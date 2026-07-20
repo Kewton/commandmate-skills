@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "cmate-repository-analysis",
+      "name": "cmate-repository-analysis",
+      "summary": "リポジトリをread-onlyで走査し、構造・既存実装・再利用候補・変更risk・推奨verificationをfile/line evidence付きで返す。",
+      "provider": {
+        "name": "CommandMate",
+        "url": "https://github.com/Kewton/CommandMate"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/Kewton/commandmate-skills",
+      "keywords": [
+        "repository-analysis",
+        "codebase",
+        "read-only",
+        "evidence",
+        "risk",
+        "onboarding"
+      ],
+      "latest": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "changelog": "初回リリース。リポジトリ構成・規約・再利用候補・変更riskを証跡付きでread-only分析する標準手順を追加。",
+          "published_at": "2026-07-20T12:36:40Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-repository-analysis-v0.1.0",
+            "commit": "82061798c20ac1347f15afc90e0a13802cfbc7a8"
+          },
+          "artifact": {
+            "asset_name": "cmate-repository-analysis-0.1.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-repository-analysis-v0.1.0/cmate-repository-analysis-0.1.0.tar.gz",
+            "sha256": "9da32e71e7fc3e1ad8613228eda44c8a27e86457750fdb1ec2f038f58e6939c5",
+            "size": 13933,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Standard SKILL.md discovery from .agents/skills",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Standard SKILL.md discovery from .agents/skills",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Discovery path not verified for this version",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Discovery path not verified for this version",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "low"
+        }
+      ]
+    }
+  ]
+}
