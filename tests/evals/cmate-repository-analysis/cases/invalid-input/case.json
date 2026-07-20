@@ -1,0 +1,35 @@
+{
+  "case_id": "invalid-input",
+  "title": "objective が曖昧なまま実行された",
+  "why_this_case": "走査 budget を消費してから入力不備を報告する退行を検出する。この case には repo を置かない。走査してはいけないためである。",
+  "input": {
+    "objective": "よろしく",
+    "roots": [
+      "."
+    ],
+    "focus": []
+  },
+  "expect": {
+    "status": [
+      "failure"
+    ],
+    "truncated": false,
+    "required_evidence_paths": [],
+    "forbidden_evidence_paths": [],
+    "required_sensitive_paths": [],
+    "required_verification_commands": [],
+    "required_excluded_rules": [],
+    "min_findings": 0,
+    "min_reuse_candidates": 0,
+    "min_risks": 0,
+    "min_recommended_verification": 0,
+    "required_summary_strings": [
+      "ambiguous_objective"
+    ],
+    "forbidden_fragments": [],
+    "files_read": 0,
+    "required_reason_codes": [
+      "ambiguous_objective"
+    ]
+  }
+}

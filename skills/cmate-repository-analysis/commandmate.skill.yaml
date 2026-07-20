@@ -1,0 +1,93 @@
+schema_version: 1
+id: cmate-repository-analysis
+name: cmate-repository-analysis
+version: 0.1.0
+summary: リポジトリをread-onlyで走査し、構造・既存実装・再利用候補・変更risk・推奨verificationをfile/line evidence付きで返す。
+description: >-
+  変更に着手する前の現状把握を、再現可能な標準手順にしたものである。対象リポジトリを
+  read-only で走査し、構成と規約、目的に関係する既存実装、再利用できる資産、変更した
+  ときに壊れうる箇所、そしてリポジトリに実在する検証手段を、すべて file と行番号の
+  evidence に結び付けて返す。secret らしき値は位置と分類だけを報告し、値は result にも
+  要約にも含めない。結果は versioned な result schema に適合し、5つの completion check
+  の合否を自身で申告するので、どこまで確かめた分析なのかを受け取った側が検証できる。
+  書き込み、command 実行、network access のいずれも行わない。
+capabilities:
+  - 対象リポジトリの構成・言語・entry point・build と CI 経路を evidence 付きで把握する
+  - AGENTS や CLAUDE や README や CONTRIBUTING から従うべき規約を抽出する
+  - 目的に関係する既存実装と再利用候補を、そのまま使えるか拡張が要るかまで含めて特定する
+  - 変更したときに壊れうる箇所を severity と緩和手段付きで列挙する
+  - リポジトリに実在する検証手段だけを、出典 evidence 付きで推奨する
+  - secret らしき値の位置と分類を、値を持ち出さずに報告する
+expected_outcomes:
+  - 実装に着手する前に、影響範囲と再利用候補が file と行番号で確認できる
+  - 推奨された検証手段が実在するので、そのまま実行して変更を確かめられる
+  - 走査の打ち切りや未解決点が明示されるので、分析の網羅性を鵜呑みにせず判断できる
+  - 分析結果が schema 適合の構造化データなので、後続の手順や自動処理へそのまま渡せる
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - repository-analysis
+  - codebase
+  - read-only
+  - evidence
+  - risk
+  - onboarding
+compatibility:
+  commandmate: '>=0.11.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Standard SKILL.md discovery from .agents/skills
+    - agent: codex
+      support: native
+      evidence: Standard SKILL.md discovery from .agents/skills
+    - agent: gemini
+      support: unknown
+      evidence: Discovery path not verified for this version
+    - agent: opencode
+      support: unknown
+      evidence: Discovery path not verified for this version
+requirements:
+  commands: []
+  network_hosts: []
+declared_permissions:
+  - filesystem_read
+declared_risk: low
+risk_rationale: >-
+  指示文と JSON schema だけで構成され、script も実行可能 file も含まない。手順が要求する
+  権限は対象リポジトリの読み取りのみで、書き込み、command 実行、network access、
+  環境変数や credential の読み取りは手順として禁止している。
+files:
+  - path: SKILL.md
+    sha256: fa79d96753f6c29bd5a7424118ca2fb1ac6887df1ba7d836a7a5d02dfa22412c
+    size: 10439
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/agent-compatibility.md
+    sha256: 9b875a08247cb17ae727dda10ce4c7c1eb32d92995d78ce7bdeff92f70616825
+    size: 3664
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/result-contract.md
+    sha256: 1354659bae1ba7775089a0d02c6cb651cfff6fc7fd55d0594a4f3c610baddcb0
+    size: 7870
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/scan-policy.md
+    sha256: 3595946e6de7919fc3e620e02aed59984be42c993928532912627ef31c29b483
+    size: 6483
+    kind: instruction
+    executable: false
+    script: false
+  - path: schemas/repository-analysis.result.v1.json
+    sha256: 996d7a4028b2ce5d16cedeb421877cf5575482c90060ed9953e2872a22d8b219
+    size: 9040
+    kind: asset
+    executable: false
+    script: false

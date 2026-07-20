@@ -1,0 +1,297 @@
+{
+  "result_schema_version": 1,
+  "skill_id": "cmate-repository-analysis",
+  "skill_version": "0.1.0",
+  "status": "success",
+  "request": {
+    "objective": "session の有効期限を全体固定ではなく利用者ごとに設定できるようにしたい",
+    "roots": [
+      "."
+    ],
+    "focus": [
+      "session",
+      "TTL"
+    ]
+  },
+  "scope": {
+    "files_listed": 10,
+    "files_read": 9,
+    "bytes_read": 4587,
+    "excluded": [],
+    "truncated": false
+  },
+  "repository_profile": {
+    "primary_languages": [
+      "typescript"
+    ],
+    "project_kinds": [
+      "nextjs_app"
+    ],
+    "entry_points": [
+      {
+        "statement": "HTTP の entry は app/api/session/route.ts の POST と GET である",
+        "evidence": [
+          {
+            "path": "app/api/session/route.ts",
+            "line_start": 5,
+            "line_end": 16
+          }
+        ]
+      },
+      {
+        "statement": "UI の root layout は app/layout.tsx である",
+        "evidence": [
+          {
+            "path": "app/layout.tsx",
+            "line_start": 3,
+            "line_end": 9
+          }
+        ]
+      }
+    ],
+    "conventions": [
+      {
+        "statement": "route から cookie を直接読み書きせず lib/auth/session.ts を経由する",
+        "evidence": [
+          {
+            "path": "AGENTS.md",
+            "line_start": 5,
+            "line_end": 6
+          }
+        ]
+      },
+      {
+        "statement": "環境変数は lib/config.ts の readEnv 経由でのみ参照する",
+        "evidence": [
+          {
+            "path": "AGENTS.md",
+            "line_start": 7,
+            "line_end": 7
+          }
+        ]
+      },
+      {
+        "statement": "lib 配下の module には同じ directory に test を置く",
+        "evidence": [
+          {
+            "path": "AGENTS.md",
+            "line_start": 4,
+            "line_end": 4
+          }
+        ]
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "session-module-is-single-owner",
+      "category": "structure",
+      "statement": "session の発行と検証は lib/auth/session.ts に集約されている",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "lib/auth/session.ts",
+          "line_start": 11,
+          "line_end": 38
+        }
+      ]
+    },
+    {
+      "id": "ttl-is-a-single-global-value",
+      "category": "existing_implementation",
+      "statement": "TTL は sessionTtlSeconds が環境変数から読む単一の値で、利用者ごとの値を持つ経路が無い",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "lib/config.ts",
+          "line_start": 13,
+          "line_end": 17
+        }
+      ]
+    },
+    {
+      "id": "verification-is-three-scripts",
+      "category": "build_and_ci",
+      "statement": "検証は lint と typecheck と test:unit の3つで、CI も同じものを実行する",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "package.json",
+          "line_start": 5,
+          "line_end": 11
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "line_start": 15,
+          "line_end": 17
+        }
+      ]
+    },
+    {
+      "id": "ttl-has-no-test",
+      "category": "test_coverage",
+      "statement": "session の test は発行と期限切れの2件のみで、可変 TTL を確かめる test は無い",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "lib/auth/session.test.ts",
+          "line_start": 5,
+          "line_end": 14
+        }
+      ]
+    },
+    {
+      "id": "env-example-carries-a-literal",
+      "category": "security_sensitive",
+      "statement": "env の例示 file に token 形式の literal が置かれている",
+      "confidence": "medium",
+      "evidence": [
+        {
+          "path": ".env.example",
+          "line_start": 4,
+          "line_end": 4
+        }
+      ]
+    }
+  ],
+  "reuse_candidates": [
+    {
+      "id": "extend-session-ttl-seconds",
+      "statement": "sessionTtlSeconds を既定値の解決点として拡張すれば、利用者ごとの TTL を差し込める",
+      "reuse_mode": "extend",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "lib/config.ts",
+          "line_start": 13,
+          "line_end": 17
+        }
+      ]
+    },
+    {
+      "id": "extend-issue-signature",
+      "statement": "issue は payload を組み立てる唯一の場所なので、TTL の引数化はここで完結する",
+      "reuse_mode": "extend",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "lib/auth/session.ts",
+          "line_start": 11,
+          "line_end": 20
+        }
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "expiry-trust-depends-on-signature",
+      "statement": "失効時刻は token 内の expiresAt で判定されるため、TTL 可変化は署名の網羅性に依存する",
+      "severity": "moderate",
+      "confidence": "medium",
+      "mitigation": "expiresAt を含む payload 全体が sign 対象であることを test で固定する",
+      "evidence": [
+        {
+          "path": "lib/auth/session.ts",
+          "line_start": 22,
+          "line_end": 38
+        }
+      ]
+    },
+    {
+      "id": "route-level-ttl-breaks-convention",
+      "statement": "route から TTL を直接渡す実装は AGENTS の規約に反する",
+      "severity": "low",
+      "confidence": "high",
+      "mitigation": "TTL の決定を lib 側に閉じ、route は subject だけを渡す",
+      "evidence": [
+        {
+          "path": "AGENTS.md",
+          "line_start": 5,
+          "line_end": 6
+        }
+      ]
+    }
+  ],
+  "recommended_verification": [
+    {
+      "id": "run-unit-tests",
+      "command": "npm run test:unit",
+      "purpose": "session の発行と失効の振る舞いが変わっていないことを確かめる",
+      "evidence": [
+        {
+          "path": "package.json",
+          "line_start": 10,
+          "line_end": 10
+        }
+      ]
+    },
+    {
+      "id": "run-lint",
+      "command": "npm run lint",
+      "purpose": "CI と同じ lint 設定で新しい経路を確かめる",
+      "evidence": [
+        {
+          "path": "package.json",
+          "line_start": 8,
+          "line_end": 8
+        }
+      ]
+    },
+    {
+      "id": "run-typecheck",
+      "command": "npm run typecheck",
+      "purpose": "issue の signature 変更が呼び出し元へ波及していないことを確かめる",
+      "evidence": [
+        {
+          "path": "package.json",
+          "line_start": 9,
+          "line_end": 9
+        }
+      ]
+    }
+  ],
+  "sensitive_locations": [
+    {
+      "path": ".env.example",
+      "line": 1,
+      "classification": "env_file"
+    },
+    {
+      "path": ".env.example",
+      "line": 4,
+      "classification": "credential_assignment"
+    }
+  ],
+  "unresolved": [],
+  "completion_check": {
+    "passed": true,
+    "checks": [
+      {
+        "id": "evidence_present",
+        "passed": true,
+        "detail": "全項目が1件以上の evidence を持つ"
+      },
+      {
+        "id": "evidence_resolvable",
+        "passed": true,
+        "detail": "全 evidence の path を本実行で読み、行番号が file 内に収まることを確認した"
+      },
+      {
+        "id": "verification_grounded",
+        "passed": true,
+        "detail": "推奨した command はすべてリポジトリ内の定義から引いた"
+      },
+      {
+        "id": "no_secret_values",
+        "passed": true,
+        "detail": "sensitive_locations は path と行番号と分類のみ"
+      },
+      {
+        "id": "scope_declared",
+        "passed": true,
+        "detail": "除外規則と打ち切りの有無を scope に記録した"
+      }
+    ]
+  },
+  "summary_markdown": "## 目的\nsession の有効期限を全体固定ではなく利用者ごとに設定できるようにする。\n\n## 結論\nTTL の解決点は `lib/config.ts` の `sessionTtlSeconds()` 1箇所に閉じており、\n発行は `lib/auth/session.ts` の `issue()` だけが行う。この2箇所の変更で足りる。\nroute を触る必要はなく、触ると `AGENTS.md` の規約に反する。\n\n## 主要な発見\n- session の発行と検証は `lib/auth/session.ts`(11-38) に集約されている。\n- TTL は `lib/config.ts`(13-17) が環境変数から読む単一の値で、利用者ごとの経路が無い。\n- 検証は lint / typecheck / test:unit の3つで、CI も同じものを実行する（`package.json`:5-11、`.github/workflows/ci.yml`:15-17）。\n- `lib/auth/session.test.ts`(5-14) は発行と期限切れの2件のみで、可変 TTL の test は無い。\n\n## 再利用候補と変更risk\n- `sessionTtlSeconds()` を既定値の解決点として拡張する（`lib/config.ts`:13-17）。\n- `issue()` は payload を組み立てる唯一の場所なので、TTL の引数化はここで完結する（`lib/auth/session.ts`:11-20）。\n- risk: 失効時刻は token 内の `expiresAt` で判定されるため、可変化すると署名の網羅性に依存する（`lib/auth/session.ts`:22-38）。\n- risk: route から TTL を渡す実装は `AGENTS.md`(5-6) の規約に反する。\n\n## 推奨verification\n- `npm run test:unit`（`package.json`:10）\n- `npm run lint`（`package.json`:8）\n- `npm run typecheck`（`package.json`:9）\n\n## 未解決と走査範囲\n10 file を列挙し 9 file を読んだ。打ち切りは無い。\n`.env.example` に credential 形式の literal がある（位置のみ報告、値は含めない）。\n"
+}
