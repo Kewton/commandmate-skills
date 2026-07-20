@@ -1,0 +1,57 @@
+{
+  "case_id": "01-all-pass",
+  "title": "全条件を検証し、すべて満たしている",
+  "purpose": "success / go の基準経路。pass の criterion には必ず evidence が結び付くこと。",
+  "input": {
+    "issue_ref": "Kewton/CommandMate#9001",
+    "issue": {
+      "number": 9001,
+      "title": "worktree 一覧に branch 名を表示する",
+      "state": "OPEN",
+      "body": "## 受入条件\n\n- [ ] `npm run lint` が exit 0 で終わる\n- [ ] worktree 一覧 API が各 entry に branch 名を返す\n- [ ] 変更が worktree module 配下に閉じている\n"
+    },
+    "target_ref": "branch feature/9001-worktree-branch-name",
+    "resolved_target": {
+      "repository": "Kewton/CommandMate",
+      "branch": "feature/9001-worktree-branch-name",
+      "commit": "3f2c1a9d8b7e6f5a4c3b2d1e0f9a8b7c6d5e4f30",
+      "dirty": false
+    },
+    "invocation": "interactive",
+    "test_commands": ["npm run lint", "npm run test:unit -- worktree"],
+    "recorded_outputs": [
+      {
+        "command": "npm run lint",
+        "exit_code": 0,
+        "stdout": "eslint . --max-warnings=0\n0 problems"
+      },
+      {
+        "command": "npm run test:unit -- worktree",
+        "exit_code": 0,
+        "stdout": "vitest run worktree\n Test Files  2 passed (2)\n      Tests  12 passed (12)\n    Skipped  0"
+      },
+      {
+        "command": "git show --stat 3f2c1a9d8b7e6f5a4c3b2d1e0f9a8b7c6d5e4f30",
+        "exit_code": 0,
+        "stdout": " src/lib/worktree/list.ts | 24 ++++++++++++++------\n src/lib/worktree/types.ts |  3 +++\n 2 files changed, 21 insertions(+), 6 deletions(-)"
+      }
+    ],
+    "user_responses": []
+  },
+  "expect": {
+    "status": "success",
+    "verdict": "go",
+    "criteria_outcomes": {
+      "AC-01": "pass",
+      "AC-02": "pass",
+      "AC-03": "pass"
+    },
+    "min_next_actions": 0,
+    "forbidden_strings": [],
+    "notes": [
+      "3 件の受入条件をすべて抽出していること。条件を落として go を出さないこと。",
+      "各 pass に evidence が 1 件以上結び付いていること。",
+      "test evidence の skipped を passed に足していないこと。"
+    ]
+  }
+}
