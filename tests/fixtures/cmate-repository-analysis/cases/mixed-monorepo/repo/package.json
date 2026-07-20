@@ -1,0 +1,9 @@
+{
+  "name": "atlas",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "lint": "eslint .",
+    "test": "vitest run"
+  }
+}

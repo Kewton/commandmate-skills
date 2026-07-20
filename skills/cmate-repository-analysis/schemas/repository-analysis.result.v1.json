@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-repository-analysis/schemas/repository-analysis.result.v1.json",
+  "title": "cmate-repository-analysis result v1",
+  "description": "Structured result returned by the cmate-repository-analysis Skill. Closed schema: an unknown field is a contract violation, not something a reader may ignore.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "result_schema_version",
+    "skill_id",
+    "skill_version",
+    "status",
+    "request",
+    "scope",
+    "repository_profile",
+    "findings",
+    "reuse_candidates",
+    "risks",
+    "recommended_verification",
+    "sensitive_locations",
+    "unresolved",
+    "completion_check",
+    "summary_markdown"
+  ],
+  "properties": {
+    "result_schema_version": { "const": 1 },
+    "skill_id": { "const": "cmate-repository-analysis" },
+    "skill_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "status": { "enum": ["success", "partial", "failure"] },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objective", "roots", "focus"],
+      "properties": {
+        "objective": { "type": "string", "minLength": 1 },
+        "roots": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "focus": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files_listed", "files_read", "bytes_read", "excluded", "truncated"],
+      "properties": {
+        "files_listed": { "type": "integer", "minimum": 0 },
+        "files_read": { "type": "integer", "minimum": 0 },
+        "bytes_read": { "type": "integer", "minimum": 0 },
+        "excluded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["rule", "count"],
+            "properties": {
+              "rule": {
+                "enum": [
+                  "excluded_directory",
+                  "binary_file",
+                  "generated_artifact",
+                  "git_ignored",
+                  "depth_limit",
+                  "size_limit"
+                ]
+              },
+              "count": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "repository_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primary_languages", "project_kinds", "entry_points", "conventions"],
+      "properties": {
+        "primary_languages": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "project_kinds": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "entry_points": { "type": "array", "items": { "$ref": "#/$defs/observation" } },
+        "conventions": { "type": "array", "items": { "$ref": "#/$defs/observation" } }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "category", "statement", "confidence", "evidence"],
+        "properties": {
+          "id": { "$ref": "#/$defs/item_id" },
+          "category": {
+            "enum": [
+              "structure",
+              "convention",
+              "existing_implementation",
+              "test_coverage",
+              "build_and_ci",
+              "security_sensitive"
+            ]
+          },
+          "statement": { "type": "string", "minLength": 1 },
+          "confidence": { "$ref": "#/$defs/confidence" },
+          "evidence": { "$ref": "#/$defs/evidence_list" }
+        }
+      }
+    },
+    "reuse_candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "reuse_mode", "confidence", "evidence"],
+        "properties": {
+          "id": { "$ref": "#/$defs/item_id" },
+          "statement": { "type": "string", "minLength": 1 },
+          "reuse_mode": { "enum": ["as_is", "extend", "reference"] },
+          "confidence": { "$ref": "#/$defs/confidence" },
+          "evidence": { "$ref": "#/$defs/evidence_list" }
+        }
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "severity", "confidence", "mitigation", "evidence"],
+        "properties": {
+          "id": { "$ref": "#/$defs/item_id" },
+          "statement": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["low", "moderate", "high"] },
+          "confidence": { "$ref": "#/$defs/confidence" },
+          "mitigation": { "type": "string", "minLength": 1 },
+          "evidence": { "$ref": "#/$defs/evidence_list" }
+        }
+      }
+    },
+    "recommended_verification": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "command", "purpose", "evidence"],
+        "properties": {
+          "id": { "$ref": "#/$defs/item_id" },
+          "command": { "type": "string", "minLength": 1 },
+          "purpose": { "type": "string", "minLength": 1 },
+          "evidence": { "$ref": "#/$defs/evidence_list" }
+        }
+      }
+    },
+    "sensitive_locations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "line", "classification"],
+        "properties": {
+          "path": { "$ref": "#/$defs/repo_path" },
+          "line": { "type": "integer", "minimum": 1 },
+          "classification": {
+            "enum": [
+              "env_file",
+              "credential_assignment",
+              "private_key_material",
+              "cloud_credential",
+              "service_token_pattern",
+              "unknown_high_entropy"
+            ]
+          }
+        }
+      }
+    },
+    "unresolved": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reason_code", "detail"],
+        "properties": {
+          "reason_code": {
+            "enum": [
+              "ambiguous_objective",
+              "invalid_root",
+              "unreadable_path",
+              "scan_budget_exhausted",
+              "binary_skipped",
+              "excluded_by_policy",
+              "no_evidence_found",
+              "out_of_scope"
+            ]
+          },
+          "detail": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "completion_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "checks"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "checks": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "passed", "detail"],
+            "properties": {
+              "id": {
+                "enum": [
+                  "evidence_present",
+                  "evidence_resolvable",
+                  "verification_grounded",
+                  "no_secret_values",
+                  "scope_declared"
+                ]
+              },
+              "passed": { "type": "boolean" },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "summary_markdown": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "item_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
+    "confidence": { "enum": ["high", "medium", "low"] },
+    "repo_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Repository-relative POSIX path. No leading slash, no backslash, no control character and no '..' segment: a result must not be able to name anything outside the analysed repository, and a trailing newline must not slip past an anchored pattern.",
+      "pattern": "^(?!.*(?:^|/)\\.\\.(?:/|$))[^/\\\\\\u0000-\\u001f\\u007f][^\\\\\\u0000-\\u001f\\u007f]*$"
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "line_start", "line_end"],
+      "properties": {
+        "path": { "$ref": "#/$defs/repo_path" },
+        "line_start": { "type": "integer", "minimum": 1 },
+        "line_end": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "evidence_list": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/evidence" }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statement", "evidence"],
+      "properties": {
+        "statement": { "type": "string", "minLength": 1 },
+        "evidence": { "$ref": "#/$defs/evidence_list" }
+      }
+    }
+  }
+}

@@ -1,0 +1,233 @@
+{
+  "result_schema_version": 1,
+  "skill_id": "cmate-repository-analysis",
+  "skill_version": "0.1.0",
+  "status": "success",
+  "request": {
+    "objective": "parse できなかった行を件数だけでなく行番号付きで報告したい",
+    "roots": [
+      "."
+    ],
+    "focus": [
+      "parse_line",
+      "skipped"
+    ]
+  },
+  "scope": {
+    "files_listed": 8,
+    "files_read": 7,
+    "bytes_read": 2962,
+    "excluded": [],
+    "truncated": false
+  },
+  "repository_profile": {
+    "primary_languages": [
+      "python"
+    ],
+    "project_kinds": [
+      "cli_tool"
+    ],
+    "entry_points": [
+      {
+        "statement": "実行 entry は src/logsift/cli.py の main である",
+        "evidence": [
+          {
+            "path": "src/logsift/cli.py",
+            "line_start": 13,
+            "line_end": 17
+          }
+        ]
+      }
+    ],
+    "conventions": [
+      {
+        "statement": "依存を増やさず標準ライブラリだけで書く",
+        "evidence": [
+          {
+            "path": "CONTRIBUTING.md",
+            "line_start": 3,
+            "line_end": 3
+          }
+        ]
+      },
+      {
+        "statement": "PR の前に make lint と make test を通す",
+        "evidence": [
+          {
+            "path": "CONTRIBUTING.md",
+            "line_start": 5,
+            "line_end": 5
+          }
+        ]
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "parse-decision-is-in-parser",
+      "category": "existing_implementation",
+      "statement": "行の可否判定は parse_line に閉じており、失敗は None で表される",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "src/logsift/parser.py",
+          "line_start": 24,
+          "line_end": 37
+        }
+      ]
+    },
+    {
+      "id": "failure-count-has-no-position",
+      "category": "existing_implementation",
+      "statement": "失敗の集計は cli の skipped counter だけで、位置情報を持たない",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "src/logsift/cli.py",
+          "line_start": 19,
+          "line_end": 31
+        }
+      ]
+    },
+    {
+      "id": "verification-is-two-make-targets",
+      "category": "build_and_ci",
+      "statement": "検証手段は Makefile の lint と test の2 target である",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "Makefile",
+          "line_start": 3,
+          "line_end": 7
+        },
+        {
+          "path": "pyproject.toml",
+          "line_start": 6,
+          "line_end": 10
+        }
+      ]
+    },
+    {
+      "id": "cli-has-no-test",
+      "category": "test_coverage",
+      "statement": "test は parser のみを対象としており、cli の出力を確かめる test は無い",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "tests/test_parser.py",
+          "line_start": 4,
+          "line_end": 9
+        },
+        {
+          "path": "tests/test_parser.py",
+          "line_start": 12,
+          "line_end": 13
+        }
+      ]
+    }
+  ],
+  "reuse_candidates": [
+    {
+      "id": "reuse-none-return-contract",
+      "statement": "parse_line の None 返却をそのまま使い、行番号は cli 側の enumerate で付けられる",
+      "reuse_mode": "as_is",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "src/logsift/parser.py",
+          "line_start": 24,
+          "line_end": 28
+        }
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "output-format-change-breaks-consumers",
+      "statement": "tsv 出力に列を足すと既存の消費側が壊れる",
+      "severity": "moderate",
+      "confidence": "medium",
+      "mitigation": "行番号は stderr 側の報告に載せ、tsv の列構成を変えない",
+      "evidence": [
+        {
+          "path": "src/logsift/cli.py",
+          "line_start": 25,
+          "line_end": 28
+        }
+      ]
+    },
+    {
+      "id": "cli-behaviour-is-untested",
+      "statement": "cli に対する test が無いため、出力変更は実行時まで表面化しない",
+      "severity": "moderate",
+      "confidence": "high",
+      "mitigation": "main を argv 引数付きで呼ぶ test を tests へ追加する",
+      "evidence": [
+        {
+          "path": "tests/test_parser.py",
+          "line_start": 4,
+          "line_end": 9
+        }
+      ]
+    }
+  ],
+  "recommended_verification": [
+    {
+      "id": "run-make-test",
+      "command": "make test",
+      "purpose": "parser と cli の振る舞いを pytest で確かめる",
+      "evidence": [
+        {
+          "path": "Makefile",
+          "line_start": 6,
+          "line_end": 7
+        }
+      ]
+    },
+    {
+      "id": "run-make-lint",
+      "command": "make lint",
+      "purpose": "ruff の設定に沿っていることを確かめる",
+      "evidence": [
+        {
+          "path": "Makefile",
+          "line_start": 3,
+          "line_end": 4
+        }
+      ]
+    }
+  ],
+  "sensitive_locations": [],
+  "unresolved": [],
+  "completion_check": {
+    "passed": true,
+    "checks": [
+      {
+        "id": "evidence_present",
+        "passed": true,
+        "detail": "全項目が1件以上の evidence を持つ"
+      },
+      {
+        "id": "evidence_resolvable",
+        "passed": true,
+        "detail": "全 evidence の path を本実行で読み、行番号が file 内に収まることを確認した"
+      },
+      {
+        "id": "verification_grounded",
+        "passed": true,
+        "detail": "推奨した command はすべてリポジトリ内の定義から引いた"
+      },
+      {
+        "id": "no_secret_values",
+        "passed": true,
+        "detail": "sensitive_locations は path と行番号と分類のみ"
+      },
+      {
+        "id": "scope_declared",
+        "passed": true,
+        "detail": "除外規則と打ち切りの有無を scope に記録した"
+      }
+    ]
+  },
+  "summary_markdown": "## 目的\nparse できなかった行を件数だけでなく行番号付きで報告できるようにする。\n\n## 結論\n行番号は `src/logsift/cli.py`(19-31) の走査 loop にしか存在せず、\n`parse_line()` は行の内容しか受け取らない。cli 側で enumerate して\n持ち回るのが最小の変更である。\n\n## 主要な発見\n- 判定は `src/logsift/parser.py`(24-37) の `parse_line()` に閉じ、失敗は None で表される。\n- 失敗の集計は `src/logsift/cli.py`(19-31) の `skipped` counter だけで、位置情報を持たない。\n- 検証手段は `Makefile`(3-7) の lint と test の2 target である。\n- test は `tests/test_parser.py`(4-9, 12-13) にあり、parser のみを対象としている。\n\n## 再利用候補と変更risk\n- `parse_line()` の None 返却をそのまま使い、cli 側で行番号を付ける（`src/logsift/parser.py`:24-28）。\n- risk: 出力形式が変わると既存の tsv 消費側が壊れる（`src/logsift/cli.py`:25-28）。\n- risk: cli に対する test が無く、変更が実行時まで表面化しない（`tests/test_parser.py`:4-9）。\n\n## 推奨verification\n- `make test`（`Makefile`:6-7）\n- `make lint`（`Makefile`:3-4）\n\n## 未解決と走査範囲\n8 file を列挙し 7 file を読んだ。打ち切りは無い。\n"
+}
