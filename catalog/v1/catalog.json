@@ -2,6 +2,72 @@
   "schema_version": 1,
   "entries": [
     {
+      "id": "cmate-issue-refinement",
+      "name": "cmate-issue-refinement",
+      "summary": "Refines a vague GitHub Issue into an implementable specification, read-only, with evidence, ranked findings, open questions and a versioned result.",
+      "provider": {
+        "name": "CommandMate",
+        "url": "https://github.com/Kewton/CommandMate"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/Kewton/commandmate-skills",
+      "keywords": [
+        "issue",
+        "refinement",
+        "specification",
+        "planning",
+        "review",
+        "github"
+      ],
+      "latest": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "changelog": "初回リリース。曖昧なIssueを実装可能な仕様・依存・受入条件へ精緻化する標準手順を追加。",
+          "published_at": "2026-07-20T13:46:12Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-refinement-v0.1.0",
+            "commit": "a90d465aeac5d63b2d4e136200295b61ca0423c5"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-refinement-0.1.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-refinement-v0.1.0/cmate-issue-refinement-0.1.0.tar.gz",
+            "sha256": "6d492b117834e527fd33659abaa2a526830ddd622d3ecb1d55f7c37c2ba76b78",
+            "size": 18561,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovers SKILL.md from .agents/skills; the procedure names no Claude-specific tool",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Not yet run against a recorded Codex version; opt-in fixture evaluation is described in references/agent-compatibility.md",
+                "support": "unknown"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not evaluated",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not evaluated",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        }
+      ]
+    },
+    {
       "id": "cmate-repository-analysis",
       "name": "cmate-repository-analysis",
       "summary": "リポジトリをread-onlyで走査し、構造・既存実装・再利用候補・変更risk・推奨verificationをfile/line evidence付きで返す。",
