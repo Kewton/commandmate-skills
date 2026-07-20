@@ -2,6 +2,72 @@
   "schema_version": 1,
   "entries": [
     {
+      "id": "cmate-acceptance-test",
+      "name": "cmate-acceptance-test",
+      "summary": "Issue の受入条件を証跡付きで検証し、Go / Conditional Go / No-Go を versioned な result として返す。",
+      "provider": {
+        "name": "CommandMate",
+        "url": "https://github.com/Kewton/CommandMate"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/Kewton/commandmate-skills",
+      "keywords": [
+        "acceptance-test",
+        "verification",
+        "evidence",
+        "go-no-go",
+        "quality-gate",
+        "issue"
+      ],
+      "latest": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "changelog": "初回リリース。Issue受入条件を証跡付きで検証しGo/Conditional/No-Goを判断する標準手順を追加。",
+          "published_at": "2026-07-20T13:47:31Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-acceptance-test-v0.1.0",
+            "commit": "85c0051f7d51dd3a21b919bb7a03db342cf36321"
+          },
+          "artifact": {
+            "asset_name": "cmate-acceptance-test-0.1.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-acceptance-test-v0.1.0/cmate-acceptance-test-0.1.0.tar.gz",
+            "sha256": "a1c01b9e5286acb5373e2bebd6fda7b430b5b23363c60cb411e32e09ebd30627",
+            "size": 17116,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Standard SKILL.md discovery from .agents/skills. Procedure uses no Claude-specific tool name.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Standard SKILL.md discovery from .agents/skills. Procedure uses no Codex-specific construct.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        }
+      ]
+    },
+    {
       "id": "cmate-issue-refinement",
       "name": "cmate-issue-refinement",
       "summary": "Refines a vague GitHub Issue into an implementable specification, read-only, with evidence, ranked findings, open questions and a versioned result.",
