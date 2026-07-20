@@ -1,0 +1,64 @@
+{
+  "case_id": "03-flaky-retry",
+  "title": "再実行で結果が変わる test がある",
+  "purpose": "成功した回を採用して pass に丸めないことを確認する。flaky は固有の outcome であり、status は partial に落ちる。",
+  "input": {
+    "issue_ref": "Kewton/CommandMate#9003",
+    "issue": {
+      "number": 9003,
+      "title": "job queue の再試行間隔を指数的にする",
+      "state": "OPEN",
+      "body": "## 受入条件\n\n- [ ] `npm run lint` が exit 0 で終わる\n- [ ] 再試行間隔が指数的に増える\n"
+    },
+    "target_ref": "branch feature/9003-backoff",
+    "resolved_target": {
+      "repository": "Kewton/CommandMate",
+      "branch": "feature/9003-backoff",
+      "commit": "c92a05f7db3148e6a2f0b5c8d17e934a6b02fd55",
+      "dirty": false
+    },
+    "invocation": "interactive",
+    "test_commands": ["npm run lint", "npm run test:unit -- backoff"],
+    "recorded_outputs": [
+      {
+        "command": "npm run lint",
+        "exit_code": 0,
+        "stdout": "eslint . --max-warnings=0\n0 problems"
+      },
+      {
+        "command": "npm run test:unit -- backoff",
+        "attempt": 1,
+        "exit_code": 1,
+        "stdout": "vitest run backoff\n      Tests  1 failed | 7 passed (8)\n\n FAIL  backoff > waits 400ms before the third attempt\n   expected 400 to be within 380..420, got 372"
+      },
+      {
+        "command": "npm run test:unit -- backoff",
+        "attempt": 2,
+        "exit_code": 0,
+        "stdout": "vitest run backoff\n      Tests  8 passed (8)"
+      },
+      {
+        "command": "npm run test:unit -- backoff",
+        "attempt": 3,
+        "exit_code": 0,
+        "stdout": "vitest run backoff\n      Tests  8 passed (8)"
+      }
+    ],
+    "user_responses": []
+  },
+  "expect": {
+    "status": "partial",
+    "verdict": "conditional_go",
+    "criteria_outcomes": {
+      "AC-01": "pass",
+      "AC-02": "flaky"
+    },
+    "min_next_actions": 1,
+    "forbidden_strings": [],
+    "notes": [
+      "3 回中 2 回成功したことを根拠に pass にしないこと。",
+      "全試行の exit code を evidence の attempts に残すこと。",
+      "conditional_go を出すなら、flaky の criterion に次 action と担当があること。"
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "result_schema_version": 1,
+  "skill": { "id": "cmate-acceptance-test", "version": "0.1.0" },
+  "generated_at": "2026-07-20T09:50:00Z",
+  "status": "failure",
+  "verdict": "no_go",
+  "verdict_reason": "Issue #9006 に受入条件が定義されておらず、可否を判定する材料が無い。",
+  "target": {
+    "issue_ref": "Kewton/CommandMate#9006",
+    "issue_title": "worktree 周りをいい感じに直す",
+    "repository": "Kewton/CommandMate",
+    "branch": "feature/9006-worktree-cleanup",
+    "commit": "7d3f8a1e5c60294bf1a7e2d09c48b53617fa0e2c",
+    "dirty": false
+  },
+  "environment": {
+    "agent": "codex",
+    "agent_version": "0.48.0",
+    "commandmate_version": "0.11.0",
+    "invocation": "interactive"
+  },
+  "criteria": [],
+  "checks": [],
+  "confirmations": [],
+  "evidence": [],
+  "next_actions": [
+    {
+      "action": "Issue #9006 に検証可能な受入条件を定義し、合意したうえで受入テストを再実行する",
+      "owner": "Issue 起票者",
+      "criterion_ids": []
+    }
+  ],
+  "blocking_reasons": [
+    "Issue 本文に受入条件の節が無く、checkbox 形式の条件も抽出できなかった",
+    "条件が無いため、実行した check の結果にかかわらず受入可否を判定できない"
+  ],
+  "limitations": [],
+  "evidence_dir": null,
+  "summary_text": null
+}

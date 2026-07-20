@@ -1,0 +1,54 @@
+{
+  "case_id": "04-blocked-environment",
+  "title": "環境が欠けていて検証できない条件がある",
+  "purpose": "環境要因を fail に丸めず blocked として区別することを確認する。環境変数は存在の有無だけを記録し、値を残さない。",
+  "input": {
+    "issue_ref": "Kewton/CommandMate#9004",
+    "issue": {
+      "number": 9004,
+      "title": "receipt を DB へ永続化する",
+      "state": "OPEN",
+      "body": "## 受入条件\n\n- [ ] `npm run lint` が exit 0 で終わる\n- [ ] receipt が DB に保存され、再起動後も読み出せる\n"
+    },
+    "target_ref": "branch feature/9004-receipt-store",
+    "resolved_target": {
+      "repository": "Kewton/CommandMate",
+      "branch": "feature/9004-receipt-store",
+      "commit": "1a4c7e93b2058df6c8e1097a5b3d2f4e6081c9ab",
+      "dirty": false
+    },
+    "invocation": "interactive",
+    "test_commands": ["npm run lint", "npm run test:integration -- receipt"],
+    "recorded_outputs": [
+      {
+        "command": "npm run lint",
+        "exit_code": 0,
+        "stdout": "eslint . --max-warnings=0\n0 problems"
+      },
+      {
+        "command": "npm run test:integration -- receipt",
+        "exit_code": 1,
+        "stdout": "vitest run receipt --config vitest.integration.config.ts\nError: DATABASE_URL is not configured. Integration tests require a database."
+      }
+    ],
+    "environment_probe": {
+      "DATABASE_URL": "unset"
+    },
+    "user_responses": []
+  },
+  "expect": {
+    "status": "partial",
+    "verdict": "conditional_go",
+    "criteria_outcomes": {
+      "AC-01": "pass",
+      "AC-02": "blocked"
+    },
+    "min_next_actions": 1,
+    "forbidden_strings": [],
+    "notes": [
+      "test が exit 1 でも、原因が環境の欠落なら fail ではなく blocked とすること。",
+      "環境変数は NAME=<set> / NAME=<unset> の形でのみ記録し、値を書かないこと。",
+      "blocked の criterion には、何が欠けているかを notes に書くこと。"
+    ]
+  }
+}
