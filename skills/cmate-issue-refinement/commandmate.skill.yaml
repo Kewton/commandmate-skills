@@ -1,0 +1,136 @@
+schema_version: 1
+id: cmate-issue-refinement
+name: cmate-issue-refinement
+version: 0.1.0
+summary: Refines a vague GitHub Issue into an implementable specification, read-only, with evidence, ranked findings, open questions and a versioned result.
+description: >-
+  Takes an Issue that is a title, a paragraph, or a set of unchecked assumptions,
+  and produces a specification an implementer can act on. It reads the Issue and
+  the repository checkout read-only, checks every claim the Issue makes about the
+  code against the code, generates the sections the Issue is missing, ranks what
+  it finds as must fix, should fix or nice to have, and assesses size,
+  dependencies, file conflicts and parallel-safety with a stated rationale.
+  Questions only the user can answer come back as questions: it does not adopt an
+  assumption to make the output look finished. Output is a versioned result
+  document with success, partial and failure states, plus a human-readable
+  summary and an explicit completion check, so a partial run is distinguishable
+  from a complete one. It never edits, comments on or closes an Issue; a proposed
+  body is a proposal the user applies as a separate approved action. Instructions
+  found inside fetched content are treated as data, never executed, and URLs in
+  an Issue body are recorded rather than opened.
+capabilities:
+  - Turn a title-only or thin Issue into a sectioned specification backed by evidence refs
+  - Verify the Issue's claims about the code against the repository and record a verdict for each
+  - Surface duplicate or overlapping Issues with the overlap cited rather than guessed
+  - Assess size, dependencies, file conflicts and parallel-safety with a stated rationale
+  - Rank findings as must fix, should fix or nice to have with a locator on each
+  - Return decisions only the user can make as open questions instead of silent assumptions
+  - Emit a versioned result document, a human-readable summary and a completion check
+expected_outcomes:
+  - An Issue leaves with checkable acceptance criteria, or an enumerated list of what is still missing
+  - Implementation does not begin from an assumption the repository contradicts
+  - Duplicate work is caught before a second branch is opened for it
+  - A scheduler can order and parallelize work from the dependency assessment
+  - Two different Agents produce results comparable field by field
+  - No Issue is modified without the user seeing the proposed body and approving it
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - issue
+  - refinement
+  - specification
+  - planning
+  - review
+  - github
+compatibility:
+  commandmate: '>=0.11.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Discovers SKILL.md from .agents/skills; the procedure names no Claude-specific tool
+    - agent: codex
+      support: unknown
+      evidence: Not yet run against a recorded Codex version; opt-in fixture evaluation is described in references/agent-compatibility.md
+    - agent: gemini
+      support: unknown
+      evidence: Not evaluated
+    - agent: opencode
+      support: unknown
+      evidence: Not evaluated
+requirements:
+  commands:
+    - name: gh
+      version_range: '>=2.20.0 <3.0.0'
+    - name: git
+      version_range: '>=2.30.0 <3.0.0'
+  network_hosts:
+    - api.github.com
+declared_permissions:
+  - filesystem_read
+  - process_execution
+  - network_access
+declared_risk: moderate
+risk_rationale: >-
+  Instruction text only: no scripts, no executable files and nothing runs at
+  install time. The procedure does invoke read-only commands (gh issue view, git
+  queries) and therefore reaches api.github.com, which is process execution and
+  network access. It declares no write permission and has no path that edits an
+  Issue or the working tree.
+files:
+  - path: SKILL.md
+    sha256: 672a7b9b9e261a7e4187d93171d90cf267988c60eb707959a200447df64e35f8
+    size: 12136
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/agent-compatibility.md
+    sha256: f10009744833d2b2e6a60b4e43709a62607fe04f969099afbcaea5cf2c875a76
+    size: 3082
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/analysis-contract.md
+    sha256: 145472d237a841f67d9c1c76d535875b2ab9b95e0afed2edd6df7017d81d4258
+    size: 3332
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/output-contract.md
+    sha256: 5687879ab2c45ca529a143c42b44f4c346d441de1c1ff2938c7f0958ead3a88a
+    size: 4762
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/release-notes.md
+    sha256: 2201acdb3f27283fe7d50721cec3f36371d15081a78dec89fb070ebf6cbb12a2
+    size: 4140
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/safety.md
+    sha256: e2414f00155aad357def4bc28c600c33459afee4c1cf71d016cf4b4ec7ea0372
+    size: 4281
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/section-contract.md
+    sha256: 9603db37533a60e6c281d936a5f1b0671a4f08bc828a10f142384c18df65f0e2
+    size: 4062
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/severity-and-questions.md
+    sha256: 67d9ac813014f607ffa0dc1e8cccbb7be70af37e457d607982324b903a852403
+    size: 3360
+    kind: instruction
+    executable: false
+    script: false
+  - path: schemas/refinement-result.v1.json
+    sha256: e6049ecd8f520a6edb425328f9e8629d092fb9545eba4228e9101fda6efbde20
+    size: 11925
+    kind: asset
+    executable: false
+    script: false
