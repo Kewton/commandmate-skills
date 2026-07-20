@@ -1,0 +1,55 @@
+schema_version: 1
+id: pipeline-selftest
+name: pipeline-selftest
+version: 0.1.0
+summary: Reference package that exercises the commandmate-skills release pipeline.
+description: >-
+  Smallest complete Skill package in this repository. It exists so validation,
+  reproducible build, Catalog generation and keyless verification have something
+  real to run against before any official Skill is written. It is never published
+  to the Catalog and is not intended to be installed.
+capabilities:
+  - Demonstrate the required package layout for a new official Skill
+  - Exercise the validate, build and verify pipeline end to end
+expected_outcomes:
+  - A contributor can copy this directory as the starting point for a new Skill
+  - A pipeline regression is caught by CI instead of by a failed install
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - fixture
+  - pipeline
+compatibility:
+  commandmate: '>=0.11.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Standard SKILL.md discovery from .agents/skills
+    - agent: codex
+      support: native
+      evidence: Standard SKILL.md discovery from .agents/skills
+    - agent: gemini
+      support: unknown
+      evidence: Not verified for this fixture
+requirements:
+  commands: []
+  network_hosts: []
+declared_permissions: []
+declared_risk: low
+risk_rationale: Instruction text only. No scripts, no executables and no network access.
+files:
+  - path: SKILL.md
+    sha256: 4aa7def0b686e20bcc0b121f99d453da09c355ed01bbf14081421969cd58455b
+    size: 1772
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/checklist.md
+    sha256: 28acbe978ccd6ddcb80d236b01f24159dedbe023967e747638c7fe2690b077bb
+    size: 1002
+    kind: instruction
+    executable: false
+    script: false
