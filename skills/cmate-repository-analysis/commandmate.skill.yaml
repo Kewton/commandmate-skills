@@ -68,8 +68,8 @@ files:
     executable: false
     script: false
   - path: references/agent-compatibility.md
-    sha256: 9b875a08247cb17ae727dda10ce4c7c1eb32d92995d78ce7bdeff92f70616825
-    size: 3664
+    sha256: 44d2f1f96d198f1fc8e8ad0974b9301bf617ba6badd3971c977d7fb76fb6894a
+    size: 3667
     kind: instruction
     executable: false
     script: false

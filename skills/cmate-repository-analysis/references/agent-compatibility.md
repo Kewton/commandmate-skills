@@ -63,7 +63,7 @@ manifest の `compatibility.agents` には、SKILL.md の discovery 経路が
 確認できている Agent だけを `native` として宣言している。
 実機での品質評価（rubric による採点）を行った Agent と version は、
 配布元リポジトリ <https://github.com/Kewton/commandmate-skills> の
-`tests/evals/cmate-repository-analysis/README.md` に記録する。
+`tests/fixtures/cmate-repository-analysis/README.md` に記録する。
 この file は package には含まれないので、install 済みの copy には無い。
 
 宣言が `unknown` の Agent で動かないという意味ではない。

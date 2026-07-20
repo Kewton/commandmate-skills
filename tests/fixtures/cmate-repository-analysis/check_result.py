@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Grade one `cmate-repository-analysis` result against a fixture case.
 
-    python3 tests/evals/cmate-repository-analysis/check_result.py \\
+    python3 tests/fixtures/cmate-repository-analysis/check_result.py \\
         --case nextjs-app --result my-run.json
 
-    python3 tests/evals/cmate-repository-analysis/check_result.py --selftest
+    python3 tests/fixtures/cmate-repository-analysis/check_result.py --selftest
 
 Two layers, in this order:
 
