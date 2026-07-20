@@ -1,0 +1,52 @@
+{
+  "case_id": "02-criterion-fail",
+  "title": "全条件を検証したが 1 件が満たされていない",
+  "purpose": "status（検証しきったか）と verdict（受入可否）が独立であることを確認する。全件検証済みなので success、1 件 fail なので no_go。",
+  "input": {
+    "issue_ref": "Kewton/CommandMate#9002",
+    "issue": {
+      "number": 9002,
+      "title": "worktree 削除時に lock を解放する",
+      "state": "OPEN",
+      "body": "## 受入条件\n\n- [ ] `npm run lint` が exit 0 で終わる\n- [ ] worktree 削除後に lock file が残らない\n"
+    },
+    "target_ref": "branch feature/9002-release-lock",
+    "resolved_target": {
+      "repository": "Kewton/CommandMate",
+      "branch": "feature/9002-release-lock",
+      "commit": "b71d4e2c0a95f83617de40c2b8f19a5d3e6c7081",
+      "dirty": false
+    },
+    "invocation": "interactive",
+    "test_commands": ["npm run lint", "npm run test:unit -- worktree-lock"],
+    "recorded_outputs": [
+      {
+        "command": "npm run lint",
+        "exit_code": 0,
+        "stdout": "eslint . --max-warnings=0\n0 problems"
+      },
+      {
+        "command": "npm run test:unit -- worktree-lock",
+        "exit_code": 1,
+        "stdout": "vitest run worktree-lock\n Test Files  1 failed (1)\n      Tests  1 failed | 5 passed (6)\n\n FAIL  worktree-lock > releases the lock when removal fails midway\n   expected lock file to be absent"
+      }
+    ],
+    "user_responses": []
+  },
+  "expect": {
+    "status": "success",
+    "verdict": "no_go",
+    "criteria_outcomes": {
+      "AC-01": "pass",
+      "AC-02": "fail"
+    },
+    "min_next_actions": 1,
+    "forbidden_strings": [],
+    "notes": [
+      "fail を blocked や flaky に言い換えないこと。test は実行され、結果は確定している。",
+      "全条件が確定しているので status は success であり、partial ではない。",
+      "verdict が no_go のとき blocking_reasons を空にしないこと。",
+      "失敗した test の識別子を evidence に残すこと。"
+    ]
+  }
+}
