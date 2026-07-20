@@ -1,0 +1,357 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/skills/cmate-issue-refinement/schemas/refinement-result.v1.json",
+  "title": "cmate-issue-refinement result",
+  "description": "Versioned result document emitted by the cmate-issue-refinement Skill. result_schema_version versions this contract, not the Skill.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "result_schema_version",
+    "skill",
+    "skill_version",
+    "status",
+    "issue",
+    "issue_type",
+    "sections",
+    "assumptions",
+    "findings",
+    "open_questions",
+    "related_issues",
+    "decomposition",
+    "dependencies",
+    "evidence",
+    "redactions",
+    "limitations",
+    "completion_check",
+    "next_actions",
+    "summary_markdown"
+  ],
+  "properties": {
+    "result_schema_version": { "const": 1 },
+    "skill": { "const": "cmate-issue-refinement" },
+    "skill_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+].*)?$"
+    },
+    "status": { "enum": ["success", "partial", "failure"] },
+    "failure_reason": {
+      "enum": [
+        "missing_required_input",
+        "issue_unavailable",
+        "evidence_unavailable",
+        "safety_refusal",
+        "schema_violation",
+        "internal_error"
+      ]
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "number", "source"],
+      "properties": {
+        "repository": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
+        "number": { "type": "integer", "minimum": 1 },
+        "title": { "type": "string" },
+        "labels": { "type": "array", "items": { "type": "string" } },
+        "state": { "enum": ["open", "closed", "unknown"] },
+        "source": { "enum": ["github_api", "caller_supplied"] },
+        "retrieved_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "issue_type": { "enum": ["feature", "bug", "refactor", "docs", "unknown"] },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "required", "state"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "required": { "type": "boolean" },
+          "state": {
+            "enum": ["present", "insufficient", "missing", "extended", "generated"]
+          },
+          "reason": { "type": "string" },
+          "evidence_refs": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "claim", "verdict"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^A-[0-9]{3}$" },
+          "claim": { "type": "string", "minLength": 1 },
+          "verdict": {
+            "enum": ["confirmed", "refuted", "partially_confirmed", "unverifiable"]
+          },
+          "correction": { "type": "string" },
+          "evidence_refs": { "type": "array", "items": { "type": "string" } }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "verdict": { "const": "refuted" } } },
+            "then": { "required": ["correction", "evidence_refs"] }
+          }
+        ]
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "severity", "category", "title", "detail", "locator"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^F-[0-9]{3}$" },
+          "severity": { "enum": ["must_fix", "should_fix", "nice_to_have"] },
+          "category": {
+            "enum": [
+              "missing_section",
+              "insufficient_section",
+              "refuted_assumption",
+              "duplicate",
+              "dependency",
+              "scope",
+              "acceptance_criteria",
+              "security",
+              "ux",
+              "test_policy",
+              "sizing",
+              "prompt_injection",
+              "other"
+            ]
+          },
+          "title": { "type": "string", "minLength": 1 },
+          "detail": { "type": "string", "minLength": 1 },
+          "correction": { "type": "string" },
+          "locator": { "type": "string", "minLength": 1 },
+          "evidence_refs": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "open_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "question", "why_it_blocks", "options"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^Q-[0-9]{3}$" },
+          "question": { "type": "string", "minLength": 1 },
+          "why_it_blocks": { "type": "string", "minLength": 1 },
+          "blocks_required_section": { "type": "boolean" },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["label", "consequence"],
+              "properties": {
+                "label": { "type": "string", "minLength": 1 },
+                "consequence": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "recommendation": { "type": "string" }
+        }
+      }
+    },
+    "related_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["number", "relation", "rationale"],
+        "properties": {
+          "number": { "type": "integer", "minimum": 1 },
+          "repository": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
+          "relation": {
+            "enum": ["duplicate", "overlapping", "depends_on", "blocks", "unrelated"]
+          },
+          "rationale": { "type": "string", "minLength": 1 },
+          "evidence_refs": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "decomposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recommendation", "size", "rationale", "children"],
+      "properties": {
+        "recommendation": { "enum": ["keep_single", "split"] },
+        "size": { "enum": ["xs", "s", "m", "l", "xl", "unknown"] },
+        "rationale": { "type": "string", "minLength": 1 },
+        "children": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title", "scope", "size", "acceptance_criterion"],
+            "properties": {
+              "title": { "type": "string", "minLength": 1 },
+              "scope": { "type": "string", "minLength": 1 },
+              "size": { "enum": ["xs", "s", "m", "l", "xl", "unknown"] },
+              "depends_on": { "type": "array", "items": { "type": "string" } },
+              "acceptance_criterion": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "recommendation": { "const": "split" } } },
+          "then": { "properties": { "children": { "minItems": 1 } } }
+        }
+      ]
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["depends_on", "blocks", "file_conflicts", "parallel_safe", "rationale"],
+      "properties": {
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["number", "reason"],
+            "properties": {
+              "number": { "type": "integer", "minimum": 1 },
+              "reason": { "type": "string", "minLength": 1 },
+              "kind": { "enum": ["cannot_start", "cannot_verify"] }
+            }
+          }
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["number", "reason"],
+            "properties": {
+              "number": { "type": "integer", "minimum": 1 },
+              "reason": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "file_conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "with_issue", "severity"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "with_issue": { "type": "integer", "minimum": 1 },
+              "severity": { "enum": ["hard", "soft"] },
+              "note": { "type": "string" }
+            }
+          }
+        },
+        "parallel_safe": { "enum": [true, false, "unknown"] },
+        "rationale": { "type": "string", "minLength": 1 }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ref", "kind", "locator", "note"],
+        "properties": {
+          "ref": { "type": "string", "pattern": "^E-[0-9]{3}$" },
+          "kind": {
+            "enum": ["repo_file", "issue_body", "issue_metadata", "related_issue", "command_output"]
+          },
+          "locator": { "type": "string", "minLength": 1 },
+          "note": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "proposed_issue_body": {
+      "type": "string",
+      "description": "A proposal only. Applying it is a separate, explicitly approved action."
+    },
+    "redactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "count"],
+        "properties": {
+          "kind": {
+            "enum": [
+              "github_token",
+              "cloud_access_key",
+              "private_key",
+              "bearer_token",
+              "api_key",
+              "signed_url",
+              "absolute_path",
+              "personal_data"
+            ]
+          },
+          "count": { "type": "integer", "minimum": 1 },
+          "where": { "enum": ["issue_body", "repo_file", "command_output"] }
+        }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["what", "reason"],
+        "properties": {
+          "what": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 },
+          "rule": { "type": "string" }
+        }
+      }
+    },
+    "completion_check": {
+      "type": "array",
+      "minItems": 9,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "passed"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^CC-[0-9]$" },
+          "statement": { "type": "string", "minLength": 1 },
+          "passed": { "type": "boolean" },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "github_writes": {
+      "type": "array",
+      "maxItems": 0,
+      "description": "Always empty. Present so a consumer can assert emptiness rather than infer it."
+    },
+    "next_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["owner", "action"],
+        "properties": {
+          "owner": { "enum": ["user", "agent", "reviewer"] },
+          "action": { "type": "string", "minLength": 1 },
+          "requires_approval": { "type": "boolean" }
+        }
+      }
+    },
+    "summary_markdown": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "failure" } }, "required": ["status"] },
+      "then": { "required": ["failure_reason"] }
+    }
+  ]
+}

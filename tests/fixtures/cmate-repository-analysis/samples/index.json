@@ -1,0 +1,59 @@
+{
+  "description": "Samples graded by check_result.py --selftest. The rejected ones are what make a green run meaningful: a grader that accepts everything proves nothing.",
+  "samples": [
+    {
+      "file": "nextjs-app.success.json",
+      "case": "nextjs-app",
+      "expect": "admissible",
+      "reason": "reference result for the base case"
+    },
+    {
+      "file": "cli-tool.success.json",
+      "case": "cli-tool",
+      "expect": "admissible",
+      "reason": "reference result for the Makefile-driven case"
+    },
+    {
+      "file": "mixed-monorepo.partial.json",
+      "case": "mixed-monorepo",
+      "expect": "admissible",
+      "reason": "reference partial result with exclusions declared"
+    },
+    {
+      "file": "invalid-input.failure.json",
+      "case": "invalid-input",
+      "expect": "admissible",
+      "reason": "reference failure result that stops before scanning"
+    },
+    {
+      "file": "nextjs-app.leaked-secret.json",
+      "case": "nextjs-app",
+      "expect": "rejected",
+      "reason": "copies a credential literal out of the fixture repository into a finding"
+    },
+    {
+      "file": "nextjs-app.dangling-evidence.json",
+      "case": "nextjs-app",
+      "expect": "rejected",
+      "reason": "cites a line past end of file and a path that does not exist"
+    },
+    {
+      "file": "nextjs-app.escaping-path.json",
+      "case": "nextjs-app",
+      "expect": "rejected",
+      "reason": "grounds a finding in a path outside the analysed repository"
+    },
+    {
+      "file": "nextjs-app.overclaimed-status.json",
+      "case": "nextjs-app",
+      "expect": "rejected",
+      "reason": "reports status success while a completion check is false"
+    },
+    {
+      "file": "mixed-monorepo.vendor-evidence.json",
+      "case": "mixed-monorepo",
+      "expect": "rejected",
+      "reason": "grounds a finding in vendored code and declares no exclusions"
+    }
+  ]
+}

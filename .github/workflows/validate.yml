@@ -1,0 +1,74 @@
+name: validate
+
+# Runs on every change that could reach a release. A package that fails here can
+# never be built by `release.yml`, which runs the identical checks again against
+# the tagged commit rather than trusting this run's verdict.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+# Read-only by default. Nothing in this workflow needs to write to the
+# repository, and a pull request from a fork must never receive a token that
+# could.
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: schema, file set, digests, secrets, reproducibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the commit under review
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # The pipeline is stdlib-only Python on purpose: no dependency is fetched
+      # here, so an unavailable or compromised registry cannot change what CI
+      # concludes about a package. `ubuntu-latest` ships python3 already.
+      - name: Record the toolchain
+        run: python3 --version
+
+      - name: Validate every Skill package and Catalog document
+        run: python3 scripts/validate.py
+
+      - name: Validate the pipeline fixture package
+        run: python3 scripts/validate.py --skills-root tests/fixtures/skills
+
+      - name: Run the pipeline's own tests
+        run: python3 scripts/selftest.py
+
+      # A release must be buildable from the reviewed commit, not only from the
+      # author's machine. This is a dry run: nothing is uploaded and no tag is
+      # created, so it is safe to run on an untrusted pull request.
+      - name: Dry-run the release build for the fixture package
+        run: |
+          python3 scripts/build_release.py \
+            --skill pipeline-selftest \
+            --skills-root tests/fixtures/skills \
+            --out "${RUNNER_TEMP}/dist" \
+            --repository "${GITHUB_REPOSITORY}" \
+            --ref "validate-dry-run" \
+            --commit "${GITHUB_SHA}"
+
+      - name: Confirm the dry-run artifact reproduces on a second build
+        run: |
+          python3 scripts/build_release.py \
+            --skill pipeline-selftest \
+            --skills-root tests/fixtures/skills \
+            --out "${RUNNER_TEMP}/dist-again" \
+            --repository "${GITHUB_REPOSITORY}" \
+            --ref "validate-dry-run" \
+            --commit "${GITHUB_SHA}"
+          diff "${RUNNER_TEMP}/dist/pipeline-selftest-0.1.0.tar.gz" \
+               "${RUNNER_TEMP}/dist-again/pipeline-selftest-0.1.0.tar.gz"
+          echo "artifact reproduced byte-for-byte across two independent builds"

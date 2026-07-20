@@ -1,0 +1,42 @@
+{
+  "case_id": "cli-tool",
+  "title": "CLI の parse 失敗行を件数ではなく行番号付きで報告する",
+  "why_this_case": "package manager の script ではなく Makefile と pyproject に検証手段がある構成。推奨verificationの出典を manifest 以外から取れるかを見る。",
+  "input": {
+    "objective": "parse できなかった行を件数だけでなく行番号付きで報告したい",
+    "roots": [
+      "."
+    ],
+    "focus": [
+      "parse_line",
+      "skipped"
+    ]
+  },
+  "expect": {
+    "status": [
+      "success"
+    ],
+    "truncated": false,
+    "required_evidence_paths": [
+      "src/logsift/parser.py",
+      "src/logsift/cli.py",
+      "Makefile"
+    ],
+    "forbidden_evidence_paths": [],
+    "required_sensitive_paths": [],
+    "required_verification_commands": [
+      "make test",
+      "make lint"
+    ],
+    "required_excluded_rules": [],
+    "min_findings": 3,
+    "min_reuse_candidates": 1,
+    "min_risks": 1,
+    "min_recommended_verification": 2,
+    "required_summary_strings": [
+      "src/logsift/cli.py"
+    ],
+    "forbidden_fragments": [],
+    "required_reason_codes": []
+  }
+}

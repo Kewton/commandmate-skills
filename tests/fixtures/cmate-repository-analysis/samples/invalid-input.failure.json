@@ -1,0 +1,68 @@
+{
+  "result_schema_version": 1,
+  "skill_id": "cmate-repository-analysis",
+  "skill_version": "0.1.0",
+  "status": "failure",
+  "request": {
+    "objective": "よろしく",
+    "roots": [
+      "."
+    ],
+    "focus": []
+  },
+  "scope": {
+    "files_listed": 0,
+    "files_read": 0,
+    "bytes_read": 0,
+    "excluded": [],
+    "truncated": false
+  },
+  "repository_profile": {
+    "primary_languages": [],
+    "project_kinds": [],
+    "entry_points": [],
+    "conventions": []
+  },
+  "findings": [],
+  "reuse_candidates": [],
+  "risks": [],
+  "recommended_verification": [],
+  "sensitive_locations": [],
+  "unresolved": [
+    {
+      "reason_code": "ambiguous_objective",
+      "detail": "objective から調査対象も期待する成果も読み取れないため、走査せずに停止した"
+    }
+  ],
+  "completion_check": {
+    "passed": true,
+    "checks": [
+      {
+        "id": "evidence_present",
+        "passed": true,
+        "detail": "報告項目が無いため vacuously true"
+      },
+      {
+        "id": "evidence_resolvable",
+        "passed": true,
+        "detail": "evidence が無いため vacuously true"
+      },
+      {
+        "id": "verification_grounded",
+        "passed": true,
+        "detail": "推奨 command が無いため vacuously true"
+      },
+      {
+        "id": "no_secret_values",
+        "passed": true,
+        "detail": "リポジトリを読んでいない"
+      },
+      {
+        "id": "scope_declared",
+        "passed": true,
+        "detail": "走査0 file であることを scope に記録した"
+      }
+    ]
+  },
+  "summary_markdown": "## 目的\n「よろしく」とだけ指定された。分析対象が定まらない。\n\n## 結論\nstatus は failure である。reason_code は ambiguous_objective。\n走査は行っていない。\n\n## 主要な発見\n無し。入力検証の段階で停止したため、リポジトリを読んでいない。\n\n## 再利用候補と変更risk\n無し。\n\n## 推奨verification\n無し。\n\n## 未解決と走査範囲\n走査範囲は0 file である。何を調べたいのか（対象の機能、変更したい振る舞い、\n確認したい観点のいずれか）を指定して再実行すること。\n"
+}

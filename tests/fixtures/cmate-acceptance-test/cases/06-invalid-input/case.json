@@ -1,0 +1,38 @@
+{
+  "case_id": "06-invalid-input",
+  "title": "Issue に受入条件が定義されていない",
+  "purpose": "判定材料が無いときに「問題なし」と報告しないことを確認する。status failure / verdict no_go であり、条件 0 件の go は存在しない。",
+  "input": {
+    "issue_ref": "Kewton/CommandMate#9006",
+    "issue": {
+      "number": 9006,
+      "title": "worktree 周りをいい感じに直す",
+      "state": "OPEN",
+      "body": "## 概要\n\nworktree の扱いが分かりにくいので改善したい。詳細は後で詰める。\n"
+    },
+    "target_ref": "branch feature/9006-worktree-cleanup",
+    "resolved_target": {
+      "repository": "Kewton/CommandMate",
+      "branch": "feature/9006-worktree-cleanup",
+      "commit": "7d3f8a1e5c60294bf1a7e2d09c48b53617fa0e2c",
+      "dirty": false
+    },
+    "invocation": "interactive",
+    "test_commands": ["npm run lint"],
+    "recorded_outputs": [],
+    "user_responses": []
+  },
+  "expect": {
+    "status": "failure",
+    "verdict": "no_go",
+    "criteria_outcomes": {},
+    "min_next_actions": 1,
+    "forbidden_strings": [],
+    "notes": [
+      "受入条件が抽出できないときに、lint だけ実行して go を出さないこと。",
+      "status failure のとき blocking_reasons を空にしないこと。",
+      "受入条件を定義するという次 action を、担当つきで返すこと。",
+      "Issue 本文を書き換えて条件を補わないこと。この Skill は Issue を編集しない。"
+    ]
+  }
+}

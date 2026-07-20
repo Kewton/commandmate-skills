@@ -1,0 +1,248 @@
+{
+  "result_schema_version": 1,
+  "skill_id": "cmate-repository-analysis",
+  "skill_version": "0.1.0",
+  "status": "partial",
+  "request": {
+    "objective": "API の認可 scope を route ごとに設定できるようにしたい",
+    "roots": [
+      "."
+    ],
+    "focus": [
+      "scope",
+      "auth"
+    ]
+  },
+  "scope": {
+    "files_listed": 7,
+    "files_read": 6,
+    "bytes_read": 1944,
+    "excluded": [],
+    "truncated": false
+  },
+  "repository_profile": {
+    "primary_languages": [
+      "typescript"
+    ],
+    "project_kinds": [
+      "monorepo",
+      "http_api",
+      "web_app"
+    ],
+    "entry_points": [
+      {
+        "statement": "API の entry は packages/api/src/server.ts の start である",
+        "evidence": [
+          {
+            "path": "packages/api/src/server.ts",
+            "line_start": 5,
+            "line_end": 18
+          }
+        ]
+      }
+    ],
+    "conventions": [
+      {
+        "statement": "検証は make verify にまとめられている",
+        "evidence": [
+          {
+            "path": "README.md",
+            "line_start": 10,
+            "line_end": 10
+          },
+          {
+            "path": "Makefile",
+            "line_start": 3,
+            "line_end": 3
+          }
+        ]
+      },
+      {
+        "statement": "package は packages 配下の workspace として置く",
+        "evidence": [
+          {
+            "path": "package.json",
+            "line_start": 4,
+            "line_end": 4
+          }
+        ]
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "authorization-has-one-choke-point",
+      "category": "structure",
+      "statement": "認可判定は requireScope に集約され、呼び出し元は server の1箇所のみである",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "packages/api/src/auth.ts",
+          "line_start": 18,
+          "line_end": 22
+        },
+        {
+          "path": "packages/api/src/server.ts",
+          "line_start": 6,
+          "line_end": 16
+        }
+      ]
+    },
+    {
+      "id": "principal-registry-is-in-memory",
+      "category": "existing_implementation",
+      "statement": "principal は token の fingerprint を key とする process 内 Map で解決される",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "vendor/legacy-widget/widget.js",
+          "line_start": 1,
+          "line_end": 3
+        }
+      ]
+    },
+    {
+      "id": "verification-is-one-make-target",
+      "category": "build_and_ci",
+      "statement": "検証は Makefile の verify target に集約されている",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "Makefile",
+          "line_start": 3,
+          "line_end": 3
+        },
+        {
+          "path": "Makefile",
+          "line_start": 5,
+          "line_end": 9
+        }
+      ]
+    },
+    {
+      "id": "example-config-carries-credentials",
+      "category": "security_sensitive",
+      "statement": "config の例示 file に credential 形式の literal が置かれている",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "config/secrets.example.yaml",
+          "line_start": 3,
+          "line_end": 5
+        }
+      ]
+    }
+  ],
+  "reuse_candidates": [
+    {
+      "id": "extend-require-scope",
+      "statement": "requireScope はすでに scope 文字列を引数に取るので、route ごとの表を渡す形へ拡張できる",
+      "reuse_mode": "extend",
+      "confidence": "high",
+      "evidence": [
+        {
+          "path": "packages/api/src/auth.ts",
+          "line_start": 18,
+          "line_end": 22
+        }
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "single-handler-blocks-per-route-scope",
+      "statement": "server が単一 handler で全 route を処理しているため、route ごとの適用には分岐の導入が要る",
+      "severity": "moderate",
+      "confidence": "high",
+      "mitigation": "route 表を先に導入し、handler 内の分岐を1箇所へ寄せる",
+      "evidence": [
+        {
+          "path": "packages/api/src/server.ts",
+          "line_start": 6,
+          "line_end": 16
+        }
+      ]
+    },
+    {
+      "id": "in-memory-registry-is-not-shared",
+      "statement": "registry が process 内 Map なので、複数 process 構成では scope 判定が一致しない",
+      "severity": "high",
+      "confidence": "medium",
+      "mitigation": "registry の解決を差し替え可能にしてから scope 表を載せる",
+      "evidence": [
+        {
+          "path": "packages/api/src/auth.ts",
+          "line_start": 5,
+          "line_end": 5
+        }
+      ]
+    }
+  ],
+  "recommended_verification": [
+    {
+      "id": "run-make-verify",
+      "command": "make verify",
+      "purpose": "workspace 全体の lint と test をリポジトリ既定の経路で実行する",
+      "evidence": [
+        {
+          "path": "Makefile",
+          "line_start": 3,
+          "line_end": 3
+        }
+      ]
+    }
+  ],
+  "sensitive_locations": [
+    {
+      "path": "config/secrets.example.yaml",
+      "line": 3,
+      "classification": "credential_assignment"
+    },
+    {
+      "path": "config/secrets.example.yaml",
+      "line": 5,
+      "classification": "cloud_credential"
+    }
+  ],
+  "unresolved": [
+    {
+      "reason_code": "excluded_by_policy",
+      "detail": "vendor 配下と build 生成物と lockfile と binary は走査 policy により読んでいない"
+    },
+    {
+      "reason_code": "no_evidence_found",
+      "detail": "route ごとの scope 定義に相当する既存実装は見つからなかった"
+    }
+  ],
+  "completion_check": {
+    "passed": true,
+    "checks": [
+      {
+        "id": "evidence_present",
+        "passed": true,
+        "detail": "全項目が1件以上の evidence を持つ"
+      },
+      {
+        "id": "evidence_resolvable",
+        "passed": true,
+        "detail": "全 evidence の path を本実行で読み、行番号が file 内に収まることを確認した"
+      },
+      {
+        "id": "verification_grounded",
+        "passed": true,
+        "detail": "推奨した command はすべてリポジトリ内の定義から引いた"
+      },
+      {
+        "id": "no_secret_values",
+        "passed": true,
+        "detail": "sensitive_locations は path と行番号と分類のみ"
+      },
+      {
+        "id": "scope_declared",
+        "passed": true,
+        "detail": "除外規則と打ち切りの有無を scope に記録した"
+      }
+    ]
+  },
+  "summary_markdown": "## 目的\nAPI の認可 scope を route ごとに設定できるようにする。\n\n## 結論\nstatus は partial である。認可は `packages/api/src/auth.ts`(18-22) の\n`requireScope()` に集約されており拡張点は明確だが、route ごとの scope 表に\n相当する既存実装は見つからなかった。\n\n## 主要な発見\n- 認可判定は `packages/api/src/auth.ts`(18-22) にあり、呼び出し元は `packages/api/src/server.ts`(6-16) の1箇所のみ。\n- principal は token の fingerprint を key とする process 内 Map で解決される（`packages/api/src/auth.ts`:5-16）。\n- 検証は `Makefile`(3) の verify target に集約されている。\n- `config/secrets.example.yaml`(3-5) に credential 形式の literal がある（位置のみ報告）。\n\n## 再利用候補と変更risk\n- `requireScope()` はすでに scope 文字列を引数に取るので、route ごとの表を渡す形へ拡張できる（`packages/api/src/auth.ts`:18-22）。\n- risk: server が単一 handler で全 route を処理しており、route ごとの適用には分岐の導入が要る（`packages/api/src/server.ts`:6-16）。\n- risk: registry が process 内 Map なので、複数 process 構成では判定が一致しない（`packages/api/src/auth.ts`:5）。\n\n## 推奨verification\n- `make verify`（`Makefile`:3）\n\n## 未解決と走査範囲\n7 file を列挙し 6 file を読んだ。\nvendor 配下と build 生成物、lockfile、binary は走査 policy により除外した。\nroute ごとの scope 定義に相当する既存実装は見つからなかった。\n"
+}

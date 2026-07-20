@@ -1,0 +1,119 @@
+{
+  "result_schema_version": 1,
+  "skill": { "id": "cmate-acceptance-test", "version": "0.1.0" },
+  "generated_at": "2026-07-20T09:30:00Z",
+  "status": "partial",
+  "verdict": "conditional_go",
+  "verdict_reason": "AC-02 は DATABASE_URL が未設定のため検証できなかった。実装の失敗ではないので fail ではない。",
+  "target": {
+    "issue_ref": "Kewton/CommandMate#9004",
+    "issue_title": "receipt を DB へ永続化する",
+    "repository": "Kewton/CommandMate",
+    "branch": "feature/9004-receipt-store",
+    "commit": "1a4c7e93b2058df6c8e1097a5b3d2f4e6081c9ab",
+    "dirty": false
+  },
+  "environment": {
+    "agent": "codex",
+    "agent_version": "0.48.0",
+    "commandmate_version": "0.11.0",
+    "invocation": "interactive"
+  },
+  "criteria": [
+    {
+      "id": "AC-01",
+      "text": "`npm run lint` が exit 0 で終わる",
+      "classification": "automated",
+      "risk_tier": "safe",
+      "outcome": "pass",
+      "evidence_ids": ["EV-01"],
+      "notes": "exit 0。"
+    },
+    {
+      "id": "AC-02",
+      "text": "receipt が DB に保存され、再起動後も読み出せる",
+      "classification": "automated",
+      "risk_tier": "blocked",
+      "outcome": "blocked",
+      "evidence_ids": ["EV-02", "EV-03"],
+      "notes": "integration test の実行に DATABASE_URL が必要だが未設定。test は起動前に停止しており、実装の可否は判定できていない。"
+    }
+  ],
+  "checks": [
+    {
+      "id": "CK-01",
+      "kind": "command",
+      "description": "npm run lint を実行し exit code を確認する",
+      "criterion_ids": ["AC-01"],
+      "risk_tier": "safe",
+      "executed": true,
+      "skip_reason": null,
+      "evidence_ids": ["EV-01"]
+    },
+    {
+      "id": "CK-02",
+      "kind": "test",
+      "description": "receipt の integration test を実行する",
+      "criterion_ids": ["AC-02"],
+      "risk_tier": "blocked",
+      "executed": false,
+      "skip_reason": "DATABASE_URL が未設定で、test runner が起動前に停止した",
+      "evidence_ids": ["EV-02", "EV-03"]
+    }
+  ],
+  "confirmations": [],
+  "evidence": [
+    {
+      "id": "EV-01",
+      "type": "command",
+      "collected_at": "2026-07-20T09:25:00Z",
+      "summary": "npm run lint が exit 0 で終了した。",
+      "redacted": false,
+      "path": "./acceptance-evidence/EV-01-lint.log",
+      "command": "npm run lint",
+      "exit_code": 0,
+      "duration_ms": 8000,
+      "output_excerpt": "eslint . --max-warnings=0\n0 problems",
+      "truncated": false
+    },
+    {
+      "id": "EV-02",
+      "type": "command",
+      "collected_at": "2026-07-20T09:27:00Z",
+      "summary": "integration test は DATABASE_URL 未設定のため起動前に停止した。test 本体は 1 件も実行されていない。",
+      "redacted": false,
+      "path": "./acceptance-evidence/EV-02-integration.log",
+      "command": "npm run test:integration -- receipt",
+      "exit_code": 1,
+      "duration_ms": 900,
+      "output_excerpt": "Error: DATABASE_URL is not configured. Integration tests require a database.",
+      "truncated": false
+    },
+    {
+      "id": "EV-03",
+      "type": "command",
+      "collected_at": "2026-07-20T09:27:30Z",
+      "summary": "必要な環境変数の存在確認。DATABASE_URL は未設定だった。値は取得していない。",
+      "redacted": true,
+      "path": "./acceptance-evidence/EV-03-env-presence.log",
+      "command": "環境変数の存在確認 (値は読み出さない)",
+      "exit_code": 0,
+      "duration_ms": 10,
+      "output_excerpt": "DATABASE_URL=<unset>",
+      "truncated": false
+    }
+  ],
+  "next_actions": [
+    {
+      "action": "DATABASE_URL を設定した環境で AC-02 の integration test を再実行する",
+      "owner": "検証依頼者",
+      "criterion_ids": ["AC-02"]
+    }
+  ],
+  "blocking_reasons": [],
+  "limitations": [
+    "この環境には integration test 用の DB が無く、AC-02 は未検証のまま残った"
+  ],
+  "evidence_dir": "./acceptance-evidence/",
+  "summary_text": null
+}

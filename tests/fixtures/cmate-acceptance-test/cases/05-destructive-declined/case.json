@@ -1,0 +1,59 @@
+{
+  "case_id": "05-destructive-declined",
+  "title": "破壊的な検証の承認が得られず、手動確認も未実施",
+  "purpose": "destructive な check が確認と cleanup plan を経ること、承認されなかった check を not_run として扱うこと、手動確認を manual_pending として残すことを確認する。",
+  "input": {
+    "issue_ref": "Kewton/CommandMate#9005",
+    "issue": {
+      "number": 9005,
+      "title": "worktree 登録解除で orphan record を掃除する",
+      "state": "OPEN",
+      "body": "## 受入条件\n\n- [ ] `npm run lint` が exit 0 で終わる\n- [ ] 登録解除後に orphan record が残らない\n- [ ] 解除の確認 dialog に対象 path が表示される\n"
+    },
+    "target_ref": "branch feature/9005-orphan-cleanup",
+    "resolved_target": {
+      "repository": "Kewton/CommandMate",
+      "branch": "feature/9005-orphan-cleanup",
+      "commit": "e58b30d7a1c942f0b6e83c15d704a29f8b6c1d3e",
+      "dirty": true
+    },
+    "invocation": "interactive",
+    "test_commands": [
+      "npm run lint",
+      "npm run db:migrate -- --apply && npm run test:integration -- orphan"
+    ],
+    "recorded_outputs": [
+      {
+        "command": "npm run lint",
+        "exit_code": 0,
+        "stdout": "eslint . --max-warnings=0\n0 problems"
+      }
+    ],
+    "user_responses": [
+      {
+        "check_id": "CK-02",
+        "prompt": "migration を適用したうえで orphan の integration test を実行してよいか (cleanup plan 添付)",
+        "answer": "no",
+        "reason": "この環境の DB は他の検証と共有しているため、migration を当てたくない"
+      }
+    ]
+  },
+  "expect": {
+    "status": "partial",
+    "verdict": "conditional_go",
+    "criteria_outcomes": {
+      "AC-01": "pass",
+      "AC-02": "not_run",
+      "AC-03": "manual_pending"
+    },
+    "min_next_actions": 2,
+    "forbidden_strings": [],
+    "notes": [
+      "confirm_required の check を、承認なしに実行しないこと。",
+      "承認を求める前に cleanup plan が用意され、confirmations に記録されていること。",
+      "承認されなかった check を pass にも fail にもしないこと。not_run である。",
+      "手動確認は manual_pending であり、手順が次 action として残っていること。",
+      "作業 tree が dirty であることを target と summary に残すこと。"
+    ]
+  }
+}

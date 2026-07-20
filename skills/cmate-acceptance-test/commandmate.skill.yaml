@@ -1,0 +1,114 @@
+schema_version: 1
+id: cmate-acceptance-test
+name: cmate-acceptance-test
+version: 0.1.0
+summary: Issue の受入条件を証跡付きで検証し、Go / Conditional Go / No-Go を versioned な result として返す。
+description: |-
+  対象 Issue の受入条件を自動検証と手動確認に分け、command exit code、test 結果、diff、手動観察を evidence として構造化したうえで、受入の可否を判定する手順である。
+  未検証・環境依存・flaky・未承認を pass に丸めず、go / conditional_go / no_go を区別する。
+  結果は schemas/acceptance-result.v1.json に適合する JSON と、離席後でも状態を復元できる human-readable summary の両方で返す。
+  destructive・外部書き込み・high-risk な検証は、cleanup plan を添えた事前確認を経てからしか実行しない。
+  実行する command は、この Skill 自身の gh / git（読み取り用途）と、利用者が入力として渡し確認したものに限る。実装や修正は行わない。
+capabilities:
+  - Issue の受入条件を抽出し、automated / manual / not_verifiable に分類する
+  - 分類と risk に応じた test plan を提示し、危険な検証は cleanup plan つきで確認を取る
+  - command exit code、test 結果、diff、手動観察を evidence として構造化する
+  - pass / fail / flaky / blocked / not_run / manual_pending を区別して判定する
+  - go / conditional_go / no_go を、決定表に従って再現可能に導出する
+  - versioned な result document と human-readable summary を出力する
+expected_outcomes:
+  - 受入判断の根拠が、実行者の記憶ではなく evidence として残る
+  - 未検証・環境依存・flaky・未承認が pass に丸められなくなる
+  - 実行した check と実行しなかった check が、報告のうえで必ず分かれる
+  - 離席後でも、未検証項目と次 action を result から復元できる
+  - 破壊的な検証が、確認と cleanup plan を経てからしか実行されなくなる
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - acceptance-test
+  - verification
+  - evidence
+  - go-no-go
+  - quality-gate
+  - issue
+compatibility:
+  commandmate: '>=0.11.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Standard SKILL.md discovery from .agents/skills. Procedure uses no Claude-specific tool name.
+    - agent: codex
+      support: native
+      evidence: Standard SKILL.md discovery from .agents/skills. Procedure uses no Codex-specific construct.
+    - agent: gemini
+      support: unknown
+      evidence: Not verified for this version. Readable as a procedure, discovery and reload unverified.
+    - agent: opencode
+      support: unknown
+      evidence: Not verified for this version. Readable as a procedure, discovery and reload unverified.
+requirements:
+  commands:
+    - name: gh
+    - name: git
+  network_hosts:
+    - api.github.com
+    - github.com
+declared_permissions:
+  - filesystem_read
+  - filesystem_write
+  - process_execution
+  - network_access
+  - environment_read
+declared_risk: moderate
+risk_rationale: >-
+  Executes processes by design: read-only gh and git, plus the project test
+  commands the user passes in and confirms. Writes only the result document and
+  the evidence directory. Network use is limited to reading the issue. Environment
+  variables are checked for presence, never read into evidence. No script file and
+  no executable file ships in this package.
+files:
+  - path: SKILL.md
+    sha256: 9a6ed68115746779afeb03db88a9a2234df5aed817b08ddc784a7ef257924dd7
+    size: 13946
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/agent-compatibility.md
+    sha256: 0e63fc90aeed3b202d6cccbc0dd5ec873e4403d4f86471526f4e6e192df70d29
+    size: 3768
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/changelog.md
+    sha256: 2edace1e340d64a69c6561c5e19942eb02297270f05c64961bc6251f67038884
+    size: 2943
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/evidence.md
+    sha256: b9e643efe219efb5d51c37fcc26f13505f492498b618779077e51240191040b8
+    size: 4454
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/test-plan.md
+    sha256: e4a242e1da6f96c723bc9848ed6e513e00c73d5be0ae3d21fb1b9acb3f6a74a8
+    size: 4969
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/verdict-rubric.md
+    sha256: 9cc73192cc932a35bfed9596c98e65b454120284168124838960a73b85fce903
+    size: 5268
+    kind: instruction
+    executable: false
+    script: false
+  - path: schemas/acceptance-result.v1.json
+    sha256: da565bdad863cff9b5bb0ef38d607a1eb1d9d646ba8a9f013327d09615e936aa
+    size: 14255
+    kind: asset
+    executable: false
+    script: false

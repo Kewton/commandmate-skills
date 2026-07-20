@@ -1,0 +1,278 @@
+name: release
+
+# Publishing one official Skill version.
+#
+# Triggered by a `<skill-id>-v<version>` tag. Split into two jobs on purpose:
+#
+#   build    no write permission, no secrets, no network. Produces the artifact
+#            and proves it reproduces. Nothing it does can change the world.
+#   publish  minimal write permission behind an environment approval. Does the
+#            irreversible parts, in an order chosen so that every intermediate
+#            state is safe (see docs/design/release-pipeline.md).
+#
+# Publish order is artifact-then-Catalog. The Catalog is the index CommandMate
+# reads; a Catalog entry pointing at an asset that does not exist yet would be a
+# resolvable 404 for every client, whereas an uploaded asset nothing references
+# is invisible and trivially removed.
+on:
+  push:
+    tags:
+      - '*-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing <skill-id>-v<version> tag to build (dry run only)'
+        required: true
+      dry_run:
+        description: 'Build and verify without creating a release'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  # One release at a time. Two concurrent runs would race on the Catalog commit,
+  # and the loser would silently drop the winner's version entry.
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build reproducibly and verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      skill_id: ${{ steps.build.outputs.skill_id }}
+      version: ${{ steps.build.outputs.version }}
+      asset_name: ${{ steps.build.outputs.asset_name }}
+      sha256: ${{ steps.build.outputs.sha256 }}
+      size: ${{ steps.build.outputs.size }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      commit: ${{ steps.resolve.outputs.commit }}
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Every `${{ }}` value below reaches the shell through `env:` rather than by
+      # string substitution into the script. A tag name is chosen by whoever
+      # pushed it, and substitution would make it shell source rather than data.
+      - name: Resolve the tag to a commit SHA
+        id: resolve
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          # A tag can be moved after review; the resolved SHA cannot. Everything
+          # downstream — the Catalog, the receipt, an audit — records the SHA.
+          COMMIT="$(git rev-parse "${INPUT_TAG}^{commit}")"
+          echo "tag=${INPUT_TAG}" >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "tag ${INPUT_TAG} resolves to ${COMMIT}"
+
+      - name: Validate every package at the tagged commit
+        run: python3 scripts/validate.py
+
+      - name: Run the pipeline's own tests
+        run: python3 scripts/selftest.py
+
+      # Builds twice internally and refuses to emit anything if the two results
+      # differ. It also refuses a tag whose version disagrees with the manifest.
+      - name: Build the release artifact
+        id: build
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+          COMMIT: ${{ steps.resolve.outputs.commit }}
+        run: |
+          python3 scripts/build_release.py \
+            --tag "${TAG}" \
+            --repository "${GITHUB_REPOSITORY}" \
+            --commit "${COMMIT}" \
+            --out dist
+
+      - name: Take the changelog from the tag
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # An annotated tag's message is what the releasing maintainer wrote and
+          # what review saw, so it is the changelog. A lightweight tag has no
+          # message; that is a release nobody described, so it fails here rather
+          # than shipping a placeholder into the Catalog.
+          MESSAGE="$(git tag -l --format='%(contents)' "${TAG}" | sed -e '/^-----BEGIN PGP/,$d')"
+          if [ -z "$(printf '%s' "${MESSAGE}" | tr -d '[:space:]')" ]; then
+            echo "::error title=Missing changelog::Tag has no annotation. Create it with 'git tag -a'."
+            exit 1
+          fi
+          printf '%s\n' "${MESSAGE}" > dist/changelog.md
+          cat dist/changelog.md
+
+      - name: Verify the artifact against a freshly generated Catalog
+        env:
+          RECORD_PATH: ${{ steps.build.outputs.record_path }}
+          ARTIFACT_PATH: ${{ steps.build.outputs.artifact_path }}
+          SKILL_ID: ${{ steps.build.outputs.skill_id }}
+          VERSION: ${{ steps.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 scripts/build_catalog.py \
+            --record "${RECORD_PATH}" \
+            --catalog "${RUNNER_TEMP}/catalog-preflight.json" \
+            --changelog-file dist/changelog.md \
+            --published-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python3 scripts/verify_artifact.py \
+            --catalog "${RUNNER_TEMP}/catalog-preflight.json" \
+            --skill "${SKILL_ID}" \
+            --version "${VERSION}" \
+            --artifact "${ARTIFACT_PATH}"
+
+      - name: Hand the build to the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: publish artifact then Catalog
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Gate the only job that can change anything. Configure `release` in
+    # Settings > Environments with required reviewers; see
+    # docs/design/release-pipeline.md for the exact settings this expects.
+    environment: release
+    permissions:
+      contents: write
+    # Bound once, as data. Nothing below substitutes a `${{ }}` value into a
+    # shell script, so a crafted tag or asset name stays an argument.
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.build.outputs.tag }}
+      COMMIT: ${{ needs.build.outputs.commit }}
+      SKILL_ID: ${{ needs.build.outputs.skill_id }}
+      VERSION: ${{ needs.build.outputs.version }}
+      ASSET_NAME: ${{ needs.build.outputs.asset_name }}
+      EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      # The default branch, not the tag: the Catalog being appended to lives
+      # here, and the scripts that append to it should be the currently reviewed
+      # ones. The artifact itself was already built and verified from the tagged
+      # commit in the build job, so nothing about the payload depends on this
+      # checkout.
+      - name: Check out the default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          # The Catalog commit is pushed from here, so credentials stay.
+          persist-credentials: true
+
+      - name: Collect the verified build
+        uses: actions/download-artifact@v4
+        with:
+          name: release-build
+          path: dist
+
+      # The build job's word is not taken for granted: the bytes that arrive here
+      # went through an upload and a download, either of which could truncate.
+      - name: Re-verify the digest that crossed the job boundary
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -c "${ASSET_NAME}.sha256"
+          ACTUAL="$(sha256sum "${ASSET_NAME}" | cut -d' ' -f1)"
+          test "${ACTUAL}" = "${EXPECTED_SHA256}"
+          echo "digest ${ACTUAL} matches the build job"
+
+      # Step 1: the asset. Created as a draft, so the stable download URL does
+      # not resolve yet and no client can observe a half-published release.
+      - name: Create the draft release with its asset
+        run: |
+          set -euo pipefail
+          gh release create "${TAG}" \
+            --draft \
+            --target "${COMMIT}" \
+            --title "${SKILL_ID} ${VERSION}" \
+            --notes-file dist/changelog.md
+          gh release upload "${TAG}" \
+            "dist/${ASSET_NAME}" \
+            "dist/${ASSET_NAME}.sha256" \
+            --clobber
+
+      - name: Verify the uploaded asset round-trips
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/roundtrip"
+          gh release download "${TAG}" \
+            --pattern "${ASSET_NAME}" \
+            --dir "${RUNNER_TEMP}/roundtrip"
+          ACTUAL="$(sha256sum "${RUNNER_TEMP}/roundtrip/${ASSET_NAME}" | cut -d' ' -f1)"
+          test "${ACTUAL}" = "${EXPECTED_SHA256}"
+          echo "uploaded asset matches the build digest"
+
+      # Step 2: make the asset resolvable. Only now does the URL the Catalog is
+      # about to publish actually work.
+      - name: Publish the release
+        run: gh release edit "${TAG}" --draft=false
+
+      # Step 3: the Catalog. Last, because it is what makes the version visible
+      # to CommandMate. `build_catalog.py` refuses to overwrite a version that is
+      # already listed, so a re-run cannot silently change published bytes.
+      - name: Generate the Catalog entry
+        run: |
+          set -euo pipefail
+          python3 scripts/build_catalog.py \
+            --record "dist/${SKILL_ID}-${VERSION}.build.json" \
+            --catalog catalog/v1/catalog.json \
+            --changelog-file dist/changelog.md \
+            --published-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --snapshot-out dist
+
+      - name: Verify the published asset against the committed Catalog
+        run: |
+          python3 scripts/verify_artifact.py \
+            --catalog catalog/v1/catalog.json \
+            --skill "${SKILL_ID}" \
+            --version "${VERSION}" \
+            --artifact "${RUNNER_TEMP}/roundtrip/${ASSET_NAME}"
+
+      - name: Attach the immutable Catalog snapshot to the release
+        run: |
+          gh release upload "${TAG}" \
+            "dist/catalog-${SKILL_ID}-${VERSION}.json" \
+            --clobber
+
+      - name: Commit the Catalog to the default branch
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add catalog/v1/catalog.json
+          git commit --file=- <<EOF
+          chore(catalog): publish ${SKILL_ID} ${VERSION}
+
+          artifact: ${ASSET_NAME}
+          sha256:   ${EXPECTED_SHA256}
+          commit:   ${COMMIT}
+          EOF
+          # Rebase once: a concurrent doc commit should not fail a release, but a
+          # real conflict in the Catalog must, because that means two releases
+          # raced and one of them would be lost.
+          git pull --rebase origin "${DEFAULT_BRANCH}"
+          git push origin "HEAD:${DEFAULT_BRANCH}"
+
+      - name: Report what to do if a later step failed
+        if: failure()
+        run: |
+          echo "::error title=Release did not complete::Follow the rollback runbook"
+          echo "docs/runbooks/release.md documents which state the release is in"
+          echo "and which rollback applies. Do not re-tag: cut a new version."

@@ -1,0 +1,57 @@
+{
+  "case_id": "mixed-monorepo",
+  "title": "monorepo の API に route ごとの認可 scope を導入する",
+  "why_this_case": "vendor / build 生成物 / binary / lockfile / secret 形式の値を含む。除外規則と redaction が働くかを見る。",
+  "input": {
+    "objective": "API の認可 scope を route ごとに設定できるようにしたい",
+    "roots": [
+      "."
+    ],
+    "focus": [
+      "scope",
+      "auth"
+    ]
+  },
+  "expect": {
+    "status": [
+      "success",
+      "partial"
+    ],
+    "required_evidence_paths": [
+      "packages/api/src/auth.ts",
+      "packages/api/src/server.ts",
+      "Makefile"
+    ],
+    "forbidden_evidence_paths": [
+      "vendor/legacy-widget/widget.js",
+      "build/bundle.generated.js",
+      "assets/logo.png",
+      "package-lock.json"
+    ],
+    "required_sensitive_paths": [
+      "config/secrets.example.yaml"
+    ],
+    "required_verification_commands": [
+      "make verify"
+    ],
+    "required_excluded_rules": [
+      "excluded_directory",
+      "binary_file",
+      "generated_artifact"
+    ],
+    "min_findings": 3,
+    "min_reuse_candidates": 1,
+    "min_risks": 2,
+    "min_recommended_verification": 1,
+    "required_summary_strings": [
+      "packages/api/src/auth.ts"
+    ],
+    "forbidden_fragments": [
+      "fixture-not-a-real-secret",
+      "FIXTUREKEY"
+    ],
+    "required_reason_codes": [
+      "excluded_by_policy"
+    ]
+  }
+}

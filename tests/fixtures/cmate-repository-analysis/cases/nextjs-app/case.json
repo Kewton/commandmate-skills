@@ -1,0 +1,47 @@
+{
+  "case_id": "nextjs-app",
+  "title": "Next.js App Router の session TTL を利用者ごとに可変にする",
+  "why_this_case": "規約 file (AGENTS.md) と manifest script と test が揃った、素直な単一 package。analysis completeness の基準線として使う。",
+  "input": {
+    "objective": "session の有効期限を全体固定ではなく利用者ごとに設定できるようにしたい",
+    "roots": [
+      "."
+    ],
+    "focus": [
+      "session",
+      "TTL"
+    ]
+  },
+  "expect": {
+    "status": [
+      "success"
+    ],
+    "truncated": false,
+    "required_evidence_paths": [
+      "AGENTS.md",
+      "package.json",
+      "lib/auth/session.ts",
+      "lib/config.ts"
+    ],
+    "forbidden_evidence_paths": [],
+    "required_sensitive_paths": [
+      ".env.example"
+    ],
+    "required_verification_commands": [
+      "npm run test:unit",
+      "npm run lint"
+    ],
+    "required_excluded_rules": [],
+    "min_findings": 4,
+    "min_reuse_candidates": 1,
+    "min_risks": 1,
+    "min_recommended_verification": 2,
+    "required_summary_strings": [
+      "lib/auth/session.ts"
+    ],
+    "forbidden_fragments": [
+      "fixture-not-a-real-secret"
+    ],
+    "required_reason_codes": []
+  }
+}
