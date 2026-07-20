@@ -3,3 +3,7 @@ dist/
 *.tgz
 *.tar.gz
 .DS_Store
+
+# Python bytecode from the release pipeline scripts
+__pycache__/
+*.py[cod]

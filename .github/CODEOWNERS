@@ -1,0 +1,29 @@
+# CODEOWNERS — 何を誰がreviewするか
+#
+# 本リポジトリの成果物はCommandMateが「検証済み供給元」として扱う。
+# 供給元の信頼は review の質そのものなので、owner のない path を作らない。
+# 最後に一致した行が優先されるため、広い規則を先に、狭い規則を後に書く。
+
+# 既定: すべて maintainer
+*                               @Kewton
+
+# 配布pipelineと契約mirror。
+# scripts/cmate_skills/ は CommandMate 側 (#1228/#1230) の契約を写したもので、
+# 単独で「改善」してはならない。変更時は docs/design/contract-sync.md の
+# 手順に従い、upstream revision を validate.py に記録すること。
+/scripts/                       @Kewton
+/.github/workflows/             @Kewton
+
+# 公式Skill package。install される中身であり、
+# 追加・変更は必ず maintainer review を通す。
+/skills/                        @Kewton
+
+# Catalog は release workflow の生成物であり、手で編集しない。
+# 手編集のPRが来た時点でreviewが止まるよう owner を明示する。
+/catalog/                       @Kewton
+
+# 供給元の約束事
+/SECURITY.md                    @Kewton
+/CONTRIBUTING.md                @Kewton
+/LICENSE                        @Kewton
+/.github/CODEOWNERS             @Kewton
