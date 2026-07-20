@@ -9,10 +9,8 @@ immutable commit SHA と artifact SHA-256 を検証したうえで、
 - 親 Epic: [Kewton/CommandMate#1227](https://github.com/Kewton/CommandMate/issues/1227)
 - 本リポジトリの release pipeline: [Kewton/CommandMate#1238](https://github.com/Kewton/CommandMate/issues/1238)
 
-> **状態**: release pipeline は実装済み。公式 Skill 本体
-> （`cmate-repository-analysis` / `cmate-issue-refinement` / `cmate-acceptance-test`）は
-> [#1239](https://github.com/Kewton/CommandMate/issues/1239)〜[#1241](https://github.com/Kewton/CommandMate/issues/1241) で追加する。
-> `skills/` 配下の該当 directory は現在 placeholder のみである。
+> **状態**: release pipeline と公式 Skill 3 件
+> （`cmate-repository-analysis` / `cmate-issue-refinement` / `cmate-acceptance-test`）が揃っている。
 
 ## ディレクトリ構成
 
@@ -91,8 +89,7 @@ Catalog source.commit（40桁 resolved SHA）
 
 ## 公開設定
 
-現在 **private**。Catalog と release asset は CommandMate から credential なしで
-取得される設計のため、公式 release の時点で public へ切り替える。
+**public**。Catalog と release asset は CommandMate から credential なしで取得される。
 
 ## License
 
