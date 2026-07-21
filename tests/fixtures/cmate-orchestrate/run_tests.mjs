@@ -22,10 +22,12 @@ const REPO_ROOT = join(HERE, '..', '..', '..');
 const RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'orchestrate.mjs');
 const DISPATCH_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'dispatch.mjs');
 const MERGE_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'merge.mjs');
+const UAT_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'uat.mjs');
 const SCHEMA_DIR = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'schemas');
 const CASES_DIR = join(HERE, 'cases');
 const DISPATCH_CASES_DIR = join(HERE, 'dispatch-cases');
 const MERGE_CASES_DIR = join(HERE, 'merge-cases');
+const UAT_CASES_DIR = join(HERE, 'uat-cases');
 const PROFILES_DIR = join(HERE, 'profiles');
 const FAKE_CLI = join(HERE, 'fake-cli.mjs');
 
@@ -33,6 +35,7 @@ const planSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'execution-plan.v1.j
 const resultSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'orchestrate-result.v1.json'), 'utf8'));
 const dispatchSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'dispatch-report.v1.json'), 'utf8'));
 const mergeSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'merge-report.v1.json'), 'utf8'));
+const uatSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'uat-report.v1.json'), 'utf8'));
 
 // A dispatch scenario where both issues of the two-wave fixture complete and
 // pass verification, so both are eligible for the merge phase. Merge cases that
@@ -557,6 +560,132 @@ function runMergeCase(caseId) {
 }
 
 // =============================================================================
+// UAT cases: drive the acceptance assessment / bounded fix loop
+// =============================================================================
+
+// Each UAT case first generates a real plan, then a real dispatch report
+// (proving the plan -> dispatch -> UAT handoff), then runs uat.mjs for a single
+// phase (--write-uat or --create-uat-fix-worktrees) against the fake CLI with an
+// injected UAT scenario. It asserts the report's status/stop_reason, the approval
+// gate, the bounded attempt count and the blocked outcome, and — via the fake's
+// invocation log — that a preview never creates a worktree, dispatches a fix or
+// re-merges, and that the fix loop stopped at the cap rather than running forever.
+
+function runUatRunner(planPath, dispatchPath, outDir, phaseFlag, extraArgs, env) {
+  const args = [
+    UAT_RUNNER,
+    '--plan', planPath,
+    '--dispatch', dispatchPath,
+    phaseFlag,
+    '--cli', FAKE_CLI, '--git', FAKE_CLI, '--gh', FAKE_CLI,
+    '--out', outDir,
+    ...extraArgs,
+  ];
+  try {
+    const stdout = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env });
+    return { exit: 0, stdout };
+  } catch (error) {
+    return { exit: error.status ?? 1, stdout: error.stdout ? error.stdout.toString() : '' };
+  }
+}
+
+function runUatCase(caseId) {
+  const caseDir = join(UAT_CASES_DIR, caseId);
+  const spec = JSON.parse(readFileSync(join(caseDir, 'case.json'), 'utf8'));
+  log(`  ${caseId}: ${spec.description}`);
+
+  // 1. plan -> 2. dispatch report -> 3. UAT phase.
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-uat-plan-'));
+  const planPath = generatePlan(spec, runsDir);
+  if (!check(existsSync(planPath), `plan.json was not generated at ${planPath}`)) return;
+
+  const work = mkdtempSync(join(tmpdir(), 'cmate-uat-'));
+  const dispatchPath = generateDispatchReport(planPath, spec.dispatch_scenario ?? DEFAULT_DISPATCH_SCENARIO, work);
+  if (!check(existsSync(dispatchPath), `dispatch-report.json was not generated at ${dispatchPath}`)) return;
+
+  const uatOut = join(work, 'uat'); // must not pre-exist; uat.mjs creates it
+  const logPath = join(work, 'uat-cli.log');
+  const stateDir = mkdtempSync(join(tmpdir(), 'cmate-uat-state-'));
+  const scenarioPath = writeScenario(work, 'uat-scenario.json', spec.uat_scenario ?? {});
+  const env = { ...process.env, CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath, CMATE_FAKE_STATE: stateDir };
+
+  const phaseFlag = spec.phase === 'fix_uat' ? '--create-uat-fix-worktrees' : '--write-uat';
+  const { exit, stdout } = runUatRunner(planPath, dispatchPath, uatOut, phaseFlag, spec.uat_args ?? [], env);
+
+  let report;
+  try {
+    report = JSON.parse(stdout);
+  } catch {
+    check(false, `uat stdout is not valid JSON (exit ${exit}): ${stdout.slice(0, 200)}`);
+    return;
+  }
+
+  const expect = spec.expect;
+  check(exit === expect.exit, `exit ${exit} !== expected ${expect.exit}`);
+
+  const schemaErrors = validateAgainst(uatSchema, report, 'uat');
+  check(schemaErrors.length === 0, `uat schema: ${schemaErrors.slice(0, 3).join('; ')}`);
+
+  check(report.status === expect.status, `status "${report.status}" !== "${expect.status}"`);
+  check(report.stop_reason === expect.stop_reason, `stop_reason "${report.stop_reason}" !== "${expect.stop_reason}"`);
+  if (expect.approved !== undefined) check(report.approved === expect.approved, `approved ${report.approved} !== ${expect.approved}`);
+  if (expect.mutated !== undefined) check(report.mutated === expect.mutated, `mutated ${report.mutated} !== ${expect.mutated}`);
+  if (expect.attempts_used !== undefined) check(report.attempts_used === expect.attempts_used, `attempts_used ${report.attempts_used} !== ${expect.attempts_used}`);
+  if (expect.eligible) check(deepEqual(report.eligible_issues, expect.eligible), `eligible ${JSON.stringify(report.eligible_issues)} !== ${JSON.stringify(expect.eligible)}`);
+  if (expect.unresolved) check(deepEqual(report.unresolved_issues, expect.unresolved), `unresolved ${JSON.stringify(report.unresolved_issues)} !== ${JSON.stringify(expect.unresolved)}`);
+  if (expect.attempts_count !== undefined) check(report.attempts.length === expect.attempts_count, `attempts ${report.attempts.length} !== ${expect.attempts_count}`);
+  if (expect.completion_passed !== undefined) check(report.completion_check.passed === expect.completion_passed, `completion_check.passed ${report.completion_check.passed} !== ${expect.completion_passed}`);
+  if (expect.next_actions_min !== undefined) check(report.next_actions.length >= expect.next_actions_min, `next_actions ${report.next_actions.length} < ${expect.next_actions_min}`);
+
+  // The bounded-loop guarantee: attempts_used never exceeds max_attempts.
+  check(report.attempts_used <= report.max_attempts, `attempts_used ${report.attempts_used} exceeded max_attempts ${report.max_attempts}`);
+  // A cap-reached stop is reported as blocked with the unresolved issue named,
+  // never rounded up to success.
+  if (report.stop_reason === 'max_attempts_reached') {
+    check(report.status === 'blocked', `max_attempts_reached but status is "${report.status}", not blocked`);
+    check(report.unresolved_issues.length > 0, 'blocked at the cap but no unresolved issue was named');
+  }
+
+  // The gate proofs come from the fake's invocation log.
+  const cliLog = readCliLog(logPath);
+  const worktreeAddCalls = countCalls(cliLog, 'worktree', 'add');
+  const sendCalls = countCalls(cliLog, 'send');
+  const mergeCalls = countCalls(cliLog, 'merge');
+  const uatCalls = countCalls(cliLog, 'uat');
+
+  if (expect.worktree_add_calls !== undefined) check(worktreeAddCalls === expect.worktree_add_calls, `worktree add called ${worktreeAddCalls} time(s) !== ${expect.worktree_add_calls}`);
+  if (expect.send_calls !== undefined) check(sendCalls === expect.send_calls, `send called ${sendCalls} time(s) !== ${expect.send_calls}`);
+  if (expect.merge_calls !== undefined) check(mergeCalls === expect.merge_calls, `git merge called ${mergeCalls} time(s) !== ${expect.merge_calls}`);
+  if (expect.uat_calls_min !== undefined) check(uatCalls >= expect.uat_calls_min, `uat called ${uatCalls} time(s) < ${expect.uat_calls_min}`);
+  if (expect.uat_calls_max !== undefined) check(uatCalls <= expect.uat_calls_max, `uat called ${uatCalls} time(s) > ${expect.uat_calls_max}`);
+  // Approval gate: without --approve nothing is created, dispatched or re-merged.
+  if (expect.no_mutation) {
+    check(worktreeAddCalls === 0 && sendCalls === 0 && mergeCalls === 0, `a mutating call ran on a no-approve path (worktree=${worktreeAddCalls}, send=${sendCalls}, merge=${mergeCalls})`);
+  }
+
+  // Append-only history: each attempt is written under attempts/attempt-<n>/ and
+  // recorded once in attempts/history.jsonl — a prior attempt is never overwritten.
+  const historyPath = join(uatOut, 'attempts', 'history.jsonl');
+  if (report.attempts.length > 0) {
+    if (check(existsSync(historyPath), 'attempts/history.jsonl was not written')) {
+      const lines = readFileSync(historyPath, 'utf8').split('\n').filter(Boolean);
+      check(lines.length === report.attempts.length, `history has ${lines.length} line(s) but the report has ${report.attempts.length} attempt(s)`);
+      const indices = report.attempts.map((a) => a.index);
+      check(deepEqual(indices, indices.map((_, i) => i)), `attempt indices ${JSON.stringify(indices)} are not a 0..n append sequence`);
+    }
+    // The output directory must refuse to be overwritten on a second run.
+    const second = runUatRunner(planPath, dispatchPath, uatOut, phaseFlag, spec.uat_args ?? [], env);
+    let secondReport;
+    try {
+      secondReport = JSON.parse(second.stdout);
+      check(secondReport.blocking_reasons.some((r) => r.code === 'out_exists'), 're-running into the same out dir did not refuse with out_exists');
+    } catch {
+      check(false, 'second uat run did not emit a JSON failure envelope');
+    }
+  }
+}
+
+// =============================================================================
 // Self-test of the validator: it must reject a broken plan, not wave it through.
 // =============================================================================
 
@@ -589,12 +718,18 @@ function main() {
     : [];
   for (const caseId of mergeIds) runMergeCase(caseId);
 
+  log('  -- uat cases --');
+  const uatIds = existsSync(UAT_CASES_DIR)
+    ? readdirSync(UAT_CASES_DIR).filter((name) => existsSync(join(UAT_CASES_DIR, name, 'case.json'))).sort()
+    : [];
+  for (const caseId of uatIds) runUatCase(caseId);
+
   log('');
   if (failures > 0) {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${mergeIds.length} merge cases`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases`);
 }
 
 main();

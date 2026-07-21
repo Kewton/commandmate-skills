@@ -1,0 +1,35 @@
+{
+  "description": "The dispatch report has no completed-and-verified issue (verification failed upstream). The UAT phase has nothing eligible: it succeeds as a no-op, records no_eligible_issues, never runs UAT, and mutates nothing.",
+  "phase": "fix_uat",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "uat_args": ["--approve", "--max-attempts", "2"],
+  "dispatch_scenario": {
+    "cli_available": true,
+    "git": { "branch": "feature/integration", "dirty": false },
+    "gh": { "repo_access": true },
+    "workers": {
+      "201": { "state": "completed", "verify": "fail" },
+      "200": { "state": "completed", "verify": "fail" }
+    }
+  },
+  "uat_scenario": {
+    "uat": { "200": "fail", "201": "fail" }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": false,
+    "attempts_used": 0,
+    "eligible": [],
+    "unresolved": [],
+    "attempts_count": 0,
+    "no_mutation": true,
+    "uat_calls_max": 0,
+    "completion_passed": true
+  }
+}
