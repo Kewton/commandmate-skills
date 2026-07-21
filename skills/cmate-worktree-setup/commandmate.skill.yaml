@@ -1,0 +1,123 @@
+schema_version: 1
+id: cmate-worktree-setup
+name: cmate-worktree-setup
+version: 0.1.0
+summary: 対象repositoryを検証し既存branch/directory/worktreeを暗黙上書きせず、profile規約に沿った専用worktreeをresolved base SHAから作成し、proportional baseline結果を証跡付きで返す。
+description: >-
+  1つ以上のIssueについて、対象リポジトリを検証し、衝突しない専用 worktree を作成し、
+  その base commit と baseline 結果を証跡付きで返す portable な標準手順である。CommandMate（Node）
+  と CommandAgent（Rust）双方の実績ある worktree 作成手順を統合し、branch 命名・directory・base・
+  baseline を profile から解決する。develop や固定 branch 名、npm、Cargo を hardcode しない。作成前に
+  Issue・branch・directory・base ref と resolved SHA・baseline command・CommandMate sync 有無・collision
+  を dry-run で提示し、確認後にのみ作成する。既存の branch・directory・worktree を暗黙に上書き・reset・
+  reuse せず、exact match の reuse も明示指定時だけ許可する。作成直前に base SHA を再確認し、drift
+  していれば作らない。dependency install は plan 表示と明示承認時だけ実行し、package lifecycle script の
+  risk と network host を承認前に列挙する。profile 別の proportional baseline を実行し、失敗しても worktree
+  を保持して診断結果を返す。CommandMate worktree sync は optional で、利用可能なら worktree ID を返し、
+  未提供環境では欠落として失敗にしない。絶対path・`..`・symlink・worktree 外 escape を拒否し、token・
+  secret・環境変数・絶対path を result や audit へ残さない。結果は versioned な result schema に適合し、
+  6つの completion check の合否を自ら申告する。server 起動停止・GitHub Project 更新・PR 作成・
+  既存worktree の強制削除・cleanup・並列 dispatch は行わない。
+capabilities:
+  - 対象repositoryの root・current/integration branch・default base・remote・既存worktreeを inspect する
+  - Node/CommandMate と Rust/CommandAgent の profile を signal で自動検出し、曖昧時は実行前に確認する
+  - Issue・branch・directory・base ref と resolved SHA・baseline・collision を dry-run plan で提示する
+  - 既存 branch/directory/worktree を暗黙上書きせず、衝突しない専用 worktree を base SHA から作成する
+  - profile 別の proportional baseline を実行し、失敗しても worktree を保持して結果を丸めず返す
+  - dependency install を明示承認時のみ行い、lifecycle script と network host を承認前に列挙する
+  - CommandMate worktree sync を optional に行い、利用可能なら worktree ID を返す
+  - 絶対path・`..`・symlink・worktree 外 escape を拒否し、secret と絶対path を result に残さない
+expected_outcomes:
+  - Issueごとに branch・directory・base SHA・baseline command を1画面で確認してから作成できる
+  - 既存の branch/directory/worktree が1件も暗黙に上書き・reset されない
+  - branch 作成元が resolved commit SHA として plan と result に記録される
+  - baseline 失敗が success に丸められず、作成済み worktree が診断のため保持される
+  - CommandMate sync 未提供環境でも worktree 作成が失敗にならず、ID は欠落として返る
+  - success/partial/failure と作成済み/未作成が後から検証できる構造化結果が得られる
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - worktree
+  - git
+  - setup
+  - branch
+  - baseline
+  - profile
+  - commandmate
+  - commandagent
+  - isolation
+  - onboarding
+compatibility:
+  commandmate: '>=0.11.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Standard SKILL.md discovery from .agents/skills
+    - agent: codex
+      support: native
+      evidence: Standard SKILL.md discovery from .agents/skills
+    - agent: gemini
+      support: unknown
+      evidence: Discovery path not verified for this version
+    - agent: opencode
+      support: unknown
+      evidence: Discovery path not verified for this version
+requirements:
+  commands:
+    - name: commandmate
+    - name: git
+      version_range: '>=2.30.0 <3.0.0'
+  network_hosts: []
+declared_permissions:
+  - filesystem_read
+  - filesystem_write
+  - process_execution
+  - network_access
+declared_risk: moderate
+risk_rationale: >-
+  指示文と JSON schema だけで構成され、script も実行可能 file も install 時 hook も含まない。手順は
+  git と commandmate を実行して worktree を作成し（process execution）、作成先へ書き込む
+  （filesystem write）。worktree 作成自体は local の resolved SHA から行い network を必要としない。
+  network access は明示承認時の dependency install に限られ、その host は対象repositoryの package
+  manager 設定に依存するため manifest に固定せず plan で列挙する。credential は読まず、既存 branch・
+  directory・worktree を暗黙上書きせず、secret と絶対path を result へ残さない。
+files:
+  - path: SKILL.md
+    sha256: f85df602deb4352f7b02213b12c683e838773c386103e19905e910727797af8a
+    size: 14025
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/agent-compatibility.md
+    sha256: f21f026b9cb0dfbdbb8f0028eb7ef36fcb5395ea8f3c051b82fa89c415fa635b
+    size: 4414
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/profile-conventions.md
+    sha256: ac0e193be062d9acb1e167cffcae594e99313dfe8fef0f03ef472a7a8c108cd3
+    size: 5618
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/result-contract.md
+    sha256: bf5f7162e1b585e2e2cb2e0a1cdc19112276c1b81be46ffb027599ab3a6fc1bf
+    size: 8051
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/safety.md
+    sha256: 2b0d76d9a144b1c15605656cd88c9b95c8a38e9691fd45c88b6ee233a6b0257d
+    size: 5331
+    kind: instruction
+    executable: false
+    script: false
+  - path: schemas/worktree-setup.result.v1.json
+    sha256: 9f22bf58464d11f64f0c2a2d9fc71ef8ef8b50d8de1c26402d5e48d23492c54e
+    size: 15305
+    kind: asset
+    executable: false
+    script: false
