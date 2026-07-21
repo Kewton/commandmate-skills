@@ -1,0 +1,34 @@
+{
+  "description": "The dispatch report has no completed-and-verified issue (verification failed). The merge phase has nothing eligible: it succeeds as a no-op, records no_eligible_issues, and mutates nothing.",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "dispatch_scenario": {
+    "cli_available": true,
+    "git": { "branch": "feature/integration", "dirty": false },
+    "gh": { "repo_access": true },
+    "workers": {
+      "201": { "state": "completed", "verify": "fail" },
+      "200": { "state": "completed", "verify": "pass" }
+    }
+  },
+  "merge_args": ["--approve"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": false,
+    "eligible": [],
+    "no_mutation": true,
+    "pr_create_calls": 0,
+    "completion_passed": true
+  }
+}

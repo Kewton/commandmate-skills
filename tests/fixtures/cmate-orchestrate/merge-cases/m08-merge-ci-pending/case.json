@@ -1,0 +1,30 @@
+{
+  "description": "Injection: a PR's CI is still pending (not yet green). The merge is refused — a pending CI is never treated as a pass — and the phase stops as partial (ci_pending) with no merge.",
+  "phase": "merge-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--approve"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "201": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "PENDING" }] },
+      "200": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" }
+    }
+  },
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "ci_pending",
+    "approved": true,
+    "mutated": false,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "ci_pending", "200": "skipped" },
+    "no_merge": true,
+    "pr_merge_calls": 0,
+    "completion_passed": true
+  }
+}

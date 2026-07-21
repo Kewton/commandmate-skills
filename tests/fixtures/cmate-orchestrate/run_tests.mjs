@@ -12,7 +12,7 @@
 // Node stdlib only. Not part of the release pipeline; run on demand.
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,15 +21,31 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, '..', '..', '..');
 const RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'orchestrate.mjs');
 const DISPATCH_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'dispatch.mjs');
+const MERGE_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'merge.mjs');
 const SCHEMA_DIR = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'schemas');
 const CASES_DIR = join(HERE, 'cases');
 const DISPATCH_CASES_DIR = join(HERE, 'dispatch-cases');
+const MERGE_CASES_DIR = join(HERE, 'merge-cases');
 const PROFILES_DIR = join(HERE, 'profiles');
 const FAKE_CLI = join(HERE, 'fake-cli.mjs');
 
 const planSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'execution-plan.v1.json'), 'utf8'));
 const resultSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'orchestrate-result.v1.json'), 'utf8'));
 const dispatchSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'dispatch-report.v1.json'), 'utf8'));
+const mergeSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'merge-report.v1.json'), 'utf8'));
+
+// A dispatch scenario where both issues of the two-wave fixture complete and
+// pass verification, so both are eligible for the merge phase. Merge cases that
+// need a different eligible set override this with spec.dispatch_scenario.
+const DEFAULT_DISPATCH_SCENARIO = {
+  cli_available: true,
+  git: { branch: 'feature/integration', dirty: false },
+  gh: { repo_access: true },
+  workers: {
+    201: { state: 'completed', verify: 'pass' },
+    200: { state: 'completed', verify: 'pass' },
+  },
+};
 
 let failures = 0;
 const log = (line) => process.stdout.write(`${line}\n`);
@@ -407,6 +423,140 @@ function runDispatchCase(caseId) {
 }
 
 // =============================================================================
+// Merge cases: drive the PR-creation / guarded-merge runner against the fake gh
+// =============================================================================
+
+// Each merge case first generates a real plan, then a real dispatch report
+// (proving the plan -> dispatch -> merge handoff), then runs merge.mjs for a
+// single mutating phase against the fake gh/git with an injected merge scenario.
+// It asserts the report's status/stop_reason, the approval gate and the CI gate,
+// and — via the fake's invocation log — that no PR was created or merged without
+// approval, that a failed CI never reaches `gh pr merge`, and that a create
+// failure or merge conflict stops the phase as partial rather than success.
+
+function writeScenario(dir, name, object) {
+  const path = join(dir, name);
+  writeFileSync(path, `${JSON.stringify(object, null, 2)}\n`);
+  return path;
+}
+
+function generateDispatchReport(planPath, scenarioObject, work) {
+  const outDir = join(work, 'dispatch');
+  const scenarioPath = writeScenario(work, 'dispatch-scenario.json', scenarioObject);
+  const env = { ...process.env, CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_STATE: work };
+  const args = [
+    DISPATCH_RUNNER,
+    '--plan', planPath,
+    '--cli', FAKE_CLI, '--git', FAKE_CLI, '--gh', FAKE_CLI,
+    '--out', outDir,
+    '--expect-branch', 'feature/integration',
+  ];
+  try {
+    execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env });
+  } catch {
+    // A partial dispatch (e.g. an injected verification failure) still writes a
+    // report; the merge runner reads whatever eligible set it produced.
+  }
+  return join(outDir, 'dispatch-report.json');
+}
+
+function runMerge(planPath, dispatchPath, outDir, phaseFlag, extraArgs, env) {
+  const args = [
+    MERGE_RUNNER,
+    '--plan', planPath,
+    '--dispatch', dispatchPath,
+    phaseFlag,
+    '--gh', FAKE_CLI, '--git', FAKE_CLI,
+    '--out', outDir,
+    ...extraArgs,
+  ];
+  try {
+    const stdout = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env });
+    return { exit: 0, stdout };
+  } catch (error) {
+    return { exit: error.status ?? 1, stdout: error.stdout ? error.stdout.toString() : '' };
+  }
+}
+
+function countCalls(cliLog, sub, action) {
+  return cliLog.filter((entry) => entry.sub === sub && (action === undefined || entry.args[0] === action)).length;
+}
+
+function runMergeCase(caseId) {
+  const caseDir = join(MERGE_CASES_DIR, caseId);
+  const spec = JSON.parse(readFileSync(join(caseDir, 'case.json'), 'utf8'));
+  log(`  ${caseId}: ${spec.description}`);
+
+  // 1. plan -> 2. dispatch report -> 3. merge phase.
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-merge-plan-'));
+  const planPath = generatePlan(spec, runsDir);
+  if (!check(existsSync(planPath), `plan.json was not generated at ${planPath}`)) return;
+
+  const work = mkdtempSync(join(tmpdir(), 'cmate-merge-'));
+  const dispatchPath = generateDispatchReport(planPath, spec.dispatch_scenario ?? DEFAULT_DISPATCH_SCENARIO, work);
+  if (!check(existsSync(dispatchPath), `dispatch-report.json was not generated at ${dispatchPath}`)) return;
+
+  const mergeOut = join(work, 'merge'); // must not pre-exist; merge creates it
+  const logPath = join(work, 'gh.log');
+  const scenarioPath = writeScenario(work, 'merge-scenario.json', spec.merge_scenario ?? {});
+  const env = { ...process.env, CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath };
+
+  const phaseFlag = spec.phase === 'merge-prs' ? '--merge-prs' : '--create-prs';
+  const { exit, stdout } = runMerge(planPath, dispatchPath, mergeOut, phaseFlag, spec.merge_args ?? [], env);
+
+  let report;
+  try {
+    report = JSON.parse(stdout);
+  } catch {
+    check(false, `merge stdout is not valid JSON (exit ${exit}): ${stdout.slice(0, 200)}`);
+    return;
+  }
+
+  const expect = spec.expect;
+  check(exit === expect.exit, `exit ${exit} !== expected ${expect.exit}`);
+
+  const schemaErrors = validateAgainst(mergeSchema, report, 'merge');
+  check(schemaErrors.length === 0, `merge schema: ${schemaErrors.slice(0, 3).join('; ')}`);
+
+  check(report.status === expect.status, `status "${report.status}" !== "${expect.status}"`);
+  check(report.stop_reason === expect.stop_reason, `stop_reason "${report.stop_reason}" !== "${expect.stop_reason}"`);
+  if (expect.approved !== undefined) check(report.approved === expect.approved, `approved ${report.approved} !== ${expect.approved}`);
+  if (expect.mutated !== undefined) check(report.mutated === expect.mutated, `mutated ${report.mutated} !== ${expect.mutated}`);
+  if (expect.eligible) check(deepEqual(report.eligible_issues, expect.eligible), `eligible ${JSON.stringify(report.eligible_issues)} !== ${JSON.stringify(expect.eligible)}`);
+  if (expect.completion_passed !== undefined) check(report.completion_check.passed === expect.completion_passed, `completion_check.passed ${report.completion_check.passed} !== ${expect.completion_passed}`);
+
+  // Per-issue outcome: proves failures are recorded (never rounded to success)
+  // and that unreached targets are marked skipped.
+  if (expect.targets_outcome) {
+    for (const [num, outcome] of Object.entries(expect.targets_outcome)) {
+      const target = report.targets.find((t) => t.issue === Number(num));
+      check(target !== undefined, `#${num} has no target record`);
+      if (target) check(target.outcome === outcome, `#${num} outcome "${target.outcome}" !== "${outcome}"`);
+    }
+  }
+
+  // The gate proofs come from the fake's invocation log.
+  const cliLog = readCliLog(logPath);
+  const pushCalls = countCalls(cliLog, 'push');
+  const createCalls = countCalls(cliLog, 'pr', 'create');
+  const mergeCalls = countCalls(cliLog, 'pr', 'merge');
+
+  if (expect.push_calls !== undefined) check(pushCalls === expect.push_calls, `push called ${pushCalls} time(s) !== ${expect.push_calls}`);
+  if (expect.pr_create_calls !== undefined) check(createCalls === expect.pr_create_calls, `pr create called ${createCalls} time(s) !== ${expect.pr_create_calls}`);
+  if (expect.pr_merge_calls !== undefined) check(mergeCalls === expect.pr_merge_calls, `pr merge called ${mergeCalls} time(s) !== ${expect.pr_merge_calls}`);
+  // Approval gate: without --approve nothing is pushed, created or merged.
+  if (expect.no_mutation) {
+    check(pushCalls === 0 && createCalls === 0 && mergeCalls === 0, `a mutating gh/git call ran on a no-approve path (push=${pushCalls}, create=${createCalls}, merge=${mergeCalls})`);
+  }
+  // CI gate: a non-green CI must never reach gh pr merge.
+  if (expect.no_merge) check(mergeCalls === 0, `pr merge was called ${mergeCalls} time(s) when CI was not green`);
+
+  if (expect.redaction_token) {
+    check(!stdout.includes(expect.redaction_token), 'a raw token survived into the merge report');
+  }
+}
+
+// =============================================================================
 // Self-test of the validator: it must reject a broken plan, not wave it through.
 // =============================================================================
 
@@ -433,12 +583,18 @@ function main() {
     : [];
   for (const caseId of dispatchIds) runDispatchCase(caseId);
 
+  log('  -- merge cases --');
+  const mergeIds = existsSync(MERGE_CASES_DIR)
+    ? readdirSync(MERGE_CASES_DIR).filter((name) => existsSync(join(MERGE_CASES_DIR, name, 'case.json'))).sort()
+    : [];
+  for (const caseId of mergeIds) runMergeCase(caseId);
+
   log('');
   if (failures > 0) {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${mergeIds.length} merge cases`);
 }
 
 main();

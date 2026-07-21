@@ -1,21 +1,26 @@
 schema_version: 1
 id: cmate-orchestrate
 name: cmate-orchestrate
-version: 0.2.0
-summary: 複数 Issue の並列実行を計画（dry-run）し、承認後に public commandmate で監督付きに実行する。計画は依存・conflict を分析し決定的な Wave plan を返し、実行は Wave barrier と verification gate で段階 dispatch する。
+version: 0.3.0
+summary: 複数 Issue の並列実行を計画（dry-run）し、承認後に public commandmate で Wave barrier と verification gate 付きに dispatch し、verification pass 後は明示承認と CI pass の 2 gate の下で PR 作成・guarded merge を 1 invocation 1 phase で行う。
 description: >-
-  複数 Issue を並列で進めるための、計画（dry-run）と、その承認後の監督付き実行を行う標準手順である。
-  同梱の deterministic planner（Node stdlib のみ）が、各 Issue の objective・受入条件・対象 file・
-  blocking question を分析し、explicit と inferred の依存を区別し、cycle・不完全 override・依存順違反を
-  拒否し、file 衝突のある Issue を同一 Wave に置かない Wave plan と merge 順、risk、要求権限、実行
-  command を生成する。同じ入力からは同じ plan が出る（Claude/Codex parity）。run artifact は unique
-  run ID 配下に生成し、既存 run を上書きしない。承認後は同梱の dispatch runner が、その plan を入力に
-  取り、public commandmate で self-contained な generic worker を dispatch し、mutation 前に
-  drift（branch/HEAD/worktree/permission）を再確認し、前 Wave の全 worker 完了と versioned
-  verification report の pass を次 Wave dispatch の条件にする。worker completion と verification success
-  は別々に判定し、prompt 検出時は自動応答せず停止して human へ提示する（Auto Yes は既定 off）。
-  base branch・branch 名・worktree path・baseline は profile から解決し hardcode しない。PR 作成・
-  merge・UAT 修正ループは後続 Issue の担当であり行わない。planner の default invocation は dry-run である。
+  複数 Issue を並列で進めるための、計画（dry-run）・その承認後の監督付き実行・verification pass 後の
+  納品（PR 作成・CI 確認・guarded merge）を行う標準手順である。同梱の deterministic planner（Node
+  stdlib のみ）が、各 Issue の objective・受入条件・対象 file・blocking question を分析し、explicit と
+  inferred の依存を区別し、cycle・不完全 override・依存順違反を拒否し、file 衝突のある Issue を同一
+  Wave に置かない Wave plan と merge 順、risk、要求権限、実行 command を生成する。同じ入力からは同じ
+  plan が出る（Claude/Codex parity）。run artifact は unique run ID 配下に生成し、既存 run を上書き
+  しない。承認後は同梱の dispatch runner が、その plan を入力に取り、public commandmate で
+  self-contained な generic worker を dispatch し、mutation 前に drift（branch/HEAD/worktree/
+  permission）を再確認し、前 Wave の全 worker 完了と versioned verification report の pass を次 Wave
+  dispatch の条件にする。worker completion と verification success は別々に判定し、prompt 検出時は自動
+  応答せず停止して human へ提示する（Auto Yes は既定 off）。納品は同梱の merge runner が、dispatch
+  report で verification pass した Issue だけを対象に、CommandAgent の explicit phase flag 設計
+  （--create-prs / --merge-prs）を踏襲して 1 invocation で 1 mutating phase だけを有効化し、明示承認
+  （--approve）無しに push・PR 作成・merge をせず、CI pass 無しに merge しない。PR 作成失敗・CI
+  failure・merge conflict は blocked/partial として停止し記録する。base branch・branch 名・worktree
+  path・baseline は profile から解決し hardcode しない。UAT 修正ループと Issue 本文編集は行わない。
+  planner の default invocation は dry-run である。
 capabilities:
   - GitHub Issue の objective・受入条件・suspected/reference file・blocking question を分析する
   - explicit（本文由来）と inferred（推論）の依存を区別して解決する
@@ -26,12 +31,15 @@ capabilities:
   - Wave barrier（前 Wave 全完了）と verification gate（versioned report の pass）で監督する
   - prompt 検出時は自動応答せず停止して human へ提示する（Auto Yes default off）
   - worker completion と verification success を分離し、mutation 前に drift を再確認する
+  - verification pass した Issue を、明示承認と CI pass の 2 gate の下で 1 invocation 1 phase で PR 作成・guarded merge し、失敗を blocked/partial として記録する
 expected_outcomes:
   - 承認前に、依存と file 衝突を踏まえた並列実行計画が file/Wave 単位で確認できる
   - 危険な依存グラフ（cycle・不完全 override）が計画段階で止まる
   - 同じ入力を別 Agent で回しても同じ plan が再現でき、突き合わせられる
   - 承認済み plan を監督付きで段階実行でき、Wave barrier と verification gate で安全に進む
   - prompt は自動応答されず human 判断に委ねられ、worker 完了と検証成功が別々に判定される
+  - verification pass した Issue が、明示承認と CI pass の 2 gate の下でのみ PR 作成・merge される
+  - PR 作成失敗・CI failure・merge conflict が success に丸められず、blocked/partial として記録される
 provider:
   name: CommandMate
   url: https://github.com/Kewton/CommandMate
@@ -78,16 +86,16 @@ declared_permissions:
 declared_risk: high
 risk_rationale: >-
   Ships executable runners, which CommandMate rates high risk. The planner only
-  reads issues and writes a dry-run plan. The dispatch runner mutates: it sends
-  work to real workers via public commandmate, guarded by a pre-wave drift
-  re-check, a wave barrier, a versioned verification gate, human-in-the-loop
-  prompts (Auto Yes off by default), and a worktree path-escape guard. PR, merge
-  and UAT are deferred. Tokens, secrets, absolute paths and raw terminal output
-  are redacted from every artifact.
+  reads issues and writes a dry-run plan. The dispatch runner mutates via public
+  commandmate, guarded by a drift re-check, a wave barrier, a verification gate,
+  human-halted prompts and a path-escape guard. The merge runner pushes branches,
+  opens PRs and merges verified issues only, one phase per invocation, never
+  without explicit approval and green CI; failures stop as partial. Secrets and
+  absolute paths are redacted.
 files:
   - path: SKILL.md
-    sha256: 6de8351d27deca79c3b36ebcbe473ffdabaf211370b255b1ee88d473e353b2ed
-    size: 14612
+    sha256: 38bfe9a7c98762d3e87302dba5374d0eab6c05bb4b09458f5eb498f258ca4679
+    size: 20042
     kind: skill_md
     executable: false
     script: false
@@ -100,6 +108,12 @@ files:
   - path: references/dispatch-contract.md
     sha256: b08cc9082b4525038070ab4addc1f183910dc2875cf821a06ba05b8d7796170d
     size: 7919
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/merge-contract.md
+    sha256: dd52d89fd61cdd05ad2a89680fdf0ea902f1277dcf537f258b7b830ae79ef3ae
+    size: 8614
     kind: instruction
     executable: false
     script: false
@@ -127,6 +141,12 @@ files:
     kind: asset
     executable: false
     script: false
+  - path: schemas/merge-report.v1.json
+    sha256: 3b306f719a182a8454c39ab9930adae0e74663d72b1d74dc71967275d4fc33f7
+    size: 9451
+    kind: asset
+    executable: false
+    script: false
   - path: schemas/orchestrate-result.v1.json
     sha256: a3c8d16878560fd529b087f4041463e65537304993079bf1e962ba18ae6d9792
     size: 3403
@@ -134,13 +154,19 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: 5b08fae69d01696a6216d236b6b397f3a7ba3c03bf0d2df3303437893c85e872
+    sha256: 56be59b86f350755c853ed6608c14d0cab03c4dbe6d54c7b33a1a8dd36664a8b
     size: 37472
     kind: script
     executable: true
     script: true
+  - path: scripts/merge.mjs
+    sha256: 141c3d8a6b6c832c031ef7de14003eb25641acd74c609e5a74f055e1ce86f2c9
+    size: 36851
+    kind: script
+    executable: true
+    script: true
   - path: scripts/orchestrate.mjs
-    sha256: ffc20ea47ac8af96be39aa971abb20fe06fac483839293f00c8b4569823eeae5
+    sha256: 4928812a7235b93d981eeac80c0a4968a3383fea4470ad539fc350ab801feec4
     size: 46878
     kind: script
     executable: true
