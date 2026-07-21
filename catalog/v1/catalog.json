@@ -198,6 +198,76 @@
           "declared_risk": "low"
         }
       ]
+    },
+    {
+      "id": "cmate-worktree-setup",
+      "name": "cmate-worktree-setup",
+      "summary": "対象repositoryを検証し既存branch/directory/worktreeを暗黙上書きせず、profile規約に沿った専用worktreeをresolved base SHAから作成し、proportional baseline結果を証跡付きで返す。",
+      "provider": {
+        "name": "CommandMate",
+        "url": "https://github.com/Kewton/CommandMate"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/Kewton/commandmate-skills",
+      "keywords": [
+        "worktree",
+        "git",
+        "setup",
+        "branch",
+        "baseline",
+        "profile",
+        "commandmate",
+        "commandagent",
+        "isolation",
+        "onboarding"
+      ],
+      "latest": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "changelog": "Release cmate-worktree-setup 0.1.0 (Phase 1B Harness Pack, #1448)",
+          "published_at": "2026-07-21T12:21:04Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-worktree-setup-v0.1.0",
+            "commit": "2b5fbc690ce4b673a3f6f938e870632785c703bb"
+          },
+          "artifact": {
+            "asset_name": "cmate-worktree-setup-0.1.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worktree-setup-v0.1.0/cmate-worktree-setup-0.1.0.tar.gz",
+            "sha256": "0d9b25c46dbc3c5b6d6ae8200c9d32c49d18457713701156d63f8a193c698c96",
+            "size": 18342,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Standard SKILL.md discovery from .agents/skills",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Standard SKILL.md discovery from .agents/skills",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Discovery path not verified for this version",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Discovery path not verified for this version",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        }
+      ]
     }
   ]
 }
