@@ -1,0 +1,16 @@
+{
+  "description": "Post-plan drift (the base no longer resolves) is re-checked before any mutation and refuses dispatch: nothing is sent.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "drift",
+    "human_required": false,
+    "never_sent": [200, 201],
+    "no_respond": true
+  }
+}

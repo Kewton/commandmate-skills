@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/dispatch-report.v1.json",
+  "title": "cmate-orchestrate dispatch report v1",
+  "description": "Report printed to stdout and written to dispatch-report.json by the cmate-orchestrate dispatch runner. Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records the supervised execution of an already-approved plan: per-wave dispatch, worker supervision, the wave barrier, and the verification gate. Worker completion and verification success are reported as separate facts and are never conflated.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "dispatch_schema_version",
+    "skill_id",
+    "skill_version",
+    "status",
+    "stop_reason",
+    "human_required",
+    "plan_run_id",
+    "out_dir",
+    "auto_yes",
+    "max_parallel",
+    "profile",
+    "drift_checks",
+    "waves",
+    "blocking_reasons",
+    "limitations",
+    "redactions",
+    "completion_check",
+    "summary_markdown"
+  ],
+  "properties": {
+    "dispatch_schema_version": { "const": 1 },
+    "skill_id": { "const": "cmate-orchestrate" },
+    "skill_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "status": {
+      "enum": ["success", "partial", "failure"],
+      "description": "success: every wave dispatched, every worker completed, every verification passed. partial: some progress but the loop stopped early (worker failure, timeout, verification failure, a prompt awaiting a human, or drift). failure: nothing was dispatched."
+    },
+    "stop_reason": {
+      "enum": [
+        "completed",
+        "human_required",
+        "worker_failed",
+        "verification_failed",
+        "timeout",
+        "drift",
+        "dispatch_error"
+      ],
+      "description": "Why the loop stopped. completed: all waves finished and passed. human_required: a worker raised a prompt and the loop halted without auto-responding. The rest name the first blocking condition."
+    },
+    "human_required": {
+      "type": "boolean",
+      "description": "True when a worker raised a prompt and the loop halted for a human. When true, no prompt was auto-answered unless auto_yes was set."
+    },
+    "plan_run_id": { "$ref": "#/$defs/run_id" },
+    "out_dir": {
+      "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+      "description": "Directory the dispatch artifacts were written to. Null when nothing was written."
+    },
+    "auto_yes": {
+      "type": "boolean",
+      "description": "Whether Auto Yes was enabled. Default off: a detected prompt halts for a human rather than being answered."
+    },
+    "max_parallel": { "type": "integer", "minimum": 1, "maximum": 3 },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "repository", "base", "verified"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$" },
+        "base": { "type": "string", "minLength": 1 },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "drift_checks": {
+      "type": "array",
+      "description": "Pre-mutation drift re-checks (branch/HEAD/worktree/permission), one entry per probe, tagged with the wave they guarded.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["wave_index", "code", "ok", "blocking", "detail"],
+        "properties": {
+          "wave_index": { "type": "integer", "minimum": 0 },
+          "code": {
+            "enum": [
+              "cli_available",
+              "repo_access",
+              "base_resolvable",
+              "branch_matches",
+              "integration_clean",
+              "worktrees_present"
+            ]
+          },
+          "ok": { "type": "boolean" },
+          "blocking": {
+            "type": "boolean",
+            "description": "Whether a failure of this check blocks dispatch. A non-blocking failure becomes a limitation, not a halt."
+          },
+          "detail": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "waves": {
+      "type": "array",
+      "description": "Ordered waves, in plan order. A wave is only present if the loop reached it; a wave present with an empty dispatched list means drift halted it before any send.",
+      "items": { "$ref": "#/$defs/wave" }
+    },
+    "blocking_reasons": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "limitations": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "redactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "count"],
+        "properties": {
+          "kind": { "type": "string", "minLength": 1 },
+          "count": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "completion_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "checks"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "checks": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "passed", "detail"],
+            "properties": {
+              "id": {
+                "enum": [
+                  "plan_approved",
+                  "drift_reconfirmed",
+                  "parallelism_bounded",
+                  "barrier_enforced",
+                  "no_auto_prompt_response"
+                ]
+              },
+              "passed": { "type": "boolean" },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "summary_markdown": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "issue_number": { "type": "integer", "minimum": 1 },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "detail"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string", "minLength": 1 }
+      }
+    },
+    "wave": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "dispatched", "workers", "barrier"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "dispatched": {
+          "type": "array",
+          "description": "Issues actually sent in this wave. Never longer than max_parallel.",
+          "items": { "$ref": "#/$defs/issue_number" }
+        },
+        "workers": { "type": "array", "items": { "$ref": "#/$defs/worker" } },
+        "barrier": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["all_workers_completed", "all_verifications_passed", "advanced"],
+          "properties": {
+            "all_workers_completed": {
+              "type": "boolean",
+              "description": "Every dispatched worker reached the completed state. This alone never advances the wave."
+            },
+            "all_verifications_passed": {
+              "type": "boolean",
+              "description": "A versioned verification report with outcome pass was produced for every worker."
+            },
+            "advanced": {
+              "type": "boolean",
+              "description": "The next wave was allowed to dispatch. True only when workers completed AND verifications passed."
+            }
+          }
+        }
+      }
+    },
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue", "task_id", "worker_state", "verification", "prompt", "note"],
+      "properties": {
+        "issue": { "$ref": "#/$defs/issue_number" },
+        "task_id": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] },
+        "worker_state": {
+          "enum": ["completed", "failed", "timeout", "prompt", "not_dispatched"],
+          "description": "completed is worker completion only; it is not verification success. Those are gated separately."
+        },
+        "verification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ran", "report_schema_version", "outcome", "checks"],
+          "properties": {
+            "ran": { "type": "boolean" },
+            "report_schema_version": {
+              "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }],
+              "description": "Version of the verification report the worker produced. Null when verification did not run."
+            },
+            "outcome": {
+              "enum": ["pass", "fail", "not_run"],
+              "description": "not_run when the worker did not complete: an incomplete worker is never verified, and never counts as verified."
+            },
+            "checks": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          }
+        },
+        "prompt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["detected", "excerpt"],
+          "properties": {
+            "detected": { "type": "boolean" },
+            "excerpt": {
+              "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+              "description": "Redacted excerpt of the prompt for a human. Never the raw terminal, never a secret."
+            }
+          }
+        },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}

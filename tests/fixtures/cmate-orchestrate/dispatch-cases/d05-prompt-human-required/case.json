@@ -1,0 +1,20 @@
+{
+  "description": "A worker prompt halts the loop for a human: it is captured and presented, never auto-answered, and the next wave is not dispatched.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "human_required",
+    "human_required": true,
+    "waves_count": 1,
+    "never_sent": [200],
+    "no_respond": true,
+    "prompt_detected": [201],
+    "redaction_token": "ghp_FAKEtokenNOTAREALSECRET00",
+    "redaction_kind": "token"
+  }
+}

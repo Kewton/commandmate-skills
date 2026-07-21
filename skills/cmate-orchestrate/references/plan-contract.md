@@ -110,10 +110,11 @@ Wave 生成の規則は次の3つ。
 （manifest の `declared_permissions` と一致）を、plan 段階で提示するものである。
 
 `commands` は plan の根拠になった read-only command と、worker が回す baseline 検証を
-列挙する。すべて `executed: false`（dry-run では1つも実行しない）。
-worktree 作成・dispatch・PR・merge といった mutating command は、後続
-[#1454-1456](https://github.com/Kewton/CommandMate/issues/1452) の担当であり、
-この version では `commands` に **含めない**。
+列挙する。すべて `executed: false`（planner は1つも実行しない）。
+worktree 作成・dispatch・PR・merge といった mutating command は plan の `commands` に
+**含めない**。dispatch と監督ループは、承認済み plan を入力に取る別 runner
+（[dispatch-contract.md](./dispatch-contract.md)）の担当であり、PR 作成・merge・UAT 修正ループは
+後続 [#1455-1456](https://github.com/Kewton/CommandMate/issues/1452) の担当である。
 
 ## 8. completion_check（result）
 

@@ -20,12 +20,16 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, '..', '..', '..');
 const RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'orchestrate.mjs');
+const DISPATCH_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'dispatch.mjs');
 const SCHEMA_DIR = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'schemas');
 const CASES_DIR = join(HERE, 'cases');
+const DISPATCH_CASES_DIR = join(HERE, 'dispatch-cases');
 const PROFILES_DIR = join(HERE, 'profiles');
+const FAKE_CLI = join(HERE, 'fake-cli.mjs');
 
 const planSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'execution-plan.v1.json'), 'utf8'));
 const resultSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'orchestrate-result.v1.json'), 'utf8'));
+const dispatchSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'dispatch-report.v1.json'), 'utf8'));
 
 let failures = 0;
 const log = (line) => process.stdout.write(`${line}\n`);
@@ -250,6 +254,159 @@ function runCase(caseId) {
 }
 
 // =============================================================================
+// Dispatch cases: drive the supervision loop against a fake commandmate/git/gh
+// =============================================================================
+
+// Each dispatch case first generates a real plan from an issue fixture (proving
+// the plan -> dispatch handoff), then runs dispatch.mjs against the fake CLI with
+// an injected scenario, and asserts the report's status, the wave barrier, the
+// verification gate, max_parallel, and — via the fake's invocation log — that
+// prompts were never auto-answered.
+
+function generatePlan(spec, runsDir) {
+  const issuesPath = join(HERE, spec.plan.issues_fixture);
+  const args = [...spec.plan.orchestrate_args, '--issue-json', issuesPath, '--runs-dir', runsDir];
+  runRunner(args); // exit code is irrelevant here; a partial plan is still a plan
+  // The run id is pinned to "plan" by every dispatch case's orchestrate_args.
+  return join(runsDir, 'plan', 'plan.json');
+}
+
+function runDispatch(planPath, outDir, extraArgs, env) {
+  const args = [
+    DISPATCH_RUNNER,
+    '--plan', planPath,
+    '--cli', FAKE_CLI,
+    '--git', FAKE_CLI,
+    '--gh', FAKE_CLI,
+    '--out', outDir,
+    ...extraArgs,
+  ];
+  try {
+    const stdout = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env });
+    return { exit: 0, stdout };
+  } catch (error) {
+    return { exit: error.status ?? 1, stdout: error.stdout ? error.stdout.toString() : '' };
+  }
+}
+
+function readCliLog(logPath) {
+  if (!existsSync(logPath)) return [];
+  return readFileSync(logPath, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+}
+
+function sentIssuesFromLog(cliLog) {
+  const sent = [];
+  for (const entry of cliLog) {
+    if (entry.sub !== 'send') continue;
+    const idx = entry.args.indexOf('--prompt-file');
+    const promptFile = idx >= 0 ? entry.args[idx + 1] : '';
+    const match = /issue-(\d+)/.exec(promptFile ?? '');
+    if (match) sent.push(Number(match[1]));
+  }
+  return sent;
+}
+
+function allWorkers(report) {
+  return report.waves.flatMap((wave) => wave.workers);
+}
+
+function runDispatchCase(caseId) {
+  const caseDir = join(DISPATCH_CASES_DIR, caseId);
+  const spec = JSON.parse(readFileSync(join(caseDir, 'case.json'), 'utf8'));
+  log(`  ${caseId}: ${spec.description}`);
+
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-disp-plan-'));
+  const planPath = generatePlan(spec, runsDir);
+  if (!check(existsSync(planPath), `plan.json was not generated at ${planPath}`)) return;
+
+  const work = mkdtempSync(join(tmpdir(), 'cmate-disp-'));
+  const outDir = join(work, 'dispatch'); // must not pre-exist; dispatch creates it
+  const logPath = join(work, 'cli.log');
+  const env = {
+    ...process.env,
+    CMATE_FAKE_SCENARIO: join(caseDir, spec.scenario),
+    CMATE_FAKE_LOG: logPath,
+    CMATE_FAKE_STATE: work,
+  };
+
+  const { exit, stdout } = runDispatch(planPath, outDir, spec.dispatch_args ?? [], env);
+  let report;
+  try {
+    report = JSON.parse(stdout);
+  } catch {
+    check(false, `dispatch stdout is not valid JSON (exit ${exit}): ${stdout.slice(0, 200)}`);
+    return;
+  }
+
+  const expect = spec.expect;
+  check(exit === expect.exit, `exit ${exit} !== expected ${expect.exit}`);
+
+  const schemaErrors = validateAgainst(dispatchSchema, report, 'dispatch');
+  check(schemaErrors.length === 0, `dispatch schema: ${schemaErrors.slice(0, 3).join('; ')}`);
+
+  check(report.status === expect.status, `status "${report.status}" !== "${expect.status}"`);
+  check(report.stop_reason === expect.stop_reason, `stop_reason "${report.stop_reason}" !== "${expect.stop_reason}"`);
+  if (expect.human_required !== undefined) {
+    check(report.human_required === expect.human_required, `human_required ${report.human_required} !== ${expect.human_required}`);
+  }
+  if (expect.waves_count !== undefined) {
+    check(report.waves.length === expect.waves_count, `waves ${report.waves.length} !== ${expect.waves_count}`);
+  }
+
+  // max_parallel is never exceeded in any dispatched wave — the core guarantee.
+  check(report.waves.every((wave) => wave.dispatched.length <= report.max_parallel), `a wave dispatched more than max_parallel ${report.max_parallel}`);
+  if (expect.max_dispatched_per_wave !== undefined) {
+    check(report.waves.every((wave) => wave.dispatched.length <= expect.max_dispatched_per_wave), `a wave dispatched more than ${expect.max_dispatched_per_wave}`);
+  }
+
+  const cliLog = readCliLog(logPath);
+  const sent = sentIssuesFromLog(cliLog);
+  const respondCount = cliLog.filter((entry) => entry.sub === 'respond').length;
+
+  if (expect.no_respond) check(respondCount === 0, `respond was called ${respondCount} time(s) on a no-auto-response path`);
+  if (expect.expect_respond) check(respondCount >= 1, 'respond was never called on the auto-yes path');
+  for (const number of expect.never_sent ?? []) check(!sent.includes(number), `#${number} was dispatched but the barrier should have stopped it`);
+  for (const number of expect.sent ?? []) check(sent.includes(number), `#${number} should have been dispatched`);
+
+  if (expect.advanced) {
+    report.waves.forEach((wave, index) => {
+      if (index < expect.advanced.length) {
+        check(wave.barrier.advanced === expect.advanced[index], `wave ${index} advanced ${wave.barrier.advanced} !== ${expect.advanced[index]}`);
+      }
+    });
+  }
+  if (expect.wave0_all_workers_completed !== undefined) {
+    check(report.waves[0].barrier.all_workers_completed === expect.wave0_all_workers_completed, 'wave0 all_workers_completed mismatch');
+  }
+  if (expect.wave0_all_verifications_passed !== undefined) {
+    check(report.waves[0].barrier.all_verifications_passed === expect.wave0_all_verifications_passed, 'wave0 all_verifications_passed mismatch');
+  }
+  if (expect.wave0_advanced !== undefined) {
+    check(report.waves[0].barrier.advanced === expect.wave0_advanced, 'wave0 advanced mismatch');
+  }
+  for (const number of expect.prompt_detected ?? []) {
+    const detected = allWorkers(report).filter((worker) => worker.prompt.detected).map((worker) => worker.issue);
+    check(detected.includes(number), `#${number} prompt was not detected`);
+  }
+  // Worker completion is never conflated with verification success: a worker can
+  // be "completed" while its verification did not pass.
+  for (const number of expect.completed_but_unverified ?? []) {
+    const conflated = allWorkers(report).filter((worker) => worker.worker_state === 'completed' && worker.verification.outcome !== 'pass').map((worker) => worker.issue);
+    check(conflated.includes(number), `#${number} was not recorded as completed-but-unverified`);
+  }
+
+  // Redaction: a secret shape in a captured prompt must not survive into the
+  // report, and must be tallied by kind only.
+  if (expect.redaction_token) {
+    check(!stdout.includes(expect.redaction_token), 'a raw token survived into the dispatch report');
+    check(stdout.includes('[REDACTED-TOKEN]'), 'the token was not replaced with a redaction marker');
+  }
+  if (expect.redaction_kind) {
+    check(report.redactions.some((entry) => entry.kind === expect.redaction_kind && entry.count >= 1), `redactions did not record kind "${expect.redaction_kind}"`);
+  }
+}
+
+// =============================================================================
 // Self-test of the validator: it must reject a broken plan, not wave it through.
 // =============================================================================
 
@@ -265,14 +422,23 @@ function selfTestValidator() {
 function main() {
   log('cmate-orchestrate fixture tests');
   selfTestValidator();
+
+  log('  -- plan cases --');
   const caseIds = readdirSync(CASES_DIR).filter((name) => existsSync(join(CASES_DIR, name, 'case.json'))).sort();
   for (const caseId of caseIds) runCase(caseId);
+
+  log('  -- dispatch cases --');
+  const dispatchIds = existsSync(DISPATCH_CASES_DIR)
+    ? readdirSync(DISPATCH_CASES_DIR).filter((name) => existsSync(join(DISPATCH_CASES_DIR, name, 'case.json'))).sort()
+    : [];
+  for (const caseId of dispatchIds) runDispatchCase(caseId);
+
   log('');
   if (failures > 0) {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} cases`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases`);
 }
 
 main();

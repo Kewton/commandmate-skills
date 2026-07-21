@@ -1,23 +1,33 @@
 ---
 name: cmate-orchestrate
-description: 複数 Issue を並列実行するための計画を dry-run で立てる。Issue 品質・依存（explicit/inferred）・file conflict を分析し、cycle や不完全 override を拒否したうえで、file 衝突の無い承認可能な Wave plan と risk・権限・実行 command を、決定的で検証可能な artifact として返す。mutation は一切行わない。
+description: 複数 Issue を並列実行するための計画を dry-run で立て、承認後にその計画を監督付きで実行する。計画では Issue 品質・依存（explicit/inferred）・file conflict を分析し、cycle や不完全 override を拒否したうえで、file 衝突の無い承認可能な Wave plan・risk・権限・実行 command を決定的な artifact として返す。実行では public commandmate で self-contained な generic worker を dispatch し、Wave barrier（前 Wave 全完了）と verification gate（versioned report の pass）で監督し、prompt 検出時は自動応答せず human へ提示して停止する。
 ---
 
-# cmate-orchestrate（計画コア）
+# cmate-orchestrate（計画コア + dispatch・監督ループ）
 
-複数の Issue を並列で進める前に、**何をどの順で、どこまで同時に**やれるかを
-安全に見積もるための手順である。この version が実装するのは計画コア、すなわち
-**dry-run による Wave plan の生成まで**である。
+複数の Issue を並列で進めるための、**計画**と、その承認後の**監督付き実行**を
+安全に行うための手順である。この Skill は2つの deterministic runner を持つ。
 
-worker dispatch・PR 作成・merge・UAT 修正ループは後続 Issue
-（[#1454-1456](https://github.com/Kewton/CommandMate/issues/1452)）の担当であり、
-この Skill は **実装しない**。default invocation は dry-run で、run directory 以外の
-いかなる状態も変えない。
+- **計画（planner, `scripts/orchestrate.mjs`）** — dry-run で Wave plan を生成する。
+  mutation は一切しない。default invocation はこれである。
+- **実行（dispatch, `scripts/dispatch.mjs`）** — 承認済み plan を入力に取り、
+  public `commandmate` で worker を dispatch し、Wave barrier と verification gate で
+  監督する。mutation を伴う。
 
-計画は同梱の deterministic runner（`scripts/orchestrate.mjs`、Node stdlib のみ）が
-行う。同じ入力からは同じ plan が出る（Claude/Codex parity）。
+PR 作成・CI 確認・merge（[#1455](https://github.com/Kewton/CommandMate/issues/1452)）と
+UAT 修正ループ（[#1456](https://github.com/Kewton/CommandMate/issues/1452)）は後続 Issue の
+担当であり、この Skill は **実装しない**。dispatch は worker dispatch と監督・verification gate
+までである。
 
-## 1. この Skill が答える問い
+計画も実行も、同梱の runner（Node stdlib のみ）が行う。計画は入力の純粋関数で、
+同じ入力からは同じ plan が出る（Claude/Codex parity）。base branch・branch 名・
+worktree path・baseline は **profile から解決**し、`develop`/`npm`/`cargo` を hardcode しない。
+
+---
+
+# 第1部 計画コア（dry-run）
+
+## 1. この runner が答える問い
 
 1. 各 Issue は着手できる品質か（objective・受入条件・対象 file・blocking question）。
 2. Issue 間の依存はどれか。明示された依存（explicit）と、推論した依存（inferred）は何か。
@@ -40,26 +50,23 @@ worker dispatch・PR 作成・merge・UAT 修正ループは後続 Issue
 | `--order <a,b,...>` | 任意 | なし | Issue 順序の主張。依存に反すれば拒否 |
 | `--run-id <id>` | 任意 | 入力 hash | run_id の明示 |
 | `--runs-dir <path>` | 任意 | `.commandmate/orchestrate/runs` | run artifact の出力先 |
-| `--phase <plan>` | 任意 | `plan` | `plan` のみ実装。mutating phase は拒否 |
+| `--phase <plan>` | 任意 | `plan` | planner は `plan` のみ。mutating phase は拒否（実行は dispatch runner） |
 | `--allow-unverified` | 任意 | off | unverified profile での planning を許可 |
-
-base branch・branch 名・worktree path・baseline は **profile から解決**する。
-`develop` や `npm`/`cargo` を入力や手順で hardcode しない。
 
 ## 3. 権限と禁止事項
 
 宣言している権限は `filesystem_read` / `filesystem_write` / `process_execution` /
-`network_access` である。これは後続 phase まで含めた orchestration 全体が
+`network_access` である。これは計画と実行の両 runner を含めた orchestration 全体が
 要求する権限であり、plan にも同じ集合を提示する。
 
-この version の手順として **禁止** するもの:
+planner の手順として **禁止** するもの:
 
-- worktree の作成、worker への dispatch、`commandmate send` / `wait` / `capture`
+- worktree の作成、worker への dispatch、`commandmate send` / `wait` / `capture`（← 実行は dispatch runner の担当）
 - PR の作成、CI のトリガ、merge、UAT 修正ループ
 - 対象リポジトリの branch・Issue・PR の変更
 
 `--issue-json` を使わない場合、read-only の `gh issue view` で Issue を取得する。
-これは唯一の network access であり、mutation を伴わない。
+これは planner 唯一の network access であり、mutation を伴わない。
 
 セキュリティ:
 
@@ -71,8 +78,9 @@ base branch・branch 名・worktree path・baseline は **profile から解決**
 ### Step 0. 入力を検証する
 
 Issue 番号が1件以上あること、`--max-parallel` が 1〜3 であること、
-`--phase` が `plan` であることを確認する。mutating phase（`dispatch`/`pr`/`merge`/`uat`）が
-指定されたら、実行せず `not_implemented` で終了する。
+`--phase` が `plan` であることを確認する。planner に mutating phase
+（`dispatch`/`pr`/`merge`/`uat`）が指定されたら、実行せず `not_implemented` で終了する
+（実行は承認済み plan を dispatch runner に渡して行う。第2部）。
 
 ### Step 1. profile を解決する
 
@@ -122,16 +130,11 @@ result を返す前に、5つの check を自己申告する
 
 ## 5. 出力
 
-runner は result envelope（[schemas/orchestrate-result.v1.json](./schemas/orchestrate-result.v1.json)）を
-stdout に、進捗 notice を stderr に出す。`status` は3値。
-
-- `success` — plan を生成し、warning が無い
-- `partial` — plan は生成したが warning がある（例: 集合外依存）
-- `failure` — plan を生成できない。`errors` に理由を持つ
-
+planner は result envelope（[schemas/orchestrate-result.v1.json](./schemas/orchestrate-result.v1.json)）を
+stdout に、進捗 notice を stderr に出す。`status` は3値（`success`/`partial`/`failure`）。
 plan 本体は [schemas/execution-plan.v1.json](./schemas/execution-plan.v1.json) に適合する。
 
-## 6. 失敗時の動作
+## 6. planner の失敗時の動作
 
 | 状況 | code | exit |
 |---|---|---|
@@ -146,19 +149,114 @@ plan 本体は [schemas/execution-plan.v1.json](./schemas/execution-plan.v1.json
 
 失敗時も stdout に `status: failure` の result を出す。plan を推測で埋めない。
 
-## 7. 完了条件
+---
+
+# 第2部 dispatch・監督ループ
+
+承認済み plan を実際に実行する。契約の正本は
+[references/dispatch-contract.md](./references/dispatch-contract.md)、report の schema は
+[schemas/dispatch-report.v1.json](./schemas/dispatch-report.v1.json) である。
+
+## 7. dispatch runner の入力
+
+```
+dispatch.mjs --plan <承認済み plan.json> [options]
+```
+
+| 名前 | 必須 | 既定値 | 説明 |
+|---|---|---|---|
+| `--plan <path>` | 必須 | なし | planner が出力した承認済み `plan.json` |
+| `--out <dir>` | 任意 | `<plan-dir>/dispatch` | dispatch artifact の出力先。既存なら `out_exists` |
+| `--cli <path>` | 任意 | `commandmate` | 実行する public CommandMate CLI |
+| `--git <path>` | 任意 | `git` | drift 確認に使う git |
+| `--gh <path>` | 任意 | `gh` | repo 到達性確認に使う gh |
+| `--auto-yes` | 任意 | **off** | worker prompt を自動応答する。既定 off（prompt で停止し human へ提示） |
+| `--expect-branch <name>` | 任意 | なし | plan 承認時の統合 branch。不一致なら drift |
+| `--wait-timeout <sec>` | 任意 | `300` | `commandmate wait` の1回あたり timeout |
+| `--poll-limit <n>` | 任意 | `120` | worker ごとの wait poll 上限。超えたら timeout |
+
+`commandmatedev` は使わない。公式経路は public `commandmate` である（ADR
+[#1447](https://github.com/Kewton/CommandMate/issues/1447)）。
+
+## 8. dispatch の手順
+
+Wave を plan の順に処理する。各 Wave について:
+
+### Step D0. plan を読み・検証する
+
+`plan_schema_version` が 1 で、`max_parallel` が 1〜3、どの Wave も `max_parallel` 以下で
+あることを確認する。反していれば `plan_invalid` で終了する（**上限を超えて dispatch しない**）。
+
+### Step D1. mutation 前に drift を再確認する
+
+`cli_available`・`repo_access`・`base_resolvable`・`branch_matches`（`--expect-branch` 時）を
+確認する。**blocking** な check が false なら dispatch せず停止する。`integration_clean`・
+`worktrees_present` は非 blocking で `limitations` に記録して続行する。最初の Wave 前の
+drift は `failure`、途中の Wave 前は `partial`。stop_reason は `drift`。
+
+### Step D2. self-contained な generic worker を dispatch する
+
+Wave の各 Issue について、plan だけから **generic worker prompt** を構成し
+（objective・受入条件・対象 file の境界・branch/worktree・baseline・「blocked なら止まって聞け」）、
+`<out>/prompts/issue-<n>.md` に残したうえで `commandmate send` する。
+repository-local な worker Skill を必須依存にしない。worktree target は path escape 検査を通す。
+
+### Step D3. 監督する（wait / capture / respond）
+
+各 worker を `commandmate wait` で完了・失敗・prompt・timeout まで監督する。
+**prompt を検出したら停止し、`commandmate capture` で内容を取得して human へ提示する。
+自動応答しない**（`--auto-yes` 明示時のみ `commandmate respond` する）。
+
+### Step D4. Wave barrier
+
+Wave の **全 worker が `completed`** でなければ次 Wave へ進まない。
+
+### Step D5. verification gate
+
+`completed` の worker それぞれに `commandmate verify` を実行し、
+**全て pass の versioned verification report** が揃ってはじめて次 Wave を dispatch する。
+**worker completion を verification success と同一視しない。** 未完了 worker は verify せず、
+report version が 1 以外・outcome が pass 以外は pass として扱わない。
+
+## 9. dispatch の出力
+
+dispatch runner は report（[schemas/dispatch-report.v1.json](./schemas/dispatch-report.v1.json)）を
+stdout に、`<out>/dispatch-report.json` と `<out>/dispatch-summary.md` を file に書く。
+
+| status | 条件 | exit |
+|---|---|---|
+| `success` | 全 Wave dispatch・全 worker completed・全 verification pass・prompt なし | 0 |
+| `partial` | 途中停止（worker 失敗・timeout・verification 失敗・prompt・drift） | 7 |
+| `failure` | 1件も dispatch できない（plan 不正・最初の Wave 前 drift・CLI 不在） | 1 |
+
+`stop_reason` の優先順位は `human_required` > `worker_failed` > `timeout` >
+`verification_failed`。report は5つの completion check（`plan_approved`・
+`drift_reconfirmed`・`parallelism_bounded`・`barrier_enforced`・`no_auto_prompt_response`）を
+自己申告する。token・secret・絶対 path・raw terminal 全量は report に残さない（redaction）。
+
+## 10. 完了条件
+
+計画:
 
 - [ ] default invocation が dry-run で、run directory 以外を変更していない
 - [ ] explicit / inferred 依存が区別され、cycle・不完全 override・順序違反を拒否している
-- [ ] file 衝突のある Issue が同一 Wave に無い
-- [ ] `max_parallel` が 1〜3 で、run artifact が unique run ID 配下にある
+- [ ] file 衝突のある Issue が同一 Wave に無く、`max_parallel` が 1〜3
 - [ ] 同じ入力から同じ plan が出る（`--run-id` 固定で diff を取って確認できる）
-- [ ] `completion_check.passed` が true、または `status` が `partial`/`failure` で理由がある
 
-## 8. 参照
+dispatch:
+
+- [ ] `max_parallel` を超えて dispatch していない
+- [ ] 前 Wave 未完了・verification 失敗時に後続 Wave を dispatch していない
+- [ ] prompt 検出時に自動応答せず human-required として停止している
+- [ ] worker completion だけを success 扱いしていない
+- [ ] mutation 前に drift を再確認している
+
+## 11. 参照
 
 - [references/profile-contract.md](./references/profile-contract.md) — profile の形と unverified の扱い
 - [references/plan-contract.md](./references/plan-contract.md) — 依存・Wave・risk・result の契約
+- [references/dispatch-contract.md](./references/dispatch-contract.md) — dispatch・監督ループ・verification gate の契約
 - [references/agent-compatibility.md](./references/agent-compatibility.md) — Agent 差異と fallback
 - [schemas/execution-plan.v1.json](./schemas/execution-plan.v1.json) — plan の機械検証用 schema
-- [schemas/orchestrate-result.v1.json](./schemas/orchestrate-result.v1.json) — result envelope の schema
+- [schemas/orchestrate-result.v1.json](./schemas/orchestrate-result.v1.json) — planner result envelope の schema
+- [schemas/dispatch-report.v1.json](./schemas/dispatch-report.v1.json) — dispatch report の schema

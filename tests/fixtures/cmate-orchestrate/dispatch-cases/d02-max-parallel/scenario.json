@@ -1,0 +1,10 @@
+{
+  "cli_available": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "100": { "state": "completed", "verify": "pass" },
+    "101": { "state": "completed", "verify": "pass" },
+    "102": { "state": "completed", "verify": "pass" }
+  }
+}

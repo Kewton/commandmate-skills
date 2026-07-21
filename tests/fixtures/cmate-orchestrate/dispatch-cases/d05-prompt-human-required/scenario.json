@@ -1,0 +1,9 @@
+{
+  "cli_available": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "201": { "state": "prompt", "prompt": "About to push using ghp_FAKEtokenNOTAREALSECRET00. Continue? [y/N]" },
+    "200": { "state": "completed", "verify": "pass" }
+  }
+}

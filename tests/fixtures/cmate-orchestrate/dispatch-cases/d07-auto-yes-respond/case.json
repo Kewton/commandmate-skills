@@ -1,0 +1,19 @@
+{
+  "description": "With --auto-yes explicitly set, a prompt is answered via commandmate respond and the loop continues; the run advances but records that auto-yes was used.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--auto-yes"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "expect_respond": true,
+    "sent": [201, 200]
+  }
+}
