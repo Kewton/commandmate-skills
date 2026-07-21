@@ -42,14 +42,21 @@
 
 これらは「機械が確認できる範囲」の担保であり、実機 install / discovery / live run は §2 以降で人が確認する。
 
-### 1b. Catalog publish（**要実施・要 authorization**）
+### 1b. Catalog publish（**実publishが必須・要 authorization**）
 
 現在 `catalog/v1/catalog.json` の entries は既存3件（cmate-acceptance-test / -issue-refinement / -repository-analysis）のみで、**Harness Pack 3 Skill は未公開**。§2 の「Catalog→install」を実施するには先に publish が必要。
 
-- 手順（いずれか）:
-  1. リリースパイプライン（`release.yml` / #1238）で 3 Skill を release・Catalog へ反映する、または
-  2. `scripts/build_release.py` → `scripts/build_catalog.py` でローカルに Catalog を生成し、UAT 用に注入する（**test-only Catalog injection とし、production endpoint/allowlist を変更しない**）。
-- **publish は artifact を外部公開する outward-facing 操作**のため、実行前に維持者の承認を得る。UAT を test-only Catalog で回す場合も、production Catalog を書き換えない。
+**重要（実装確認済み）**: CommandMate の Catalog 取得元 `SKILL_CATALOG_URL` は
+`raw.githubusercontent.com/Kewton/commandmate-skills/main/catalog/v1/catalog.json` の
+**compile-time 定数**であり、環境変数・設定・リクエストから導出できない（`src/config/skill-catalog-config.ts`、SSRF 対策）。
+allowlist も完全一致1件のみ。**稼働中の CommandMate に local / test-only Catalog を注入する経路は無い。**
+したがって実機の「Catalog→install」を回すには、**main の `catalog/v1/catalog.json` 更新＋GitHub release asset の実 publish** が唯一の方法である。
+
+- **手順（実 publish）**: skill ごとに `<skill-id>-v<version>` タグを push すると `release.yml` が起動する。
+  - `build` ジョブ: 権限なし・secretなし・network なしで artifact を再現ビルドし、reproducible を証明（安全）。
+  - `publish` ジョブ: **`release` environment の required reviewer（維持者 `Kewton`）の承認**の後にのみ、artifact upload → Catalog 更新（artifact-then-Catalog 順）を行う。**承認するまで何も公開されない**。
+  - 3 タグを同時 push すると `release` concurrency（同時1本）で中間のものが pending 段階で cancel される。**cancel されたものは approve 完了後に re-run する**。
+- ローカルの `build_release.py` → `build_catalog.py` は「**publish される Catalog 内容の事前検証**」用（reproducible 確認・fixture）であり、**稼働サーバーには注入できない**。実機 install には上記の実 publish が必要。
 
 ### 1c. sandbox 環境構築
 
