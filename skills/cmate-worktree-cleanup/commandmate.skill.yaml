@@ -1,0 +1,131 @@
+schema_version: 1
+id: cmate-worktree-cleanup
+name: cmate-worktree-cleanup
+version: 0.1.0
+summary: merge 済み・不要な git worktree を、削除可能性と証跡を dry-run で提示したうえで、clean かつ merge 証跡が十分な対象だけ guarded な方式で安全に削除する。dirty・unmerged・検証不能は削除しない。
+description: >-
+  対象 issue または eligible な worktree を検査し、削除可能性と proof を dry-run で
+  preview したあと、clean かつ merge 証跡が十分な対象だけを安全に削除する portable な
+  手順である。候補は git worktree list --porcelain から発見し、path naming を truth に
+  しない。各候補の status・branch・tip SHA・remote freshness・direct ancestry を検証し、
+  direct ancestry（git merge-base --is-ancestor）が成立しない場合は、exact head/base の
+  merged PR・headRefOid 一致・reachable merge commit・tree equality の4条件すべてで
+  squash/rebase 等価を判定する。fetch 失敗・GitHub data 不足・複数候補・tip drift・
+  tree mismatch は unverifiable として削除しない。direct は git worktree remove と
+  git branch -d、merged-equivalent は expected-old-OID 付き guarded ref delete を使い、
+  git worktree remove --force・git branch -D・無条件 process kill・DB/log 自動削除は
+  行わない。dirty・detached・unmerged・unverifiable は zero-delete とし、
+  current/integration worktree は指定されても削除しない。plan 後 drift を apply 直前に
+  再検査し、removed/skipped/proof/evidence を versioned result へ残す。token・secret・
+  絶対 path・raw GitHub response は result にも summary にも含めない。
+capabilities:
+  - git worktree list --porcelain から候補を発見し、path naming を truth にせず current/integration worktree を除外する
+  - 各候補の status・branch・tip SHA・remote freshness・direct ancestry を検証する
+  - direct ancestry が無い場合、merged PR・headRefOid 一致・reachable merge commit・tree equality の4条件で squash/rebase 等価を判定する
+  - clean かつ証跡十分な対象だけを、direct は branch -d、merged-equivalent は expected-old-OID 付き guarded ref delete で削除する
+  - dirty・detached・unmerged・検証不能を zero-delete とし、force remove や branch -D や無条件 process kill を行わない
+  - server/process/tmux/DB/log は診断表示のみとし、削除は利用者の手動 next action に回す
+  - 削除可能性と証跡を dry-run で preview し、明示確認と plan 後 drift 再検査を経てから apply する
+  - removed/skipped/proof/evidence を versioned result へ残し、token/secret/絶対path/raw GitHub response を含めない
+expected_outcomes:
+  - clean かつ merge 済みの worktree だけが、証跡付きで安全に片付く
+  - dirty・unmerged・検証不能な worktree が保持され、手動 next action が分かる
+  - squash/rebase merge 済みの worktree を、tip/tree/reachability の証跡付きで安全に削除できる
+  - current/integration worktree が、指定されても削除されない
+  - 削除の判断根拠が result schema に proof/evidence として残り、後から検証できる
+  - CommandMate sync が無い環境でも失敗にならず、worktree id 欠落として報告される
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - worktree
+  - cleanup
+  - git
+  - merge-proof
+  - squash-merge
+  - dry-run
+  - safety
+  - github
+compatibility:
+  commandmate: '>=0.11.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Standard SKILL.md discovery from .agents/skills. Procedure uses no Claude-specific construct.
+    - agent: codex
+      support: native
+      evidence: Standard SKILL.md discovery from .agents/skills. Procedure uses no Codex-specific construct.
+    - agent: gemini
+      support: unknown
+      evidence: Not verified for this version. Readable as a procedure, discovery and reload unverified.
+    - agent: opencode
+      support: unknown
+      evidence: Not verified for this version. Readable as a procedure, discovery and reload unverified.
+requirements:
+  commands:
+    - name: git
+      version_range: '>=2.30.0 <3.0.0'
+    - name: gh
+      version_range: '>=2.20.0 <3.0.0'
+    - name: commandmate
+  network_hosts:
+    - api.github.com
+    - github.com
+declared_permissions:
+  - filesystem_read
+  - filesystem_write
+  - process_execution
+  - network_access
+declared_risk: high
+risk_rationale: >-
+  破壊的操作を行う: git worktree remove（非 force）と guarded ref delete で worktree と
+  branch を削除し、git fetch と gh で merge 証跡を取得する。削除するのは clean かつ direct
+  ancestry または4条件完備の merged-equivalent 証跡がある対象だけで、dirty・detached・
+  unmerged・検証不能は削除しない。git worktree remove --force・git branch -D・process
+  kill・DB/log 削除・remote branch 削除は手順として禁止している。script も実行可能 file も
+  含まず、install 時に実行されるものは無い。
+files:
+  - path: SKILL.md
+    sha256: '0b1933661e124c60910711779e8c72c810a2ea8b0861eef08c2e5b3541bf4ca4'
+    size: 13004
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/agent-compatibility.md
+    sha256: e941ce301364f399c7ebc716e4ac9d8295ffec9c2d7ba3b10a10fd1d1ad4b40a
+    size: 3858
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/proof-algorithm.md
+    sha256: ebae39144b10102c94ad3bed123056bf2ca935adf31ed47d7a48f4869f835997
+    size: 8686
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/result-contract.md
+    sha256: 8f5d8809084e2d2893249c94713abc510f681951e4b7b4a854474124b792eb85
+    size: 6010
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/safety.md
+    sha256: c67cbecd2f69a400c8558da582867cca7865586e996b99bc8015f4f3c7edf41b
+    size: 7289
+    kind: instruction
+    executable: false
+    script: false
+  - path: schemas/cleanup-plan.v1.json
+    sha256: 30da35eacad85651473cdcdcfd41546612b8beb731e4500ac065fd95495600b5
+    size: 12561
+    kind: asset
+    executable: false
+    script: false
+  - path: schemas/cleanup-result.v1.json
+    sha256: 6ba64b504221c0b293dc5a6bf9f3a7a82adc02f8c4704c68c8abd6655ec8ab1f
+    size: 12084
+    kind: asset
+    executable: false
+    script: false

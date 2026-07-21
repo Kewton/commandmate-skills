@@ -1,0 +1,283 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-worktree-cleanup/schemas/cleanup-plan.v1.json",
+  "title": "cmate-worktree-cleanup plan (version 1)",
+  "description": "The dry-run preview a cleanup run produces before any deletion. Every candidate worktree discovered from git metadata appears here with its status, its merge proof, and whether apply would delete or skip it. A candidate is deletable only when proof.type is direct or merged_equivalent; everything else is skipped. Closed schema: an unknown field is a contract violation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "plan_schema_version",
+    "skill",
+    "generated_at",
+    "mode",
+    "profile",
+    "request",
+    "fetch",
+    "candidates",
+    "excluded",
+    "blocking_reasons",
+    "limitations",
+    "summary_markdown"
+  ],
+  "properties": {
+    "plan_schema_version": { "const": 1 },
+    "skill": { "$ref": "#/$defs/skill" },
+    "generated_at": { "$ref": "#/$defs/timestamp" },
+    "mode": {
+      "const": "dry_run",
+      "description": "A plan is always a dry run. Deletion happens only in a later apply run, recorded in cleanup-result.v1.json."
+    },
+    "profile": { "$ref": "#/$defs/profile" },
+    "request": { "$ref": "#/$defs/request" },
+    "fetch": { "$ref": "#/$defs/fetch" },
+    "candidates": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/candidate" },
+      "description": "Every eligible worktree discovered from git worktree list --porcelain, after excluding the entries in `excluded`."
+    },
+    "excluded": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/exclusion" },
+      "description": "Worktrees that were never treated as candidates: the current worktree, integration worktrees, and worktrees outside the requested target set. These are never deletable, whatever the input asked for."
+    },
+    "blocking_reasons": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 300 },
+      "description": "Why a plan could not be produced at all. Non-empty means no candidate is deletable."
+    },
+    "limitations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 300 },
+      "description": "Capabilities that were unavailable and the fallback taken. A fetch that failed belongs here as well as in `fetch`."
+    },
+    "summary_markdown": { "type": "string", "minLength": 1, "maxLength": 20000 }
+  },
+  "$defs": {
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "const": "cmate-worktree-cleanup" },
+        "version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" }
+      }
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "RFC 3339 in UTC, second precision."
+    },
+    "git_oid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "A full 40-hex git object id. A commit id is not a secret and is recorded as proof; a raw GitHub API payload is never recorded."
+    },
+    "git_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "A branch or ref name such as feature/1449-cmate-worktree-cleanup or origin/main. Not an absolute path."
+    },
+    "worktree_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^/\\\\\\u0000-\\u001f\\u007f]+$",
+      "description": "A redacted, non-sensitive label for a worktree: its directory basename as git reports it (for example commandmate-issue-135). It carries no slash on purpose, so it can never hold an absolute path, a home directory, or a parent-escape. The live absolute path used to run git commands is never persisted here."
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "verified", "base", "remote"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "The profile in effect, for example commandmate or commandagent, or a user-supplied name. Nothing about branch, base, path or baseline is hardcoded; every value comes from the resolved profile."
+        },
+        "verified": {
+          "type": "boolean",
+          "description": "true only for profiles whose discovery and base resolution were confirmed against a real repository (Node/CommandMate and Rust/CommandAgent). An unverified profile is usable only after the user confirms it for this run."
+        },
+        "base": {
+          "$ref": "#/$defs/git_ref",
+          "description": "The merge base ref every proof is measured against, resolved from the profile. Never assumed to be develop or main."
+        },
+        "remote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "The remote whose base is fetched for freshness, for example origin."
+        },
+        "baseline": {
+          "type": ["string", "null"],
+          "maxLength": 200,
+          "description": "The ref tree equality is compared against when it differs from `base`, resolved from the profile. null when `base` is the baseline."
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selection_mode", "targets"],
+      "properties": {
+        "selection_mode": {
+          "enum": ["issues", "all_eligible"],
+          "description": "issues: only the listed issue numbers. all_eligible: every candidate the profile recognises, still excluding current and integration worktrees."
+        },
+        "targets": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+          "description": "Issue numbers when selection_mode is issues; empty when all_eligible. The skill never accepts a filesystem path as a target: worktrees are resolved from git metadata, not from a path the caller typed."
+        }
+      }
+    },
+    "fetch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "succeeded", "remote", "base"],
+      "properties": {
+        "attempted": { "type": "boolean" },
+        "succeeded": {
+          "type": "boolean",
+          "description": "false means remote freshness is unknown. Every candidate that needs the remote is then unverifiable; the plan never presents a stale base as current."
+        },
+        "remote": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "base": { "$ref": "#/$defs/git_ref" }
+      }
+    },
+    "proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "base"],
+      "properties": {
+        "type": {
+          "enum": ["direct", "merged_equivalent", "unverifiable"],
+          "description": "direct: the branch tip is an ancestor of base. merged_equivalent: not an ancestor, but all four squash/rebase conditions held. unverifiable: neither could be proven; the target is not deletable."
+        },
+        "base": { "$ref": "#/$defs/git_ref" },
+        "ancestor_verified": {
+          "type": ["boolean", "null"],
+          "description": "Result of git merge-base --is-ancestor <tip> <base>. Sole condition for type direct."
+        },
+        "pr_number": { "type": ["integer", "null"], "minimum": 1 },
+        "merged_pr_exact": {
+          "type": ["boolean", "null"],
+          "description": "Condition 1: exactly one merged PR whose head is this branch and whose base is the profile base. Zero or several is not exact."
+        },
+        "head_oid_match": {
+          "type": ["boolean", "null"],
+          "description": "Condition 2: the PR headRefOid equals the worktree tip."
+        },
+        "merge_commit_oid": { "anyOf": [{ "$ref": "#/$defs/git_oid" }, { "type": "null" }] },
+        "merge_commit_reachable": {
+          "type": ["boolean", "null"],
+          "description": "Condition 3: the merge commit is a real commit reachable from the freshly fetched base."
+        },
+        "tree_equal": {
+          "type": ["boolean", "null"],
+          "description": "Condition 4: the net tree change the branch makes over its merge base is identical to the change the merge commit introduced into base."
+        },
+        "unverifiable_reasons": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/unverifiable_reason" },
+          "description": "Present and non-empty when type is unverifiable. Records every condition that failed, so the user sees why a merged-looking worktree was kept."
+        }
+      }
+    },
+    "unverifiable_reason": {
+      "enum": [
+        "fetch_failed",
+        "github_data_missing",
+        "no_merged_pr",
+        "multiple_prs",
+        "head_oid_drift",
+        "merge_commit_unreachable",
+        "tree_mismatch",
+        "command_failed"
+      ]
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktree_ref", "branch", "tip", "state", "proof", "decision", "delete_method", "skip_reason", "diagnostics"],
+      "properties": {
+        "worktree_ref": { "$ref": "#/$defs/worktree_ref" },
+        "issue_number": { "type": ["integer", "null"], "minimum": 1, "maximum": 2147483647 },
+        "branch": {
+          "anyOf": [{ "$ref": "#/$defs/git_ref" }, { "type": "null" }],
+          "description": "null when the worktree is on a detached HEAD, which is itself a skip reason."
+        },
+        "tip": { "anyOf": [{ "$ref": "#/$defs/git_oid" }, { "type": "null" }] },
+        "state": {
+          "enum": ["clean", "dirty", "detached", "locked", "missing"],
+          "description": "clean is the only state a deletion may proceed from. dirty, detached, locked and missing are all zero-delete."
+        },
+        "proof": { "$ref": "#/$defs/proof" },
+        "decision": {
+          "enum": ["delete", "skip"],
+          "description": "delete requires state clean and proof.type direct or merged_equivalent. Any other combination is skip."
+        },
+        "delete_method": {
+          "type": ["string", "null"],
+          "enum": ["direct_branch_d", "guarded_ref_delete", null],
+          "description": "direct_branch_d for proof direct: git worktree remove then git branch -d. guarded_ref_delete for proof merged_equivalent: git worktree remove then git update-ref -d with the verified tip as the expected old id. null when decision is skip."
+        },
+        "skip_reason": {
+          "anyOf": [{ "$ref": "#/$defs/skip_reason" }, { "type": "null" }],
+          "description": "Required non-null when decision is skip; null when decision is delete."
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/diagnostic" },
+          "description": "Servers, processes, tmux sessions, DB files and logs observed near this worktree. Display only: this skill never stops or deletes them."
+        }
+      }
+    },
+    "exclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktree_ref", "reason"],
+      "properties": {
+        "worktree_ref": { "$ref": "#/$defs/worktree_ref" },
+        "reason": {
+          "enum": ["current_worktree", "integration_worktree", "not_in_scope"],
+          "description": "current_worktree and integration_worktree are refused even when named explicitly."
+        }
+      }
+    },
+    "skip_reason": {
+      "enum": [
+        "dirty",
+        "detached",
+        "unmerged",
+        "unverifiable",
+        "fetch_failed",
+        "github_data_missing",
+        "no_merged_pr",
+        "multiple_prs",
+        "head_oid_drift",
+        "merge_commit_unreachable",
+        "tree_mismatch",
+        "locked",
+        "missing",
+        "command_failed"
+      ]
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "observation"],
+      "properties": {
+        "kind": { "enum": ["server", "process", "tmux", "database", "log"] },
+        "observation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "What was seen, with no absolute path, no PID that the user would act on blindly, and no secret. A hint for a manual next action, never an instruction this skill carries out."
+        }
+      }
+    }
+  }
+}
