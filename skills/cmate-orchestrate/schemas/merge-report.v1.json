@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/merge-report.v1.json",
+  "title": "cmate-orchestrate merge report v1",
+  "description": "Report printed to stdout and written to merge-report.json by the cmate-orchestrate merge runner (scripts/merge.mjs). Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records one mutating phase — either PR creation (create_prs) or guarded merge (merge_prs) — over the verification-passed issues of an already-executed plan. A single invocation enables exactly one phase. Nothing is created or merged without explicit approval, and no PR is merged unless its CI passed; a create failure, a red or pending CI, or a merge conflict stops the phase and is reported as partial, never rounded up to success.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "merge_schema_version",
+    "skill_id",
+    "skill_version",
+    "phase",
+    "status",
+    "stop_reason",
+    "approved",
+    "mutated",
+    "merge_method",
+    "plan_run_id",
+    "out_dir",
+    "profile",
+    "eligible_issues",
+    "preflight",
+    "targets",
+    "blocking_reasons",
+    "limitations",
+    "redactions",
+    "completion_check",
+    "summary_markdown"
+  ],
+  "properties": {
+    "merge_schema_version": { "const": 1 },
+    "skill_id": { "const": "cmate-orchestrate" },
+    "skill_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "phase": {
+      "enum": ["create_prs", "merge_prs"],
+      "description": "The single mutating phase this invocation enabled. create_prs opens a PR per verification-passed issue; merge_prs checks CI and, if green and approved, merges. Exactly one is ever enabled."
+    },
+    "status": {
+      "enum": ["success", "partial", "failure"],
+      "description": "success: the phase handled every eligible issue without a failure (including a no-mutation preview). partial: the phase started but stopped early on a PR-create failure, a red/pending CI, a missing PR, or a merge conflict. failure: nothing could be attempted (preflight failed, no plan, or a bad invocation)."
+    },
+    "stop_reason": {
+      "enum": [
+        "completed",
+        "preflight_failed",
+        "pr_create_failed",
+        "pr_missing",
+        "pr_closed",
+        "ci_failed",
+        "ci_pending",
+        "merge_failed",
+        "runner_error"
+      ],
+      "description": "Why the phase stopped. completed: every eligible issue was handled. The rest name the first blocking condition; a failure is never reported as completed."
+    },
+    "approved": {
+      "type": "boolean",
+      "description": "Whether --approve was given. When false the phase is a no-mutation preview: no branch is pushed, no PR is created, and no PR is merged."
+    },
+    "mutated": {
+      "type": "boolean",
+      "description": "Whether at least one mutating command (git push, gh pr create, or gh pr merge) was actually invoked. Always false when approved is false."
+    },
+    "merge_method": {
+      "enum": ["merge", "squash", "rebase"],
+      "description": "The merge method used (or that would be used) for the merge_prs phase. Reported in both phases for completeness."
+    },
+    "plan_run_id": { "$ref": "#/$defs/run_id" },
+    "out_dir": {
+      "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+      "description": "Directory the merge artifacts were written to. Null when nothing was written."
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "repository", "base", "verified"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$" },
+        "base": { "type": "string", "minLength": 1 },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "eligible_issues": {
+      "type": "array",
+      "description": "Issues drawn from the dispatch report whose worker completed AND whose verification passed. Only these are ever acted on: an unverified issue is never turned into a PR or a merge.",
+      "items": { "$ref": "#/$defs/issue_number" }
+    },
+    "preflight": {
+      "type": "array",
+      "description": "Read-only preflight probes run before any mutation (gh availability, repo access, base resolvable). A blocking failure yields status failure and nothing is attempted.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "ok", "blocking", "detail"],
+        "properties": {
+          "code": { "enum": ["cli_available", "repo_access", "base_resolvable"] },
+          "ok": { "type": "boolean" },
+          "blocking": { "type": "boolean" },
+          "detail": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "targets": {
+      "type": "array",
+      "description": "One record per eligible issue, in merge order. A target reached after the phase stopped is recorded with outcome skipped so the full set stays visible.",
+      "items": { "$ref": "#/$defs/target" }
+    },
+    "blocking_reasons": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "limitations": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
+    "redactions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "count"],
+        "properties": {
+          "kind": { "type": "string", "minLength": 1 },
+          "count": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "completion_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "checks"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "checks": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "passed", "detail"],
+            "properties": {
+              "id": {
+                "enum": [
+                  "single_phase",
+                  "approval_enforced",
+                  "verification_gated",
+                  "ci_gated",
+                  "failures_not_rounded"
+                ]
+              },
+              "passed": { "type": "boolean" },
+              "detail": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "summary_markdown": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "run_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" },
+    "issue_number": { "type": "integer", "minimum": 1 },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "detail"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string", "minLength": 1 }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issue",
+        "branch",
+        "eligible",
+        "action",
+        "pr_number",
+        "pr_url",
+        "pushed",
+        "pr_created",
+        "ci_checked",
+        "ci_passed",
+        "ci_summary",
+        "ci_checks",
+        "merge_attempted",
+        "merged",
+        "outcome",
+        "note"
+      ],
+      "properties": {
+        "issue": { "$ref": "#/$defs/issue_number" },
+        "branch": { "type": "string", "minLength": 1 },
+        "eligible": {
+          "type": "boolean",
+          "description": "True: this issue's worker completed and its verification passed. Only eligible issues appear as targets."
+        },
+        "action": { "enum": ["create_pr", "merge_pr"] },
+        "pr_number": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/issue_number" }] },
+        "pr_url": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] },
+        "pushed": {
+          "type": "boolean",
+          "description": "Whether the branch was pushed (create_prs phase only; always false in a preview or in merge_prs)."
+        },
+        "pr_created": { "type": "boolean" },
+        "ci_checked": { "type": "boolean" },
+        "ci_passed": {
+          "type": "boolean",
+          "description": "Whether every required check reported success. A merge is refused unless this is true — completion never opens the merge gate on its own."
+        },
+        "ci_summary": { "type": "string", "minLength": 1 },
+        "ci_checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "state"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1 },
+              "state": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "merge_attempted": { "type": "boolean" },
+        "merged": { "type": "boolean" },
+        "outcome": {
+          "enum": [
+            "previewed",
+            "pr_created",
+            "pr_failed",
+            "pr_missing",
+            "pr_closed",
+            "ci_failed",
+            "ci_pending",
+            "merged",
+            "already_merged",
+            "merge_failed",
+            "skipped"
+          ]
+        },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}

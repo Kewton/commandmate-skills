@@ -1,0 +1,23 @@
+{
+  "description": "Passing both --create-prs and --merge-prs enables two mutating phases; the runner refuses (invalid_input) rather than pick one, honoring one-mutating-phase-per-invocation.",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--merge-prs", "--approve"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true }
+  },
+  "expect": {
+    "exit": 3,
+    "status": "failure",
+    "stop_reason": "runner_error",
+    "no_mutation": true,
+    "pr_create_calls": 0,
+    "pr_merge_calls": 0,
+    "completion_passed": false
+  }
+}

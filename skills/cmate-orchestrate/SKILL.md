@@ -3,23 +3,26 @@ name: cmate-orchestrate
 description: 複数 Issue を並列実行するための計画を dry-run で立て、承認後にその計画を監督付きで実行する。計画では Issue 品質・依存（explicit/inferred）・file conflict を分析し、cycle や不完全 override を拒否したうえで、file 衝突の無い承認可能な Wave plan・risk・権限・実行 command を決定的な artifact として返す。実行では public commandmate で self-contained な generic worker を dispatch し、Wave barrier（前 Wave 全完了）と verification gate（versioned report の pass）で監督し、prompt 検出時は自動応答せず human へ提示して停止する。
 ---
 
-# cmate-orchestrate（計画コア + dispatch・監督ループ）
+# cmate-orchestrate（計画コア + dispatch・監督 + PR/CI/merge）
 
-複数の Issue を並列で進めるための、**計画**と、その承認後の**監督付き実行**を
-安全に行うための手順である。この Skill は2つの deterministic runner を持つ。
+複数の Issue を並列で進めるための、**計画**と、その承認後の**監督付き実行**と、
+verification pass 後の**PR 作成・CI 確認・guarded merge** を安全に行うための手順である。
+この Skill は3つの deterministic runner を持つ。
 
 - **計画（planner, `scripts/orchestrate.mjs`）** — dry-run で Wave plan を生成する。
   mutation は一切しない。default invocation はこれである。
 - **実行（dispatch, `scripts/dispatch.mjs`）** — 承認済み plan を入力に取り、
   public `commandmate` で worker を dispatch し、Wave barrier と verification gate で
   監督する。mutation を伴う。
+- **納品（merge, `scripts/merge.mjs`）** — dispatch report で verification pass した
+  Issue だけを対象に、明示承認の下で PR 作成（`--create-prs`）または CI 確認付きの
+  guarded merge（`--merge-prs`）を、1 invocation で1 phase だけ行う。mutation を伴う。
 
-PR 作成・CI 確認・merge（[#1455](https://github.com/Kewton/CommandMate/issues/1452)）と
-UAT 修正ループ（[#1456](https://github.com/Kewton/CommandMate/issues/1452)）は後続 Issue の
-担当であり、この Skill は **実装しない**。dispatch は worker dispatch と監督・verification gate
-までである。
+UAT 修正ループ（[#1456](https://github.com/Kewton/CommandMate/issues/1456)）と Issue 本文の
+自動編集は後続 Issue の担当であり、この Skill は **実装しない**。merge runner は明示承認・
+CI pass 無しに PR 作成・merge を行わない。
 
-計画も実行も、同梱の runner（Node stdlib のみ）が行う。計画は入力の純粋関数で、
+計画も実行も納品も、同梱の runner（Node stdlib のみ）が行う。計画は入力の純粋関数で、
 同じ入力からは同じ plan が出る（Claude/Codex parity）。base branch・branch 名・
 worktree path・baseline は **profile から解決**し、`develop`/`npm`/`cargo` を hardcode しない。
 
@@ -62,7 +65,7 @@ worktree path・baseline は **profile から解決**し、`develop`/`npm`/`carg
 planner の手順として **禁止** するもの:
 
 - worktree の作成、worker への dispatch、`commandmate send` / `wait` / `capture`（← 実行は dispatch runner の担当）
-- PR の作成、CI のトリガ、merge、UAT 修正ループ
+- PR の作成、CI のトリガ、merge（← 納品は merge runner の担当。第3部）、UAT 修正ループ（後続 Issue）
 - 対象リポジトリの branch・Issue・PR の変更
 
 `--issue-json` を使わない場合、read-only の `gh issue view` で Issue を取得する。
@@ -251,12 +254,106 @@ dispatch:
 - [ ] worker completion だけを success 扱いしていない
 - [ ] mutation 前に drift を再確認している
 
-## 11. 参照
+---
+
+# 第3部 PR 作成・CI 確認・guarded merge
+
+dispatch report で verification pass した Issue を納品する。契約の正本は
+[references/merge-contract.md](./references/merge-contract.md)、report の schema は
+[schemas/merge-report.v1.json](./schemas/merge-report.v1.json) である。
+
+## 11. merge runner の入力
+
+```
+merge.mjs --plan <承認済み plan.json> --dispatch <dispatch-report.json> (--create-prs | --merge-prs) [options]
+```
+
+CommandAgent の explicit phase flag 設計（ADR
+[#1447](https://github.com/Kewton/CommandMate/issues/1447)）を踏襲し、**1 invocation で
+mutating phase をちょうど1つだけ** 有効化する。`--create-prs` は PR 作成、`--merge-prs` は
+CI 確認付きの guarded merge である。両方指定・どちらも未指定は `invalid_input` で拒否する。
+
+| 名前 | 必須 | 既定値 | 説明 |
+|---|---|---|---|
+| `--plan <path>` | 必須 | なし | 承認済み `plan.json` |
+| `--dispatch <path>` | 必須 | なし | dispatch runner の `dispatch-report.json`。eligible の唯一の根拠 |
+| `--create-prs` / `--merge-prs` | どちらか1つ | なし | 有効化する mutating phase |
+| `--approve` | 任意 | **off** | 明示承認。無ければ mutation しない preview |
+| `--merge-method <m>` | 任意 | `squash` | merge 方式（`merge`/`squash`/`rebase`） |
+| `--out <dir>` | 任意 | `<dispatch-dir>/<phase>` | 出力先。既存なら `out_exists` |
+| `--gh <path>` | 任意 | `gh` | PR 作成・CI 確認・merge の GitHub CLI |
+| `--git <path>` | 任意 | `git` | branch push と base preflight の git |
+
+## 12. merge の手順
+
+対象は dispatch report で **`completed` かつ verification `pass`** の Issue だけである
+（verification gate の継承）。plan の `merge_order` 順に処理する。
+
+### Step M0. eligible を決める
+
+dispatch report から eligible 集合を取る。空なら `no_eligible_issues` を載せて no-op success
+とし、mutation しない。**verification が pass していない Issue を PR/merge に変えない。**
+
+### Step M1. preflight（read-only）
+
+`gh --version`・`gh repo view`・`git rev-parse --verify <base>` を確認する。blocking な失敗が
+あれば `failure`（`preflight_failed`）で、何も試さず終了する。
+
+### Step M2. 2つの gate を守る
+
+- **承認 gate** — `--approve` が無ければ push・PR 作成・merge を **一切しない** preview とする。
+  `mutated` は false のままにする。
+- **CI gate（`--merge-prs`）** — PR を merge するのは CI checks が **すべて green** のときだけ。
+  failure は `ci_failed`、pending・check 0 件は `ci_pending` として **merge を拒否** する。
+
+### Step M3-a. `--create-prs`
+
+各 eligible の branch を（承認時のみ）`git push` し、self-contained な PR body
+（objective・受入条件・baseline・`Resolves #n`）を `<out>/pr-bodies/issue-<n>.md` に残して
+`gh pr create` する。push または create が失敗したら `pr_failed` で停止する。
+
+### Step M3-b. `--merge-prs`
+
+各 eligible の PR を `gh pr view` で発見し、`gh pr checks` で CI を確認する。CI green かつ
+承認ありのときだけ `gh pr merge --<method>` で merge する。CI が green でない、PR が無い、
+merge が conflict のときは停止し、`ci_failed`/`ci_pending`/`pr_missing`/`merge_failed` を記録する。
+
+### Step M4. 記録する
+
+失敗・blocked は途中停止し、`blocking_reasons` と該当 target に記録する。停止後の eligible は
+outcome `skipped` として残す。**failure を success に丸めない。** token・secret・絶対 path・
+raw terminal は report/artifact に残さない（redaction）。
+
+## 13. merge の出力
+
+merge runner は report（[schemas/merge-report.v1.json](./schemas/merge-report.v1.json)）を
+stdout に、`<out>/merge-report.json` と `<out>/merge-summary.md` を file に書く。
+
+| status | 条件 | exit |
+|---|---|---|
+| `success` | 全 eligible を失敗なく処理（preview を含む） | 0 |
+| `partial` | 途中停止（PR 作成失敗・CI failure/pending・PR 不在・merge conflict） | 7 |
+| `failure` | 何も試せない（preflight 失敗・plan 不正・invalid input） | 1 |
+
+report は5つの completion check（`single_phase`・`approval_enforced`・`verification_gated`・
+`ci_gated`・`failures_not_rounded`）を自己申告する。
+
+merge 完了条件:
+
+- [ ] 1 invocation で mutating phase を1つだけ有効化している
+- [ ] `--approve` 無しに push・PR 作成・merge をしていない
+- [ ] CI green 無しに merge していない
+- [ ] verification pass した Issue だけを対象にしている
+- [ ] PR 作成失敗・CI failure・merge conflict を blocked/partial として停止・記録している
+
+## 14. 参照
 
 - [references/profile-contract.md](./references/profile-contract.md) — profile の形と unverified の扱い
 - [references/plan-contract.md](./references/plan-contract.md) — 依存・Wave・risk・result の契約
 - [references/dispatch-contract.md](./references/dispatch-contract.md) — dispatch・監督ループ・verification gate の契約
+- [references/merge-contract.md](./references/merge-contract.md) — PR 作成・CI 確認・guarded merge の契約
 - [references/agent-compatibility.md](./references/agent-compatibility.md) — Agent 差異と fallback
 - [schemas/execution-plan.v1.json](./schemas/execution-plan.v1.json) — plan の機械検証用 schema
 - [schemas/orchestrate-result.v1.json](./schemas/orchestrate-result.v1.json) — planner result envelope の schema
 - [schemas/dispatch-report.v1.json](./schemas/dispatch-report.v1.json) — dispatch report の schema
+- [schemas/merge-report.v1.json](./schemas/merge-report.v1.json) — merge report の schema

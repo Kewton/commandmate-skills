@@ -1,0 +1,24 @@
+{
+  "description": "gh is not runnable at preflight. The phase reports failure (preflight_failed), attempts nothing, and mutates nothing.",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--approve"],
+  "merge_scenario": {
+    "cli_available": false,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true }
+  },
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "preflight_failed",
+    "approved": true,
+    "mutated": false,
+    "no_mutation": true,
+    "pr_create_calls": 0,
+    "completion_passed": false
+  }
+}

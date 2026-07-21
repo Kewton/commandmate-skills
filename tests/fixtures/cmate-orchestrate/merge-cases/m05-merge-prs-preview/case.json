@@ -1,0 +1,29 @@
+{
+  "description": "Without --approve, --merge-prs checks CI read-only and reports it would merge (CI green), but calls no gh pr merge; nothing is mutated.",
+  "phase": "merge-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" },
+      "201": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": false,
+    "mutated": false,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "previewed", "200": "previewed" },
+    "no_mutation": true,
+    "pr_merge_calls": 0,
+    "completion_passed": true
+  }
+}

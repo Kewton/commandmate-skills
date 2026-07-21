@@ -1,0 +1,31 @@
+{
+  "description": "Injection: gh pr create fails for the first eligible issue. The phase stops as partial (pr_create_failed), records pr_failed, and never reaches the next issue.",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--approve"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "201": { "create": "fail" },
+      "200": { "create": "ok" }
+    }
+  },
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "pr_create_failed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "pr_failed", "200": "skipped" },
+    "push_calls": 1,
+    "pr_create_calls": 1,
+    "pr_merge_calls": 0,
+    "completion_passed": true
+  }
+}

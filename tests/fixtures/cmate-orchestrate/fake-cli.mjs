@@ -1,12 +1,18 @@
 #!/usr/bin/env node
-// Fake CommandMate/git/gh CLI for the cmate-orchestrate dispatch tests.
+// Fake CommandMate/git/gh CLI for the cmate-orchestrate dispatch and merge tests.
 //
 // dispatch.mjs shells out to `commandmate` (send/wait/capture/respond/verify),
 // `git` (drift checks) and `gh` (repo access) via injectable --cli/--git/--gh.
-// Pointing all three at this one script lets the fixtures drive the whole
-// supervision loop deterministically and inject failures — without a real
-// repository, a real worker, or the network. Subcommand names are disjoint
-// across the three tools, so a single dispatcher on argv is unambiguous.
+// merge.mjs shells out to `git` (push) and `gh` (pr create/view/checks/merge)
+// via injectable --git/--gh. Pointing all of them at this one script lets the
+// fixtures drive the whole supervision and delivery loop deterministically and
+// inject failures — without a real repository, a real worker, or the network.
+// Subcommand names are disjoint across the tools, so a single dispatcher on argv
+// is unambiguous.
+//
+// A PR number in this fake is always equal to its issue number, so that
+// `pr view` (keyed by branch) and `pr checks`/`pr merge` (keyed by number) can
+// look the same worker's behavior up by a single key.
 //
 // Behavior is read from a scenario JSON whose path is in CMATE_FAKE_SCENARIO.
 // Every invocation is also appended (as one JSON line: {sub, args}) to the file
@@ -56,9 +62,17 @@ function issueFromTask(value) {
   const match = /task-(\d+)/.exec(value ?? '');
   return match ? match[1] : null;
 }
+function issueFromBranch(value) {
+  const match = /issue-(\d+)/.exec(value ?? '');
+  return match ? match[1] : null;
+}
 function workerSpec(spec, issue) {
   const workers = spec.workers ?? {};
   return workers[issue] ?? workers[String(issue)] ?? {};
+}
+function prSpec(spec, issue) {
+  const prs = spec.prs ?? {};
+  return prs[issue] ?? prs[String(issue)] ?? {};
 }
 
 // The fake is stateless across processes, so an auto-yes flow (respond, then
@@ -119,12 +133,57 @@ function main() {
     process.stdout.write(`${lines.join('\n')}\n`);
     process.exit(0);
   }
+  if (sub === 'push') {
+    // `git push --set-upstream origin <branch>` from merge.mjs --create-prs.
+    const branch = argv[argv.length - 1];
+    const pr = prSpec(spec, issueFromBranch(branch));
+    if (pr.push === 'fail') fail('fatal: failed to push some refs');
+    process.stdout.write(`Branch '${branch}' set up to track 'origin/${branch}'.\n`);
+    process.exit(0);
+  }
 
   // --- gh repo access probe ------------------------------------------------
   if (sub === 'repo') {
     const gh = spec.gh ?? {};
     if (gh.repo_access === false) fail('gh: could not resolve repository');
     emit({ nameWithOwner: gh.name ?? 'Kewton/CommandMate' });
+  }
+
+  // --- gh pull-request lifecycle (merge.mjs) -------------------------------
+  if (sub === 'pr') {
+    const action = argv[1] ?? '';
+    if (action === 'create') {
+      const issue = issueFromBranch(optionValue('--head'));
+      const pr = prSpec(spec, issue);
+      if (pr.create === 'fail') fail('pull request create failed: a PR already exists or the branch is unpushed');
+      const repo = optionValue('--repo') ?? 'Kewton/CommandMate';
+      process.stdout.write(`https://github.com/${repo}/pull/${issue}\n`);
+      process.exit(0);
+    }
+    if (action === 'view') {
+      const branch = argv[2];
+      const issue = issueFromBranch(branch);
+      const pr = prSpec(spec, issue);
+      const state = (pr.view_state ?? 'OPEN').toUpperCase();
+      if (state === 'MISSING') fail('no pull requests found for branch');
+      const repo = 'Kewton/CommandMate';
+      emit({ number: Number(issue), url: `https://github.com/${repo}/pull/${issue}`, state });
+    }
+    if (action === 'checks') {
+      const number = argv[2];
+      const pr = prSpec(spec, number);
+      // Default: a single green check. A scenario injects a failing/pending run.
+      emit(pr.checks ?? [{ name: 'build', state: 'SUCCESS' }]);
+    }
+    if (action === 'merge') {
+      const number = argv[2];
+      const pr = prSpec(spec, number);
+      if (pr.merge === 'conflict') fail('failed to merge: merge conflict between base and head');
+      if (pr.merge === 'blocked') fail('failed to merge: required status checks or reviews are missing');
+      process.stdout.write(`Merged pull request #${number}\n`);
+      process.exit(0);
+    }
+    fail(`fake-cli: unknown pr action "${action}"`);
   }
 
   // --- commandmate worker lifecycle ---------------------------------------

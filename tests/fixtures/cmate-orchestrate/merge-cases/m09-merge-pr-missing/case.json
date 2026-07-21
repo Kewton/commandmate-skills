@@ -1,0 +1,30 @@
+{
+  "description": "A verification-passed issue has no open PR yet (create-prs was not run). --merge-prs stops as partial (pr_missing) rather than inventing a merge target.",
+  "phase": "merge-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--approve"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "201": { "view_state": "MISSING" },
+      "200": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" }
+    }
+  },
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "pr_missing",
+    "approved": true,
+    "mutated": false,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "pr_missing", "200": "skipped" },
+    "no_merge": true,
+    "pr_merge_calls": 0,
+    "completion_passed": true
+  }
+}
