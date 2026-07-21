@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-worktree-setup
 name: cmate-worktree-setup
-version: 0.1.0
+version: 0.1.1
 summary: 対象repositoryを検証し既存branch/directory/worktreeを暗黙上書きせず、profile規約に沿った専用worktreeをresolved base SHAから作成し、proportional baseline結果を証跡付きで返す。
 description: >-
   1つ以上のIssueについて、対象リポジトリを検証し、衝突しない専用 worktree を作成し、
@@ -54,8 +54,8 @@ compatibility:
   commandmate: '>=0.11.0 <1.0.0'
   agents:
     - agent: claude
-      support: native
-      evidence: Standard SKILL.md discovery from .agents/skills
+      support: unknown
+      evidence: Claude reads SKILL.md from .claude/skills, not .agents/skills. The CommandMate installer places packages in .agents/skills only for now (see CommandMate issue 1460); native discovery for this version is not yet measured (see issue 1246).
     - agent: codex
       support: native
       evidence: Standard SKILL.md discovery from .agents/skills

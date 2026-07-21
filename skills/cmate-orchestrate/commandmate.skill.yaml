@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-orchestrate
 name: cmate-orchestrate
-version: 0.4.0
+version: 0.4.1
 summary: 複数 Issue の並列実行を dry-run で計画し、承認後に public commandmate で Wave barrier・verification gate 付きに dispatch、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT を実行し不合格なら回数上限つき修正ループを回し上限到達時は blocked で停止する。
 description: >-
   複数 Issue を並列で進めるための、計画（dry-run）・その承認後の監督付き実行・verification pass 後の
@@ -63,8 +63,8 @@ compatibility:
   commandmate: '>=0.11.0 <1.0.0'
   agents:
     - agent: claude
-      support: native
-      evidence: Standard SKILL.md discovery from .agents/skills. Plan is produced by a bundled Node runner, so it is Agent-agnostic.
+      support: unknown
+      evidence: Claude reads SKILL.md from .claude/skills, not .agents/skills. The CommandMate installer places packages in .agents/skills only for now (see CommandMate issue 1460); native discovery for this version is not yet measured (see issue 1246).
     - agent: codex
       support: native
       evidence: Standard SKILL.md discovery from .agents/skills. Same deterministic runner yields the same plan (parity).
