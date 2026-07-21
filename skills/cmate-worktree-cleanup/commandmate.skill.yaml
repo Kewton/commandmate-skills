@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-worktree-cleanup
 name: cmate-worktree-cleanup
-version: 0.1.0
+version: 0.1.1
 summary: merge 済み・不要な git worktree を、削除可能性と証跡を dry-run で提示したうえで、clean かつ merge 証跡が十分な対象だけ guarded な方式で安全に削除する。dirty・unmerged・検証不能は削除しない。
 description: >-
   対象 issue または eligible な worktree を検査し、削除可能性と proof を dry-run で
@@ -52,8 +52,8 @@ compatibility:
   commandmate: '>=0.11.0 <1.0.0'
   agents:
     - agent: claude
-      support: native
-      evidence: Standard SKILL.md discovery from .agents/skills. Procedure uses no Claude-specific construct.
+      support: unknown
+      evidence: Claude reads SKILL.md from .claude/skills, not .agents/skills. The CommandMate installer places packages in .agents/skills only for now (see CommandMate issue 1460); native discovery for this version is not yet measured (see issue 1246).
     - agent: codex
       support: native
       evidence: Standard SKILL.md discovery from .agents/skills. Procedure uses no Codex-specific construct.
