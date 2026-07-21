@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-worktree-cleanup/schemas/cleanup-result.v1.json",
+  "title": "cmate-worktree-cleanup result (version 1)",
+  "description": "The receipt of one cleanup run. status describes how far the run got; removed and skipped never mix, and every removal carries the proof that justified it. In dry_run mode `removed` is always empty. Closed schema: an unknown field is a contract violation. No token, secret, absolute path or raw GitHub payload is ever written here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "result_schema_version",
+    "skill",
+    "generated_at",
+    "status",
+    "mode",
+    "profile",
+    "request",
+    "confirmation",
+    "fetch",
+    "removed",
+    "skipped",
+    "worktree_prune",
+    "commandmate_sync",
+    "next_actions",
+    "blocking_reasons",
+    "limitations",
+    "completion_check",
+    "summary_markdown"
+  ],
+  "properties": {
+    "result_schema_version": { "const": 1 },
+    "skill": { "$ref": "#/$defs/skill" },
+    "generated_at": { "$ref": "#/$defs/timestamp" },
+    "status": {
+      "enum": ["success", "partial", "failure"],
+      "description": "success: the run completed and every deletable target was resolved. partial: some targets were kept as unverifiable, or apply was interrupted, or sync could not run. failure: no plan could be produced."
+    },
+    "mode": {
+      "enum": ["dry_run", "apply"],
+      "description": "dry_run: nothing was deleted; `removed` is empty. apply: deletions in `removed` were carried out after confirmation and a fresh drift re-check."
+    },
+    "profile": { "$ref": "#/$defs/profile" },
+    "request": { "$ref": "#/$defs/request" },
+    "confirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "granted", "granted_targets"],
+      "properties": {
+        "required": {
+          "const": true,
+          "description": "Confirmation is always required before apply. A dry_run records required true with granted null."
+        },
+        "granted": {
+          "type": ["boolean", "null"],
+          "description": "null when no confirmation was requested or obtained, which is never treated as yes. In a non-interactive invocation this stays null and mode stays dry_run."
+        },
+        "granted_targets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/worktree_ref" },
+          "description": "The exact worktrees the user approved for deletion. Apply deletes only worktrees in this set."
+        },
+        "note": { "type": ["string", "null"], "maxLength": 300 }
+      }
+    },
+    "fetch": { "$ref": "#/$defs/fetch" },
+    "removed": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/removal" },
+      "description": "Worktrees deleted this run, each with the proof that justified it. Empty in dry_run mode."
+    },
+    "skipped": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/skip" },
+      "description": "Worktrees kept, each with the reason. dirty, detached, unmerged and every unverifiable target lands here, never in `removed`."
+    },
+    "worktree_prune": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ran"],
+      "properties": {
+        "ran": { "type": "boolean", "description": "Whether git worktree prune ran after deletion." }
+      }
+    },
+    "commandmate_sync": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "outcome", "worktree_ids"],
+      "properties": {
+        "attempted": { "type": "boolean" },
+        "outcome": {
+          "enum": ["synced", "unavailable", "failed", "skipped"],
+          "description": "unavailable: the public commandmate CLI has no sync path in this environment. Sync is optional: unavailable and failed keep worktree_ids missing and do not turn the run into a failure."
+        },
+        "worktree_ids": {
+          "type": "array",
+          "items": { "type": ["string", "null"], "maxLength": 200 },
+          "description": "Worktree ids reconciled by sync, in removal order. A null entry marks an id that could not be resolved because sync was unavailable, never a fabricated value."
+        }
+      }
+    },
+    "next_actions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/next_action" },
+      "description": "Manual follow-ups this skill deliberately did not perform: recover a dirty worktree, merge an unmerged branch, stop a server, remove a DB or log."
+    },
+    "blocking_reasons": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+    },
+    "limitations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+    },
+    "completion_check": { "$ref": "#/$defs/completion_check" },
+    "summary_markdown": { "type": "string", "minLength": 1, "maxLength": 20000 }
+  },
+  "$defs": {
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "const": "cmate-worktree-cleanup" },
+        "version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" }
+      }
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "RFC 3339 in UTC, second precision."
+    },
+    "git_oid": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "git_ref": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "worktree_ref": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[^/\\\\\\u0000-\\u001f\\u007f]+$",
+      "description": "Redacted worktree label: the directory basename, never an absolute path."
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "verified", "base", "remote"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "verified": { "type": "boolean" },
+        "base": { "$ref": "#/$defs/git_ref" },
+        "remote": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "baseline": { "type": ["string", "null"], "maxLength": 200 }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selection_mode", "targets"],
+      "properties": {
+        "selection_mode": { "enum": ["issues", "all_eligible"] },
+        "targets": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1, "maximum": 2147483647 }
+        }
+      }
+    },
+    "fetch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "succeeded", "remote", "base"],
+      "properties": {
+        "attempted": { "type": "boolean" },
+        "succeeded": { "type": "boolean" },
+        "remote": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "base": { "$ref": "#/$defs/git_ref" }
+      }
+    },
+    "removal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktree_ref", "branch", "tip", "proof_type", "method", "worktree_removed", "branch_deleted", "evidence"],
+      "properties": {
+        "worktree_ref": { "$ref": "#/$defs/worktree_ref" },
+        "issue_number": { "type": ["integer", "null"], "minimum": 1, "maximum": 2147483647 },
+        "branch": { "$ref": "#/$defs/git_ref" },
+        "tip": { "$ref": "#/$defs/git_oid" },
+        "proof_type": {
+          "enum": ["direct", "merged_equivalent"],
+          "description": "The only two proof types a removal may carry. unverifiable never appears here."
+        },
+        "method": {
+          "enum": ["direct_branch_d", "guarded_ref_delete"],
+          "description": "guarded_ref_delete used git update-ref -d refs/heads/<branch> <tip>, which fails if the ref moved after the plan. Neither method is ever git worktree remove --force or git branch -D."
+        },
+        "worktree_removed": { "type": "boolean" },
+        "branch_deleted": {
+          "type": "boolean",
+          "description": "false when the worktree was removed but the guarded ref delete failed on a race; the run is then partial and a next action is recorded."
+        },
+        "evidence": { "$ref": "#/$defs/removal_evidence" }
+      }
+    },
+    "removal_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base", "verified_at"],
+      "properties": {
+        "base": { "$ref": "#/$defs/git_ref" },
+        "verified_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "When the drift re-check confirmed the tip and state immediately before deletion."
+        },
+        "ancestor_verified": {
+          "type": ["boolean", "null"],
+          "description": "Set for proof_type direct."
+        },
+        "pr_number": { "type": ["integer", "null"], "minimum": 1 },
+        "merge_commit_oid": { "anyOf": [{ "$ref": "#/$defs/git_oid" }, { "type": "null" }] },
+        "expected_old_oid": {
+          "anyOf": [{ "$ref": "#/$defs/git_oid" }, { "type": "null" }],
+          "description": "The tip passed to the guarded ref delete, for proof_type merged_equivalent. Equal to `tip`."
+        }
+      }
+    },
+    "skip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktree_ref", "branch", "reason", "proof_type"],
+      "properties": {
+        "worktree_ref": { "$ref": "#/$defs/worktree_ref" },
+        "issue_number": { "type": ["integer", "null"], "minimum": 1, "maximum": 2147483647 },
+        "branch": { "anyOf": [{ "$ref": "#/$defs/git_ref" }, { "type": "null" }] },
+        "reason": { "$ref": "#/$defs/skip_reason" },
+        "proof_type": { "enum": ["direct", "merged_equivalent", "unverifiable", "excluded"] },
+        "detail": { "type": ["string", "null"], "maxLength": 300 }
+      }
+    },
+    "skip_reason": {
+      "enum": [
+        "current_worktree",
+        "integration_worktree",
+        "not_in_scope",
+        "dirty",
+        "detached",
+        "unmerged",
+        "unverifiable",
+        "fetch_failed",
+        "github_data_missing",
+        "no_merged_pr",
+        "multiple_prs",
+        "head_oid_drift",
+        "merge_commit_unreachable",
+        "tree_mismatch",
+        "plan_drift",
+        "locked",
+        "missing",
+        "command_failed"
+      ]
+    },
+    "next_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "reason"],
+      "properties": {
+        "action": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "reason": {
+          "enum": ["dirty", "detached", "unmerged", "unverifiable", "server", "process", "tmux", "database", "log", "sync"],
+          "description": "Why the action is left to the user. server, process, tmux, database and log are diagnostic-only in this phase and are never carried out here."
+        },
+        "worktree_ref": { "anyOf": [{ "$ref": "#/$defs/worktree_ref" }, { "type": "null" }] }
+      }
+    },
+    "completion_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "checks"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "checks": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "passed", "detail"],
+            "properties": {
+              "id": {
+                "enum": [
+                  "exclusions_honored",
+                  "zero_delete_honored",
+                  "proof_sufficient",
+                  "guarded_delete_used",
+                  "drift_rechecked",
+                  "no_sensitive_values"
+                ]
+              },
+              "passed": { "type": "boolean" },
+              "detail": { "type": "string", "minLength": 1, "maxLength": 300 }
+            }
+          }
+        }
+      }
+    }
+  }
+}
