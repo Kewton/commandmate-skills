@@ -1,0 +1,32 @@
+{
+  "description": "Injection: the fix completes and re-verifies, but re-merging its branch hits a conflict. The phase stops as partial (remerge_failed) rather than pretending the repair landed; the fix was dispatched and the re-merge was attempted.",
+  "phase": "fix_uat",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "uat_args": ["--approve", "--max-attempts", "2"],
+  "uat_scenario": {
+    "uat": { "200": "fail", "201": "pass" },
+    "workers": {
+      "200": { "state": "completed", "verify": "pass", "remerge": "conflict" },
+      "201": { "state": "completed", "verify": "pass" }
+    }
+  },
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "remerge_failed",
+    "approved": true,
+    "mutated": true,
+    "attempts_used": 1,
+    "eligible": [201, 200],
+    "unresolved": [200],
+    "attempts_count": 1,
+    "worktree_add_calls": 1,
+    "send_calls": 1,
+    "merge_calls": 1,
+    "next_actions_min": 1,
+    "completion_passed": true
+  }
+}

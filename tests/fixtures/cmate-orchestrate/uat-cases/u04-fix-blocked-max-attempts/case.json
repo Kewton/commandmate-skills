@@ -1,0 +1,32 @@
+{
+  "description": "Injection: #200 never passes UAT. The bounded fix loop performs exactly --max-attempts fix attempts and then stops as blocked (max_attempts_reached), naming the unresolved issue. A cap-reached stop is never rounded up to success.",
+  "phase": "fix_uat",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "uat_args": ["--approve", "--max-attempts", "2"],
+  "uat_scenario": {
+    "uat": { "200": "fail", "201": "pass" },
+    "workers": {
+      "200": { "state": "completed", "verify": "pass" },
+      "201": { "state": "completed", "verify": "pass" }
+    }
+  },
+  "expect": {
+    "exit": 8,
+    "status": "blocked",
+    "stop_reason": "max_attempts_reached",
+    "approved": true,
+    "mutated": true,
+    "attempts_used": 2,
+    "eligible": [201, 200],
+    "unresolved": [200],
+    "attempts_count": 3,
+    "worktree_add_calls": 2,
+    "send_calls": 2,
+    "merge_calls": 2,
+    "next_actions_min": 1,
+    "completion_passed": true
+  }
+}

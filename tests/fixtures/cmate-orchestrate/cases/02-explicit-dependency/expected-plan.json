@@ -1,7 +1,7 @@
 {
   "plan_schema_version": 1,
   "skill_id": "cmate-orchestrate",
-  "skill_version": "0.3.0",
+  "skill_version": "0.4.0",
   "run_id": "fixture",
   "generated_mode": "dry-run",
   "profile": {

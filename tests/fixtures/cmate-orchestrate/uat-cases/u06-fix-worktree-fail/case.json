@@ -1,0 +1,32 @@
+{
+  "description": "Injection: creating the fix worktree fails. The fix attempt stops before dispatching any fix worker; the phase is partial (worktree_failed), no fix is sent and nothing is re-merged.",
+  "phase": "fix_uat",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "uat_args": ["--approve", "--max-attempts", "2"],
+  "uat_scenario": {
+    "uat": { "200": "fail", "201": "pass" },
+    "workers": {
+      "200": { "worktree_add": "fail", "state": "completed", "verify": "pass" },
+      "201": { "state": "completed", "verify": "pass" }
+    }
+  },
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worktree_failed",
+    "approved": true,
+    "mutated": true,
+    "attempts_used": 1,
+    "eligible": [201, 200],
+    "unresolved": [200],
+    "attempts_count": 1,
+    "worktree_add_calls": 1,
+    "send_calls": 0,
+    "merge_calls": 0,
+    "next_actions_min": 1,
+    "completion_passed": true
+  }
+}

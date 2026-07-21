@@ -83,6 +83,36 @@ function markerPath(issue) {
   return dir ? join(dir, `responded-${issue}`) : null;
 }
 
+// The UAT fix loop calls `commandmate uat` once per issue per attempt, all from a
+// single uat.mjs process but as separate fake subprocesses. A per-issue counter
+// on disk lets a scenario make an issue fail the first N assessments and pass the
+// (N+1)-th — the fail -> fix -> pass path — or fail forever (the blocked path).
+function uatCountPath(issue) {
+  const dir = process.env.CMATE_FAKE_STATE;
+  return dir ? join(dir, `uat-count-${issue}`) : null;
+}
+function bumpUatCount(issue) {
+  const path = uatCountPath(issue);
+  if (!path) return 1;
+  let count = 0;
+  try {
+    if (existsSync(path)) count = Number.parseInt(readFileSync(path, 'utf8'), 10) || 0;
+  } catch {
+    count = 0;
+  }
+  count += 1;
+  try {
+    writeFileSync(path, String(count));
+  } catch {
+    // best effort; a scenario with no state dir simply cannot vary by attempt
+  }
+  return count;
+}
+function uatSpec(spec, issue) {
+  const uat = spec.uat ?? {};
+  return uat[issue] ?? uat[String(issue)] ?? {};
+}
+
 function emit(object) {
   process.stdout.write(`${JSON.stringify(object)}\n`);
   process.exit(0);
@@ -125,12 +155,29 @@ function main() {
     process.exit(0);
   }
   if (sub === 'worktree') {
+    const action = argv[1] ?? '';
+    if (action === 'add') {
+      // `git worktree add <dir> -b <branch> <sha>` from uat.mjs's fix loop.
+      const issue = issueFromBranch(optionValue('-b'));
+      const worker = workerSpec(spec, issue);
+      if (worker.worktree_add === 'fail') fail('fatal: could not create work tree: directory already exists');
+      process.stdout.write(`Preparing worktree (new branch '${optionValue('-b')}')\nHEAD is now at ${(argv[argv.length - 1] || 'deadbeef').slice(0, 8)}\n`);
+      process.exit(0);
+    }
     // `worktree list --porcelain`. Absent from the scenario means "all present":
     // echo the planned targets is impossible here, so emit a generic listing the
     // dispatcher's substring check will accept unless the scenario overrides it.
     const git = spec.git ?? {};
     const lines = (git.worktrees ?? ['<all>']).map((w) => `worktree ${w}`);
     process.stdout.write(`${lines.join('\n')}\n`);
+    process.exit(0);
+  }
+  if (sub === 'merge') {
+    // `git merge --no-ff --no-edit <branch>` from uat.mjs's re-merge of a fix.
+    const issue = issueFromBranch(argv[argv.length - 1]);
+    const worker = workerSpec(spec, issue);
+    if (worker.remerge === 'conflict') fail('CONFLICT (content): Merge conflict in some/file.ts\nAutomatic merge failed; fix conflicts and then commit the result.');
+    process.stdout.write(`Merge made by the 'ort' strategy.\n`);
     process.exit(0);
   }
   if (sub === 'push') {
@@ -228,6 +275,26 @@ function main() {
       emit({ report_schema_version: worker.verify_version, outcome: worker.verify ?? 'pass', checks: ['baseline'] });
     }
     emit({ report_schema_version: 1, outcome: worker.verify ?? 'pass', checks: ['baseline'] });
+  }
+  if (sub === 'uat') {
+    // `commandmate uat --json --task task-<n>` from uat.mjs. A scenario controls
+    // the acceptance outcome, optionally varying it by attempt via a disk counter.
+    const issue = issueFromTask(optionValue('--task'));
+    const uat = uatSpec(spec, issue);
+    const count = bumpUatCount(issue);
+    let outcome;
+    if (typeof uat === 'string') {
+      outcome = uat === 'pass' ? 'pass' : 'fail';
+    } else if (typeof uat.pass_on === 'number') {
+      // Fail every assessment before the pass_on-th, then pass from it onward.
+      outcome = count >= uat.pass_on ? 'pass' : 'fail';
+    } else if (uat.outcome !== undefined) {
+      outcome = uat.outcome === 'pass' ? 'pass' : 'fail';
+    } else {
+      outcome = 'pass';
+    }
+    const version = uat.report_version !== undefined ? uat.report_version : 1;
+    emit({ report_schema_version: version, outcome, scenarios: uat.scenarios ?? ['acceptance'] });
   }
 
   fail(`fake-cli: unknown subcommand "${sub}"`);

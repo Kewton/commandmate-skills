@@ -1,0 +1,31 @@
+{
+  "description": "Injection: #200 fails UAT, then passes after one fix. --create-uat-fix-worktrees with approval creates a fix worktree, dispatches and re-verifies a fix, re-merges it, re-runs UAT, and succeeds within the attempt cap.",
+  "phase": "fix_uat",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "uat_args": ["--approve", "--max-attempts", "2"],
+  "uat_scenario": {
+    "uat": { "200": { "pass_on": 2 }, "201": "pass" },
+    "workers": {
+      "200": { "state": "completed", "verify": "pass" },
+      "201": { "state": "completed", "verify": "pass" }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "attempts_used": 1,
+    "eligible": [201, 200],
+    "unresolved": [],
+    "attempts_count": 2,
+    "worktree_add_calls": 1,
+    "send_calls": 1,
+    "merge_calls": 1,
+    "completion_passed": true
+  }
+}

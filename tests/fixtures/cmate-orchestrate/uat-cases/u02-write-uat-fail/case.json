@@ -1,0 +1,25 @@
+{
+  "description": "write_uat reports a UAT failure honestly: one eligible issue fails acceptance, so the phase is partial (uat_failed), nothing is mutated, and a next action points at the fix phase.",
+  "phase": "write_uat",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "uat_scenario": {
+    "uat": { "200": "fail", "201": "pass" }
+  },
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "uat_failed",
+    "approved": false,
+    "mutated": false,
+    "attempts_used": 0,
+    "eligible": [201, 200],
+    "unresolved": [200],
+    "attempts_count": 1,
+    "no_mutation": true,
+    "next_actions_min": 1,
+    "completion_passed": true
+  }
+}
