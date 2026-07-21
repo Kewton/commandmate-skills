@@ -1,9 +1,12 @@
 # Agent 差異と fallback
 
-この Skill の計画コアは、特定の Agent の tool 名・命令形式に依存しない。
-plan の生成は同梱の deterministic runner（`scripts/orchestrate.mjs`）が行い、
+この Skill は、特定の Agent の tool 名・命令形式に依存しない。
+plan の生成は同梱の deterministic runner（`scripts/orchestrate.mjs`）が、
+承認済み plan の dispatch・監督は別 runner（`scripts/dispatch.mjs`）が行い、
 Agent は runner を呼び出して結果を解釈するだけである。したがって、
 plan の内容は Agent の種類によらず同じになる（Claude/Codex parity）。
+dispatch は public `commandmate` を driver に取り、その CLI 経路を
+[dispatch-contract.md](./dispatch-contract.md) が定める。
 
 ## 1. 必要な能力
 

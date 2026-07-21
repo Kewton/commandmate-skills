@@ -1,0 +1,17 @@
+{
+  "description": "When a wave-1 worker fails, the barrier holds: the next wave is never dispatched.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "never_sent": [200],
+    "no_respond": true
+  }
+}

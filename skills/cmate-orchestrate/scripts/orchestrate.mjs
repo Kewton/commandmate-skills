@@ -23,7 +23,7 @@ import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.1.0';
+const SKILL_VERSION = '0.2.0';
 const PLAN_SCHEMA_VERSION = 1;
 const RESULT_SCHEMA_VERSION = 1;
 
@@ -1031,7 +1031,7 @@ function buildPlan({ runId, profile, inputs, analyses, edges, waves }) {
     warnings: [],
     notes: [
       'Dry run: no worktree was created, no worker dispatched, no PR opened or merged.',
-      'Mutating phases (dispatch, PR, merge, UAT) are deferred to CommandMate issues #1454-1456.',
+      'This plan is executed by the dispatch runner (scripts/dispatch.mjs) once approved; PR, merge and UAT are deferred to CommandMate issues #1455-1456.',
       'worktree_id is null until `commandmate sync` resolves it at dispatch time (optional per ADR #1447).',
     ],
   };

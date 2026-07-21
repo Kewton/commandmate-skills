@@ -1,7 +1,7 @@
 {
   "plan_schema_version": 1,
   "skill_id": "cmate-orchestrate",
-  "skill_version": "0.1.0",
+  "skill_version": "0.2.0",
   "run_id": "fixture",
   "generated_mode": "dry-run",
   "profile": {
@@ -152,7 +152,7 @@
   "warnings": [],
   "notes": [
     "Dry run: no worktree was created, no worker dispatched, no PR opened or merged.",
-    "Mutating phases (dispatch, PR, merge, UAT) are deferred to CommandMate issues #1454-1456.",
+    "This plan is executed by the dispatch runner (scripts/dispatch.mjs) once approved; PR, merge and UAT are deferred to CommandMate issues #1455-1456.",
     "worktree_id is null until `commandmate sync` resolves it at dispatch time (optional per ADR #1447)."
   ]
 }
