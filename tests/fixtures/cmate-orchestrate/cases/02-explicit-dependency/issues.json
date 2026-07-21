@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 200,
+      "title": "feat: add a session store",
+      "body": "Add the session store in `src/store.ts`.\n\n## Acceptance criteria\n- [ ] `src/store.ts` persists a session\n\n## Dependencies\n- Depends on #201\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 201,
+      "title": "feat: add base configuration loader",
+      "body": "Add the base configuration loader in `src/base.ts`.\n\n## Acceptance criteria\n- [ ] `src/base.ts` reads config from disk\n",
+      "labels": ["feature"]
+    }
+  ]
+}

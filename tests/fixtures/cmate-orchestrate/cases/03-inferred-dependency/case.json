@@ -1,0 +1,13 @@
+{
+  "description": "A consumer of a shared contract inferred-depends on its producer (shared topic: payment).",
+  "args": ["300", "301", "--profile", "node-commandmate", "--max-parallel", "3"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "waves": [[301], [300]],
+    "merge_order": [301, 300],
+    "dependencies": [{ "issue": 300, "depends_on": 301, "kind": "inferred" }],
+    "classifications": { "300": "dependent", "301": "independent" },
+    "risk_level": "moderate"
+  }
+}

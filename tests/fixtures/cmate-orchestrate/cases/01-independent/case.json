@@ -1,0 +1,13 @@
+{
+  "description": "Three issues on distinct files with no dependencies pack into one wave.",
+  "args": ["100", "101", "102", "--profile", "node-commandmate", "--max-parallel", "3"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "waves": [[100, 101, 102]],
+    "merge_order": [100, 101, 102],
+    "dependencies": [],
+    "classifications": { "100": "independent", "101": "independent", "102": "independent" },
+    "risk_level": "low"
+  }
+}

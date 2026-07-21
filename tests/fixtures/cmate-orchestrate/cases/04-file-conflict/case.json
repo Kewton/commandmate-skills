@@ -1,0 +1,13 @@
+{
+  "description": "Two issues touching the same file are never placed in one wave, even with room to spare.",
+  "args": ["400", "401", "--profile", "node-commandmate", "--max-parallel", "3"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "waves": [[400], [401]],
+    "merge_order": [400, 401],
+    "dependencies": [],
+    "classifications": { "400": "conflicting", "401": "conflicting" },
+    "risk_level": "moderate"
+  }
+}

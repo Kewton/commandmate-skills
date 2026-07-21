@@ -1,0 +1,14 @@
+{
+  "description": "An explicit 'Depends on #201' splits the two issues across two waves.",
+  "args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "fixture"],
+  "golden": "expected-plan.json",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "waves": [[201], [200]],
+    "merge_order": [201, 200],
+    "dependencies": [{ "issue": 200, "depends_on": 201, "kind": "explicit" }],
+    "classifications": { "200": "dependent", "201": "independent" },
+    "risk_level": "moderate"
+  }
+}

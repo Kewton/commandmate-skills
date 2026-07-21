@@ -1,0 +1,10 @@
+{
+  "description": "An unverified profile is refused unless the operator confirms with --allow-unverified.",
+  "args": ["700", "--profile-json", "PROFILE:unverified-example.json"],
+  "expect": {
+    "exit": 3,
+    "status": "failure",
+    "error_code": "unverified_profile",
+    "plan_null": true
+  }
+}

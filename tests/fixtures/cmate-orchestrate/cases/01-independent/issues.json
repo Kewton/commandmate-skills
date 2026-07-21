@@ -1,0 +1,22 @@
+{
+  "issues": [
+    {
+      "number": 100,
+      "title": "feat: add a CLI verbosity flag",
+      "body": "Add a verbosity flag to the command line entry point in `src/cli.ts`.\n\n## Acceptance criteria\n- [ ] `src/cli.ts` accepts a --verbose flag\n- [ ] verbosity is threaded into the logger call\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 101,
+      "title": "feat: add a rotating logger",
+      "body": "Add a rotating file logger in `src/logger.ts`.\n\n## Acceptance criteria\n- [ ] `src/logger.ts` rotates at 10MB\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 102,
+      "title": "feat: add an in-memory cache",
+      "body": "Add a small in-memory cache in `src/cache.ts`.\n\n## Acceptance criteria\n- [ ] `src/cache.ts` evicts least-recently-used entries\n",
+      "labels": ["feature"]
+    }
+  ]
+}

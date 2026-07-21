@@ -1,0 +1,8 @@
+{
+  "id": "acme-unverified",
+  "repository": "Acme/widget",
+  "base": "origin/main",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": ["make lint", "make test"]
+}

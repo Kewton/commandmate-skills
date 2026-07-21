@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 800,
+      "title": "feat: component A",
+      "body": "Build component A in `src/a.ts`.\n\n## Acceptance criteria\n- [ ] `src/a.ts` builds\n",
+      "labels": ["feature"]
+    }
+  ]
+}

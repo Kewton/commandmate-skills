@@ -1,0 +1,13 @@
+{
+  "description": "--no-infer suppresses the inferred dependency; the same two issues become independent and share one wave.",
+  "args": ["300", "301", "--profile", "node-commandmate", "--max-parallel", "3", "--no-infer"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "waves": [[300, 301]],
+    "merge_order": [300, 301],
+    "dependencies": [],
+    "classifications": { "300": "independent", "301": "independent" },
+    "risk_level": "low"
+  }
+}

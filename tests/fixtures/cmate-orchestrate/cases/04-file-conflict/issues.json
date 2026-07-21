@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 400,
+      "title": "feat: add a feature flag",
+      "body": "Edit `src/config.ts` to add a feature flag.\n\n## Acceptance criteria\n- [ ] `src/config.ts` exposes the flag\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 401,
+      "title": "feat: add a timeout option",
+      "body": "Edit `src/config.ts` to add a timeout option.\n\n## Acceptance criteria\n- [ ] `src/config.ts` exposes the timeout\n",
+      "labels": ["feature"]
+    }
+  ]
+}

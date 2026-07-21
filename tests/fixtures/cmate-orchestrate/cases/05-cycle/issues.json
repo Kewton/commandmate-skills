@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 500,
+      "title": "feat: component A",
+      "body": "Build component A in `src/a.ts`.\n\n## Dependencies\n- Depends on #501\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 501,
+      "title": "feat: component B",
+      "body": "Build component B in `src/b.ts`.\n\n## Dependencies\n- Depends on #500\n",
+      "labels": ["feature"]
+    }
+  ]
+}

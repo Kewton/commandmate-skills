@@ -1,0 +1,10 @@
+{
+  "description": "A dependency override that names an issue outside the plan is incomplete and is refused.",
+  "args": ["600", "601", "--profile", "node-commandmate", "--depends", "600:999"],
+  "expect": {
+    "exit": 5,
+    "status": "failure",
+    "error_code": "override_incomplete",
+    "plan_null": true
+  }
+}

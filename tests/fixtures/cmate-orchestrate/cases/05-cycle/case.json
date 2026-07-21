@@ -1,0 +1,10 @@
+{
+  "description": "A mutual dependency is a cycle and is refused; no plan is produced.",
+  "args": ["500", "501", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 5,
+    "status": "failure",
+    "error_code": "cycle_detected",
+    "plan_null": true
+  }
+}

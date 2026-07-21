@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 600,
+      "title": "feat: component A",
+      "body": "Build component A in `src/a.ts`.\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 601,
+      "title": "feat: component B",
+      "body": "Build component B in `src/b.ts`.\n",
+      "labels": ["feature"]
+    }
+  ]
+}
