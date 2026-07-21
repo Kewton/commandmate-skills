@@ -1,0 +1,124 @@
+schema_version: 1
+id: cmate-orchestrate
+name: cmate-orchestrate
+version: 0.1.0
+summary: 複数 Issue の並列実行計画を dry-run で立てる。Issue 品質・依存・file conflict を分析し、承認可能な Wave plan を決定的に返す。mutation は行わない。
+description: >-
+  複数 Issue を並列で進める前に、着手可否・依存・衝突を見積もって承認可能な実行計画を
+  作るための標準手順である。この version は計画コア、すなわち dry-run による Wave plan の
+  生成までを実装する。同梱の deterministic runner（Node stdlib のみ）が、各 Issue の
+  objective・受入条件・対象 file・blocking question を分析し、explicit と inferred の依存を
+  区別し、cycle・不完全 override・依存順違反を拒否し、file 衝突のある Issue を同一 Wave に
+  置かない Wave plan と merge 順、risk、要求権限、実行 command を生成する。同じ入力からは
+  同じ plan が出る（Claude/Codex parity）。run artifact は unique run ID 配下に生成し、既存 run を
+  上書きしない。base branch・branch 名・worktree path・baseline は profile から解決し、
+  hardcode しない。worker dispatch・PR 作成・merge・UAT 修正ループは後続 Issue の担当であり
+  行わない。default invocation は dry-run で、run directory 以外の状態を変えない。
+capabilities:
+  - GitHub Issue の objective・受入条件・suspected/reference file・blocking question を分析する
+  - explicit（本文由来）と inferred（推論）の依存を区別して解決する
+  - cycle・不完全 override・依存順違反を安全に検出して拒否する
+  - file 衝突のある Issue を同一 Wave に置かない bounded な Wave plan を生成する
+  - 同一入力から決定的な plan・run_id を返し、既存 run を上書きしない
+  - dry-run で manifest・issue 分析・依存・Wave・risk・権限・実行 command を生成する
+expected_outcomes:
+  - 承認前に、依存と file 衝突を踏まえた並列実行計画が file/Wave 単位で確認できる
+  - 危険な依存グラフ（cycle・不完全 override）が計画段階で止まる
+  - 同じ入力を別 Agent で回しても同じ plan が再現でき、突き合わせられる
+  - 計画結果が schema 適合の構造化データなので、後続 phase へそのまま渡せる
+  - mutation を伴わないので、実行を承認する前に安全に検討できる
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - orchestration
+  - planning
+  - dry-run
+  - dependency
+  - wave
+  - parallel
+  - issue
+compatibility:
+  commandmate: '>=0.11.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Standard SKILL.md discovery from .agents/skills. Plan is produced by a bundled Node runner, so it is Agent-agnostic.
+    - agent: codex
+      support: native
+      evidence: Standard SKILL.md discovery from .agents/skills. Same deterministic runner yields the same plan (parity).
+    - agent: gemini
+      support: unknown
+      evidence: Not verified for this version. Readable as a procedure, discovery and reload unverified.
+    - agent: opencode
+      support: unknown
+      evidence: Not verified for this version. Readable as a procedure, discovery and reload unverified.
+requirements:
+  commands:
+    - name: commandmate
+    - name: git
+    - name: gh
+    - name: node
+      version_range: '>=22.0.0'
+  network_hosts:
+    - api.github.com
+    - github.com
+declared_permissions:
+  - filesystem_read
+  - filesystem_write
+  - process_execution
+  - network_access
+declared_risk: high
+risk_rationale: >-
+  Ships an executable runner, which CommandMate classifies as high risk. In this
+  version the runner only plans: it reads issues (read-only gh, or an offline
+  fixture), writes plan artifacts under a unique run directory, and executes no
+  mutating command. The declared permissions cover the full orchestration the
+  plan describes; worktree creation, dispatch, PR and merge are deferred to later
+  issues and are not performed here. Tokens, secrets and absolute paths are
+  redacted from every artifact.
+files:
+  - path: SKILL.md
+    sha256: 7eefd6407ca9aa0824c732ccd83300d9c12fa0361cba06cc95a36467e401ab94
+    size: 8873
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/agent-compatibility.md
+    sha256: a9499ab1abf76cbba4701eef170d891e7f66e8a02cb39dfd3bf30987f45da4c2
+    size: 2953
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/plan-contract.md
+    sha256: ddd30629aeaf4fa7780114e65cf8b71c5fec4a4badf9605455c06c10cfd18d9e
+    size: 6411
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/profile-contract.md
+    sha256: f43434582d18e3f4a0598a992ba0fb37ba721ea657882dfa01c1ec6bb8f1baec
+    size: 3443
+    kind: instruction
+    executable: false
+    script: false
+  - path: schemas/execution-plan.v1.json
+    sha256: d6c1ece372441ccbe2b7afd7bc09bb6a0293eb31efb20f96b5e49b7bd129e4e1
+    size: 8046
+    kind: asset
+    executable: false
+    script: false
+  - path: schemas/orchestrate-result.v1.json
+    sha256: a3c8d16878560fd529b087f4041463e65537304993079bf1e962ba18ae6d9792
+    size: 3403
+    kind: asset
+    executable: false
+    script: false
+  - path: scripts/orchestrate.mjs
+    sha256: 4dac0501ac7050abc605758272ac39796c547f6c80f8d71050358b512a9b8f41
+    size: 46820
+    kind: script
+    executable: true
+    script: true

@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 700,
+      "title": "feat: component A",
+      "body": "Build component A in `src/a.ts`.\n",
+      "labels": ["feature"]
+    }
+  ]
+}

@@ -1,0 +1,158 @@
+{
+  "plan_schema_version": 1,
+  "skill_id": "cmate-orchestrate",
+  "skill_version": "0.1.0",
+  "run_id": "fixture",
+  "generated_mode": "dry-run",
+  "profile": {
+    "id": "node-commandmate",
+    "repository": "Kewton/CommandMate",
+    "base": "origin/develop",
+    "branch_template": "feature/issue-{number}-{slug}",
+    "worktree_template": "../{repo}-issue-{number}-{slug}",
+    "baseline": [
+      "npm ci",
+      "npm run build",
+      "npm test"
+    ],
+    "verified": true
+  },
+  "inputs": {
+    "issues": [
+      200,
+      201
+    ],
+    "base": "origin/develop",
+    "profile_id": "node-commandmate",
+    "max_parallel": 3,
+    "phase": "plan",
+    "infer": true,
+    "dependency_overrides": [],
+    "order": null
+  },
+  "issues": [
+    {
+      "number": 200,
+      "title": "feat: add a session store",
+      "objective": "Add the session store in `src/store.ts`.",
+      "acceptance_criteria": [
+        "`src/store.ts` persists a session"
+      ],
+      "suspected_files": [
+        "src/store.ts"
+      ],
+      "reference_files": [],
+      "test_expectations": [],
+      "labels": [
+        "feature"
+      ],
+      "branch": "feature/issue-200-feat-add-a-session-store",
+      "worktree": "../CommandMate-issue-200-feat-add-a-session-store",
+      "worktree_id": null,
+      "questions": [],
+      "classification": "dependent"
+    },
+    {
+      "number": 201,
+      "title": "feat: add base configuration loader",
+      "objective": "Add the base configuration loader in `src/base.ts`.",
+      "acceptance_criteria": [
+        "`src/base.ts` reads config from disk"
+      ],
+      "suspected_files": [
+        "src/base.ts"
+      ],
+      "reference_files": [],
+      "test_expectations": [],
+      "labels": [
+        "feature"
+      ],
+      "branch": "feature/issue-201-feat-add-base-configuration-loader",
+      "worktree": "../CommandMate-issue-201-feat-add-base-configuration-loader",
+      "worktree_id": null,
+      "questions": [],
+      "classification": "independent"
+    }
+  ],
+  "dependencies": [
+    {
+      "issue": 200,
+      "depends_on": 201,
+      "kind": "explicit",
+      "reason": "#200 states a dependency on #201"
+    }
+  ],
+  "waves": [
+    [
+      201
+    ],
+    [
+      200
+    ]
+  ],
+  "merge_order": [
+    201,
+    200
+  ],
+  "max_parallel": 3,
+  "risk": {
+    "level": "moderate",
+    "factors": [
+      {
+        "code": "cross_issue_dependency",
+        "severity": "moderate",
+        "detail": "1 dependency edge(s) constrain ordering"
+      }
+    ]
+  },
+  "permissions": [
+    "filesystem_read",
+    "filesystem_write",
+    "process_execution",
+    "network_access"
+  ],
+  "commands": [
+    {
+      "phase": "analyze",
+      "command": "gh issue view 200 --repo Kewton/CommandMate --json number,title,body,labels",
+      "mutating": false,
+      "executed": false
+    },
+    {
+      "phase": "analyze",
+      "command": "gh issue view 201 --repo Kewton/CommandMate --json number,title,body,labels",
+      "mutating": false,
+      "executed": false
+    },
+    {
+      "phase": "analyze",
+      "command": "git rev-parse origin/develop",
+      "mutating": false,
+      "executed": false
+    },
+    {
+      "phase": "verify",
+      "command": "npm ci",
+      "mutating": false,
+      "executed": false
+    },
+    {
+      "phase": "verify",
+      "command": "npm run build",
+      "mutating": false,
+      "executed": false
+    },
+    {
+      "phase": "verify",
+      "command": "npm test",
+      "mutating": false,
+      "executed": false
+    }
+  ],
+  "warnings": [],
+  "notes": [
+    "Dry run: no worktree was created, no worker dispatched, no PR opened or merged.",
+    "Mutating phases (dispatch, PR, merge, UAT) are deferred to CommandMate issues #1454-1456.",
+    "worktree_id is null until `commandmate sync` resolves it at dispatch time (optional per ADR #1447)."
+  ]
+}

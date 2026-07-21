@@ -1,0 +1,12 @@
+{
+  "description": "With --allow-unverified the plan is produced and carries the unverified_profile risk factor (high).",
+  "args": ["800", "--profile-json", "PROFILE:unverified-example.json", "--allow-unverified"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "waves": [[800]],
+    "risk_level": "high",
+    "profile_verified": false,
+    "base": "origin/main"
+  }
+}
