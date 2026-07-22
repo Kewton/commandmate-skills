@@ -12,9 +12,9 @@
 // Node stdlib only. Not part of the release pipeline; run on demand.
 
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -30,6 +30,13 @@ const MERGE_CASES_DIR = join(HERE, 'merge-cases');
 const UAT_CASES_DIR = join(HERE, 'uat-cases');
 const PROFILES_DIR = join(HERE, 'profiles');
 const FAKE_CLI = join(HERE, 'fake-cli.mjs');
+// The dispatch/merge/uat runners execute the profile baseline INSIDE each
+// worktree as the verification/UAT signal (there is no `commandmate verify|uat`).
+// This profile's baseline is `cat cmate-verify-ok`, so a worktree "passes" iff it
+// holds that marker file — which the harness (dispatch worktrees) and the fake CLI
+// (fix worktrees) create for the workers a scenario says should pass.
+const NODE_FAKE_PROFILE = join(PROFILES_DIR, 'node-fake.json');
+const CLI_CONTRACT_PATH = join(HERE, 'commandmate-cli-contract.json');
 
 const planSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'execution-plan.v1.json'), 'utf8'));
 const resultSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'orchestrate-result.v1.json'), 'utf8'));
@@ -52,6 +59,87 @@ const DEFAULT_DISPATCH_SCENARIO = {
 
 let failures = 0;
 const log = (line) => process.stdout.write(`${line}\n`);
+
+// =============================================================================
+// Worktree-based CLI harness (Issue #1467)
+// =============================================================================
+//
+// The real commandmate CLI is worktree-id based and has no verify/uat subcommand.
+// These helpers stand up the world the runners now expect: a resolvable worktree
+// id (fed to the fake `ls --json`), a real worktree directory per issue (the
+// runner cwd's into it to run the profile baseline), and the `cmate-verify-ok`
+// marker that makes that baseline pass. The runner is spawned with cwd set to a
+// throwaway integration directory so the plan's `../repo-issue-…` worktree paths
+// resolve into the temp area rather than next to this repository.
+
+function readPlan(planPath) {
+  return JSON.parse(readFileSync(planPath, 'utf8'));
+}
+
+// Mirror CommandMate's generateWorktreeId(branch, repoName): lowercase, non
+// [a-z0-9-] -> '-', collapse/trim hyphens, joined as `<repo>-<branch>`.
+function sanitizeSlug(value) {
+  return String(value).toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+}
+function worktreeIdFor(repository, branch) {
+  const repo = repository.split('/').pop() ?? repository;
+  return `${sanitizeSlug(repo)}-${sanitizeSlug(branch)}`;
+}
+
+// The `ls --json` rows the runner resolves worktree ids from, one per plan issue.
+function planToWorktrees(plan) {
+  return plan.issues.map((issue) => ({
+    id: worktreeIdFor(plan.profile.repository, issue.branch),
+    name: issue.branch,
+    branch: issue.branch,
+    path: issue.worktree,
+  }));
+}
+
+// Create the integration cwd and one real worktree directory per issue, dropping
+// the verify marker where `markerFor(issueNumber)` is true. Returns the
+// integration directory the runner should be spawned in.
+function setupWorktrees(plan, work, markerFor) {
+  const integration = join(work, 'integration');
+  mkdirSync(integration, { recursive: true });
+  for (const issue of plan.issues) {
+    const dir = join(work, basename(issue.worktree));
+    mkdirSync(dir, { recursive: true });
+    if (markerFor(issue.number)) writeFileSync(join(dir, 'cmate-verify-ok'), 'ok');
+  }
+  return integration;
+}
+
+function workerVerifyPasses(scenario, number) {
+  const workers = scenario.workers ?? {};
+  const spec = workers[number] ?? workers[String(number)] ?? {};
+  return spec.verify === 'pass';
+}
+
+// Run dispatch.mjs against the fake CLI with a fully set-up worktree world.
+// Returns { exit, stdout }; the dispatch-report.json lands in outDir.
+function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, logPath) {
+  const plan = readPlan(planPath);
+  const scenario = { ...scenarioObject, worktrees: planToWorktrees(plan) };
+  const integration = setupWorktrees(plan, work, (n) => workerVerifyPasses(scenario, n));
+  const scenarioPath = join(work, 'dispatch-scenario.json');
+  writeFileSync(scenarioPath, `${JSON.stringify(scenario, null, 2)}\n`);
+  const env = { ...process.env, CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_STATE: work };
+  if (logPath) env.CMATE_FAKE_LOG = logPath;
+  const args = [
+    DISPATCH_RUNNER,
+    '--plan', planPath,
+    '--cli', FAKE_CLI, '--git', FAKE_CLI, '--gh', FAKE_CLI,
+    '--out', outDir,
+    ...extraArgs,
+  ];
+  try {
+    const stdout = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env, cwd: integration });
+    return { exit: 0, stdout };
+  } catch (error) {
+    return { exit: error.status ?? 1, stdout: error.stdout ? error.stdout.toString() : '' };
+  }
+}
 
 // =============================================================================
 // Minimal JSON Schema validator (the subset the two schemas use)
@@ -284,28 +372,18 @@ function runCase(caseId) {
 
 function generatePlan(spec, runsDir) {
   const issuesPath = join(HERE, spec.plan.issues_fixture);
-  const args = [...spec.plan.orchestrate_args, '--issue-json', issuesPath, '--runs-dir', runsDir];
+  // Force the fake profile so the plan's baseline is `cat cmate-verify-ok` — a
+  // real, controllable command the worktree-based verification/UAT runs execute.
+  const raw = spec.plan.orchestrate_args;
+  const args = [];
+  for (let i = 0; i < raw.length; i += 1) {
+    if (raw[i] === '--profile' || raw[i] === '--profile-json') { i += 1; continue; }
+    args.push(raw[i]);
+  }
+  args.push('--profile-json', NODE_FAKE_PROFILE, '--issue-json', issuesPath, '--runs-dir', runsDir);
   runRunner(args); // exit code is irrelevant here; a partial plan is still a plan
   // The run id is pinned to "plan" by every dispatch case's orchestrate_args.
   return join(runsDir, 'plan', 'plan.json');
-}
-
-function runDispatch(planPath, outDir, extraArgs, env) {
-  const args = [
-    DISPATCH_RUNNER,
-    '--plan', planPath,
-    '--cli', FAKE_CLI,
-    '--git', FAKE_CLI,
-    '--gh', FAKE_CLI,
-    '--out', outDir,
-    ...extraArgs,
-  ];
-  try {
-    const stdout = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env });
-    return { exit: 0, stdout };
-  } catch (error) {
-    return { exit: error.status ?? 1, stdout: error.stdout ? error.stdout.toString() : '' };
-  }
 }
 
 function readCliLog(logPath) {
@@ -317,9 +395,8 @@ function sentIssuesFromLog(cliLog) {
   const sent = [];
   for (const entry of cliLog) {
     if (entry.sub !== 'send') continue;
-    const idx = entry.args.indexOf('--prompt-file');
-    const promptFile = idx >= 0 ? entry.args[idx + 1] : '';
-    const match = /issue-(\d+)/.exec(promptFile ?? '');
+    // `send <worktree-id> <message>`: the id (first positional) carries the issue.
+    const match = /issue-(\d+)/.exec(entry.args[0] ?? '');
     if (match) sent.push(Number(match[1]));
   }
   return sent;
@@ -341,14 +418,9 @@ function runDispatchCase(caseId) {
   const work = mkdtempSync(join(tmpdir(), 'cmate-disp-'));
   const outDir = join(work, 'dispatch'); // must not pre-exist; dispatch creates it
   const logPath = join(work, 'cli.log');
-  const env = {
-    ...process.env,
-    CMATE_FAKE_SCENARIO: join(caseDir, spec.scenario),
-    CMATE_FAKE_LOG: logPath,
-    CMATE_FAKE_STATE: work,
-  };
+  const scenarioObject = JSON.parse(readFileSync(join(caseDir, spec.scenario), 'utf8'));
 
-  const { exit, stdout } = runDispatch(planPath, outDir, spec.dispatch_args ?? [], env);
+  const { exit, stdout } = runDispatchRunner(planPath, scenarioObject, work, outDir, spec.dispatch_args ?? [], logPath);
   let report;
   try {
     report = JSON.parse(stdout);
@@ -445,21 +517,9 @@ function writeScenario(dir, name, object) {
 
 function generateDispatchReport(planPath, scenarioObject, work) {
   const outDir = join(work, 'dispatch');
-  const scenarioPath = writeScenario(work, 'dispatch-scenario.json', scenarioObject);
-  const env = { ...process.env, CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_STATE: work };
-  const args = [
-    DISPATCH_RUNNER,
-    '--plan', planPath,
-    '--cli', FAKE_CLI, '--git', FAKE_CLI, '--gh', FAKE_CLI,
-    '--out', outDir,
-    '--expect-branch', 'feature/integration',
-  ];
-  try {
-    execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env });
-  } catch {
-    // A partial dispatch (e.g. an injected verification failure) still writes a
-    // report; the merge runner reads whatever eligible set it produced.
-  }
+  // A partial dispatch (e.g. an injected verification failure) still writes a
+  // report; the caller reads whatever eligible set it produced.
+  runDispatchRunner(planPath, scenarioObject, work, outDir, ['--expect-branch', 'feature/integration'], null);
   return join(outDir, 'dispatch-report.json');
 }
 
@@ -571,7 +631,12 @@ function runMergeCase(caseId) {
 // invocation log — that a preview never creates a worktree, dispatches a fix or
 // re-merges, and that the fix loop stopped at the cap rather than running forever.
 
-function runUatRunner(planPath, dispatchPath, outDir, phaseFlag, extraArgs, env) {
+function uatSpecPasses(scenario, number) {
+  const uat = scenario.uat ?? {};
+  return (uat[number] ?? uat[String(number)]) === 'pass';
+}
+
+function runUatRunner(planPath, dispatchPath, outDir, phaseFlag, extraArgs, env, cwd) {
   const args = [
     UAT_RUNNER,
     '--plan', planPath,
@@ -582,7 +647,7 @@ function runUatRunner(planPath, dispatchPath, outDir, phaseFlag, extraArgs, env)
     ...extraArgs,
   ];
   try {
-    const stdout = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env });
+    const stdout = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env, cwd });
     return { exit: 0, stdout };
   } catch (error) {
     return { exit: error.status ?? 1, stdout: error.stdout ? error.stdout.toString() : '' };
@@ -598,19 +663,26 @@ function runUatCase(caseId) {
   const runsDir = mkdtempSync(join(tmpdir(), 'cmate-uat-plan-'));
   const planPath = generatePlan(spec, runsDir);
   if (!check(existsSync(planPath), `plan.json was not generated at ${planPath}`)) return;
+  const plan = readPlan(planPath);
 
-  const work = mkdtempSync(join(tmpdir(), 'cmate-uat-'));
-  const dispatchPath = generateDispatchReport(planPath, spec.dispatch_scenario ?? DEFAULT_DISPATCH_SCENARIO, work);
+  // The dispatch report (which issues are eligible) and the UAT run use SEPARATE
+  // worktree worlds: dispatch marks verify-passed worktrees for eligibility, while
+  // the UAT run marks worktrees per the uat scenario — so an eligible issue can
+  // still fail UAT (the two gates are distinct).
+  const workDispatch = mkdtempSync(join(tmpdir(), 'cmate-uat-disp-'));
+  const dispatchPath = generateDispatchReport(planPath, spec.dispatch_scenario ?? DEFAULT_DISPATCH_SCENARIO, workDispatch);
   if (!check(existsSync(dispatchPath), `dispatch-report.json was not generated at ${dispatchPath}`)) return;
 
-  const uatOut = join(work, 'uat'); // must not pre-exist; uat.mjs creates it
-  const logPath = join(work, 'uat-cli.log');
-  const stateDir = mkdtempSync(join(tmpdir(), 'cmate-uat-state-'));
-  const scenarioPath = writeScenario(work, 'uat-scenario.json', spec.uat_scenario ?? {});
-  const env = { ...process.env, CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath, CMATE_FAKE_STATE: stateDir };
+  const workUat = mkdtempSync(join(tmpdir(), 'cmate-uat-'));
+  const uatScenario = spec.uat_scenario ?? {};
+  const integration = setupWorktrees(plan, workUat, (n) => uatSpecPasses(uatScenario, n));
+  const uatOut = join(workUat, 'uat'); // must not pre-exist; uat.mjs creates it
+  const logPath = join(workUat, 'uat-cli.log');
+  const scenarioPath = writeScenario(workUat, 'uat-scenario.json', { ...uatScenario, worktrees: planToWorktrees(plan) });
+  const env = { ...process.env, CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath, CMATE_FAKE_STATE: workUat };
 
   const phaseFlag = spec.phase === 'fix_uat' ? '--create-uat-fix-worktrees' : '--write-uat';
-  const { exit, stdout } = runUatRunner(planPath, dispatchPath, uatOut, phaseFlag, spec.uat_args ?? [], env);
+  const { exit, stdout } = runUatRunner(planPath, dispatchPath, uatOut, phaseFlag, spec.uat_args ?? [], env, integration);
 
   let report;
   try {
@@ -651,7 +723,9 @@ function runUatCase(caseId) {
   const worktreeAddCalls = countCalls(cliLog, 'worktree', 'add');
   const sendCalls = countCalls(cliLog, 'send');
   const mergeCalls = countCalls(cliLog, 'merge');
-  const uatCalls = countCalls(cliLog, 'uat');
+  // UAT acceptance is a profile-baseline run in the worktree (not a commandmate
+  // call), so it is counted from the report's per-issue assessments.
+  const uatCalls = report.attempts.reduce((sum, a) => sum + a.uat_results.length, 0);
 
   if (expect.worktree_add_calls !== undefined) check(worktreeAddCalls === expect.worktree_add_calls, `worktree add called ${worktreeAddCalls} time(s) !== ${expect.worktree_add_calls}`);
   if (expect.send_calls !== undefined) check(sendCalls === expect.send_calls, `send called ${sendCalls} time(s) !== ${expect.send_calls}`);
@@ -674,7 +748,7 @@ function runUatCase(caseId) {
       check(deepEqual(indices, indices.map((_, i) => i)), `attempt indices ${JSON.stringify(indices)} are not a 0..n append sequence`);
     }
     // The output directory must refuse to be overwritten on a second run.
-    const second = runUatRunner(planPath, dispatchPath, uatOut, phaseFlag, spec.uat_args ?? [], env);
+    const second = runUatRunner(planPath, dispatchPath, uatOut, phaseFlag, spec.uat_args ?? [], env, integration);
     let secondReport;
     try {
       secondReport = JSON.parse(second.stdout);
@@ -683,6 +757,102 @@ function runUatCase(caseId) {
       check(false, 'second uat run did not emit a JSON failure envelope');
     }
   }
+}
+
+// =============================================================================
+// Contract parity: the runners only ever call the real commandmate CLI surface
+// =============================================================================
+//
+// This is the #1467 regression guard. The runners used to shell out to a task
+// based CLI (`send --json --worktree --prompt-file`, `wait --task`, `verify`,
+// `uat`) that the real `commandmate` does not have, so they failed on first
+// contact. Here we (B) drive a real dispatch run and assert every commandmate
+// call the runner makes is within commandmate-cli-contract.json (subcommand and
+// flags), and (C) — when a real `commandmate` is on PATH — assert that contract
+// is itself a subset of the live `--help`. The fake CLI additionally rejects any
+// off-contract flag at call time, so every fixture case is a parity check too.
+
+const COMMANDMATE_SUBS = ['ls', 'send', 'wait', 'capture', 'respond'];
+
+function resolveRealCli() {
+  const bin = process.env.CMATE_REAL_CLI || 'commandmate';
+  try {
+    execFileSync(bin, ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    return bin;
+  } catch (error) {
+    // ENOENT => not installed (skip live check); any other error => it exists.
+    return error.code === 'ENOENT' ? null : bin;
+  }
+}
+
+function liveContractCheck(contract) {
+  const bin = resolveRealCli();
+  if (!bin) {
+    log('    (no real commandmate on PATH; skipping live --help parity)');
+    return;
+  }
+  for (const [sub, spec] of Object.entries(contract.subcommands)) {
+    let help = '';
+    try {
+      help = execFileSync(bin, [sub, '--help'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (error) {
+      help = error.stdout ? error.stdout.toString() : '';
+    }
+    if (!check(help.length > 0, `real commandmate ${sub} --help produced no output (subcommand missing?)`)) continue;
+    for (const flag of spec.flags) {
+      check(help.includes(flag), `real commandmate ${sub} --help does not list ${flag} — the contract drifted from the CLI`);
+    }
+  }
+}
+
+function parityTest() {
+  log('  contract parity (commandmate CLI surface)');
+  const contract = JSON.parse(readFileSync(CLI_CONTRACT_PATH, 'utf8'));
+  const subs = contract.subcommands ?? {};
+  check(COMMANDMATE_SUBS.every((s) => subs[s]), 'the CLI contract is missing a commandmate subcommand the runners use');
+
+  // (B) Runner ⊆ contract. An --auto-yes prompt run exercises the full surface:
+  // ls (resolve id) -> send -> wait (prompt) -> capture -> respond -> wait.
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-parity-plan-'));
+  const spec = { plan: { issues_fixture: 'cases/02-explicit-dependency/issues.json', orchestrate_args: ['200', '201', '--max-parallel', '3', '--run-id', 'plan'] } };
+  const planPath = generatePlan(spec, runsDir);
+  if (!check(existsSync(planPath), 'parity: plan.json was not generated')) return;
+
+  const work = mkdtempSync(join(tmpdir(), 'cmate-parity-'));
+  const outDir = join(work, 'dispatch');
+  const logPath = join(work, 'cli.log');
+  const scenario = {
+    cli_available: true,
+    git: { branch: 'feature/integration', dirty: false },
+    gh: { repo_access: true },
+    workers: {
+      201: { state: 'prompt', prompt: 'Proceed? [y/N]', verify: 'pass' },
+      200: { state: 'completed', verify: 'pass' },
+    },
+  };
+  runDispatchRunner(planPath, scenario, work, outDir, ['--auto-yes'], logPath);
+
+  const calls = readCliLog(logPath).filter((entry) => COMMANDMATE_SUBS.includes(entry.sub));
+  const used = new Set(calls.map((entry) => entry.sub));
+  for (const sub of COMMANDMATE_SUBS) {
+    check(used.has(sub), `the runner never exercised commandmate ${sub}, so its parity is untested`);
+  }
+  let violations = 0;
+  for (const entry of calls) {
+    const allowed = new Set(subs[entry.sub]?.flags ?? []);
+    for (const token of entry.args) {
+      if (typeof token !== 'string' || !token.startsWith('--')) continue;
+      const flag = token.split('=')[0];
+      if (!allowed.has(flag)) {
+        violations += 1;
+        check(false, `runner called commandmate ${entry.sub} with ${flag}, outside the CLI contract`);
+      }
+    }
+  }
+  check(violations === 0, `runner made ${violations} commandmate call(s) outside the CLI contract`);
+
+  // (C) Contract ⊆ real CLI, when a real binary is available.
+  liveContractCheck(contract);
 }
 
 // =============================================================================
@@ -724,12 +894,15 @@ function main() {
     : [];
   for (const caseId of uatIds) runUatCase(caseId);
 
+  log('  -- contract parity --');
+  parityTest();
+
   log('');
   if (failures > 0) {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, contract parity`);
 }
 
 main();

@@ -7,10 +7,10 @@
   },
   "uat_args": ["--approve", "--max-attempts", "2"],
   "uat_scenario": {
-    "uat": { "200": "fail", "201": "pass" },
+    "uat": { "200": { "fix_on": 1 }, "201": "pass" },
     "workers": {
-      "200": { "state": "completed", "verify": "pass", "remerge": "conflict" },
-      "201": { "state": "completed", "verify": "pass" }
+      "200": { "state": "completed", "remerge": "conflict" },
+      "201": { "state": "completed" }
     }
   },
   "expect": {

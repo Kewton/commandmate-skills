@@ -6,16 +6,20 @@
 // runner (scripts/orchestrate.mjs) and drives it, wave by wave, against the
 // public `commandmate` CLI:
 //
-//   - it builds a self-contained, generic worker prompt from the plan (it does
-//     not depend on a repository-local worker Skill) and dispatches it with
-//     `commandmate send`;
-//   - it supervises each worker with `commandmate wait` / `capture`, and when a
-//     worker raises a prompt it STOPS and presents it to a human — it never
-//     auto-answers (Auto Yes is off by default);
+//   - it resolves each issue's CommandMate worktree id (`commandmate ls --json`,
+//     matched on the plan's branch) and dispatches a self-contained, generic
+//     worker prompt to it with `commandmate send <worktree-id> <message>` (the
+//     public CLI is worktree-id based; there is no task id, --worktree or
+//     --prompt-file);
+//   - it supervises each worker with a single blocking `commandmate wait
+//     <worktree-id>` whose EXIT CODE is the state (0 completed, 10 prompt, 124
+//     timeout), and on a prompt it STOPS and presents it (via `commandmate
+//     capture --json`) to a human — it never auto-answers (Auto Yes is off by
+//     default);
 //   - it enforces a wave barrier: the next wave dispatches only when every
-//     worker of the previous wave completed AND a versioned verification report
-//     passed for each of them. Worker completion and verification success are
-//     kept strictly separate;
+//     worker of the previous wave completed AND its profile baseline, re-run
+//     inside the worktree, passed (there is no `commandmate verify`). Worker
+//     completion and verification success are kept strictly separate;
 //   - it honors max_parallel (1-3): a wave is never wider than the bound;
 //   - before every mutating wave it re-checks post-plan drift
 //     (branch / HEAD / worktree / permission) and refuses to dispatch on drift.
@@ -32,20 +36,28 @@ import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.4.0';
+const SKILL_VERSION = '0.5.0';
 const DISPATCH_SCHEMA_VERSION = 1;
 const SUPPORTED_PLAN_SCHEMA_VERSION = 1;
 
-// The verification report version this runner understands. A worker that
-// reports a different version is treated as an unverified worker, never as a
-// pass — an unknown verification shape must never open the next-wave gate.
-const SUPPORTED_VERIFICATION_REPORT_VERSION = 1;
-
 const MAX_PARALLEL_MAX = 3;
 
-// How many times a single worker is polled with `commandmate wait` before it is
-// declared timed out. Each poll passes --timeout to the CLI, so the real bound
-// is per-poll-timeout * poll-limit. Kept finite so the loop always terminates.
+// A CommandMate worktree id (mirrors the CLI's isValidWorktreeId): an
+// alphanumeric-led token of [A-Za-z0-9_-], at most 200 chars. The runner refuses
+// to hand anything else to `commandmate send/wait/capture`.
+const WORKTREE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/;
+
+// `commandmate wait` reports the worker's terminal state by EXIT CODE, not by a
+// JSON field: 0 completed, 10 a prompt is awaiting input (prompt JSON on stdout),
+// 124 the --timeout elapsed. Any other non-zero exit is an infrastructure failure.
+const WAIT_EXIT_COMPLETED = 0;
+const WAIT_EXIT_PROMPT = 10;
+const WAIT_EXIT_TIMEOUT = 124;
+
+// The per-worker `commandmate wait` timeout. `wait` blocks internally until a
+// terminal state or this timeout, so the runner calls it once per worker rather
+// than polling. --poll-limit is retained for input compatibility but no longer
+// drives a polling loop (there is none to bound).
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 300;
 const DEFAULT_POLL_LIMIT = 120;
 
@@ -132,8 +144,8 @@ Options:
                          prompt otherwise halts the loop for a human.
   --expect-branch <name> Integration branch the plan was approved from; a
                          mismatch at dispatch time is treated as drift.
-  --wait-timeout <sec>   Per-poll timeout passed to commandmate wait (default ${DEFAULT_WAIT_TIMEOUT_SECONDS}).
-  --poll-limit <n>       Max wait polls per worker before timeout (default ${DEFAULT_POLL_LIMIT}).
+  --wait-timeout <sec>   --timeout passed to commandmate wait (default ${DEFAULT_WAIT_TIMEOUT_SECONDS}).
+  --poll-limit <n>       Retained for compatibility; wait now blocks (default ${DEFAULT_POLL_LIMIT}).
   --help                 Show this help.
 
 The dispatch runner mutates: it sends work to real workers. It refuses to
@@ -410,64 +422,83 @@ function buildWorkerPrompt(plan, issue) {
 // Supervision primitives
 // =============================================================================
 
-function dispatchWorker(inputs, worktreeTarget, promptFile) {
-  const result = runCli(inputs.cli, ['send', '--json', '--worktree', worktreeTarget, '--prompt-file', promptFile]);
-  const payload = parseCliJson(result);
-  if (!payload || typeof payload.task_id !== 'string' || payload.task_id.length === 0) {
-    return { taskId: null, error: excerpt(result.stderr || result.stdout || 'send returned no task id') };
+// Resolve the CommandMate worktree id an issue's work lives in, at dispatch time.
+// The public CLI is worktree-id based (`send <id> …`); the id is the one
+// CommandMate assigned, a `<repo>-<branch>` slug we cannot reconstruct reliably.
+// A plan may already carry a resolved `worktree_id`; otherwise we ask the live
+// CLI (`ls --json`) which worktree currently holds the issue's branch. There is
+// no `commandmate sync` — `ls` is the source of truth for the id.
+function resolveWorktreeId(inputs, issue) {
+  if (typeof issue.worktree_id === 'string' && WORKTREE_ID_RE.test(issue.worktree_id)) {
+    return { id: issue.worktree_id, note: '' };
   }
-  return { taskId: payload.task_id, error: null };
+  const branch = typeof issue.branch === 'string' ? issue.branch : null;
+  if (!branch) return { id: null, note: 'issue has no branch to resolve a worktree from' };
+  const result = runCli(inputs.cli, ['ls', '--json']);
+  const rows = parseCliJson(result);
+  if (!Array.isArray(rows)) {
+    return { id: null, note: excerpt(result.stderr || result.stdout || 'ls returned no worktree list') };
+  }
+  const match = rows.find((row) => row && (row.branch === branch || row.name === branch));
+  const id = match && typeof match.id === 'string' && WORKTREE_ID_RE.test(match.id) ? match.id : null;
+  return { id, note: id ? '' : `no registered worktree matches branch ${redact(branch)}` };
 }
 
-// Poll `commandmate wait` until the worker reaches a terminal state (completed /
-// failed) or raises a prompt, or the poll budget is exhausted (timeout). A
-// prompt is returned as its own state — it is never answered here.
-function superviseWorker(inputs, taskId) {
-  for (let poll = 0; poll < inputs.pollLimit; poll += 1) {
-    const result = runCli(inputs.cli, ['wait', '--json', '--task', taskId, '--timeout', String(inputs.waitTimeout)]);
-    const payload = parseCliJson(result);
-    if (!payload || typeof payload.state !== 'string') {
-      return { state: 'failed', note: excerpt(result.stderr || result.stdout || 'wait returned no state') };
-    }
-    const state = payload.state;
-    if (state === 'completed') return { state: 'completed', note: '' };
-    if (state === 'failed') return { state: 'failed', note: excerpt(payload.detail ?? 'worker reported failure') };
-    if (state === 'prompt') return { state: 'prompt', note: '' };
-    // Any other value (e.g. "running") means keep waiting.
+// `commandmate send <worktree-id> <message>` — positional, no task id returned.
+// The worker prompt is the message (also written to <out>/prompts/ as an artifact).
+function dispatchWorker(inputs, worktreeId, message) {
+  const result = runCli(inputs.cli, ['send', worktreeId, message]);
+  if (!result.ok) {
+    return { ok: false, error: excerpt(result.stderr || result.stdout || 'send failed') };
   }
-  return { state: 'timeout', note: `no terminal state after ${inputs.pollLimit} poll(s)` };
+  return { ok: true, error: null };
 }
 
-function capturePrompt(inputs, taskId) {
-  const result = runCli(inputs.cli, ['capture', '--json', '--task', taskId]);
+// Supervise one worker with a single blocking `commandmate wait`: it returns when
+// the worker completes, raises a prompt, or the --timeout elapses. The state is
+// the process EXIT CODE, not a JSON field. A prompt is its own state and is never
+// answered here.
+function superviseWorker(inputs, worktreeId) {
+  const result = runCli(inputs.cli, ['wait', worktreeId, '--timeout', String(inputs.waitTimeout)]);
+  if (result.ok) return { state: 'completed', note: '' };
+  if (result.status === WAIT_EXIT_PROMPT) return { state: 'prompt', note: '' };
+  if (result.status === WAIT_EXIT_TIMEOUT) return { state: 'timeout', note: `wait timed out after ${inputs.waitTimeout}s` };
+  return { state: 'failed', note: excerpt(result.stderr || result.stdout || `wait exited ${result.status ?? 'with an error'}`) };
+}
+
+function capturePrompt(inputs, worktreeId) {
+  const result = runCli(inputs.cli, ['capture', worktreeId, '--json']);
   const payload = parseCliJson(result);
-  const raw = payload?.prompt ?? payload?.excerpt ?? result.stdout ?? '';
+  const raw = payload?.promptData?.question ?? payload?.content ?? result.stdout ?? '';
   return excerpt(raw) ?? 'a prompt is awaiting input';
 }
 
-// A versioned verification report. Worker completion got us here; this is the
-// second, independent gate. An unknown report version or a missing outcome is
-// treated as "not a pass" — never optimistically opened.
-function verifyWorker(inputs, worktreeTarget, taskId) {
-  const result = runCli(inputs.cli, ['verify', '--json', '--worktree', worktreeTarget, '--task', taskId]);
-  const payload = parseCliJson(result);
-  if (!payload) {
-    return { ran: true, report_schema_version: null, outcome: 'fail', checks: [], note: excerpt(result.stderr || 'verify returned no report') };
+// The independent verification gate. Worker completion got us here; this re-runs
+// the profile baseline INSIDE the worktree (there is no `commandmate verify`) and
+// passes only when every baseline command exits zero. A missing worktree or any
+// non-zero step is a fail — never optimistically opened.
+function verifyWorker(inputs, worktreePath, baseline) {
+  if (!Array.isArray(baseline) || baseline.length === 0) {
+    return { ran: true, outcome: 'fail', checks: [], note: 'profile has no baseline to verify against' };
   }
-  const version = Number.isInteger(payload.report_schema_version) ? payload.report_schema_version : null;
-  if (version !== SUPPORTED_VERIFICATION_REPORT_VERSION) {
-    return { ran: true, report_schema_version: version, outcome: 'fail', checks: [], note: `unsupported verification report version ${version}` };
+  const checks = [];
+  for (const command of baseline) {
+    const argv = String(command).trim().split(/\s+/).filter(Boolean);
+    if (argv.length === 0) continue;
+    checks.push(redact(String(command)));
+    const res = runCli(argv[0], argv.slice(1), { cwd: worktreePath });
+    if (!res.ok) {
+      return { ran: true, outcome: 'fail', checks, note: excerpt(res.stderr || res.stdout || `baseline step failed: ${command}`) };
+    }
   }
-  const outcome = payload.outcome === 'pass' ? 'pass' : 'fail';
-  const checks = Array.isArray(payload.checks) ? payload.checks.map((c) => redact(String(c))) : [];
-  return { ran: true, report_schema_version: version, outcome, checks, note: '' };
+  return { ran: true, outcome: 'pass', checks, note: '' };
 }
 
-function respondWorker(inputs, taskId) {
+function respondWorker(inputs, worktreeId) {
   // Only ever reached when --auto-yes is explicitly set. A generic affirmative;
   // the default path never calls this, which is what keeps prompt handling
   // human-in-the-loop.
-  const result = runCli(inputs.cli, ['respond', '--json', '--task', taskId, '--input', 'yes']);
+  const result = runCli(inputs.cli, ['respond', worktreeId, 'yes']);
   return result.ok;
 }
 
@@ -520,10 +551,9 @@ function runDispatch(inputs, plan, outDir) {
 
   for (let waveIndex = 0; waveIndex < plan.waves.length && !stopped; waveIndex += 1) {
     const waveIssues = plan.waves[waveIndex];
-    const worktreeTargets = waveIssues.map((number) => {
-      const issue = issueOf(plan, number);
-      return issue.worktree_id ?? issue.worktree ?? '';
-    });
+    // The drift `worktrees_present` probe is path-based: it looks the planned
+    // worktree directories up in `git worktree list`.
+    const worktreeTargets = waveIssues.map((number) => issueOf(plan, number).worktree ?? '');
 
     // 1. Drift re-check before this (mutating) wave.
     const checks = driftChecks(inputs, plan, waveIndex, worktreeTargets);
@@ -556,45 +586,57 @@ function runDispatch(inputs, plan, outDir) {
     const workers = [];
     for (const number of toDispatch) {
       const issue = issueOf(plan, number);
-      const rawTarget = issue.worktree_id ?? issue.worktree ?? '';
-      const target = safeWorktreeTarget(rawTarget);
+      const worktreePath = safeWorktreeTarget(issue.worktree ?? '');
       const worker = {
         issue: number,
+        // The worker is tracked by its worktree id (there is no task id in the
+        // public CLI); this field carries that id, or null when it did not run.
         task_id: null,
         worker_state: 'not_dispatched',
         verification: { ran: false, report_schema_version: null, outcome: 'not_run', checks: [] },
         prompt: { detected: false, excerpt: null },
         note: '',
       };
-      if (target === null) {
+      if (worktreePath === null) {
         worker.note = redact(`refused unsafe worktree target for #${number}`);
         report.limitations.push({ code: 'unsafe_worktree_target', detail: `#${number}: worktree target rejected by path-escape guard` });
         workers.push(worker);
         continue;
       }
 
-      const promptFile = join(promptsDir, `issue-${number}.md`);
-      writeFileSync(promptFile, `${buildWorkerPrompt(plan, issue)}\n`, 'utf8');
+      // Resolve the CommandMate worktree id the CLI needs (there is no task id).
+      const resolved = resolveWorktreeId(inputs, issue);
+      if (resolved.id === null) {
+        worker.worker_state = 'failed';
+        worker.note = redact(`worktree unresolved: ${resolved.note}`);
+        workers.push(worker);
+        continue;
+      }
+      const worktreeId = resolved.id;
+      worker.task_id = worktreeId;
 
-      const sent = dispatchWorker(inputs, target, promptFile);
-      if (sent.taskId === null) {
+      const promptFile = join(promptsDir, `issue-${number}.md`);
+      const prompt = buildWorkerPrompt(plan, issue);
+      writeFileSync(promptFile, `${prompt}\n`, 'utf8');
+
+      const sent = dispatchWorker(inputs, worktreeId, prompt);
+      if (!sent.ok) {
         worker.worker_state = 'failed';
         worker.note = redact(`dispatch failed: ${sent.error}`);
         workers.push(worker);
         continue;
       }
-      worker.task_id = sent.taskId;
 
-      const supervised = superviseWorker(inputs, sent.taskId);
+      const supervised = superviseWorker(inputs, worktreeId);
       worker.worker_state = supervised.state;
       worker.note = redact(supervised.note);
       if (supervised.state === 'prompt') {
-        worker.prompt = { detected: true, excerpt: capturePrompt(inputs, sent.taskId) };
+        worker.prompt = { detected: true, excerpt: capturePrompt(inputs, worktreeId) };
         if (inputs.autoYes) {
           autoResponded = true;
-          respondWorker(inputs, sent.taskId);
+          respondWorker(inputs, worktreeId);
           worker.note = 'auto-yes responded; re-supervising';
-          const again = superviseWorker(inputs, sent.taskId);
+          const again = superviseWorker(inputs, worktreeId);
           worker.worker_state = again.state;
         }
       }
@@ -605,16 +647,16 @@ function runDispatch(inputs, plan, outDir) {
     const allCompleted = workers.length > 0 && workers.every((worker) => worker.worker_state === 'completed');
 
     // 5. Verification gate — only completed workers are verified, and every one
-    //    must produce a passing versioned report. Worker completion alone does
-    //    not open this gate.
+    //    must pass its profile baseline (re-run inside the worktree). Worker
+    //    completion alone does not open this gate.
     let allVerified = allCompleted;
     if (allCompleted) {
       for (const worker of workers) {
-        const target = safeWorktreeTarget(issueOf(plan, worker.issue).worktree_id ?? issueOf(plan, worker.issue).worktree ?? '');
-        const verification = verifyWorker(inputs, target, worker.task_id);
+        const worktreePath = safeWorktreeTarget(issueOf(plan, worker.issue).worktree ?? '');
+        const verification = verifyWorker(inputs, worktreePath, plan.profile.baseline);
         worker.verification = {
           ran: verification.ran,
-          report_schema_version: verification.report_schema_version,
+          report_schema_version: null,
           outcome: verification.outcome,
           checks: verification.checks,
         };

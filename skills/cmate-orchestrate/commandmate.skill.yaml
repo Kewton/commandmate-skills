@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-orchestrate
 name: cmate-orchestrate
-version: 0.4.1
+version: 0.5.0
 summary: 複数 Issue の並列実行を dry-run で計画し、承認後に public commandmate で Wave barrier・verification gate 付きに dispatch、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT を実行し不合格なら回数上限つき修正ループを回し上限到達時は blocked で停止する。
 description: >-
   複数 Issue を並列で進めるための、計画（dry-run）・その承認後の監督付き実行・verification pass 後の
@@ -11,9 +11,10 @@ description: >-
   違反を拒否し、file 衝突のある Issue を同一 Wave に置かない Wave plan と merge 順、risk、要求権限、実行
   command を生成する。同じ入力からは同じ plan が出る（Claude/Codex parity）。run artifact は unique run
   ID 配下に生成し、既存 run を上書きしない。承認後は同梱の dispatch runner が、その plan を入力に取り、
-  public commandmate で self-contained な generic worker を dispatch し、mutation 前に drift（branch/
-  HEAD/worktree/permission）を再確認し、前 Wave の全 worker 完了と versioned verification report の
-  pass を次 Wave dispatch の条件にする。worker completion と verification success は別々に判定し、prompt
+  public commandmate（worktree-id ベースの send/wait/capture）で self-contained な generic worker を
+  dispatch し、mutation 前に drift（branch/HEAD/permission）を再確認し、前 Wave の全 worker 完了と、
+  worktree 内で profile baseline を再実行した pass を次 Wave dispatch の条件にする。worker completion と
+  verification success は別々に判定し、prompt
   検出時は自動応答せず停止して human へ提示する（Auto Yes は既定 off）。納品は同梱の merge runner が、
   dispatch report で verification pass した Issue だけを対象に、CommandAgent の explicit phase flag 設計
   （--create-prs / --merge-prs）を踏襲して 1 invocation で 1 mutating phase だけを有効化し、明示承認
@@ -100,8 +101,8 @@ risk_rationale: >-
   are redacted.
 files:
   - path: SKILL.md
-    sha256: ac76ebcc00fe694fd10da499ba5a1bc4c63673649702945bada30d1b993db1c3
-    size: 26603
+    sha256: 9ebadfd31ff6c37c5d6e98ada1ddb5958d4e5bfbae5dda37239250a8df439675
+    size: 27575
     kind: skill_md
     executable: false
     script: false
@@ -112,8 +113,8 @@ files:
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: b08cc9082b4525038070ab4addc1f183910dc2875cf821a06ba05b8d7796170d
-    size: 7919
+    sha256: de69f57100ec01ce281c97ef3c368ae25fd766d70838a00b380e251c84e01587
+    size: 8893
     kind: instruction
     executable: false
     script: false
@@ -136,8 +137,8 @@ files:
     executable: false
     script: false
   - path: references/uat-contract.md
-    sha256: 1fc385cd222fa5277eb5d41996264f137ca571b236d151bda7c928c8f40cb312
-    size: 10693
+    sha256: 822b281be020ac993b82984009ff2e113d44246ddbf23c9654d841686ec369b6
+    size: 11135
     kind: instruction
     executable: false
     script: false
@@ -172,26 +173,26 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: f62f9060a6f5f5fc0d9692f9dd371906ed511aeb7bb8682eaa9f400bb17e486d
-    size: 37472
+    sha256: 1cc6b5edc85b0194638e728c9f74e3cdc7f2b33c95e62af71664e52ec0c0b505
+    size: 39580
     kind: script
     executable: true
     script: true
   - path: scripts/merge.mjs
-    sha256: 3f1815b95d530c7044a28c59a5099a12adc228eef2e25d8194b3630ce322c7ce
+    sha256: 55ed87fb74ea236fd4f2133d82991e28009d31ac705071f98d45a94fff1438a9
     size: 36851
     kind: script
     executable: true
     script: true
   - path: scripts/orchestrate.mjs
-    sha256: 06dfb6bafd5b8058c99ba1bedd1a587c0e28cbca57e7241e05f56fcdb221d35e
+    sha256: db4e021da025a5b2ad061478b09e8fda7220761175754260234ceaa5c9f10aef
     size: 46878
     kind: script
     executable: true
     script: true
   - path: scripts/uat.mjs
-    sha256: 0afde9d7173cca0a349572d8663ea8328a757778e574642ea70d3936b12a2830
-    size: 45890
+    sha256: 16bba45c52692643fd808ba396fa6e0f56f2f0e2897b187713dbe11ed0f88884
+    size: 47732
     kind: script
     executable: true
     script: true
