@@ -9,8 +9,8 @@
   "uat_scenario": {
     "uat": { "200": "fail", "201": "pass" },
     "workers": {
-      "200": { "state": "completed", "verify": "pass" },
-      "201": { "state": "completed", "verify": "pass" }
+      "200": { "state": "completed" },
+      "201": { "state": "completed" }
     }
   },
   "expect": {
@@ -25,7 +25,7 @@
     "attempts_count": 3,
     "worktree_add_calls": 2,
     "send_calls": 2,
-    "merge_calls": 2,
+    "merge_calls": 0,
     "next_actions_min": 1,
     "completion_passed": true
   }

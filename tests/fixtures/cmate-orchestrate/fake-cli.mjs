@@ -1,14 +1,30 @@
 #!/usr/bin/env node
-// Fake CommandMate/git/gh CLI for the cmate-orchestrate dispatch and merge tests.
+// Fake CommandMate/git/gh CLI for the cmate-orchestrate dispatch/merge/uat tests.
 //
-// dispatch.mjs shells out to `commandmate` (send/wait/capture/respond/verify),
-// `git` (drift checks) and `gh` (repo access) via injectable --cli/--git/--gh.
-// merge.mjs shells out to `git` (push) and `gh` (pr create/view/checks/merge)
-// via injectable --git/--gh. Pointing all of them at this one script lets the
-// fixtures drive the whole supervision and delivery loop deterministically and
-// inject failures — without a real repository, a real worker, or the network.
+// The runners shell out to `commandmate` (ls/send/wait/capture/respond), `git`
+// (drift checks, fix worktrees, re-merge) and `gh` (repo access, PR lifecycle)
+// via injectable --cli/--git/--gh. Pointing all of them at this one script lets
+// the fixtures drive the whole supervision/delivery/UAT loop deterministically
+// and inject failures — without a real repository, a real worker, or the network.
 // Subcommand names are disjoint across the tools, so a single dispatcher on argv
 // is unambiguous.
+//
+// Contract parity (Issue #1467): every `commandmate` invocation is validated
+// against commandmate-cli-contract.json (the real CLI surface transcribed from
+// `commandmate <cmd> --help`). A subcommand or flag the real CLI does not accept
+// makes the fake exit non-zero — so a runner that reaches for a fictional flag
+// fails the suite here, not only in production. The real CLI is worktree-id based:
+// `send <worktree-id> <message>`, `wait <worktree-ids...>`, `capture <worktree-id>
+// --json`, `respond <worktree-id> <answer>`, `ls --json`. There is no `--json
+// --worktree --prompt-file` on send, no `--task` anywhere, and no `verify`/`uat`
+// subcommand. `wait` signals state by EXIT CODE (0 completed, 10 prompt, 124
+// timeout), printing prompt JSON to stdout on a prompt.
+//
+// Verification/UAT is NOT a commandmate call in the real CLI: the runners run the
+// profile baseline inside the worktree. The tests model that with the node-fake
+// profile whose baseline is `cat cmate-verify-ok`, so a worktree "passes" iff it
+// contains that marker file. This fake writes the marker into a fix worktree it
+// creates when the scenario says that fix should succeed.
 //
 // A PR number in this fake is always equal to its issue number, so that
 // `pr view` (keyed by branch) and `pr checks`/`pr merge` (keyed by number) can
@@ -21,11 +37,26 @@
 //
 // Node stdlib only. Not part of the release pipeline; used only by run_tests.mjs.
 
-import { readFileSync, appendFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, appendFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { join, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const HERE = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 const sub = argv[0] ?? '';
+
+// The marker file the node-fake profile's baseline (`cat cmate-verify-ok`) reads.
+// Present in a worktree => that worktree's baseline passes.
+const VERIFY_MARKER = 'cmate-verify-ok';
+
+// commandmate subcommands this fake emulates. Only these are contract-checked.
+const COMMANDMATE_SUBS = new Set(['ls', 'send', 'wait', 'capture', 'respond']);
+
+// wait exit codes (mirror the real CLI's WaitExitCode).
+const WAIT_COMPLETED = 0;
+const WAIT_PROMPT = 10;
+const WAIT_TIMEOUT = 124;
+const WAIT_FAILED = 1;
 
 function scenario() {
   const path = process.env.CMATE_FAKE_SCENARIO;
@@ -52,19 +83,46 @@ function optionValue(name) {
   return index >= 0 && index + 1 < argv.length ? argv[index + 1] : null;
 }
 
-// Workers are keyed by issue number. The task id encodes the issue so that the
-// stateless per-process fake can look a worker's behavior back up on wait/verify.
-function issueFromPromptFile(value) {
-  const match = /issue-(\d+)/.exec(value ?? '');
-  return match ? match[1] : null;
+// Contract parity: reject any commandmate flag the real CLI does not accept.
+function enforceContract() {
+  if (!COMMANDMATE_SUBS.has(sub)) return;
+  let contract;
+  try {
+    contract = JSON.parse(readFileSync(join(HERE, 'commandmate-cli-contract.json'), 'utf8'));
+  } catch {
+    return; // no contract on disk => skip enforcement rather than mis-fail
+  }
+  const spec = contract.subcommands?.[sub];
+  if (!spec) {
+    process.stderr.write(`fake-cli: contract violation: commandmate has no subcommand "${sub}"\n`);
+    process.exit(2);
+  }
+  const allowed = new Set(spec.flags ?? []);
+  for (const token of argv.slice(1)) {
+    if (typeof token !== 'string' || !token.startsWith('--')) continue;
+    const flag = token.split('=')[0];
+    if (!allowed.has(flag)) {
+      process.stderr.write(`fake-cli: contract violation: commandmate ${sub} does not accept ${flag}\n`);
+      process.exit(2);
+    }
+  }
 }
-function issueFromTask(value) {
-  const match = /task-(\d+)/.exec(value ?? '');
+
+// Workers are keyed by issue number. Every worktree id the runner uses carries
+// the issue in its slug (…issue-<n>…), so a stateless per-process fake can look a
+// worker's behavior back up from the id it was handed.
+function issueFromId(value) {
+  const match = /issue-(\d+)/.exec(value ?? '');
   return match ? match[1] : null;
 }
 function issueFromBranch(value) {
   const match = /issue-(\d+)/.exec(value ?? '');
   return match ? match[1] : null;
+}
+// Fix worktrees/branches are suffixed `-uat-fix-<attempt>`; recover the attempt.
+function attemptFromBranch(value) {
+  const match = /-uat-fix-(\d+)/.exec(value ?? '');
+  return match ? Number(match[1]) : null;
 }
 function workerSpec(spec, issue) {
   const workers = spec.workers ?? {};
@@ -74,62 +132,49 @@ function prSpec(spec, issue) {
   const prs = spec.prs ?? {};
   return prs[issue] ?? prs[String(issue)] ?? {};
 }
+function uatSpec(spec, issue) {
+  const uat = spec.uat ?? {};
+  return uat[issue] ?? uat[String(issue)] ?? undefined;
+}
+
+// Should a fix worktree for `issue` created at `attempt` pass its baseline?
+// "pass" => always; {fix_on:N} => from the N-th attempt onward; anything else
+// (including "fail") => never. Mirrors the harness's dispatch-worktree logic.
+function fixWorktreePasses(spec, issue, attempt) {
+  const u = uatSpec(spec, issue);
+  if (u === 'pass') return true;
+  if (u && typeof u === 'object' && typeof u.fix_on === 'number') {
+    return attempt !== null && attempt >= u.fix_on;
+  }
+  return false;
+}
 
 // The fake is stateless across processes, so an auto-yes flow (respond, then
 // wait again expecting completion) needs a marker on disk. CMATE_FAKE_STATE
 // names a directory the harness gives each case.
-function markerPath(issue) {
+function respondedMarkerPath(issue) {
   const dir = process.env.CMATE_FAKE_STATE;
   return dir ? join(dir, `responded-${issue}`) : null;
-}
-
-// The UAT fix loop calls `commandmate uat` once per issue per attempt, all from a
-// single uat.mjs process but as separate fake subprocesses. A per-issue counter
-// on disk lets a scenario make an issue fail the first N assessments and pass the
-// (N+1)-th — the fail -> fix -> pass path — or fail forever (the blocked path).
-function uatCountPath(issue) {
-  const dir = process.env.CMATE_FAKE_STATE;
-  return dir ? join(dir, `uat-count-${issue}`) : null;
-}
-function bumpUatCount(issue) {
-  const path = uatCountPath(issue);
-  if (!path) return 1;
-  let count = 0;
-  try {
-    if (existsSync(path)) count = Number.parseInt(readFileSync(path, 'utf8'), 10) || 0;
-  } catch {
-    count = 0;
-  }
-  count += 1;
-  try {
-    writeFileSync(path, String(count));
-  } catch {
-    // best effort; a scenario with no state dir simply cannot vary by attempt
-  }
-  return count;
-}
-function uatSpec(spec, issue) {
-  const uat = spec.uat ?? {};
-  return uat[issue] ?? uat[String(issue)] ?? {};
 }
 
 function emit(object) {
   process.stdout.write(`${JSON.stringify(object)}\n`);
   process.exit(0);
 }
-function fail(message) {
+function fail(message, code = 1) {
   process.stderr.write(`${message}\n`);
-  process.exit(1);
+  process.exit(code);
 }
 
 function main() {
   logInvocation();
+  enforceContract();
   const spec = scenario();
 
   // --- commandmate availability probe -------------------------------------
   if (sub === '--version') {
     if (spec.cli_available === false) fail('commandmate: not available');
-    process.stdout.write(`${spec.cli_version ?? 'commandmate 0.11.0'}\n`);
+    process.stdout.write(`${spec.cli_version ?? 'commandmate 0.12.0'}\n`);
     process.exit(0);
   }
 
@@ -157,18 +202,31 @@ function main() {
   if (sub === 'worktree') {
     const action = argv[1] ?? '';
     if (action === 'add') {
-      // `git worktree add <dir> -b <branch> <sha>` from uat.mjs's fix loop.
-      const issue = issueFromBranch(optionValue('-b'));
+      // `git worktree add <dir> -b <branch> <sha>` from uat.mjs's fix loop. On
+      // success create the real directory so the runner's baseline can cwd into
+      // it, and drop the verify marker iff the scenario says this fix succeeds.
+      const dir = argv[2];
+      const branch = optionValue('-b');
+      const issue = issueFromBranch(branch);
       const worker = workerSpec(spec, issue);
       if (worker.worktree_add === 'fail') fail('fatal: could not create work tree: directory already exists');
-      process.stdout.write(`Preparing worktree (new branch '${optionValue('-b')}')\nHEAD is now at ${(argv[argv.length - 1] || 'deadbeef').slice(0, 8)}\n`);
+      const absDir = resolve(process.cwd(), dir ?? '.');
+      try {
+        mkdirSync(absDir, { recursive: true });
+        if (fixWorktreePasses(spec, issue, attemptFromBranch(branch))) {
+          writeFileSync(join(absDir, VERIFY_MARKER), 'ok');
+        }
+      } catch {
+        // best effort; a spawn into a missing dir will surface as a baseline fail
+      }
+      process.stdout.write(`Preparing worktree (new branch '${branch}')\nHEAD is now at ${(argv[argv.length - 1] || 'deadbeef').slice(0, 8)}\n`);
       process.exit(0);
     }
-    // `worktree list --porcelain`. Absent from the scenario means "all present":
-    // echo the planned targets is impossible here, so emit a generic listing the
-    // dispatcher's substring check will accept unless the scenario overrides it.
+    // `worktree list --porcelain`. Echo the planned worktree paths (injected by
+    // the harness) so the dispatch `worktrees_present` probe can see them.
     const git = spec.git ?? {};
-    const lines = (git.worktrees ?? ['<all>']).map((w) => `worktree ${w}`);
+    const paths = git.worktrees ?? (spec.worktrees ?? []).map((w) => w.path).filter(Boolean);
+    const lines = (paths.length ? paths : ['<all>']).map((w) => `worktree ${w}`);
     process.stdout.write(`${lines.join('\n')}\n`);
     process.exit(0);
   }
@@ -233,32 +291,69 @@ function main() {
     fail(`fake-cli: unknown pr action "${action}"`);
   }
 
-  // --- commandmate worker lifecycle ---------------------------------------
+  // --- commandmate worktree/worker lifecycle ------------------------------
+  if (sub === 'ls') {
+    // `commandmate ls --json` — the dispatch-time worktree-id resolver. Returns
+    // the worktrees the harness injected from the plan's branches.
+    if (argv.includes('--json')) {
+      const rows = spec.worktrees ?? [];
+      process.stdout.write(`${JSON.stringify(rows)}\n`);
+      process.exit(0);
+    }
+    const rows = spec.worktrees ?? [];
+    process.stdout.write(`${rows.map((w) => w.id).join('\n')}\n`);
+    process.exit(0);
+  }
   if (sub === 'send') {
-    const issue = issueFromPromptFile(optionValue('--prompt-file'));
-    if (!issue) fail('send: could not determine issue');
+    // `commandmate send <worktree-id> <message>` — positional, no task id back.
+    const worktreeId = argv[1];
+    const issue = issueFromId(worktreeId);
+    if (!issue) fail('send: could not determine worktree');
     const worker = workerSpec(spec, issue);
     if (worker.send === 'fail') fail('send: worker dispatch refused');
-    emit({ task_id: `task-${issue}`, state: 'running' });
+    process.stderr.write('Message sent.\n');
+    process.exit(0);
   }
   if (sub === 'wait') {
-    const issue = issueFromTask(optionValue('--task'));
+    // `commandmate wait <worktree-id> [--timeout <s>]`. State is the EXIT CODE:
+    // 0 completed, 10 prompt (prompt JSON on stdout), 124 timeout, 1 failed.
+    const worktreeId = argv[1];
+    const issue = issueFromId(worktreeId);
     const worker = workerSpec(spec, issue);
     let state = worker.state ?? 'completed';
     // Once a prompt has been answered (auto-yes), the worker moves on.
-    const marker = markerPath(issue);
+    const marker = respondedMarkerPath(issue);
     if (state === 'prompt' && marker && existsSync(marker)) state = 'completed';
-    emit({ state, detail: worker.detail ?? 'ok' });
+    if (state === 'completed') process.exit(WAIT_COMPLETED);
+    if (state === 'prompt') {
+      process.stdout.write(`${JSON.stringify({ worktreeId, cliToolId: 'claude', type: 'confirm', question: worker.prompt ?? 'Proceed? [y/N]', options: [], status: 'pending' })}\n`);
+      process.exit(WAIT_PROMPT);
+    }
+    if (state === 'timeout') process.exit(WAIT_TIMEOUT);
+    // failed
+    process.stderr.write(`${worker.detail ?? 'worker exited non-zero'}\n`);
+    process.exit(WAIT_FAILED);
   }
   if (sub === 'capture') {
-    const issue = issueFromTask(optionValue('--task'));
+    // `commandmate capture <worktree-id> --json` — CurrentOutputResponse shape.
+    const worktreeId = argv[1];
+    const issue = issueFromId(worktreeId);
     const worker = workerSpec(spec, issue);
-    emit({ prompt: worker.prompt ?? 'Proceed? [y/N]', excerpt: worker.prompt ?? 'Proceed? [y/N]' });
+    const prompt = worker.prompt ?? 'Proceed? [y/N]';
+    emit({
+      isRunning: true,
+      isPromptWaiting: true,
+      content: prompt,
+      promptData: { type: 'confirm', question: prompt, options: [], status: 'pending' },
+      sessionStatus: 'waiting',
+    });
   }
   if (sub === 'respond') {
-    // Reaching here at all is the thing the default path must never do.
-    const issue = issueFromTask(optionValue('--task'));
-    const marker = markerPath(issue);
+    // `commandmate respond <worktree-id> <answer>`. Reaching here at all is the
+    // thing the default (no --auto-yes) path must never do.
+    const worktreeId = argv[1];
+    const issue = issueFromId(worktreeId);
+    const marker = respondedMarkerPath(issue);
     if (marker) {
       try {
         writeFileSync(marker, 'responded');
@@ -266,35 +361,8 @@ function main() {
         // best effort; the wait fallback simply won't advance
       }
     }
-    emit({ state: 'running' });
-  }
-  if (sub === 'verify') {
-    const issue = issueFromTask(optionValue('--task'));
-    const worker = workerSpec(spec, issue);
-    if (worker.verify_version !== undefined) {
-      emit({ report_schema_version: worker.verify_version, outcome: worker.verify ?? 'pass', checks: ['baseline'] });
-    }
-    emit({ report_schema_version: 1, outcome: worker.verify ?? 'pass', checks: ['baseline'] });
-  }
-  if (sub === 'uat') {
-    // `commandmate uat --json --task task-<n>` from uat.mjs. A scenario controls
-    // the acceptance outcome, optionally varying it by attempt via a disk counter.
-    const issue = issueFromTask(optionValue('--task'));
-    const uat = uatSpec(spec, issue);
-    const count = bumpUatCount(issue);
-    let outcome;
-    if (typeof uat === 'string') {
-      outcome = uat === 'pass' ? 'pass' : 'fail';
-    } else if (typeof uat.pass_on === 'number') {
-      // Fail every assessment before the pass_on-th, then pass from it onward.
-      outcome = count >= uat.pass_on ? 'pass' : 'fail';
-    } else if (uat.outcome !== undefined) {
-      outcome = uat.outcome === 'pass' ? 'pass' : 'fail';
-    } else {
-      outcome = 'pass';
-    }
-    const version = uat.report_version !== undefined ? uat.report_version : 1;
-    emit({ report_schema_version: version, outcome, scenarios: uat.scenarios ?? ['acceptance'] });
+    process.stderr.write('Responded.\n');
+    process.exit(0);
   }
 
   fail(`fake-cli: unknown subcommand "${sub}"`);

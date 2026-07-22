@@ -1,0 +1,26 @@
+{
+  "description": "The commandmate CLI subcommands and options the cmate-orchestrate runners are allowed to use, transcribed verbatim from `commandmate <cmd> --help` (CommandMate 0.12.0). The fake CLI enforces this surface and the contract-parity test asserts the runners only ever call subcommands/flags listed here — so a runner that reaches for a non-existent flag (the #1467 regression) fails the suite instead of only failing in production. When a real `commandmate` binary is on PATH the parity test additionally checks these flags are a subset of the live `--help`.",
+  "source": "commandmate 0.12.0 --help",
+  "subcommands": {
+    "send": {
+      "positionals": "2",
+      "flags": ["--agent", "--instance", "--register", "--model", "--auto-yes", "--duration", "--stop-pattern", "--token"]
+    },
+    "wait": {
+      "positionals": "1+",
+      "flags": ["--timeout", "--on-prompt", "--stall-timeout", "--instance", "--token"]
+    },
+    "capture": {
+      "positionals": "1",
+      "flags": ["--json", "--agent", "--instance", "--token"]
+    },
+    "respond": {
+      "positionals": "2",
+      "flags": ["--agent", "--instance", "--token"]
+    },
+    "ls": {
+      "positionals": "0",
+      "flags": ["--json", "--quiet", "--branch", "--id", "--token"]
+    }
+  }
+}

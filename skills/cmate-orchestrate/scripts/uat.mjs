@@ -19,6 +19,12 @@
 //                               it, and re-runs UAT — repeating up to a fixed
 //                               attempt cap.
 //
+// Acceptance and re-verification are a profile-baseline run INSIDE the worktree,
+// not a `commandmate uat`/`verify` call (those subcommands do not exist, #1467).
+// The only commandmate calls are `send <worktree-id> <message>` / `wait
+// <worktree-id>` for the fix worker; its worktree id is derived from the fix
+// branch (a freshly-created worktree is not yet in `ls`).
+//
 // Two invariants are non-negotiable:
 //
 //   1. The loop is bounded. It never runs more than --max-attempts fix attempts.
@@ -45,16 +51,19 @@ import { mkdirSync, existsSync, writeFileSync, appendFileSync, readFileSync } fr
 import { join, dirname } from 'node:path';
 
 const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.4.0';
+const SKILL_VERSION = '0.5.0';
 const UAT_SCHEMA_VERSION = 1;
 const SUPPORTED_PLAN_SCHEMA_VERSION = 1;
 const SUPPORTED_DISPATCH_SCHEMA_VERSION = 1;
 
-// The versioned report shapes this runner understands. A UAT or verification
-// report of a different version is treated as a fail, never a pass — an unknown
-// shape must never open the "UAT passed" or the "re-merge" gate.
-const SUPPORTED_UAT_REPORT_VERSION = 1;
-const SUPPORTED_VERIFICATION_REPORT_VERSION = 1;
+// A CommandMate worktree id (mirrors the CLI's isValidWorktreeId).
+const WORKTREE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/;
+
+// `commandmate wait` reports the worker's terminal state by EXIT CODE:
+// 0 completed, 10 a prompt is awaiting input, 124 the --timeout elapsed.
+const WAIT_EXIT_COMPLETED = 0;
+const WAIT_EXIT_PROMPT = 10;
+const WAIT_EXIT_TIMEOUT = 124;
 
 // The bounded fix loop's cap. The default is small on purpose: repair is
 // expensive and an unbounded loop is out of scope (#1456 non-goal). 1..5.
@@ -153,8 +162,8 @@ Options:
   --cli <path>           The commandmate CLI to drive (default "commandmate").
   --git <path>           The git CLI for base/worktree/re-merge (default "git").
   --gh <path>            The gh CLI for the repo-access preflight (default "gh").
-  --wait-timeout <sec>   Per-poll timeout for commandmate wait (default ${DEFAULT_WAIT_TIMEOUT_SECONDS}).
-  --poll-limit <n>       Max wait polls per fix worker (default ${DEFAULT_POLL_LIMIT}).
+  --wait-timeout <sec>   --timeout for the fix worker's commandmate wait (default ${DEFAULT_WAIT_TIMEOUT_SECONDS}).
+  --poll-limit <n>       Retained for compatibility; wait now blocks (default ${DEFAULT_POLL_LIMIT}).
   --help                 Show this help.
 
 The fix loop is always bounded and never rounds a cap-reached stop up to success;
@@ -350,12 +359,13 @@ function safeWorktreeTarget(pathValue) {
 // CLI invocation (mirrors merge.mjs / dispatch.mjs)
 // =============================================================================
 
-function runCli(bin, args) {
+function runCli(bin, args, extra = {}) {
   try {
     const stdout = execFileSync(bin, args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 8 * 1024 * 1024,
+      ...extra,
     });
     return { ok: true, stdout, stderr: '', status: 0 };
   } catch (error) {
@@ -375,6 +385,38 @@ function parseCliJson(result) {
   } catch {
     return null;
   }
+}
+
+// The CommandMate worktree id for a branch, computed the way the CLI does
+// (generateWorktreeId): lowercase, non [a-z0-9-] -> '-', collapse/trim hyphens,
+// joined as `<repo>-<branch>`. Used for a freshly-created fix worktree, which is
+// not yet in `ls`. Returns null when the result is not a valid id.
+function deriveWorktreeId(repository, branch) {
+  const slug = (value) => String(value).toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  const repo = String(repository).split('/').pop() ?? '';
+  const id = `${slug(repo)}-${slug(branch)}`;
+  return WORKTREE_ID_RE.test(id) ? id : null;
+}
+
+// The acceptance/verification signal in the worktree-based model: run the profile
+// baseline INSIDE a worktree (there is no `commandmate uat`/`verify`). Passes only
+// when every baseline command exits zero. A missing worktree or any non-zero step
+// is a fail. Returns { outcome, checks, note } where checks label the steps run.
+function runBaseline(baseline, worktreePath) {
+  if (!Array.isArray(baseline) || baseline.length === 0) {
+    return { outcome: 'fail', checks: [], note: 'profile has no baseline to run' };
+  }
+  const checks = [];
+  for (const command of baseline) {
+    const argv = String(command).trim().split(/\s+/).filter(Boolean);
+    if (argv.length === 0) continue;
+    checks.push(redact(String(command)));
+    const res = runCli(argv[0], argv.slice(1), { cwd: worktreePath });
+    if (!res.ok) {
+      return { outcome: 'fail', checks, note: excerpt(res.stderr || res.stdout || `baseline step failed: ${command}`) };
+    }
+  }
+  return { outcome: 'pass', checks, note: '' };
 }
 
 // =============================================================================
@@ -401,22 +443,21 @@ function preflight(inputs, plan) {
 // UAT assessment (read-only)
 // =============================================================================
 
-// Run the acceptance suite for one issue. The versioned UAT report is the source
-// of truth: an unknown report version or a missing outcome is a fail, never an
-// optimistic pass.
-function runUat(inputs, number) {
-  const result = runCli(inputs.cli, ['uat', '--json', '--task', `task-${number}`]);
-  const payload = parseCliJson(result);
-  if (!payload) {
-    return { issue: number, ran: true, report_schema_version: null, outcome: 'fail', scenarios: [], note: excerpt(result.stderr || 'uat returned no report') };
-  }
-  const version = Number.isInteger(payload.report_schema_version) ? payload.report_schema_version : null;
-  const scenarios = Array.isArray(payload.scenarios) ? payload.scenarios.map((s) => redact(String(s))) : [];
-  if (version !== SUPPORTED_UAT_REPORT_VERSION) {
-    return { issue: number, ran: true, report_schema_version: version, outcome: 'fail', scenarios, note: `unsupported uat report version ${version}` };
-  }
-  const outcome = payload.outcome === 'pass' ? 'pass' : 'fail';
-  return { issue: number, ran: true, report_schema_version: version, outcome, scenarios, note: '' };
+// Run acceptance for one issue by executing the profile baseline inside the
+// worktree that currently holds its work (its dispatch worktree, or — after a
+// fix landed — that fix's worktree). There is no `commandmate uat`; the acceptance
+// signal is a real baseline run. A missing worktree or a non-zero step is a fail,
+// never an optimistic pass.
+function runUat(inputs, plan, number, worktreePath) {
+  const baseline = runBaseline(plan.profile.baseline, worktreePath);
+  return {
+    issue: number,
+    ran: true,
+    report_schema_version: null,
+    outcome: baseline.outcome,
+    scenarios: baseline.checks,
+    note: baseline.note,
+  };
 }
 
 // =============================================================================
@@ -507,7 +548,7 @@ function buildFixPrompt(plan, issue, failingScenarios) {
   ].join('\n');
 }
 
-function dispatchFix(inputs, plan, number, worktreeDir, promptFile) {
+function dispatchFix(inputs, plan, number, fixBranch, worktreeDir, message) {
   const fix = {
     issue: number,
     task_id: null,
@@ -517,55 +558,43 @@ function dispatchFix(inputs, plan, number, worktreeDir, promptFile) {
     note: '',
   };
 
-  const sent = runCli(inputs.cli, ['send', '--json', '--worktree', worktreeDir, '--prompt-file', promptFile]);
-  const sendPayload = parseCliJson(sent);
-  if (!sendPayload || typeof sendPayload.task_id !== 'string' || sendPayload.task_id.length === 0) {
+  // The fix worktree was just created, so it is not yet in `ls`; derive its
+  // CommandMate id from the fix branch (the id the CLI would assign it).
+  const worktreeId = deriveWorktreeId(plan.profile.repository, fixBranch);
+  if (worktreeId === null) {
     fix.worker_state = 'failed';
-    fix.note = redact(`fix dispatch failed: ${excerpt(sent.stderr || sent.stdout || 'send returned no task id')}`);
+    fix.note = 'could not derive a valid worktree id for the fix branch';
+    return fix;
+  }
+  fix.task_id = worktreeId;
+
+  const sent = runCli(inputs.cli, ['send', worktreeId, message]);
+  if (!sent.ok) {
+    fix.worker_state = 'failed';
+    fix.note = redact(`fix dispatch failed: ${excerpt(sent.stderr || sent.stdout || 'send failed')}`);
     return fix;
   }
   fix.dispatched = true;
-  fix.task_id = sendPayload.task_id;
 
-  // Supervise to a terminal state (the fix loop does not auto-answer prompts;
-  // a prompt is a non-completion that stops the loop).
-  let state = 'timeout';
-  let note = `no terminal state after ${inputs.pollLimit} poll(s)`;
-  for (let poll = 0; poll < inputs.pollLimit; poll += 1) {
-    const waited = runCli(inputs.cli, ['wait', '--json', '--task', fix.task_id, '--timeout', String(inputs.waitTimeout)]);
-    const payload = parseCliJson(waited);
-    if (!payload || typeof payload.state !== 'string') {
-      state = 'failed';
-      note = excerpt(waited.stderr || waited.stdout || 'wait returned no state');
-      break;
-    }
-    if (payload.state === 'completed') { state = 'completed'; note = ''; break; }
-    if (payload.state === 'failed') { state = 'failed'; note = excerpt(payload.detail ?? 'fix worker reported failure'); break; }
-    if (payload.state === 'prompt') { state = 'prompt'; note = 'fix worker raised a prompt; the loop does not auto-answer'; break; }
-    // "running" — keep polling.
-  }
+  // Supervise with a single blocking wait (the fix loop does not auto-answer
+  // prompts; a prompt is a non-completion that stops the loop). State is the
+  // process exit code.
+  const waited = runCli(inputs.cli, ['wait', worktreeId, '--timeout', String(inputs.waitTimeout)]);
+  let state;
+  let note;
+  if (waited.ok) { state = 'completed'; note = ''; }
+  else if (waited.status === WAIT_EXIT_PROMPT) { state = 'prompt'; note = 'fix worker raised a prompt; the loop does not auto-answer'; }
+  else if (waited.status === WAIT_EXIT_TIMEOUT) { state = 'timeout'; note = `wait timed out after ${inputs.waitTimeout}s`; }
+  else { state = 'failed'; note = excerpt(waited.stderr || waited.stdout || `wait exited ${waited.status ?? 'with an error'}`); }
   fix.worker_state = state;
   fix.note = redact(note);
   if (state !== 'completed') return fix;
 
-  // Re-verify: worker completion got us here; a passing versioned report is the
-  // separate gate a fix must clear before it may be re-merged.
-  const verified = runCli(inputs.cli, ['verify', '--json', '--worktree', worktreeDir, '--task', fix.task_id]);
-  const vPayload = parseCliJson(verified);
-  if (!vPayload) {
-    fix.verification = { ran: true, report_schema_version: null, outcome: 'fail', checks: [] };
-    fix.note = fix.note ? `${fix.note}; verify returned no report` : 'verify returned no report';
-    return fix;
-  }
-  const vVersion = Number.isInteger(vPayload.report_schema_version) ? vPayload.report_schema_version : null;
-  if (vVersion !== SUPPORTED_VERIFICATION_REPORT_VERSION) {
-    fix.verification = { ran: true, report_schema_version: vVersion, outcome: 'fail', checks: [] };
-    fix.note = fix.note ? `${fix.note}; unsupported verification report version ${vVersion}` : `unsupported verification report version ${vVersion}`;
-    return fix;
-  }
-  const outcome = vPayload.outcome === 'pass' ? 'pass' : 'fail';
-  const checks = Array.isArray(vPayload.checks) ? vPayload.checks.map((c) => redact(String(c))) : [];
-  fix.verification = { ran: true, report_schema_version: vVersion, outcome, checks };
+  // Re-verify: worker completion got us here; the profile baseline re-run inside
+  // the fix worktree is the separate gate it must clear before it may be re-merged.
+  const baseline = runBaseline(plan.profile.baseline, worktreeDir);
+  fix.verification = { ran: true, report_schema_version: null, outcome: baseline.outcome, checks: baseline.checks };
+  if (baseline.note) fix.note = fix.note ? `${fix.note}; ${redact(baseline.note)}` : redact(baseline.note);
   return fix;
 }
 
@@ -668,7 +697,7 @@ function runWriteUat(inputs, plan, eligible, outDir, report) {
   mkdirSync(attemptsRoot, { recursive: true });
   const historyPath = join(attemptsRoot, 'history.jsonl');
 
-  const uatResults = eligible.map((n) => runUat(inputs, n));
+  const uatResults = eligible.map((n) => runUat(inputs, plan, n, issueOf(plan, n).worktree));
   const failing = eligible.filter((n) => uatResults.find((u) => u.issue === n).outcome !== 'pass');
   const attempt = {
     index: 0,
@@ -706,14 +735,19 @@ function runFixLoop(inputs, plan, eligible, outDir, report) {
   let fixCount = 0;
   let iteration = 0;
 
+  // Each issue is assessed in the worktree that currently holds its work: its
+  // dispatch worktree initially, and — once a fix re-verifies and re-merges — that
+  // fix's worktree, so the next assessment reflects the repair.
+  const worktreeOf = new Map(eligible.map((n) => [n, issueOf(plan, n).worktree]));
+
   while (true) {
     const attemptDir = join(attemptsRoot, `attempt-${iteration}`);
     mkdirSync(attemptDir, { recursive: true });
 
-    // 1. Assess: run the read-only UAT for the current target set. UAT is a
-    //    read-only acceptance probe (like the merge runner's CI checks), so it
-    //    runs in a preview too — the difference is that a preview never fixes.
-    const uatResults = target.map((n) => runUat(inputs, n));
+    // 1. Assess: re-run the profile baseline (the acceptance signal) in each
+    //    target's current worktree. Read-only, so it runs in a preview too — the
+    //    difference is that a preview never fixes.
+    const uatResults = target.map((n) => runUat(inputs, plan, n, worktreeOf.get(n)));
     const failing = target.filter((n) => uatResults.find((u) => u.issue === n).outcome !== 'pass');
 
     const attempt = {
@@ -786,27 +820,33 @@ function runFixLoop(inputs, plan, eligible, outDir, report) {
       break;
     }
 
-    // 5b. Dispatch a fix worker per failing issue and re-verify it.
+    // 5b. Dispatch a fix worker per failing issue, then re-verify (baseline in
+    //     the fix worktree). A fix worker that never COMPLETES is a hard stop
+    //     (it broke mid-flight); a worker that completes but whose baseline still
+    //     fails is a failed attempt that the loop retries until the cap.
     for (const number of failing) {
       const wt = attempt.worktrees.find((w) => w.issue === number);
       const issue = issueOf(plan, number);
       const failingScenarios = attempt.uat_results.find((u) => u.issue === number)?.scenarios ?? [];
       const promptFile = join(attemptDir, `fix-issue-${number}.md`);
-      writeFileSync(promptFile, `${buildFixPrompt(plan, issue, failingScenarios)}\n`, 'utf8');
-      const fix = dispatchFix(inputs, plan, number, wt.directory, promptFile);
+      const message = buildFixPrompt(plan, issue, failingScenarios);
+      writeFileSync(promptFile, `${message}\n`, 'utf8');
+      const fix = dispatchFix(inputs, plan, number, wt.branch, wt.directory, message);
       attempt.fixes.push(fix);
     }
-    const brokenFix = attempt.fixes.find((f) => f.worker_state !== 'completed' || f.verification.outcome !== 'pass');
-    if (brokenFix) {
+    const brokenWorker = attempt.fixes.find((f) => f.worker_state !== 'completed');
+    if (brokenWorker) {
       appendAttempt(report, attempt, historyPath);
       report.unresolved_issues = failing.slice();
-      halt(report, 'partial', 'fix_failed', 'fix_failed', `#${brokenFix.issue}: fix worker did not complete-and-verify; stopping before re-merge`);
-      report.next_actions.push({ action: `diagnose the fix worktree for #${brokenFix.issue} and repair manually`, owner: 'operator' });
+      halt(report, 'partial', 'fix_failed', 'fix_failed', `#${brokenWorker.issue}: fix worker did not complete; stopping before re-merge`);
+      report.next_actions.push({ action: `diagnose the fix worktree for #${brokenWorker.issue} and repair manually`, owner: 'operator' });
       break;
     }
 
-    // 5c. Re-merge the re-verified fixes (all failing issues verified here).
-    const remerge = runRemerge(inputs, plan, failing, fixCount);
+    // 5c. Re-merge only the fixes whose baseline re-verified. A fix whose baseline
+    //     still fails did not land: it is not merged, and its issue stays failing.
+    const reverified = attempt.fixes.filter((f) => f.verification.outcome === 'pass').map((f) => f.issue);
+    const remerge = runRemerge(inputs, plan, reverified, fixCount);
     attempt.remerge = remerge;
     if (remerge.outcome === 'conflict') {
       appendAttempt(report, attempt, historyPath);
@@ -816,7 +856,11 @@ function runFixLoop(inputs, plan, eligible, outDir, report) {
       break;
     }
 
-    // 5d. Fix attempt complete; loop to re-run UAT on the (formerly) failing set.
+    // 5d. A re-verified+re-merged issue is now assessed against its fix worktree,
+    //     so the next assessment reflects the repair; the rest retry from theirs.
+    for (const number of reverified) {
+      worktreeOf.set(number, attempt.worktrees.find((w) => w.issue === number).directory);
+    }
     appendAttempt(report, attempt, historyPath);
     target = failing.slice();
     iteration += 1;

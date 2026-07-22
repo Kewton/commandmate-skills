@@ -43,7 +43,7 @@ uat.mjs --plan <plan.json> --dispatch <dispatch-report.json> (--write-uat | --cr
 | `--approve` | 任意 | **off** | fix loop の明示承認。無ければ mutation しない preview |
 | `--max-attempts <1-5>` | 任意 | `2` | fix 試行回数の上限。ループはこれを超えない |
 | `--out <dir>` | 任意 | `<dispatch-dir>/<phase>` | 出力先。既存なら `out_exists` で拒否 |
-| `--cli <path>` | 任意 | `commandmate` | UAT・fix worker dispatch・再検証に使う CLI |
+| `--cli <path>` | 任意 | `commandmate` | preflight と fix worker dispatch（send/wait）に使う CLI |
 | `--git <path>` | 任意 | `git` | base 解決・fix worktree 作成・再merge に使う git |
 | `--gh <path>` | 任意 | `gh` | repo 到達性 preflight に使う gh |
 | `--wait-timeout <sec>` | 任意 | `300` | fix worker の1回あたり wait timeout |
@@ -61,8 +61,8 @@ eligible が空の場合は `no_eligible_issues`（limitation）を載せて no-
 
 ## 4. write_uat（read-only assessment）
 
-各 eligible Issue に `commandmate uat` を実行し、versioned UAT report の outcome を記録する。
-UAT report の version が 1 以外・outcome が `pass` 以外は **pass として扱わない**。
+各 eligible Issue の worktree 内で **profile の `baseline` を実行**して受入を判定する（`commandmate uat`
+は無い。全 baseline command が exit 0 なら `pass`、それ以外は **pass として扱わない**）。
 このphaseは worktree も fix も再merge もしない（mutation なし）。
 
 - 全 eligible が pass → `success`（stop_reason `completed`）。
@@ -72,10 +72,11 @@ UAT report の version が 1 以外・outcome が `pass` 以外は **pass とし
 ## 5. fix_uat（回数上限つき修正ループ）
 
 `target` を eligible として、次を繰り返す。**各反復が1つの attempt** であり、`attempts[]` に **append**
-する（既存 attempt を上書きしない）。
+する（既存 attempt を上書きしない）。各 Issue は「現行 worktree」（初回は dispatch worktree、fix が
+成立した後はその fix worktree）で受入判定する。
 
-1. **assess** — `target` の各 Issue に `commandmate uat` を実行する（read-only）。全 pass ならループを
-   抜けて `success`。
+1. **assess** — `target` の各 Issue の現行 worktree で **baseline を再実行**する（read-only）。全 pass
+   ならループを抜けて `success`。
 2. **preview** — `--approve` が無ければ、不合格集合を報告して停止する（`partial` / `uat_failed`）。
    worktree・fix・再merge は **一切しない**（`mutated` は false のまま）。
 3. **上限判定** — これまでの fix 回数が `--max-attempts` に達していれば、不合格集合を
@@ -83,11 +84,13 @@ UAT report の version が 1 以外・outcome が `pass` 以外は **pass とし
    **成功に丸めない。**
 4. **fix**（承認あり・上限未達のときだけ、mutation）—
    - 不合格 Issue ごとに fix worktree を作る（第6節）。作れなければ `worktree_failed` で停止。
-   - fix worker を `commandmate send` で dispatch し、`wait` で監督し、`verify` で **再検証** する。
-     完了しない・再検証 pass しない worker があれば `fix_failed` で停止（再merge しない）。
-   - 再検証 pass した fix branch を `git merge --no-ff` で **再merge** する。conflict なら
-     `remerge_failed` で停止。
-   - `target` を不合格集合に更新し、次の反復（再UAT）へ進む。
+   - fix worker を `commandmate send <worktree-id> <message>`（worktree-id は fix branch から導出）で
+     dispatch し、`commandmate wait` で監督（exit code）、**fix worktree 内で baseline を再実行して
+     再検証**する。worker が完了しなければ `fix_failed` で停止。
+   - **再検証 pass した fix のみ** `git merge --no-ff` で **再merge** する（再検証不合格は再merge せず、
+     その Issue は次反復で再試行する）。conflict なら `remerge_failed` で停止。
+   - `target` を不合格集合に更新し、再merge した Issue の現行 worktree を fix worktree に切り替えて、
+     次の反復（再UAT）へ進む。
 
 `attempts_used`（fix 回数）は常に `max_attempts` 以下である。ループが無限に回ることは無い。
 
