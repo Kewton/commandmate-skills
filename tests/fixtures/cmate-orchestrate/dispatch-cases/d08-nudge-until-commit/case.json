@@ -1,0 +1,20 @@
+{
+  "description": "A worker that idles after each turn without committing is driven to completion by continuation nudges. #201 commits only on its third turn; the supervisor nudges it twice, detects the new commit, and both waves advance to success. Idle is never mistaken for done (Issue #1468).",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "no_respond": true,
+    "sent": [201, 200],
+    "send_counts": { "201": 3, "200": 1 },
+    "worker_states": { "201": "completed", "200": "completed" }
+  }
+}

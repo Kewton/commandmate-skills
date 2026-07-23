@@ -20,6 +20,20 @@
 // subcommand. `wait` signals state by EXIT CODE (0 completed, 10 prompt, 124
 // timeout), printing prompt JSON to stdout on a prompt.
 //
+// Worker lifecycle (Issue #1468): a real Claude worker runs one TURN per message
+// and then goes idle waiting for input — `wait` returns exit 0 on that idle, which
+// is NOT task completion. The runners' ground truth for completion is a new commit
+// on the worktree branch, so this fake models a worker that idles after every turn
+// and only "commits" once it has been driven `commit_on` turns (default 1: commits
+// on the first turn). Each `send` (the initial dispatch and every supervision
+// nudge) counts as one turn; `git rev-parse HEAD` in a worktree returns a SHA
+// derived from how many commits the worker has produced so far, so the supervisor
+// can tell "committed" from "merely idle" and knows when to nudge, when to stop at
+// the --max-turns cap, and — via `commit_on` far above the cap — never commits.
+// `capture` reports whether the send actually registered (a send can leave the
+// message unsubmitted); `confirm_after: N` withholds the "generating" signal until
+// the N-th send so the send-confirm/re-send path is exercisable.
+//
 // Verification/UAT is NOT a commandmate call in the real CLI: the runners run the
 // profile baseline inside the worktree. The tests model that with the node-fake
 // profile whose baseline is `cat cmate-verify-ok`, so a worktree "passes" iff it
@@ -157,6 +171,58 @@ function respondedMarkerPath(issue) {
   return dir ? join(dir, `responded-${issue}`) : null;
 }
 
+// Per-issue turn counter (Issue #1468). Every `send` — the initial dispatch and
+// every supervision nudge — bumps it; `git rev-parse HEAD` reads it to decide how
+// far the worker has progressed. Stored under CMATE_FAKE_STATE so it survives the
+// stateless per-process fake.
+function sendsCountPath(issue) {
+  const dir = process.env.CMATE_FAKE_STATE;
+  return dir && issue != null ? join(dir, `sends-${issue}`) : null;
+}
+function readSends(issue) {
+  const path = sendsCountPath(issue);
+  if (!path) return 0;
+  try {
+    return Number.parseInt(readFileSync(path, 'utf8'), 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+function bumpSends(issue) {
+  const path = sendsCountPath(issue);
+  if (!path) return;
+  try {
+    writeFileSync(path, String(readSends(issue) + 1));
+  } catch {
+    // best effort; commit progression simply will not advance if we cannot record it
+  }
+}
+
+// The issue an in-worktree git call is about, recovered from the process cwd
+// (…/repo-issue-<n>[-uat-fix-<a>]). The runners cwd into the worktree to run the
+// baseline and to read HEAD, so the fake can look the worker's spec back up.
+function issueFromCwd() {
+  const match = /issue-(\d+)/.exec(process.cwd());
+  return match ? match[1] : null;
+}
+
+// How many commits the worker for `issue` has produced so far: none until it has
+// been driven `commit_on` turns (default 1), then one per further turn. A worker
+// whose `commit_on` sits above the runner's --max-turns cap never commits, which
+// is exactly the "idle forever, never completes" case the supervisor must escape.
+function commitsFor(spec, issue) {
+  const worker = workerSpec(spec, issue);
+  const commitOn = typeof worker.commit_on === 'number' ? worker.commit_on : 1;
+  const sends = readSends(issue);
+  return sends < commitOn ? 0 : sends - commitOn + 1;
+}
+// A 40-hex worktree HEAD that advances by one each time the worker commits; 40
+// zeros before its first commit. Distinct SHAs per commit let the supervisor see
+// progress across attempts, not just "changed vs base".
+function headShaFor(spec, issue) {
+  return String(commitsFor(spec, issue)).padStart(40, '0');
+}
+
 function emit(object) {
   process.stdout.write(`${JSON.stringify(object)}\n`);
   process.exit(0);
@@ -189,6 +255,13 @@ function main() {
     if (argv.includes('--abbrev-ref')) {
       const git = spec.git ?? {};
       process.stdout.write(`${git.branch ?? 'feature/integration'}\n`);
+      process.exit(0);
+    }
+    // `git rev-parse HEAD` inside a worktree — the commit-completion ground truth
+    // (Issue #1468). The SHA only moves once the worker has committed, so the
+    // supervisor can distinguish a real completion from a bare idle.
+    if (argv[1] === 'HEAD') {
+      process.stdout.write(`${headShaFor(spec, issueFromCwd())}\n`);
       process.exit(0);
     }
     process.stdout.write('deadbeef\n');
@@ -311,6 +384,8 @@ function main() {
     if (!issue) fail('send: could not determine worktree');
     const worker = workerSpec(spec, issue);
     if (worker.send === 'fail') fail('send: worker dispatch refused');
+    // A successful send drives the worker one more turn (Issue #1468).
+    bumpSends(issue);
     process.stderr.write('Message sent.\n');
     process.exit(0);
   }
@@ -336,16 +411,36 @@ function main() {
   }
   if (sub === 'capture') {
     // `commandmate capture <worktree-id> --json` — CurrentOutputResponse shape.
+    // Reports the worker's live state so the supervisor can (a) present a pending
+    // prompt and (b) confirm a send actually registered (Issue #1468). A prompt
+    // worker shows a pending prompt until it is answered; otherwise the worker is
+    // "generating" only once it has received `confirm_after` sends (default 1), so
+    // a scenario can withhold that signal to exercise the send-confirm/re-send path.
     const worktreeId = argv[1];
     const issue = issueFromId(worktreeId);
     const worker = workerSpec(spec, issue);
-    const prompt = worker.prompt ?? 'Proceed? [y/N]';
+    const marker = respondedMarkerPath(issue);
+    const responded = Boolean(marker && existsSync(marker));
+    if (worker.state === 'prompt' && !responded) {
+      const prompt = worker.prompt ?? 'Proceed? [y/N]';
+      emit({
+        isRunning: true,
+        isGenerating: false,
+        isPromptWaiting: true,
+        content: prompt,
+        promptData: { type: 'confirm', question: prompt, options: [], status: 'pending' },
+        sessionStatus: 'waiting',
+      });
+    }
+    const confirmAfter = typeof worker.confirm_after === 'number' ? worker.confirm_after : 1;
+    const started = readSends(issue) >= confirmAfter;
     emit({
-      isRunning: true,
-      isPromptWaiting: true,
-      content: prompt,
-      promptData: { type: 'confirm', question: prompt, options: [], status: 'pending' },
-      sessionStatus: 'waiting',
+      isRunning: started,
+      isGenerating: started,
+      isPromptWaiting: false,
+      content: started ? 'working…' : '',
+      promptData: null,
+      sessionStatus: started ? 'working' : 'idle',
     });
   }
   if (sub === 'respond') {

@@ -1,0 +1,20 @@
+{
+  "description": "A send that does not submit (Enter unconfirmed) is detected and re-sent. #201's first send leaves the worker idle (capture shows it never started), so the supervisor re-submits before waiting; the worker then works and commits. The run succeeds; #201 was sent twice (one unconfirmed + one confirmed), #200 once (Issue #1468).",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "no_respond": true,
+    "sent": [201, 200],
+    "send_counts": { "201": 2, "200": 1 },
+    "worker_states": { "201": "completed", "200": "completed" }
+  }
+}

@@ -47,7 +47,8 @@ uat.mjs --plan <plan.json> --dispatch <dispatch-report.json> (--write-uat | --cr
 | `--git <path>` | 任意 | `git` | base 解決・fix worktree 作成・再merge に使う git |
 | `--gh <path>` | 任意 | `gh` | repo 到達性 preflight に使う gh |
 | `--wait-timeout <sec>` | 任意 | `300` | fix worker の1回あたり wait timeout |
-| `--poll-limit <n>` | 任意 | `120` | fix worker ごとの wait poll 上限 |
+| `--max-turns <n>` | 任意 | `8` | fix worker を駆動する最大ターン数（初回 send + nudge）。未 commit のまま到達で当該 fix worker を failed とする |
+| `--poll-limit <n>` | 任意 | `120` | 互換のため保持（wait は block するので poll しない） |
 
 `commandmatedev` は使わない。公式経路は public `commandmate`/`gh`/`git` である。
 
@@ -84,9 +85,14 @@ eligible が空の場合は `no_eligible_issues`（limitation）を載せて no-
    **成功に丸めない。**
 4. **fix**（承認あり・上限未達のときだけ、mutation）—
    - 不合格 Issue ごとに fix worktree を作る（第6節）。作れなければ `worktree_failed` で停止。
-   - fix worker を `commandmate send <worktree-id> <message>`（worktree-id は fix branch から導出）で
-     dispatch し、`commandmate wait` で監督（exit code）、**fix worktree 内で baseline を再実行して
-     再検証**する。worker が完了しなければ `fix_failed` で停止。
+   - fix worker を **dispatch runner と同じ監督ループ**で駆動する（#1468）。worktree-id は fix branch
+     から導出する。fix worktree の開始時 SHA を `git rev-parse HEAD` で記録し、`commandmate send`
+     （送信直後に `capture` で確定を確認し、未確定なら1回だけ再送）→ `commandmate wait` で idle 化を
+     待つ。**wait の exit 0（idle）は完了ではない**。fix worktree のブランチに **新規 commit** が出れば
+     `completed`、未 commit なら **継続 nudge** を送って `wait` へ戻る（fix prompt には「完了時に単一
+     commit」を明記）。prompt を出したら `fix_failed`（fix loop は自動応答しない）、`--max-turns`
+     到達で未 commit なら当該 fix worker を `failed` として `fix_failed` で停止する。完了（commit 検出）
+     した fix worker のみ **fix worktree 内で baseline を再実行して再検証**する。
    - **再検証 pass した fix のみ** `git merge --no-ff` で **再merge** する（再検証不合格は再merge せず、
      その Issue は次反復で再試行する）。conflict なら `remerge_failed` で停止。
    - `target` を不合格集合に更新し、再merge した Issue の現行 worktree を fix worktree に切り替えて、

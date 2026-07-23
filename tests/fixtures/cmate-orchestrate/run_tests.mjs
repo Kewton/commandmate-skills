@@ -459,6 +459,25 @@ function runDispatchCase(caseId) {
   for (const number of expect.never_sent ?? []) check(!sent.includes(number), `#${number} was dispatched but the barrier should have stopped it`);
   for (const number of expect.sent ?? []) check(sent.includes(number), `#${number} should have been dispatched`);
 
+  // Per-issue send count proves the supervision loop: a worker driven to a commit
+  // over N turns is sent N times (initial dispatch + nudges / a re-sent unconfirmed
+  // send), while a one-turn worker is sent exactly once (Issue #1468).
+  if (expect.send_counts) {
+    for (const [num, count] of Object.entries(expect.send_counts)) {
+      const actual = sent.filter((n) => n === Number(num)).length;
+      check(actual === count, `#${num} was sent ${actual} time(s) !== ${count}`);
+    }
+  }
+  // Per-issue worker_state: a worker that never commits within --max-turns is
+  // recorded as failed (an honest non-completion), never as completed.
+  if (expect.worker_states) {
+    for (const [num, state] of Object.entries(expect.worker_states)) {
+      const worker = allWorkers(report).find((w) => w.issue === Number(num));
+      check(worker !== undefined, `#${num} has no worker record`);
+      if (worker) check(worker.worker_state === state, `#${num} worker_state "${worker.worker_state}" !== "${state}"`);
+    }
+  }
+
   if (expect.advanced) {
     report.waves.forEach((wave, index) => {
       if (index < expect.advanced.length) {

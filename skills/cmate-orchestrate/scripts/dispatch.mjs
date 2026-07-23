@@ -11,13 +11,16 @@
 //     worker prompt to it with `commandmate send <worktree-id> <message>` (the
 //     public CLI is worktree-id based; there is no task id, --worktree or
 //     --prompt-file);
-//   - it supervises each worker with a single blocking `commandmate wait
-//     <worktree-id>` whose EXIT CODE is the state (0 completed, 10 prompt, 124
-//     timeout), and on a prompt it STOPS and presents it (via `commandmate
-//     capture --json`) to a human — it never auto-answers (Auto Yes is off by
-//     default);
-//   - it enforces a wave barrier: the next wave dispatches only when every
-//     worker of the previous wave completed AND its profile baseline, re-run
+//   - it supervises each worker as a loop, not a single wait (Issue #1468): a real
+//     worker idles after every turn, so `commandmate wait` returning exit 0 means
+//     "idle", not "done". Completion is a NEW COMMIT on the worktree branch (read
+//     with `git rev-parse HEAD` inside it). While the worker idles without a new
+//     commit the runner nudges it to keep going, bounded by --max-turns; a prompt
+//     (exit 10) STOPS and is presented (via `commandmate capture --json`) to a
+//     human — it never auto-answers unless --auto-yes; hitting the turn cap with no
+//     commit is an honest `failed`, never a false completion;
+//   - it enforces a wave barrier: the next wave dispatches only when every worker
+//     of the previous wave completed (committed) AND its profile baseline, re-run
 //     inside the worktree, passed (there is no `commandmate verify`). Worker
 //     completion and verification success are kept strictly separate;
 //   - it honors max_parallel (1-3): a wave is never wider than the bound;
@@ -36,7 +39,7 @@ import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.5.0';
+const SKILL_VERSION = '0.6.0';
 const DISPATCH_SCHEMA_VERSION = 1;
 const SUPPORTED_PLAN_SCHEMA_VERSION = 1;
 
@@ -48,18 +51,26 @@ const MAX_PARALLEL_MAX = 3;
 const WORKTREE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/;
 
 // `commandmate wait` reports the worker's terminal state by EXIT CODE, not by a
-// JSON field: 0 completed, 10 a prompt is awaiting input (prompt JSON on stdout),
-// 124 the --timeout elapsed. Any other non-zero exit is an infrastructure failure.
-const WAIT_EXIT_COMPLETED = 0;
+// JSON field: 0 the worker went idle (a turn finished), 10 a prompt is awaiting
+// input (prompt JSON on stdout), 124 the --timeout elapsed. Any other non-zero
+// exit is an infrastructure failure. IMPORTANT (Issue #1468): a real Claude worker
+// idles after every TURN, so exit 0 means "idle", not "task done". Completion is
+// detected separately, from a new commit on the worktree branch.
+const WAIT_EXIT_IDLE = 0;
 const WAIT_EXIT_PROMPT = 10;
 const WAIT_EXIT_TIMEOUT = 124;
 
-// The per-worker `commandmate wait` timeout. `wait` blocks internally until a
-// terminal state or this timeout, so the runner calls it once per worker rather
-// than polling. --poll-limit is retained for input compatibility but no longer
-// drives a polling loop (there is none to bound).
+// The per-worker `commandmate wait` timeout. `wait` blocks internally until the
+// worker idles, raises a prompt, or this timeout elapses. --poll-limit is retained
+// for input compatibility but no longer drives a polling loop (there is none).
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 300;
 const DEFAULT_POLL_LIMIT = 120;
+
+// The supervision loop drives each worker turn by turn. Because a worker idles
+// after every turn without necessarily being done, the runner nudges it to keep
+// going until it commits — bounded by this many turns (initial send + nudges).
+// Reaching the cap with no commit is an honest `failed`, never a false completion.
+const DEFAULT_MAX_TURNS = 8;
 
 class SkillError extends Error {
   constructor(code, detail, exitCode) {
@@ -145,11 +156,14 @@ Options:
   --expect-branch <name> Integration branch the plan was approved from; a
                          mismatch at dispatch time is treated as drift.
   --wait-timeout <sec>   --timeout passed to commandmate wait (default ${DEFAULT_WAIT_TIMEOUT_SECONDS}).
+  --max-turns <n>        Max turns to drive each worker (initial send + nudges)
+                         before giving up with no commit (default ${DEFAULT_MAX_TURNS}).
   --poll-limit <n>       Retained for compatibility; wait now blocks (default ${DEFAULT_POLL_LIMIT}).
   --help                 Show this help.
 
-The dispatch runner mutates: it sends work to real workers. It refuses to
-dispatch on post-plan drift and never answers a worker prompt on its own.`;
+The dispatch runner mutates: it sends work to real workers, nudging each until it
+commits its work (a worker idles after every turn, so idle is not "done"). It
+refuses to dispatch on post-plan drift and never answers a worker prompt on its own.`;
 
 function parseCli(argv) {
   let parsed;
@@ -166,6 +180,7 @@ function parseCli(argv) {
         'auto-yes': { type: 'boolean' },
         'expect-branch': { type: 'string' },
         'wait-timeout': { type: 'string' },
+        'max-turns': { type: 'string' },
         'poll-limit': { type: 'string' },
         help: { type: 'boolean' },
       },
@@ -198,6 +213,7 @@ function resolveInputs(parsed) {
     autoYes: Boolean(values['auto-yes']),
     expectBranch: values['expect-branch'] ?? null,
     waitTimeout: positiveInt(values['wait-timeout'], 'wait-timeout', DEFAULT_WAIT_TIMEOUT_SECONDS),
+    maxTurns: positiveInt(values['max-turns'], 'max-turns', DEFAULT_MAX_TURNS),
     pollLimit: positiveInt(values['poll-limit'], 'poll-limit', DEFAULT_POLL_LIMIT),
   };
 }
@@ -413,6 +429,10 @@ function buildWorkerPrompt(plan, issue) {
     '## Rules',
     '- Stay within this issue. Do not modify files another issue in the plan owns.',
     '- Run the verification above and report its real result. Do not report done on a failing baseline.',
+    '- Keep working across turns until the whole task is finished; do not stop half-done.',
+    '- When the work is complete, make a SINGLE commit of this issue\'s changes on the',
+    '  work branch. That commit is the completion signal — the supervisor treats a new',
+    '  commit as "done" and will otherwise nudge you to keep going.',
     '- If a step is destructive, ambiguous, or blocked, STOP and ask. Do not guess.',
     '- Do not print tokens, secrets, or absolute host paths.',
   ].join('\n');
@@ -444,26 +464,105 @@ function resolveWorktreeId(inputs, issue) {
   return { id, note: id ? '' : `no registered worktree matches branch ${redact(branch)}` };
 }
 
-// `commandmate send <worktree-id> <message>` — positional, no task id returned.
-// The worker prompt is the message (also written to <out>/prompts/ as an artifact).
-function dispatchWorker(inputs, worktreeId, message) {
-  const result = runCli(inputs.cli, ['send', worktreeId, message]);
-  if (!result.ok) {
-    return { ok: false, error: excerpt(result.stderr || result.stdout || 'send failed') };
-  }
-  return { ok: true, error: null };
+// The HEAD commit of a worktree, read INSIDE it (there is no commandmate call for
+// this). The supervisor snapshots this before dispatch and compares after each
+// idle: a changed HEAD means the worker committed its work — the real completion
+// signal (Issue #1468). Null when HEAD cannot be read (a broken/absent worktree),
+// which the supervisor treats as "no commit yet", never as done.
+function worktreeHeadSha(inputs, worktreePath) {
+  if (!worktreePath) return null;
+  const result = runCli(inputs.git, ['rev-parse', 'HEAD'], { cwd: worktreePath });
+  if (!result.ok) return null;
+  const sha = result.stdout.trim();
+  return sha.length > 0 ? sha : null;
 }
 
-// Supervise one worker with a single blocking `commandmate wait`: it returns when
-// the worker completes, raises a prompt, or the --timeout elapses. The state is
-// the process EXIT CODE, not a JSON field. A prompt is its own state and is never
-// answered here.
-function superviseWorker(inputs, worktreeId) {
-  const result = runCli(inputs.cli, ['wait', worktreeId, '--timeout', String(inputs.waitTimeout)]);
-  if (result.ok) return { state: 'completed', note: '' };
-  if (result.status === WAIT_EXIT_PROMPT) return { state: 'prompt', note: '' };
-  if (result.status === WAIT_EXIT_TIMEOUT) return { state: 'timeout', note: `wait timed out after ${inputs.waitTimeout}s` };
-  return { state: 'failed', note: excerpt(result.stderr || result.stdout || `wait exited ${result.status ?? 'with an error'}`) };
+// `commandmate send <worktree-id> <message>`, then confirm the worker actually
+// started (Issue #1468). A send can leave the message unsubmitted (Enter not
+// confirmed), which would leave the worker idle so the next `wait` returns
+// "completed" with nothing done. We capture the worker's live state right after
+// sending; if it is neither generating nor holding a prompt, we treat the send as
+// unconfirmed and re-send once to force submission. The commit check below is the
+// real ground truth, so this is a best-effort confirmation, not a guarantee.
+function sendAndConfirm(inputs, worktreeId, message) {
+  const first = runCli(inputs.cli, ['send', worktreeId, message]);
+  if (!first.ok) {
+    return { sent: false, note: excerpt(first.stderr || first.stdout || 'send failed') };
+  }
+  const capture = parseCliJson(runCli(inputs.cli, ['capture', worktreeId, '--json']));
+  const started = capture && (capture.isGenerating === true || capture.isRunning === true || capture.isPromptWaiting === true);
+  if (started) return { sent: true, confirmed: true, note: '' };
+  const again = runCli(inputs.cli, ['send', worktreeId, message]);
+  if (!again.ok) {
+    return { sent: true, confirmed: false, note: 'send may not have submitted and the re-send failed' };
+  }
+  return { sent: true, confirmed: false, note: 're-sent after an unconfirmed first send' };
+}
+
+// The message that nudges an idle-but-uncommitted worker to keep going.
+const NUDGE_MESSAGE = [
+  '続けて作業を進め、この Issue の実装を最後まで完遂してください。',
+  'まだ変更が commit されていません。完了したら work ブランチに単一 commit を作成してください（それが完了の合図です）。',
+].join('\n');
+
+// Supervise one worker to a real completion. A worker idles after every turn, so
+// the loop drives it turn by turn: dispatch, then wait; on idle-with-no-new-commit
+// nudge it and wait again, until it commits (completed), raises a prompt, times
+// out, fails, or the --max-turns cap is reached with no commit (an honest failed).
+// A prompt is answered only under --auto-yes; otherwise it halts for a human.
+function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMessage) {
+  const baseSha = worktreeHeadSha(inputs, worktreePath);
+  let autoResponded = false;
+
+  const sent0 = sendAndConfirm(inputs, worktreeId, initialMessage);
+  if (!sent0.sent) {
+    return { state: 'failed', promptExcerpt: null, nudges: 0, autoResponded, note: `dispatch failed: ${sent0.note}` };
+  }
+  let turns = 1;
+
+  // A hard bound on wait iterations, above the turn cap, so an unexpected
+  // prompt/respond ping-pong under --auto-yes can never spin forever.
+  const hardIterations = inputs.maxTurns * 4 + 8;
+  for (let i = 0; i < hardIterations; i += 1) {
+    const waited = runCli(inputs.cli, ['wait', worktreeId, '--timeout', String(inputs.waitTimeout)]);
+    if (!waited.ok && waited.status === WAIT_EXIT_PROMPT) {
+      const promptExcerpt = capturePrompt(inputs, worktreeId);
+      if (inputs.autoYes) {
+        autoResponded = true;
+        respondWorker(inputs, worktreeId);
+        continue; // answered; wait again within the same turn
+      }
+      return { state: 'prompt', promptExcerpt, nudges: turns - 1, autoResponded, note: '' };
+    }
+    if (!waited.ok && waited.status === WAIT_EXIT_TIMEOUT) {
+      return { state: 'timeout', promptExcerpt: null, nudges: turns - 1, autoResponded, note: `wait timed out after ${inputs.waitTimeout}s` };
+    }
+    if (!waited.ok) {
+      return { state: 'failed', promptExcerpt: null, nudges: turns - 1, autoResponded, note: excerpt(waited.stderr || waited.stdout || `wait exited ${waited.status ?? 'with an error'}`) };
+    }
+
+    // wait returned idle. Real completion is a NEW commit, not the idle itself.
+    const currentSha = worktreeHeadSha(inputs, worktreePath);
+    if (currentSha !== null && currentSha !== baseSha) {
+      const note = turns > 1 ? `completed after ${turns - 1} nudge(s); new commit detected` : 'completed; new commit detected';
+      return { state: 'completed', promptExcerpt: null, nudges: turns - 1, autoResponded, note };
+    }
+    if (turns >= inputs.maxTurns) {
+      return {
+        state: 'failed',
+        promptExcerpt: null,
+        nudges: turns - 1,
+        autoResponded,
+        note: `no new commit after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap`,
+      };
+    }
+    const nudged = sendAndConfirm(inputs, worktreeId, NUDGE_MESSAGE);
+    if (!nudged.sent) {
+      return { state: 'failed', promptExcerpt: null, nudges: turns - 1, autoResponded, note: `nudge failed: ${nudged.note}` };
+    }
+    turns += 1;
+  }
+  return { state: 'failed', promptExcerpt: null, nudges: turns - 1, autoResponded, note: 'supervision exceeded its hard iteration bound' };
 }
 
 function capturePrompt(inputs, worktreeId) {
@@ -619,26 +718,14 @@ function runDispatch(inputs, plan, outDir) {
       const prompt = buildWorkerPrompt(plan, issue);
       writeFileSync(promptFile, `${prompt}\n`, 'utf8');
 
-      const sent = dispatchWorker(inputs, worktreeId, prompt);
-      if (!sent.ok) {
-        worker.worker_state = 'failed';
-        worker.note = redact(`dispatch failed: ${sent.error}`);
-        workers.push(worker);
-        continue;
-      }
-
-      const supervised = superviseWorker(inputs, worktreeId);
+      // Drive the worker turn by turn until it commits (the real completion
+      // signal), raises a prompt, times out, fails, or exhausts --max-turns.
+      const supervised = superviseUntilCommit(inputs, worktreeId, worktreePath, prompt);
       worker.worker_state = supervised.state;
       worker.note = redact(supervised.note);
+      if (supervised.autoResponded) autoResponded = true;
       if (supervised.state === 'prompt') {
-        worker.prompt = { detected: true, excerpt: capturePrompt(inputs, worktreeId) };
-        if (inputs.autoYes) {
-          autoResponded = true;
-          respondWorker(inputs, worktreeId);
-          worker.note = 'auto-yes responded; re-supervising';
-          const again = superviseWorker(inputs, worktreeId);
-          worker.worker_state = again.state;
-        }
+        worker.prompt = { detected: true, excerpt: supervised.promptExcerpt };
       }
       workers.push(worker);
     }
