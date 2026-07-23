@@ -1,0 +1,13 @@
+{
+  "cli_available": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "worktree_paths": {
+    "200": "../CommandMate-issue-200",
+    "201": "../CommandMate-issue-201"
+  },
+  "workers": {
+    "201": { "state": "completed", "verify": "pass" },
+    "200": { "state": "completed", "verify": "pass" }
+  }
+}

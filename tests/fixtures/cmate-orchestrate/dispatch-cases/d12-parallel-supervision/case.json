@@ -1,0 +1,20 @@
+{
+  "description": "Enhancement (#1474): a single wave of two workers with max_parallel 2 is supervised concurrently, not one worker driven fully to completion before the next is dispatched. #100 commits only on its third turn while #101 commits on its first; because both are supervised in parallel, #101's dispatch send lands in the CLI log before #100's final (third) send — a crossover that is impossible under sequential supervision, where all of #100's sends would precede #101's. Both workers complete and the wave advances to success.",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": ["100", "101", "--profile", "node-commandmate", "--max-parallel", "2", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "max_dispatched_per_wave": 2,
+    "no_respond": true,
+    "send_counts": { "100": 3, "101": 1 },
+    "worker_states": { "100": "completed", "101": "completed" },
+    "parallel_send_crossover": { "early": 101, "late": 100 }
+  }
+}

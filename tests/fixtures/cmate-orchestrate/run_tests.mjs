@@ -86,24 +86,36 @@ function worktreeIdFor(repository, branch) {
   return `${sanitizeSlug(repo)}-${sanitizeSlug(branch)}`;
 }
 
+// The registered worktree path for an issue: a per-issue override when the
+// scenario declares one (used to model a worktree registered under a path that
+// differs from the plan's worktree_template — the #1473 asymmetry), otherwise the
+// plan template path. `ls --json` reports this path and the real directory is
+// created here, so a mismatch is exercised end to end.
+function registeredPathFor(issue, pathOverrides) {
+  return pathOverrides[issue.number] ?? pathOverrides[String(issue.number)] ?? issue.worktree;
+}
+
 // The `ls --json` rows the runner resolves worktree ids from, one per plan issue.
-function planToWorktrees(plan) {
+function planToWorktrees(plan, pathOverrides = {}) {
   return plan.issues.map((issue) => ({
     id: worktreeIdFor(plan.profile.repository, issue.branch),
     name: issue.branch,
     branch: issue.branch,
-    path: issue.worktree,
+    path: registeredPathFor(issue, pathOverrides),
   }));
 }
 
 // Create the integration cwd and one real worktree directory per issue, dropping
-// the verify marker where `markerFor(issueNumber)` is true. Returns the
-// integration directory the runner should be spawned in.
-function setupWorktrees(plan, work, markerFor) {
+// the verify marker where `markerFor(issueNumber)` is true. The directory is
+// created at the REGISTERED path (the `ls`-reported path, which may differ from
+// the plan template) so a runner that cwd's into the template path instead finds
+// nothing — the #1473 regression. Returns the integration directory the runner
+// should be spawned in.
+function setupWorktrees(plan, work, markerFor, pathOverrides = {}) {
   const integration = join(work, 'integration');
   mkdirSync(integration, { recursive: true });
   for (const issue of plan.issues) {
-    const dir = join(work, basename(issue.worktree));
+    const dir = join(work, basename(registeredPathFor(issue, pathOverrides)));
     mkdirSync(dir, { recursive: true });
     if (markerFor(issue.number)) writeFileSync(join(dir, 'cmate-verify-ok'), 'ok');
   }
@@ -120,8 +132,9 @@ function workerVerifyPasses(scenario, number) {
 // Returns { exit, stdout }; the dispatch-report.json lands in outDir.
 function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, logPath) {
   const plan = readPlan(planPath);
-  const scenario = { ...scenarioObject, worktrees: planToWorktrees(plan) };
-  const integration = setupWorktrees(plan, work, (n) => workerVerifyPasses(scenario, n));
+  const pathOverrides = scenarioObject.worktree_paths ?? {};
+  const scenario = { ...scenarioObject, worktrees: planToWorktrees(plan, pathOverrides) };
+  const integration = setupWorktrees(plan, work, (n) => workerVerifyPasses(scenario, n), pathOverrides);
   const scenarioPath = join(work, 'dispatch-scenario.json');
   writeFileSync(scenarioPath, `${JSON.stringify(scenario, null, 2)}\n`);
   const env = { ...process.env, CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_STATE: work };
@@ -503,6 +516,35 @@ function runDispatchCase(caseId) {
   for (const number of expect.completed_but_unverified ?? []) {
     const conflated = allWorkers(report).filter((worker) => worker.worker_state === 'completed' && worker.verification.outcome !== 'pass').map((worker) => worker.issue);
     check(conflated.includes(number), `#${number} was not recorded as completed-but-unverified`);
+  }
+
+  // Parallel supervision crossover (#1474): the early worker's dispatch send must
+  // land in the log before the late (multi-turn) worker's FINAL send. Under the
+  // old sequential supervision the late worker was driven fully to completion
+  // before the early worker was dispatched, so every one of its sends would
+  // precede the early worker's — the crossover proves the wave is supervised
+  // concurrently, bounded by max_parallel.
+  if (expect.parallel_send_crossover) {
+    const { early, late } = expect.parallel_send_crossover;
+    const sendIndicesFor = (n) => cliLog
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => entry.sub === 'send' && /issue-(\d+)/.exec(entry.args[0] ?? '')?.[1] === String(n))
+      .map(({ index }) => index);
+    const earlyIdx = sendIndicesFor(early);
+    const lateIdx = sendIndicesFor(late);
+    if (check(earlyIdx.length > 0 && lateIdx.length > 0, `parallel crossover: missing sends for #${early}/#${late}`)) {
+      check(
+        Math.min(...earlyIdx) < Math.max(...lateIdx),
+        `parallel crossover: #${early} first send (idx ${Math.min(...earlyIdx)}) should precede #${late} last send (idx ${Math.max(...lateIdx)}) — sequential supervision detected`,
+      );
+    }
+  }
+
+  // Drift limitations that must NOT be recorded (#1473): a worktree registered at
+  // a non-template path but resolvable by branch via `commandmate ls` must not be
+  // reported as a missing worktree.
+  for (const code of expect.absent_limitation_codes ?? []) {
+    check(!report.limitations.some((entry) => entry.code === code), `limitation "${code}" should be absent but was recorded`);
   }
 
   // Redaction: a secret shape in a captured prompt must not survive into the

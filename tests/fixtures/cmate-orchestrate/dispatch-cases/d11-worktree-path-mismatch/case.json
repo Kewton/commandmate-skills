@@ -1,0 +1,21 @@
+{
+  "description": "Regression (#1473): the worktrees are registered under paths that differ from the plan's worktree_template (short `../CommandMate-issue-<n>` vs the templated `../CommandMate-issue-<n>-<slug>`). `commandmate ls` still resolves each by branch, so send/wait/capture, commit detection and baseline verification all cwd into the ls-reported path — the real directory. Both workers commit and verify, both waves advance to success; the old runner used the template path for git operations, found no directory, and silently false-failed the committed worker. `worktrees_present` also resolves by branch, so no missing-worktree limitation is recorded.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "no_respond": true,
+    "sent": [201, 200],
+    "worker_states": { "201": "completed", "200": "completed" },
+    "absent_limitation_codes": ["drift_worktrees_present"]
+  }
+}

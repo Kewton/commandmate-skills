@@ -6,19 +6,26 @@
 // runner (scripts/orchestrate.mjs) and drives it, wave by wave, against the
 // public `commandmate` CLI:
 //
-//   - it resolves each issue's CommandMate worktree id (`commandmate ls --json`,
-//     matched on the plan's branch) and dispatches a self-contained, generic
-//     worker prompt to it with `commandmate send <worktree-id> <message>` (the
-//     public CLI is worktree-id based; there is no task id, --worktree or
-//     --prompt-file);
+//   - it resolves each issue's CommandMate worktree id AND real path from a single
+//     `commandmate ls --json` row matched on the plan's branch (Issue #1473), and
+//     dispatches a self-contained, generic worker prompt to it with `commandmate
+//     send <worktree-id> <message>` (the public CLI is worktree-id based; there is
+//     no task id, --worktree or --prompt-file). Because `send`/`wait`/`capture`
+//     (id) and the git operations below (path) both come from that one row, they
+//     can never diverge onto different worktrees; the plan's template path is only
+//     a fallback when `ls` omits a path;
 //   - it supervises each worker as a loop, not a single wait (Issue #1468): a real
 //     worker idles after every turn, so `commandmate wait` returning exit 0 means
 //     "idle", not "done". Completion is a NEW COMMIT on the worktree branch (read
-//     with `git rev-parse HEAD` inside it). While the worker idles without a new
-//     commit the runner nudges it to keep going, bounded by --max-turns; a prompt
-//     (exit 10) STOPS and is presented (via `commandmate capture --json`) to a
-//     human — it never auto-answers unless --auto-yes; hitting the turn cap with no
-//     commit is an honest `failed`, never a false completion;
+//     with `git rev-parse HEAD` inside the ls-resolved path). While the worker
+//     idles without a new commit the runner nudges it to keep going, bounded by
+//     --max-turns; a prompt (exit 10) STOPS and is presented (via `commandmate
+//     capture --json`) to a human — it never auto-answers unless --auto-yes;
+//     hitting the turn cap with no commit is an honest `failed`, never a false
+//     completion. Within a wave every worker's supervision loop runs CONCURRENTLY
+//     (Issue #1474): `wait` blocks until its worker idles, so the wave takes the
+//     slowest single worker instead of the sum, with runtime parallelism bounded
+//     by the wave width (already <= max_parallel);
 //   - it enforces a wave barrier: the next wave dispatches only when every worker
 //     of the previous wave completed (committed) AND its profile baseline, re-run
 //     inside the worktree, passed (there is no `commandmate verify`). Worker
@@ -33,13 +40,13 @@
 // without touching a real repository. Tokens, secrets, absolute paths and raw
 // terminal output are redacted before they reach the report or an artifact.
 
-import { parseArgs } from 'node:util';
-import { execFileSync } from 'node:child_process';
+import { parseArgs, promisify } from 'node:util';
+import { execFile, execFileSync } from 'node:child_process';
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.6.0';
+const SKILL_VERSION = '0.7.0';
 const DISPATCH_SCHEMA_VERSION = 1;
 const SUPPORTED_PLAN_SCHEMA_VERSION = 1;
 
@@ -346,6 +353,36 @@ function parseCliJson(result) {
   }
 }
 
+const execFileAsync = promisify(execFile);
+
+// The async twin of runCli, used only by the per-worker supervision path so that a
+// whole wave's `commandmate wait` calls — each of which blocks until its worker
+// idles — run CONCURRENTLY instead of one worker at a time (Issue #1474). It keeps
+// runCli's non-throwing contract and the same { ok, stdout, stderr, status } shape,
+// so the supervision code reads identically to the sync version. The sync runCli
+// still backs the preflight drift checks and the post-barrier verification, which
+// stay synchronous. NOTE: promisified execFile surfaces a non-zero exit as
+// error.code (a number) where execFileSync used error.status; a spawn failure keeps
+// a string code (e.g. "ENOENT"). Normalizing to a numeric `status` lets the wait
+// exit-code checks (prompt 10 / timeout 124) read exactly as the sync path does.
+async function runCliAsync(bin, args, extra = {}) {
+  try {
+    const { stdout } = await execFileAsync(bin, args, {
+      encoding: 'utf8',
+      maxBuffer: 8 * 1024 * 1024,
+      ...extra,
+    });
+    return { ok: true, stdout, stderr: '', status: 0 };
+  } catch (error) {
+    return {
+      ok: false,
+      stdout: error.stdout ? error.stdout.toString() : '',
+      stderr: error.stderr ? error.stderr.toString() : redact(error.message ?? ''),
+      status: typeof error.code === 'number' ? error.code : (error.status ?? null),
+    };
+  }
+}
+
 // =============================================================================
 // Drift re-check (branch / HEAD / worktree / permission)
 // =============================================================================
@@ -353,7 +390,11 @@ function parseCliJson(result) {
 // Re-run before every wave. `blocking` checks that fail stop the dispatch;
 // non-blocking failures are recorded as limitations so the operator sees them
 // without the run stalling on something a just-in-time setup step will fix.
-function driftChecks(inputs, plan, waveIndex, worktreeTargets) {
+// `resolutions` is the wave's up-front worktree resolution (id + real path from
+// `commandmate ls`), so `worktrees_present` can judge reachability the same way
+// the supervisor does — by a live branch match — instead of string-matching the
+// plan's template path against `git worktree list` (Issue #1473).
+function driftChecks(inputs, plan, waveIndex, resolutions) {
   const checks = [];
   const add = (code, ok, blocking, detail) =>
     checks.push({ wave_index: waveIndex, code, ok, blocking, detail });
@@ -380,9 +421,18 @@ function driftChecks(inputs, plan, waveIndex, worktreeTargets) {
 
   const listed = runCli(inputs.git, ['worktree', 'list', '--porcelain']);
   const registered = listed.ok ? listed.stdout : '';
-  const missing = worktreeTargets.filter((target) => !registered.includes(target.replace(/^\.\.\//, '')));
-  const present = missing.length === 0;
-  add('worktrees_present', present, false, present ? 'planned worktrees are registered' : `${missing.length} planned worktree(s) not yet registered`);
+  // A planned worktree is "present" if `commandmate ls` resolved its branch to a
+  // registered worktree id (the same reachability the supervisor relies on) OR its
+  // template path shows up in `git worktree list`. Resolving by branch means a
+  // worktree registered under a path that differs from the plan template no longer
+  // false-NGs here and silently masks a real dispatch (Issue #1473).
+  const unresolved = resolutions.filter((r) => {
+    if (r.resolved && r.resolved.id) return false;
+    const target = r.templatePath ?? '';
+    return !(target && registered.includes(target.replace(/^\.\.\//, '')));
+  });
+  const present = unresolved.length === 0;
+  add('worktrees_present', present, false, present ? 'planned worktrees resolve (commandmate ls branch match or git worktree list)' : `${unresolved.length} planned worktree(s) neither resolve via commandmate ls nor appear in git worktree list`);
 
   return checks;
 }
@@ -450,18 +500,25 @@ function buildWorkerPrompt(plan, issue) {
 // no `commandmate sync` — `ls` is the source of truth for the id.
 function resolveWorktreeId(inputs, issue) {
   if (typeof issue.worktree_id === 'string' && WORKTREE_ID_RE.test(issue.worktree_id)) {
-    return { id: issue.worktree_id, note: '' };
+    return { id: issue.worktree_id, path: null, note: '' };
   }
   const branch = typeof issue.branch === 'string' ? issue.branch : null;
-  if (!branch) return { id: null, note: 'issue has no branch to resolve a worktree from' };
+  if (!branch) return { id: null, path: null, note: 'issue has no branch to resolve a worktree from' };
   const result = runCli(inputs.cli, ['ls', '--json']);
   const rows = parseCliJson(result);
   if (!Array.isArray(rows)) {
-    return { id: null, note: excerpt(result.stderr || result.stdout || 'ls returned no worktree list') };
+    return { id: null, path: null, note: excerpt(result.stderr || result.stdout || 'ls returned no worktree list') };
   }
   const match = rows.find((row) => row && (row.branch === branch || row.name === branch));
   const id = match && typeof match.id === 'string' && WORKTREE_ID_RE.test(match.id) ? match.id : null;
-  return { id, note: id ? '' : `no registered worktree matches branch ${redact(branch)}` };
+  // Issue #1473: git operations (commit detection and baseline verification) must
+  // run in the SAME worktree that `send`/`wait`/`capture` target — the one
+  // CommandMate actually registered — not the plan's `worktree_template` path,
+  // which can differ. `ls --json` reports each worktree's real `path`; carry it
+  // (path-escape checked) so the supervisor cwd's into the registered directory.
+  // The plan template stays a fallback for when `ls` omits a path.
+  const path = match && typeof match.path === 'string' ? safeWorktreeTarget(match.path) : null;
+  return { id, path, note: id ? '' : `no registered worktree matches branch ${redact(branch)}` };
 }
 
 // The HEAD commit of a worktree, read INSIDE it (there is no commandmate call for
@@ -469,9 +526,9 @@ function resolveWorktreeId(inputs, issue) {
 // idle: a changed HEAD means the worker committed its work — the real completion
 // signal (Issue #1468). Null when HEAD cannot be read (a broken/absent worktree),
 // which the supervisor treats as "no commit yet", never as done.
-function worktreeHeadSha(inputs, worktreePath) {
+async function worktreeHeadSha(inputs, worktreePath) {
   if (!worktreePath) return null;
-  const result = runCli(inputs.git, ['rev-parse', 'HEAD'], { cwd: worktreePath });
+  const result = await runCliAsync(inputs.git, ['rev-parse', 'HEAD'], { cwd: worktreePath });
   if (!result.ok) return null;
   const sha = result.stdout.trim();
   return sha.length > 0 ? sha : null;
@@ -484,15 +541,15 @@ function worktreeHeadSha(inputs, worktreePath) {
 // sending; if it is neither generating nor holding a prompt, we treat the send as
 // unconfirmed and re-send once to force submission. The commit check below is the
 // real ground truth, so this is a best-effort confirmation, not a guarantee.
-function sendAndConfirm(inputs, worktreeId, message) {
-  const first = runCli(inputs.cli, ['send', worktreeId, message]);
+async function sendAndConfirm(inputs, worktreeId, message) {
+  const first = await runCliAsync(inputs.cli, ['send', worktreeId, message]);
   if (!first.ok) {
     return { sent: false, note: excerpt(first.stderr || first.stdout || 'send failed') };
   }
-  const capture = parseCliJson(runCli(inputs.cli, ['capture', worktreeId, '--json']));
+  const capture = parseCliJson(await runCliAsync(inputs.cli, ['capture', worktreeId, '--json']));
   const started = capture && (capture.isGenerating === true || capture.isRunning === true || capture.isPromptWaiting === true);
   if (started) return { sent: true, confirmed: true, note: '' };
-  const again = runCli(inputs.cli, ['send', worktreeId, message]);
+  const again = await runCliAsync(inputs.cli, ['send', worktreeId, message]);
   if (!again.ok) {
     return { sent: true, confirmed: false, note: 'send may not have submitted and the re-send failed' };
   }
@@ -510,11 +567,11 @@ const NUDGE_MESSAGE = [
 // nudge it and wait again, until it commits (completed), raises a prompt, times
 // out, fails, or the --max-turns cap is reached with no commit (an honest failed).
 // A prompt is answered only under --auto-yes; otherwise it halts for a human.
-function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMessage) {
-  const baseSha = worktreeHeadSha(inputs, worktreePath);
+async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMessage) {
+  const baseSha = await worktreeHeadSha(inputs, worktreePath);
   let autoResponded = false;
 
-  const sent0 = sendAndConfirm(inputs, worktreeId, initialMessage);
+  const sent0 = await sendAndConfirm(inputs, worktreeId, initialMessage);
   if (!sent0.sent) {
     return { state: 'failed', promptExcerpt: null, nudges: 0, autoResponded, note: `dispatch failed: ${sent0.note}` };
   }
@@ -524,12 +581,12 @@ function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMessage) 
   // prompt/respond ping-pong under --auto-yes can never spin forever.
   const hardIterations = inputs.maxTurns * 4 + 8;
   for (let i = 0; i < hardIterations; i += 1) {
-    const waited = runCli(inputs.cli, ['wait', worktreeId, '--timeout', String(inputs.waitTimeout)]);
+    const waited = await runCliAsync(inputs.cli, ['wait', worktreeId, '--timeout', String(inputs.waitTimeout)]);
     if (!waited.ok && waited.status === WAIT_EXIT_PROMPT) {
-      const promptExcerpt = capturePrompt(inputs, worktreeId);
+      const promptExcerpt = await capturePrompt(inputs, worktreeId);
       if (inputs.autoYes) {
         autoResponded = true;
-        respondWorker(inputs, worktreeId);
+        await respondWorker(inputs, worktreeId);
         continue; // answered; wait again within the same turn
       }
       return { state: 'prompt', promptExcerpt, nudges: turns - 1, autoResponded, note: '' };
@@ -542,7 +599,7 @@ function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMessage) 
     }
 
     // wait returned idle. Real completion is a NEW commit, not the idle itself.
-    const currentSha = worktreeHeadSha(inputs, worktreePath);
+    const currentSha = await worktreeHeadSha(inputs, worktreePath);
     if (currentSha !== null && currentSha !== baseSha) {
       const note = turns > 1 ? `completed after ${turns - 1} nudge(s); new commit detected` : 'completed; new commit detected';
       return { state: 'completed', promptExcerpt: null, nudges: turns - 1, autoResponded, note };
@@ -556,7 +613,7 @@ function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMessage) 
         note: `no new commit after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap`,
       };
     }
-    const nudged = sendAndConfirm(inputs, worktreeId, NUDGE_MESSAGE);
+    const nudged = await sendAndConfirm(inputs, worktreeId, NUDGE_MESSAGE);
     if (!nudged.sent) {
       return { state: 'failed', promptExcerpt: null, nudges: turns - 1, autoResponded, note: `nudge failed: ${nudged.note}` };
     }
@@ -565,8 +622,8 @@ function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMessage) 
   return { state: 'failed', promptExcerpt: null, nudges: turns - 1, autoResponded, note: 'supervision exceeded its hard iteration bound' };
 }
 
-function capturePrompt(inputs, worktreeId) {
-  const result = runCli(inputs.cli, ['capture', worktreeId, '--json']);
+async function capturePrompt(inputs, worktreeId) {
+  const result = await runCliAsync(inputs.cli, ['capture', worktreeId, '--json']);
   const payload = parseCliJson(result);
   const raw = payload?.promptData?.question ?? payload?.content ?? result.stdout ?? '';
   return excerpt(raw) ?? 'a prompt is awaiting input';
@@ -593,11 +650,11 @@ function verifyWorker(inputs, worktreePath, baseline) {
   return { ran: true, outcome: 'pass', checks, note: '' };
 }
 
-function respondWorker(inputs, worktreeId) {
+async function respondWorker(inputs, worktreeId) {
   // Only ever reached when --auto-yes is explicitly set. A generic affirmative;
   // the default path never calls this, which is what keeps prompt handling
   // human-in-the-loop.
-  const result = runCli(inputs.cli, ['respond', worktreeId, 'yes']);
+  const result = await runCliAsync(inputs.cli, ['respond', worktreeId, 'yes']);
   return result.ok;
 }
 
@@ -605,7 +662,7 @@ function respondWorker(inputs, worktreeId) {
 // The supervision loop
 // =============================================================================
 
-function runDispatch(inputs, plan, outDir) {
+async function runDispatch(inputs, plan, outDir) {
   const promptsDir = join(outDir, 'prompts');
   mkdirSync(promptsDir, { recursive: true });
 
@@ -650,12 +707,22 @@ function runDispatch(inputs, plan, outDir) {
 
   for (let waveIndex = 0; waveIndex < plan.waves.length && !stopped; waveIndex += 1) {
     const waveIssues = plan.waves[waveIndex];
-    // The drift `worktrees_present` probe is path-based: it looks the planned
-    // worktree directories up in `git worktree list`.
-    const worktreeTargets = waveIssues.map((number) => issueOf(plan, number).worktree ?? '');
+    // Resolve each issue's CommandMate worktree ONCE, up front: its id (what
+    // send/wait/capture address) and the real `path` `commandmate ls` reports
+    // (what git rev-parse and the baseline cwd into). The drift probe, the
+    // supervision loop and the verification gate all read this single resolution,
+    // so the id path and the git path can never diverge (Issue #1473). The plan's
+    // template path is only a fallback for when `ls` omits a path.
+    const resolutions = waveIssues.map((number) => {
+      const issue = issueOf(plan, number);
+      const templatePath = safeWorktreeTarget(issue.worktree ?? '');
+      const resolved = resolveWorktreeId(inputs, issue);
+      const worktreePath = resolved.path ?? templatePath;
+      return { number, issue, templatePath, resolved, worktreePath };
+    });
 
     // 1. Drift re-check before this (mutating) wave.
-    const checks = driftChecks(inputs, plan, waveIndex, worktreeTargets);
+    const checks = driftChecks(inputs, plan, waveIndex, resolutions);
     report.drift_checks.push(...checks);
     for (const check of checks) {
       if (!check.ok && !check.blocking) {
@@ -680,12 +747,17 @@ function runDispatch(inputs, plan, outDir) {
       report.limitations.push({ code: 'parallelism_truncated', detail: `wave ${waveIndex} had ${waveIssues.length} issues; capped at ${plan.max_parallel}` });
     }
 
-    // 3. Dispatch every issue in the wave, then supervise each to a terminal
-    //    state or a prompt.
+    // 3a. Prepare every issue in the wave (sequential, cheap): build its worker
+    //     record, take its already-resolved worktree id/path, and write its prompt
+    //     artifact. `worktreePaths` remembers the git path per issue so the
+    //     verification gate reuses the exact same worktree the supervisor drove
+    //     (Issue #1473). Workers that cannot be dispatched (unsafe target /
+    //     unresolved worktree) are recorded terminal here and never supervised.
     const workers = [];
+    const worktreePaths = new Map();
+    const supervisable = [];
     for (const number of toDispatch) {
-      const issue = issueOf(plan, number);
-      const worktreePath = safeWorktreeTarget(issue.worktree ?? '');
+      const res = resolutions.find((r) => r.number === number);
       const worker = {
         issue: number,
         // The worker is tracked by its worktree id (there is no task id in the
@@ -696,50 +768,60 @@ function runDispatch(inputs, plan, outDir) {
         prompt: { detected: false, excerpt: null },
         note: '',
       };
-      if (worktreePath === null) {
+      if (res.templatePath === null) {
         worker.note = redact(`refused unsafe worktree target for #${number}`);
         report.limitations.push({ code: 'unsafe_worktree_target', detail: `#${number}: worktree target rejected by path-escape guard` });
         workers.push(worker);
         continue;
       }
-
-      // Resolve the CommandMate worktree id the CLI needs (there is no task id).
-      const resolved = resolveWorktreeId(inputs, issue);
-      if (resolved.id === null) {
+      if (res.resolved.id === null) {
         worker.worker_state = 'failed';
-        worker.note = redact(`worktree unresolved: ${resolved.note}`);
+        worker.note = redact(`worktree unresolved: ${res.resolved.note}`);
         workers.push(worker);
         continue;
       }
-      const worktreeId = resolved.id;
-      worker.task_id = worktreeId;
+      worker.task_id = res.resolved.id;
+      worktreePaths.set(number, res.worktreePath);
 
       const promptFile = join(promptsDir, `issue-${number}.md`);
-      const prompt = buildWorkerPrompt(plan, issue);
+      const prompt = buildWorkerPrompt(plan, res.issue);
       writeFileSync(promptFile, `${prompt}\n`, 'utf8');
 
-      // Drive the worker turn by turn until it commits (the real completion
-      // signal), raises a prompt, times out, fails, or exhausts --max-turns.
-      const supervised = superviseUntilCommit(inputs, worktreeId, worktreePath, prompt);
+      workers.push(worker);
+      supervisable.push({ worker, worktreeId: res.resolved.id, worktreePath: res.worktreePath, prompt });
+    }
+
+    // 3b. Supervise the wave's workers CONCURRENTLY (Issue #1474). Each worker
+    //     runs its own send -> wait -> commit-check -> nudge loop; because
+    //     `commandmate wait` blocks until its worker idles, running them in
+    //     parallel (the wave width is already <= max_parallel, so the runtime
+    //     parallelism matches the plan bound) makes the wave take the slowest
+    //     single worker instead of the sum. Each worker's commit detection,
+    //     --max-turns, prompt handling and auto-yes respond stay strictly
+    //     independent; the wave barrier below is unchanged.
+    await Promise.all(supervisable.map(async ({ worker, worktreeId, worktreePath, prompt }) => {
+      const supervised = await superviseUntilCommit(inputs, worktreeId, worktreePath, prompt);
       worker.worker_state = supervised.state;
       worker.note = redact(supervised.note);
       if (supervised.autoResponded) autoResponded = true;
       if (supervised.state === 'prompt') {
         worker.prompt = { detected: true, excerpt: supervised.promptExcerpt };
       }
-      workers.push(worker);
-    }
+    }));
 
     // 4. Wave barrier — every dispatched worker must have completed.
     const allCompleted = workers.length > 0 && workers.every((worker) => worker.worker_state === 'completed');
 
     // 5. Verification gate — only completed workers are verified, and every one
     //    must pass its profile baseline (re-run inside the worktree). Worker
-    //    completion alone does not open this gate.
+    //    completion alone does not open this gate. Verification cwd's into the
+    //    SAME worktree path the supervisor drove — the `commandmate ls` path, not
+    //    the plan template — so a completed worker is never false-failed on a git
+    //    path the send target never used (Issue #1473).
     let allVerified = allCompleted;
     if (allCompleted) {
       for (const worker of workers) {
-        const worktreePath = safeWorktreeTarget(issueOf(plan, worker.issue).worktree ?? '');
+        const worktreePath = worktreePaths.get(worker.issue) ?? safeWorktreeTarget(issueOf(plan, worker.issue).worktree ?? '');
         const verification = verifyWorker(inputs, worktreePath, plan.profile.baseline);
         worker.verification = {
           ran: verification.ran,
@@ -918,7 +1000,7 @@ function dispatchFailure(error) {
 // Entry point
 // =============================================================================
 
-function run(argv) {
+async function run(argv) {
   const parsed = parseCli(argv);
   if (parsed.values.help) {
     process.stderr.write(`${USAGE}\n`);
@@ -935,7 +1017,7 @@ function run(argv) {
   }
   mkdirSync(outDir, { recursive: true });
 
-  const report = runDispatch(inputs, plan, outDir);
+  const report = await runDispatch(inputs, plan, outDir);
   writeFileSync(join(outDir, 'dispatch-report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   writeFileSync(join(outDir, 'dispatch-summary.md'), `${report.summary_markdown}\n`, 'utf8');
 
@@ -944,10 +1026,10 @@ function run(argv) {
   return { exitCode, stdout: `${JSON.stringify(report, null, 2)}\n` };
 }
 
-function main() {
+async function main() {
   const argv = process.argv.slice(2);
   try {
-    const { exitCode, stdout } = run(argv);
+    const { exitCode, stdout } = await run(argv);
     if (stdout) process.stdout.write(stdout);
     process.exit(exitCode);
   } catch (error) {
