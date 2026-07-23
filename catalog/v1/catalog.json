@@ -152,7 +152,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.4.0",
+      "latest": "0.7.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -177,6 +177,50 @@
                 "agent": "claude",
                 "evidence": "Standard SKILL.md discovery from .agents/skills. Plan is produced by a bundled Node runner, so it is Agent-agnostic.",
                 "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Standard SKILL.md discovery from .agents/skills. Same deterministic runner yields the same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.7.0",
+          "changelog": "cmate-orchestrate 0.7.0 — dispatch runner robustness\n\nHarness Pack 実機UAT（CommandMate#1458 S2 live）で発見した dispatch runner の2つの課題を修正。\n\n- worktree path 解決の非対称（CommandMate#1473）: `send`/`wait`/`capture` は `commandmate ls` の branch 一致で worktree-id を解決する一方、commit 検出と baseline 検証の cwd は plan の `worktree_template` 由来 path を使っていた。登録 path が template と異なると `git -C` が存在しない path で失敗し、worker が commit しても完了を検出できず `--max-turns` で silent に failed になっていた。`resolveWorktreeId` を `commandmate ls` の実 path も返すよう拡張し、supervise/verify を ls 由来の実 path で行うよう統一（`worktree_template` は fallback）。`drift worktrees_present` も branch 解決を優先。\n\n- wave 内監督の並列化（CommandMate#1474）: 従来は wave 内 worker を 1 体ずつ逐次監督していたため `max_parallel` が実行時の並列度に反映されていなかった。監督経路の CLI 呼び出しを async 化し、各 worker の send→wait→commit判定→nudge ループを `Promise.all` で並行実行（並列度は `max_parallel` 以下）。barrier（全 worker completed AND 全 verification pass）と per-worker の完了検出・`--max-turns`・auto-yes・prompt 停止は独立に維持。\n\n- dispatch 回帰ケース d11（ls path ≠ template path でも completion/verification が動く）・d12（wave 内2 worker の並行監督 crossover）を追加。既存 9 plan / 12 dispatch / 12 merge / 9 uat + contract parity は全て pass。\n\n- `references/dispatch-contract.md` を両修正へ更新。",
+          "published_at": "2026-07-23T15:05:03Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.7.0",
+            "commit": "b4b175d4a254cbd999a59101beb6410a57521a74"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.7.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.7.0/cmate-orchestrate-0.7.0.tar.gz",
+            "sha256": "25d7f84c298c4e77f8500f7a016fb37b3818b9b7ab50b52c51872141f0558a13",
+            "size": 87466,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Claude reads SKILL.md from .claude/skills, not .agents/skills. The CommandMate installer places packages in .agents/skills only for now (see CommandMate issue 1460); native discovery for this version is not yet measured (see issue 1246).",
+                "support": "unknown"
               },
               {
                 "agent": "codex",
