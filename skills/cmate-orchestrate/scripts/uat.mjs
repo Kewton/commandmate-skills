@@ -21,9 +21,12 @@
 //
 // Acceptance and re-verification are a profile-baseline run INSIDE the worktree,
 // not a `commandmate uat`/`verify` call (those subcommands do not exist, #1467).
-// The only commandmate calls are `send <worktree-id> <message>` / `wait
+// The commandmate calls are `send <worktree-id> <message>` / `capture` / `wait
 // <worktree-id>` for the fix worker; its worktree id is derived from the fix
-// branch (a freshly-created worktree is not yet in `ls`).
+// branch (a freshly-created worktree is not yet in `ls`). Like a dispatch worker,
+// a fix worker idles after every turn, so `wait` returning idle is not "done"
+// (Issue #1468): the loop nudges it until it commits its repair — a new commit on
+// the fix branch — bounded by --max-turns, before it re-verifies and re-merges.
 //
 // Two invariants are non-negotiable:
 //
@@ -51,7 +54,7 @@ import { mkdirSync, existsSync, writeFileSync, appendFileSync, readFileSync } fr
 import { join, dirname } from 'node:path';
 
 const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.5.0';
+const SKILL_VERSION = '0.6.0';
 const UAT_SCHEMA_VERSION = 1;
 const SUPPORTED_PLAN_SCHEMA_VERSION = 1;
 const SUPPORTED_DISPATCH_SCHEMA_VERSION = 1;
@@ -59,9 +62,10 @@ const SUPPORTED_DISPATCH_SCHEMA_VERSION = 1;
 // A CommandMate worktree id (mirrors the CLI's isValidWorktreeId).
 const WORKTREE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/;
 
-// `commandmate wait` reports the worker's terminal state by EXIT CODE:
-// 0 completed, 10 a prompt is awaiting input, 124 the --timeout elapsed.
-const WAIT_EXIT_COMPLETED = 0;
+// `commandmate wait` reports the worker's state by EXIT CODE: 0 the worker went
+// idle (a turn finished — NOT necessarily done, Issue #1468), 10 a prompt is
+// awaiting input, 124 the --timeout elapsed.
+const WAIT_EXIT_IDLE = 0;
 const WAIT_EXIT_PROMPT = 10;
 const WAIT_EXIT_TIMEOUT = 124;
 
@@ -72,6 +76,11 @@ const MAX_ATTEMPTS_CEILING = 5;
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 300;
 const DEFAULT_POLL_LIMIT = 120;
+
+// A fix worker, like a dispatch worker, idles after every turn. The fix loop drives
+// it turn by turn until it commits, bounded by this many turns (initial send +
+// nudges); reaching the cap with no commit is a non-completion, not a false pass.
+const DEFAULT_MAX_TURNS = 8;
 
 class SkillError extends Error {
   constructor(code, detail, exitCode) {
@@ -163,6 +172,8 @@ Options:
   --git <path>           The git CLI for base/worktree/re-merge (default "git").
   --gh <path>            The gh CLI for the repo-access preflight (default "gh").
   --wait-timeout <sec>   --timeout for the fix worker's commandmate wait (default ${DEFAULT_WAIT_TIMEOUT_SECONDS}).
+  --max-turns <n>        Max turns to drive a fix worker (initial send + nudges)
+                         before giving up with no commit (default ${DEFAULT_MAX_TURNS}).
   --poll-limit <n>       Retained for compatibility; wait now blocks (default ${DEFAULT_POLL_LIMIT}).
   --help                 Show this help.
 
@@ -187,6 +198,7 @@ function parseCli(argv) {
         git: { type: 'string' },
         gh: { type: 'string' },
         'wait-timeout': { type: 'string' },
+        'max-turns': { type: 'string' },
         'poll-limit': { type: 'string' },
         help: { type: 'boolean' },
       },
@@ -239,6 +251,7 @@ function resolveInputs(parsed) {
     git: values.git ?? 'git',
     gh: values.gh ?? 'gh',
     waitTimeout: positiveInt(values['wait-timeout'], 'wait-timeout', DEFAULT_WAIT_TIMEOUT_SECONDS),
+    maxTurns: positiveInt(values['max-turns'], 'max-turns', DEFAULT_MAX_TURNS),
     pollLimit: positiveInt(values['poll-limit'], 'poll-limit', DEFAULT_POLL_LIMIT),
   };
 }
@@ -543,9 +556,90 @@ function buildFixPrompt(plan, issue, failingScenarios) {
     '## Rules',
     '- Stay within this issue. Do not modify files another issue in the plan owns.',
     '- Run the verification above and report its real result. Do not report done on a failing check.',
+    '- Keep working across turns until the repair is complete; do not stop half-done.',
+    '- When the repair is complete, make a SINGLE commit of the fix on this branch.',
+    '  That commit is the completion signal — the supervisor treats a new commit as',
+    '  "done" and will otherwise nudge you to keep going.',
     '- If a step is destructive, ambiguous, or blocked, STOP and ask. Do not guess.',
     '- Do not print tokens, secrets, or absolute host paths.',
   ].join('\n');
+}
+
+// The HEAD commit of a fix worktree, read INSIDE it. The loop snapshots this before
+// dispatch and compares after each idle: a changed HEAD means the fix worker
+// committed its repair — the real completion signal (Issue #1468). Null when HEAD
+// cannot be read, which counts as "no commit yet", never as done.
+function worktreeHeadSha(inputs, worktreePath) {
+  if (!worktreePath) return null;
+  const result = runCli(inputs.git, ['rev-parse', 'HEAD'], { cwd: worktreePath });
+  if (!result.ok) return null;
+  const sha = result.stdout.trim();
+  return sha.length > 0 ? sha : null;
+}
+
+// `commandmate send`, then confirm the fix worker actually started (Issue #1468).
+// A send can leave the message unsubmitted; if the capture right after shows the
+// worker is neither generating nor prompting, re-send once. Best-effort — the
+// commit check below is the ground truth.
+function sendAndConfirm(inputs, worktreeId, message) {
+  const first = runCli(inputs.cli, ['send', worktreeId, message]);
+  if (!first.ok) {
+    return { sent: false, note: excerpt(first.stderr || first.stdout || 'send failed') };
+  }
+  const capture = parseCliJson(runCli(inputs.cli, ['capture', worktreeId, '--json']));
+  const started = capture && (capture.isGenerating === true || capture.isRunning === true || capture.isPromptWaiting === true);
+  if (started) return { sent: true, confirmed: true, note: '' };
+  const again = runCli(inputs.cli, ['send', worktreeId, message]);
+  if (!again.ok) return { sent: true, confirmed: false, note: 'send may not have submitted and the re-send failed' };
+  return { sent: true, confirmed: false, note: 're-sent after an unconfirmed first send' };
+}
+
+// The message that nudges an idle-but-uncommitted fix worker to keep going.
+const FIX_NUDGE_MESSAGE = [
+  '続けて修正を進め、この Issue の受入不合格を解消してください。',
+  'まだ変更が commit されていません。完了したらこのブランチに単一 commit を作成してください（それが完了の合図です）。',
+].join('\n');
+
+// Supervise a fix worker to a real completion, the same way dispatch does: a fix
+// worker idles after every turn, so drive it turn by turn — dispatch, wait; on
+// idle-with-no-new-commit nudge and wait again — until it commits (completed),
+// raises a prompt (a non-completion the fix loop never auto-answers), times out,
+// fails, or the --max-turns cap is reached with no commit. Returns the worker state,
+// whether a fix was dispatched at all, and a note.
+function superviseFixUntilCommit(inputs, worktreeId, worktreeDir, message) {
+  const baseSha = worktreeHeadSha(inputs, worktreeDir);
+  const sent0 = sendAndConfirm(inputs, worktreeId, message);
+  if (!sent0.sent) {
+    return { state: 'failed', dispatched: false, note: `fix dispatch failed: ${sent0.note}` };
+  }
+  let turns = 1;
+  const hardIterations = inputs.maxTurns * 4 + 8;
+  for (let i = 0; i < hardIterations; i += 1) {
+    const waited = runCli(inputs.cli, ['wait', worktreeId, '--timeout', String(inputs.waitTimeout)]);
+    if (!waited.ok && waited.status === WAIT_EXIT_PROMPT) {
+      return { state: 'prompt', dispatched: true, note: 'fix worker raised a prompt; the loop does not auto-answer' };
+    }
+    if (!waited.ok && waited.status === WAIT_EXIT_TIMEOUT) {
+      return { state: 'timeout', dispatched: true, note: `wait timed out after ${inputs.waitTimeout}s` };
+    }
+    if (!waited.ok) {
+      return { state: 'failed', dispatched: true, note: excerpt(waited.stderr || waited.stdout || `wait exited ${waited.status ?? 'with an error'}`) };
+    }
+    const currentSha = worktreeHeadSha(inputs, worktreeDir);
+    if (currentSha !== null && currentSha !== baseSha) {
+      const note = turns > 1 ? `fix completed after ${turns - 1} nudge(s); new commit detected` : 'fix completed; new commit detected';
+      return { state: 'completed', dispatched: true, note };
+    }
+    if (turns >= inputs.maxTurns) {
+      return { state: 'failed', dispatched: true, note: `fix worker made no new commit after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap` };
+    }
+    const nudged = sendAndConfirm(inputs, worktreeId, FIX_NUDGE_MESSAGE);
+    if (!nudged.sent) {
+      return { state: 'failed', dispatched: true, note: `fix nudge failed: ${nudged.note}` };
+    }
+    turns += 1;
+  }
+  return { state: 'failed', dispatched: true, note: 'fix supervision exceeded its hard iteration bound' };
 }
 
 function dispatchFix(inputs, plan, number, fixBranch, worktreeDir, message) {
@@ -568,30 +662,17 @@ function dispatchFix(inputs, plan, number, fixBranch, worktreeDir, message) {
   }
   fix.task_id = worktreeId;
 
-  const sent = runCli(inputs.cli, ['send', worktreeId, message]);
-  if (!sent.ok) {
-    fix.worker_state = 'failed';
-    fix.note = redact(`fix dispatch failed: ${excerpt(sent.stderr || sent.stdout || 'send failed')}`);
-    return fix;
-  }
-  fix.dispatched = true;
+  // Supervise turn by turn until the fix worker commits its repair (the real
+  // completion signal), raises a prompt, times out, fails, or exhausts --max-turns.
+  const supervised = superviseFixUntilCommit(inputs, worktreeId, worktreeDir, message);
+  fix.dispatched = supervised.dispatched;
+  fix.worker_state = supervised.state;
+  fix.note = redact(supervised.note);
+  if (supervised.state !== 'completed') return fix;
 
-  // Supervise with a single blocking wait (the fix loop does not auto-answer
-  // prompts; a prompt is a non-completion that stops the loop). State is the
-  // process exit code.
-  const waited = runCli(inputs.cli, ['wait', worktreeId, '--timeout', String(inputs.waitTimeout)]);
-  let state;
-  let note;
-  if (waited.ok) { state = 'completed'; note = ''; }
-  else if (waited.status === WAIT_EXIT_PROMPT) { state = 'prompt'; note = 'fix worker raised a prompt; the loop does not auto-answer'; }
-  else if (waited.status === WAIT_EXIT_TIMEOUT) { state = 'timeout'; note = `wait timed out after ${inputs.waitTimeout}s`; }
-  else { state = 'failed'; note = excerpt(waited.stderr || waited.stdout || `wait exited ${waited.status ?? 'with an error'}`); }
-  fix.worker_state = state;
-  fix.note = redact(note);
-  if (state !== 'completed') return fix;
-
-  // Re-verify: worker completion got us here; the profile baseline re-run inside
-  // the fix worktree is the separate gate it must clear before it may be re-merged.
+  // Re-verify: worker completion (a new commit) got us here; the profile baseline
+  // re-run inside the fix worktree is the separate gate it must clear before it
+  // may be re-merged.
   const baseline = runBaseline(plan.profile.baseline, worktreeDir);
   fix.verification = { ran: true, report_schema_version: null, outcome: baseline.outcome, checks: baseline.checks };
   if (baseline.note) fix.note = fix.note ? `${fix.note}; ${redact(baseline.note)}` : redact(baseline.note);

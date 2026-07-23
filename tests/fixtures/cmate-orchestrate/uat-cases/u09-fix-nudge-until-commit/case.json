@@ -1,0 +1,31 @@
+{
+  "description": "The fix worker is supervised the same way as a dispatch worker (Issue #1468): #200's fix worker idles after its first turn without committing, so the loop nudges it once; on the second turn it commits, re-verifies, re-merges, and UAT passes within the attempt cap. The fix worker was sent twice (initial + one nudge), proving the fix loop drives to a commit rather than trusting the first idle.",
+  "phase": "fix_uat",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "uat_args": ["--approve", "--max-attempts", "2"],
+  "uat_scenario": {
+    "uat": { "200": { "fix_on": 1 }, "201": "pass" },
+    "workers": {
+      "200": { "state": "completed", "commit_on": 2 },
+      "201": { "state": "completed" }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "attempts_used": 1,
+    "eligible": [201, 200],
+    "unresolved": [],
+    "attempts_count": 2,
+    "worktree_add_calls": 1,
+    "send_calls": 2,
+    "merge_calls": 1,
+    "completion_passed": true
+  }
+}
