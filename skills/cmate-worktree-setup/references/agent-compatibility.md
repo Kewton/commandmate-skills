@@ -38,13 +38,16 @@ result object の代わりではない。片方だけを返さない。
 1. CommandMate の Skill install flow で新 version を install する。install は Catalog の
    artifact digest に pin し、権限と risk 宣言を適用前に提示する。UI/CLI の文言は CommandMate 側に属し、
    ここでは再掲しない。
-2. payload は登録済み worktree の `.agents/skills/cmate-worktree-setup/` に配置される。
-   この directory の外は触れられず、install 時に中の何かが実行されることもない。
+2. payload は登録済み worktree の `.agents/skills/cmate-worktree-setup/` と
+   `.claude/skills/cmate-worktree-setup/` の **両方**へ byte-identical に配置される
+   （CommandMate 0.15.0 以降。install receipt の `install_roots` に両 root が記録される）。
+   これらの directory の外は触れられず、install 時に中の何かが実行されることもない。
 3. Agent は discovery 時に `SKILL.md` を読む。更新が landing した時点で既に走っていた session は
    古い text のままなので、**新しい session を開始** して新 version を読み込む。
-   - Claude — 新しい session を開始すると `.agents/skills` から `SKILL.md` を再 discovery する。
-     Claude 固有の tool 名を手順は前提にしない。
-   - Codex — 同様に、新しい session の起動時に `.agents/skills` の `SKILL.md` を再読込する。
+   - Claude — `.claude/skills` から `SKILL.md` を discovery する（`.agents/skills` は読まない）。
+     新しい session を開始すれば再 discovery される。Claude 固有の tool 名を手順は前提にしない。
+   - Codex — `.agents/skills` の `SKILL.md` を新しい session の起動時に読み込む。
+     ただし Codex CLI 0.145.0 は skill を slash command として露出しないので、名前で指示する。
      手順は capability（読む・照会する・command を実行する）で書かれており、Codex 側の
      tool 名に依存しない。
 4. 実効 version は、install 済み `commandmate.skill.yaml` の `version` を読んで確認する。

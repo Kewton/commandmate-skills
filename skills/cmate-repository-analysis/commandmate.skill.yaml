@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-repository-analysis
 name: cmate-repository-analysis
-version: 0.1.0
+version: 0.1.1
 summary: リポジトリをread-onlyで走査し、構造・既存実装・再利用候補・変更risk・推奨verificationをfile/line evidence付きで返す。
 description: >-
   変更に着手する前の現状把握を、再現可能な標準手順にしたものである。対象リポジトリを
@@ -40,10 +40,10 @@ compatibility:
   agents:
     - agent: claude
       support: native
-      evidence: Standard SKILL.md discovery from .agents/skills
+      evidence: Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.
     - agent: codex
       support: native
-      evidence: Standard SKILL.md discovery from .agents/skills
+      evidence: Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.
     - agent: gemini
       support: unknown
       evidence: Discovery path not verified for this version

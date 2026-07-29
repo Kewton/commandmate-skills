@@ -53,9 +53,10 @@ This text is the source for the annotated tag message that becomes the Catalog
 - **It does not decide for the user.** Product, policy and risk-tolerance
   questions come back as questions. A run with unanswered blocking questions
   ends `partial` by design.
-- **Recorded Agent support is thin on purpose.** Only `claude` is declared
-  `native`; `codex`, `gemini` and `opencode` are `unknown` until an evaluation
-  is recorded. See
+- **Recorded Agent support is thin on purpose.** `claude` and `codex` are
+  declared `native` on a 2026-07-26 discovery measurement; `gemini` and
+  `opencode` stay `unknown` until one is recorded. Discovery is not a quality
+  claim — no rubric evaluation has been recorded for Codex. See
   [`agent-compatibility.md`](./agent-compatibility.md).
 - **Quality is not self-certifying.** The fixtures and rubric under
   `tests/fixtures/cmate-issue-refinement/` are the check; a good-looking
@@ -70,9 +71,11 @@ new bytes behind the same one.
    UI and CLI wording belongs to CommandMate and is not restated here; what
    matters is that install pins to the Catalog's artifact digest and shows the
    permission and risk declarations before applying.
-2. The payload lands under `.agents/skills/cmate-issue-refinement/` in the
-   registered worktree. Nothing outside that directory is touched, and nothing
-   in it is executed at install time.
+2. The payload lands under both `.agents/skills/cmate-issue-refinement/` and
+   `.claude/skills/cmate-issue-refinement/` in the registered worktree, written
+   byte-identically (CommandMate 0.15.0 and later; the install receipt records
+   both roots). Nothing outside those directories is touched, and nothing in
+   them is executed at install time.
 3. Agents read `SKILL.md` at discovery time. An Agent session that was already
    running when the update landed keeps the old text; **start a new session** to
    pick up the new version.

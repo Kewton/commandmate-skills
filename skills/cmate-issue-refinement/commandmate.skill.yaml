@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-issue-refinement
 name: cmate-issue-refinement
-version: 0.1.0
+version: 0.1.1
 summary: Refines a vague GitHub Issue into an implementable specification, read-only, with evidence, ranked findings, open questions and a versioned result.
 description: >-
   Takes an Issue that is a title, a paragraph, or a set of unchecked assumptions,
@@ -50,10 +50,10 @@ compatibility:
   agents:
     - agent: claude
       support: native
-      evidence: Discovers SKILL.md from .agents/skills; the procedure names no Claude-specific tool
+      evidence: Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.
     - agent: codex
-      support: unknown
-      evidence: Not yet run against a recorded Codex version; opt-in fixture evaluation is described in references/agent-compatibility.md
+      support: native
+      evidence: Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. No rubric evaluation recorded yet.
     - agent: gemini
       support: unknown
       evidence: Not evaluated
@@ -87,8 +87,8 @@ files:
     executable: false
     script: false
   - path: references/agent-compatibility.md
-    sha256: f10009744833d2b2e6a60b4e43709a62607fe04f969099afbcaea5cf2c875a76
-    size: 3082
+    sha256: 0a83d75692e012a30b581fde5c03ea4e7c885324f864a76bdd0fd7e13dd63c1a
+    size: 3655
     kind: instruction
     executable: false
     script: false
@@ -105,8 +105,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 2201acdb3f27283fe7d50721cec3f36371d15081a78dec89fb070ebf6cbb12a2
-    size: 4140
+    sha256: '0b882c64e68c10b797c6283eaf956cab34bda7e7fc853c269badbc68d98cd027'
+    size: 4415
     kind: instruction
     executable: false
     script: false

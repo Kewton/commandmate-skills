@@ -24,15 +24,21 @@ degradation, not a failure.
 
 | Agent | Support | What that is based on |
 |---|---|---|
-| `claude` | native | Discovers `SKILL.md` from `.agents/skills`. The procedure uses no Claude-specific tool name. |
-| `codex` | unknown | Not yet run against a recorded Codex version in this repository. Opt-in evaluation is described below. |
-| `gemini` | unknown | Not evaluated. |
-| `opencode` | unknown | Not evaluated. |
+| `claude` | native | Claude Code 2.1.220, measured 2026-07-26: discovers `SKILL.md` from `.claude/skills` — not `.agents/skills` — and matches in the slash palette. The procedure uses no Claude-specific tool name. |
+| `codex` | native | Codex CLI 0.145.0, measured 2026-07-26: reads `SKILL.md` from `.agents/skills` (model self-report, not a mechanical trace). That version exposes no skill as a slash command, so invoke it by name. |
+| `gemini` | unknown | Not measured. |
+| `opencode` | unknown | Not measured. |
 
-`unknown` is deliberate. Declaring `native` for an Agent nobody has run this
-against would make the manifest's compatibility block unusable for the decision
-it exists to support. When an evaluation is recorded, the entry moves to
-`native` or `commandmate_runtime` and the Skill version is bumped.
+`support` records the **discovery path**, which the installer decides: since
+CommandMate 0.15.0 a package is written to `.agents/skills/<skill-id>/` and
+`.claude/skills/<skill-id>/` byte-identically, so the measurement above holds for
+any package. It does **not** record how well this procedure performs on an Agent —
+no rubric evaluation has been recorded for Codex yet (see below).
+
+`unknown` is deliberate. Declaring `native` for an Agent nobody has measured would
+make the manifest's compatibility block unusable for the decision it exists to
+support. When a measurement is recorded, the entry moves to `native` or
+`commandmate_runtime` and the Skill version is bumped.
 
 ## Opt-in evaluation
 

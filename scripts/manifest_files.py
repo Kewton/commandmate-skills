@@ -25,6 +25,7 @@ from cmate_skills.constants import SKILL_MANIFEST_FILENAME
 from cmate_skills.errors import Finding
 from cmate_skills.package import sha256_hex
 from cmate_skills.repo import derive_file_kind, is_script_payload, read_tree
+from cmate_skills.safe_yaml import _is_ambiguous_plain_scalar
 
 
 #: Characters that need no quoting in a YAML plain scalar. Anything else — most
@@ -34,7 +35,12 @@ _PLAIN_SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 
 
 def _yaml_scalar(value: str) -> str:
-    if _PLAIN_SAFE.match(value):
+    # A digest is plain-safe by shape yet can still be ambiguous: roughly one in
+    # eighty starts `0b` / `0x` / `0o`, which YAML 1.1 readers take as a number
+    # base. Emitted bare, such a manifest is rejected by the parser with
+    # SKILL_YAML_AMBIGUOUS_SCALAR — so the same rule the reader applies decides
+    # the quoting here.
+    if _PLAIN_SAFE.match(value) and not _is_ambiguous_plain_scalar(value):
         return value
     return "'" + value.replace("'", "''") + "'"
 
@@ -65,7 +71,7 @@ def main() -> int:
         kind = derive_file_kind(entry.path, entry.data)
         script = is_script_payload(entry.path, entry.data)
         print(f"  - path: {_yaml_scalar(entry.path)}")
-        print(f"    sha256: {sha256_hex(entry.data)}")
+        print(f"    sha256: {_yaml_scalar(sha256_hex(entry.data))}")
         print(f"    size: {len(entry.data)}")
         print(f"    kind: {kind}")
         print(f"    executable: {str(entry.executable).lower()}")

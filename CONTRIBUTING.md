@@ -69,7 +69,7 @@ CommandMate 固有の配布 metadata は **ここに書かない**。`commandmat
 | `capabilities` / `expected_outcomes` | **空配列不可**。install 前に「何ができるようになるか」を説明できない Skill は成立しない |
 | `compatibility.commandmate` | `>=0.11.0 <1.0.0` 形式。`\|\|` や `x` range は不可 |
 | `compatibility.agents[].agent` | `claude` / `codex` / `gemini` / `vibe-local` / `opencode` / `copilot` / `antigravity` のみ |
-| `compatibility.agents[].support` | `native` / `commandmate_runtime` / `unsupported` / `unknown`。`evidence` 必須。未検証なら `unknown` と正直に書く |
+| `compatibility.agents[].support` | `native` / `commandmate_runtime` / `unsupported` / `unknown`。`evidence` 必須。未検証なら `unknown` と正直に書く（実測済みの内容は [docs/agent-support-matrix.md](./docs/agent-support-matrix.md)、測り方は [docs/runbooks/verify-install.md](./docs/runbooks/verify-install.md)） |
 | `declared_permissions` | **宣言であって enforcement ではない**。実際に使うものだけを書く |
 | `declared_risk` | 算出値より低く申告しない（後述） |
 | `files` | 手で書かない（次項） |
