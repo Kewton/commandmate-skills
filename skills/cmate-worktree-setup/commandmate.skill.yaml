@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-worktree-setup
 name: cmate-worktree-setup
-version: 0.1.1
+version: 0.1.2
 summary: 対象repositoryを検証し既存branch/directory/worktreeを暗黙上書きせず、profile規約に沿った専用worktreeをresolved base SHAから作成し、proportional baseline結果を証跡付きで返す。
 description: >-
   1つ以上のIssueについて、対象リポジトリを検証し、衝突しない専用 worktree を作成し、
@@ -54,11 +54,11 @@ compatibility:
   commandmate: '>=0.11.0 <1.0.0'
   agents:
     - agent: claude
-      support: unknown
-      evidence: Claude reads SKILL.md from .claude/skills, not .agents/skills. The CommandMate installer places packages in .agents/skills only for now (see CommandMate issue 1460); native discovery for this version is not yet measured (see issue 1246).
+      support: native
+      evidence: Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.
     - agent: codex
       support: native
-      evidence: Standard SKILL.md discovery from .agents/skills
+      evidence: Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.
     - agent: gemini
       support: unknown
       evidence: Discovery path not verified for this version
@@ -92,8 +92,8 @@ files:
     executable: false
     script: false
   - path: references/agent-compatibility.md
-    sha256: f21f026b9cb0dfbdbb8f0028eb7ef36fcb5395ea8f3c051b82fa89c415fa635b
-    size: 4414
+    sha256: 95b64d1950839e0b882ff05c384a15ec7691f8a6ce8e2f91ac8a537625558671
+    size: 4766
     kind: instruction
     executable: false
     script: false

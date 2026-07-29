@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-acceptance-test
 name: cmate-acceptance-test
-version: 0.1.0
+version: 0.1.1
 summary: Issue の受入条件を証跡付きで検証し、Go / Conditional Go / No-Go を versioned な result として返す。
 description: |-
   対象 Issue の受入条件を自動検証と手動確認に分け、command exit code、test 結果、diff、手動観察を evidence として構造化したうえで、受入の可否を判定する手順である。
@@ -39,10 +39,10 @@ compatibility:
   agents:
     - agent: claude
       support: native
-      evidence: Standard SKILL.md discovery from .agents/skills. Procedure uses no Claude-specific tool name.
+      evidence: Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.
     - agent: codex
       support: native
-      evidence: Standard SKILL.md discovery from .agents/skills. Procedure uses no Codex-specific construct.
+      evidence: Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.
     - agent: gemini
       support: unknown
       evidence: Not verified for this version. Readable as a procedure, discovery and reload unverified.
@@ -77,8 +77,8 @@ files:
     executable: false
     script: false
   - path: references/agent-compatibility.md
-    sha256: 0e63fc90aeed3b202d6cccbc0dd5ec873e4403d4f86471526f4e6e192df70d29
-    size: 3768
+    sha256: 226c200ea97ed1b84cdfe06aec4de73c9e6151cb21c9e4d85f05785b36a25b1c
+    size: 4006
     kind: instruction
     executable: false
     script: false

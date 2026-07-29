@@ -3,14 +3,16 @@
 CommandMate 公式 Agent Skills の配布リポジトリ。
 
 CommandMate は本リポジトリを **唯一の公式 Skill 供給元** として扱い、
-immutable commit SHA と artifact SHA-256 を検証したうえで、
-登録済み worktree の `.agents/skills/<skill-id>/` へ配備する。
+immutable commit SHA と artifact SHA-256 を検証したうえで、登録済み worktree の
+`.agents/skills/<skill-id>/` と `.claude/skills/<skill-id>/` の**両方へ byte-identical に**
+配備する（CommandMate 0.15.0 以降。Claude は後者を、Codex は前者を読む）。
 
 - 親 Epic: [Kewton/CommandMate#1227](https://github.com/Kewton/CommandMate/issues/1227)
 - 本リポジトリの release pipeline: [Kewton/CommandMate#1238](https://github.com/Kewton/CommandMate/issues/1238)
 
-> **状態**: release pipeline と公式 Skill 3 件
-> （`cmate-repository-analysis` / `cmate-issue-refinement` / `cmate-acceptance-test`）が揃っている。
+> **状態**: release pipeline と公式 Skill 7 件が揃っている。
+> どの Agent でどこまで確認済みかは
+> [docs/agent-support-matrix.md](./docs/agent-support-matrix.md) を参照。
 
 ## ディレクトリ構成
 
@@ -24,8 +26,10 @@ scripts/                    # reproducible release pipeline (#1238)
   cmate_skills/             # CommandMate 側配布契約の mirror（正本は CommandMate）
 tests/fixtures/skills/
   pipeline-selftest/        # pipeline を通す最小の package。新規 Skill の雛形
+tests/fixtures/<skill-id>/  # 各 Skill の評価・回帰テスト（package には含まれない）
+docs/agent-support-matrix.md # どの Agent でどこまで実測したか
 docs/design/                # 設計（pipeline / 契約 mirror の同期手順）
-docs/runbooks/              # release・rollback・artifact 検証の手順書
+docs/runbooks/              # release・rollback・artifact 検証・導入検証の手順書
 ```
 
 `SKILL.md` は Agent が読む標準 artifact、`commandmate.skill.yaml` は
@@ -46,18 +50,25 @@ python3 scripts/verify_artifact.py --help      # 公開 artifact の keyless 検
 - Skill を追加する: [CONTRIBUTING.md](./CONTRIBUTING.md)
 - release する / 失敗から戻す: [docs/runbooks/release.md](./docs/runbooks/release.md)
 - 配布物を独立に検証する: [docs/runbooks/verify-artifact.md](./docs/runbooks/verify-artifact.md)
+- release 後にクリーン環境で導入を実測する: [docs/runbooks/verify-install.md](./docs/runbooks/verify-install.md)
+- Agent 対応状況: [docs/agent-support-matrix.md](./docs/agent-support-matrix.md)
 - pipeline の設計判断: [docs/design/release-pipeline.md](./docs/design/release-pipeline.md)
 
-## 公式 Skill（Phase 1 MVP）
+## 公式 Skill
 
-| Skill ID | 内容 | Issue |
+| Skill ID | 内容 | risk |
 |---|---|---|
-| `cmate-repository-analysis` | リポジトリ構造・規約の分析手順 | [#1239](https://github.com/Kewton/CommandMate/issues/1239) |
-| `cmate-issue-refinement` | Issue 精緻化の標準手順 | [#1240](https://github.com/Kewton/CommandMate/issues/1240) |
-| `cmate-acceptance-test` | 受入テストの標準手順 | [#1241](https://github.com/Kewton/CommandMate/issues/1241) |
+| `cmate-repository-analysis` | リポジトリ構造・規約の分析手順 | low |
+| `cmate-issue-refinement` | Issue 精緻化の標準手順 | low |
+| `cmate-acceptance-test` | 受入テストの標準手順 | low |
+| `cmate-worktree-setup` | 専用 worktree の作成と baseline 取得 | moderate |
+| `cmate-worktree-cleanup` | worktree の安全な後始末 | moderate |
+| `cmate-orchestrate` | 複数 Issue の計画・dispatch・PR/merge・UAT（Node runner 同梱） | **high** |
+| `cmate-orchestrate-monitor` | 並列 worker 監視の判定コア（bash script 同梱） | **high** |
 
-`cmate-parallel-issue-development` は high-risk な Runtime 依存のため Phase 5
-（[#1258](https://github.com/Kewton/CommandMate/issues/1258)〜[#1261](https://github.com/Kewton/CommandMate/issues/1261)）で扱う。
+version は `skills/<skill-id>/commandmate.skill.yaml` の `version` が正本である
+（Catalog は「入手可能なもの」を示す）。high risk の package は install に
+`--yes` と `--ack-risk <skill-id>@<version>` の完全一致が要る。
 
 ## 配布の前提
 

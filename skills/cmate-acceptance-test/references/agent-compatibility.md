@@ -32,7 +32,8 @@ summary の「実行しなかった check」に必ず書く。
 `commandmate.skill.yaml` の `compatibility.agents` が正本である。ここは補足で、
 `support` の値は次を意味する。
 
-- `native` — Agent 自身が `.agents/skills/<skill-id>/SKILL.md` を discovery できる
+- `native` — Agent 自身が install 先の `SKILL.md` を discovery できる
+  （Claude は `.claude/skills/<skill-id>/`、Codex は `.agents/skills/<skill-id>/` から読む）
 - `commandmate_runtime` — CommandMate の Runtime 経由で手順を渡す必要がある
 - `unknown` — この version では検証していない。動かないという意味ではない
 
@@ -52,7 +53,9 @@ discovery と reload の挙動は保証されない。結果の再現性を主�
 
 ## 5. 再読み込み（reload）
 
-Skill は CommandMate が登録済み worktree の `.agents/skills/<skill-id>/` へ配備する。
+Skill は CommandMate が登録済み worktree の `.agents/skills/<skill-id>/` と
+`.claude/skills/<skill-id>/` の **両方**へ byte-identical に配備する
+（CommandMate 0.15.0 以降）。Claude は後者を、Codex は前者を読む。
 配備先 path は server 側で解決されるものであり、この Skill が絶対 path を指定しない。
 
 更新を反映する手順:

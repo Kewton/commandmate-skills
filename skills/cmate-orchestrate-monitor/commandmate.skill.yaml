@@ -1,0 +1,168 @@
+schema_version: 1
+id: cmate-orchestrate-monitor
+name: cmate-orchestrate-monitor
+version: 0.1.0
+summary: 並列 worker の capture を状態分類し、健全な worker へ入力を注入しない条件でのみ介入し、実 commit / uncommitted 数に基づく STARTED ガード付きの完了判定を証拠つきで下す監視レシピ。
+description: >-
+  tmux セッション上で走る worker（coding CLI）を監督するための、実運用で検証済みの監視レシピである。
+  同梱の bash script が `commandmate capture <id> --json` の 1 フレームを 1 つの状態トークン
+  （NOT_RUNNING / GENERATING / PROMPT / RATE_LIMIT / IDLE）へ落とし、その分類と worker 横断の
+  状態から完了判定（COMPLETE / NOT_STARTED / WORKING）を下す。アンカー照合は ANSI エスケープと
+  NBSP を正規化したうえで「いま画面に出ている領域」に限定するため、スクロールバックに流れた作業
+  指示文や spinner 行に誤マッチしない。判定順（NOT_RUNNING → リトライ backoff → PROMPT →
+  GENERATING → RATE_LIMIT → IDLE）自体がガードで、各分岐は入力注入か抑止のどちらかを引き起こす。
+  介入は 3 種類だけで、プロンプトのサイレント自動承認、usage limit バナー検出時の即時再開、
+  リトライ枯渇後の上限つき再送に限られる。再送は IDLE かつ idle 閾値到達かつ現ペインに terminal
+  API error があるときのみ発火し、上限到達後はオペレータへエスカレーションする。完了判定は STARTED
+  ガードを持ち、生成アンカーを一度も観測していない idle や、commit も uncommitted も 0 の idle を
+  COMPLETE と報告しない。作業量カウンタは差し替え可能なフックとして外部供給し（参照実装 hooks-git.sh
+  は worktree-id を実 checkout へ解決して git から数える）、指定した hooks file が存在しない場合は
+  黙ってスタブへ落ちずに即座に失敗する。--verbose は 1 ポーリング 1 行の固定フォーマットで、状態と
+  完了判定に実際に渡した入力を機械可読に残す（既定出力は変わらない）。worker の作成・dispatch・
+  作業指示の送信・PR 作成・merge・Issue の close は行わない。完了は「作業の痕跡があり生成が
+  止まった」ことであって受入条件の充足ではなく、送られた指示そのものの正しさも検知しない。
+capabilities:
+  - capture の 1 フレームを NOT_RUNNING / GENERATING / PROMPT / RATE_LIMIT / IDLE へ分類する
+  - ANSI と NBSP を正規化し、現ペインに限定してアンカー照合する（スクロールバックへ誤マッチしない）
+  - CLI 自身のリトライ backoff を生存として扱い、生成中の worker へ入力を注入しない
+  - 権限・選択プロンプトをサイレントに自動承認し、件数をカウントする
+  - usage limit バナーを生成中の否定後にだけ判定し、待たずに再開キーを送る
+  - リトライ枯渇で停止した worker へ上限つきで再送し、上限到達でオペレータへエスカレーションする
+  - 生成アンカーの観測有無と実 commit / uncommitted 数から STARTED ガード付きの完了判定を下す
+  - 完了カウンタを差し替え可能なフックとして供給し、指定 file が無ければ黙って続行せず失敗する
+  - 1 ポーリング 1 行の固定フォーマットで、判定とその入力を機械可読に記録する
+  - 品質ゲートを exit code の実測で判定し、スコープ違反をコメント行を除いて数える
+expected_outcomes:
+  - 生成中の worker が idle と誤分類されず、思考が長い worker も停止扱いされない
+  - 介入がプロンプト・usage limit・枯渇後の再送に限られ、健全な worker へ入力が注入されない
+  - 未起動 worker や作業の痕跡が無い worker が COMPLETE と誤報されない
+  - 完了判定の根拠（started / streak / commits / uncommitted）がログから読み取れる
+  - 完了フック未配線のまま「全 worker 完了」と報告されることがなく、NOT_STARTED として露見する
+  - 総ポーリング数・状態分類の分布・介入の全件が監視ログから機械的に取り出せる
+  - 品質ゲートの非 0 終了が「テスト緑」の出力に隠されない
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - monitoring
+  - supervision
+  - orchestration
+  - worker
+  - tmux
+  - capture
+  - completion
+  - parallel
+  - guard
+  - bash
+compatibility:
+  commandmate: '>=0.15.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0. An installed skill was discovered from .claude/skills and matched in the slash palette; the installer writes .agents/skills and .claude/skills byte-identically.
+    - agent: codex
+      support: native
+      evidence: Measured 2026-07-26 on Codex CLI 0.145.0. It reads SKILL.md from .agents/skills (model self-report of the absolute path, not a mechanical trace). This version does not expose skills as slash commands; invoke by name or run the scripts.
+    - agent: gemini
+      support: unknown
+      evidence: Not measured for this version. Readable as a procedure; discovery unverified.
+    - agent: opencode
+      support: unknown
+      evidence: Not measured for this version. Readable as a procedure; discovery unverified.
+requirements:
+  commands:
+    - name: bash
+      version_range: '>=3.2.0'
+    - name: commandmate
+    - name: git
+    - name: tmux
+  network_hosts:
+    - registry.npmjs.org
+declared_permissions:
+  - filesystem_read
+  - filesystem_write
+  - process_execution
+  - network_access
+declared_risk: high
+risk_rationale: >-
+  Ships executable scripts (high risk). The loop runs `commandmate capture` per poll, keeps
+  cross-poll state in a temp directory and reads worker checkouts through git once the completion
+  hooks are wired. It types into worker panes via tmux — Enter, "a" and the resend message only,
+  each gated on a classification that first rules out a live turn. It never sends task text and
+  never mutates a repository. Network access is the default npx launcher, avoidable with
+  CM=commandmate.
+files:
+  - path: SKILL.md
+    sha256: 02b6209f7bacb27138d22c1862cac1d47b9e25f040d6ab63c19f335b6ce65696
+    size: 15265
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/agent-compatibility.md
+    sha256: '0b1bf957f2b02b9b1021f6d218bee97675565455679efa7338c15e774a7b8c0b'
+    size: 3878
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/evidence.md
+    sha256: f5504b3f1f5c470f526712708b444b5d0a8fd60b6fa557389c9b175868a12fa3
+    size: 5795
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/monitor-contract.md
+    sha256: 1252c2081997932cf30cc82689198da0f881bb2d120543e265a0be97cb54b735
+    size: 8142
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/recipe-rationale.md
+    sha256: 8c8f524f9516110e9e2c0c6e4d1657862a547aa7ddf50a558f7a92318b720b74
+    size: 11526
+    kind: instruction
+    executable: false
+    script: false
+  - path: scripts/classify-state.sh
+    sha256: 41750af3480a11a5b4f2c74a2bc5dfd5111f41291a2ccca4a15f25ff502e072b
+    size: 2590
+    kind: script
+    executable: true
+    script: true
+  - path: scripts/hooks-git.sh
+    sha256: f6d65d2b4659a5384ba69de513790ff7c63e3408e45ba8e1d50d8457f7d17b16
+    size: 4384
+    kind: script
+    executable: true
+    script: true
+  - path: scripts/monitor-lib.sh
+    sha256: 3b399827fb031601892e2e947763a8d22d63fa1989e2591338ed430167aeaaac
+    size: 8894
+    kind: script
+    executable: true
+    script: true
+  - path: scripts/monitor.sh
+    sha256: 22848f077f8cd28de0693f9a85017401872e481723568a62114ae7406b0ff4e9
+    size: 11628
+    kind: script
+    executable: true
+    script: true
+  - path: scripts/quality-gate.sh
+    sha256: c64057db91b400a661b2191ccdfa9f0f08922fa8f84f0e9463dca65ad91712b6
+    size: 1038
+    kind: script
+    executable: true
+    script: true
+  - path: scripts/verify-completion.sh
+    sha256: 3542c4e0ce4a9325f9c7ca95c2445d927bac1269387948f0c4a5bee09749f417
+    size: 2178
+    kind: script
+    executable: true
+    script: true
+  - path: scripts/verify-scope.sh
+    sha256: 82845086a9d47f799db1ee32d00a3ea38b53cc1de9ca99bcc0d09bfb45e16927
+    size: 1233
+    kind: script
+    executable: true
+    script: true
