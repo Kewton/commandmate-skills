@@ -245,6 +245,76 @@
       ]
     },
     {
+      "id": "cmate-orchestrate-monitor",
+      "name": "cmate-orchestrate-monitor",
+      "summary": "並列 worker の capture を状態分類し、健全な worker へ入力を注入しない条件でのみ介入し、実 commit / uncommitted 数に基づく STARTED ガード付きの完了判定を証拠つきで下す監視レシピ。",
+      "provider": {
+        "name": "CommandMate",
+        "url": "https://github.com/Kewton/CommandMate"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/Kewton/commandmate-skills",
+      "keywords": [
+        "monitoring",
+        "supervision",
+        "orchestration",
+        "worker",
+        "tmux",
+        "capture",
+        "completion",
+        "parallel",
+        "guard",
+        "bash"
+      ],
+      "latest": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "changelog": "cmate-orchestrate-monitor 0.1.0 — 初回リリース\n\nCommandMate の worker セッションを tmux 越しに監視し、完了を機械的に判定する\nハーネスを独立パッケージとして登録。`cmate-orchestrate` の Node dispatch runner\nとは責務が異なるため（監視だけを使う運用がある）別 package とした。\n\n- monitor.sh / classify-state.sh / verify-completion.sh / monitor-lib.sh /\n  quality-gate.sh / verify-scope.sh / hooks-git.sh を収録。\n- STARTED ガード: commits=0 かつ uncommitted=0 の idle は未起動の署名であり、\n  COMPLETE と判定しない（CommandMate#1522 / #1527 で確立）。\n- 実運用検証: CommandMate #1242 / #1246 / #1247 / #1248 の 2 運用 延べ 371 poll、\n  誤報 0。本 package 自身の登録運用でも 95 poll・誤報 0。\n- declared_risk: high（tmux セッションへキー入力を送るため）。install には\n  --ack-risk の完全一致が必要。\n- 同梱契約テスト 95 件。",
+          "published_at": "2026-07-29T09:58:51Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-monitor-v0.1.0",
+            "commit": "ade0ccf51030d764a7c51d1783e47b36eda32ed4"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-monitor-0.1.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-monitor-v0.1.0/cmate-orchestrate-monitor-0.1.0.tar.gz",
+            "sha256": "a9c55200372e495362149184bfdb6027c4a545237e0543807aa14236421b691e",
+            "size": 31026,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0. An installed skill was discovered from .claude/skills and matched in the slash palette; the installer writes .agents/skills and .claude/skills byte-identically.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0. It reads SKILL.md from .agents/skills (model self-report of the absolute path, not a mechanical trace). This version does not expose skills as slash commands; invoke by name or run the scripts.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; discovery unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. Readable as a procedure; discovery unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.15.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        }
+      ]
+    },
+    {
       "id": "cmate-repository-analysis",
       "name": "cmate-repository-analysis",
       "summary": "リポジトリをread-onlyで走査し、構造・既存実装・再利用候補・変更risk・推奨verificationをfile/line evidence付きで返す。",
