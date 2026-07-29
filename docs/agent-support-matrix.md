@@ -64,7 +64,43 @@ evidence:
 <https://github.com/Kewton/CommandMate/issues/1513#issuecomment-5083878264>
 
 install 先は package に依存しないので、この測定は全 package の discovery 経路に効く。
-ただし **測定に使った package は 1 件（low risk・script 無し）**である。
+測定に使った package は 1 件（`cmate-repository-analysis` 0.1.0・low risk・script 無し）だが、
+**publish 後に 7 package 全件で追試済み**（第 3.1 節）。
+
+### 3.1 Catalog publish 後の追試（2026-07-29）
+
+第 3 節は**手動配置**した payload での測定である。Catalog へ publish したあと、
+**catalog 経由で install した状態**で同じ隔離環境（npm 公開版 `commandmate@0.15.0`・
+専用 HOME / 専用 DB / 専用ポート・skills 未導入の新規 git リポジトリ）を組んで追試した。
+
+| 項目 | 結果 |
+|---|---|
+| `skill list` | 7 package すべて表示（`compatible`） |
+| install | **7 package すべて成功** |
+| 配置 | 全件 `.agents/skills/<id>` と `.claude/skills/<id>` へ `diff -r` 差分なし |
+| receipt | 全件 `install_roots` に両 root を記録 |
+| manifest digest 照合 | mismatch なし |
+| Claude Code 2.1.220 の palette | **7 件すべて完全一致（機械的証跡）** |
+| Codex CLI 0.145.0 の palette | 非露出（対照 `/mo` → `/model` は match ＝ palette 機構は正常） |
+| Codex の SKILL.md 絶対 path 自己申告 | 正答（self-report） |
+
+**high risk の承認ゲートもここで初めて実測した。**
+
+| 試行 | 結果 |
+|---|---|
+| `--yes` のみ | **exit 12 で拒否**・ファイル書き込みなし |
+| `--ack-risk <id>@<誤った version>` | 拒否（完全一致を要求） |
+| `--ack-risk <id>@<正しい version>` | install 成功 |
+
+`skill plan` が書き込みを行わないことも確認した（実行後に `.agents` / `.claude` が生成されない）。
+
+evidence:
+<https://github.com/Kewton/CommandMate/issues/1513#issuecomment-5116598691>
+
+なお、この追試中に CommandMate 側の不具合を 1 件検出している
+（uninstall 後の再 install が idempotency replay で握り潰され、exit 0 のまま
+ファイルが書かれない → [CommandMate#1552](https://github.com/Kewton/CommandMate/issues/1552)）。
+**初回 install には影響しない**が、drift 修復のための入れ直しは現状 no-op になる。
 
 ### Codex の slash 非露出について
 
@@ -91,9 +127,11 @@ Codex では skill 名を自然文で指示するか、同梱 script を直接�
 - **Codex の発見は self-report**（model が SKILL.md の絶対 path を答えた）であり、
   機械的証跡ではない。
 - **Codex 0.145.0 は skill を slash command として露出しない。**
-- **high risk package（`cmate-orchestrate` / `cmate-orchestrate-monitor`）は
-  クリーン環境での install 実測をまだ行っていない。** install には `--yes` に加えて
-  `--ack-risk <skill-id>@<version>` の完全一致が必要である。
+- **high risk package は `cmate-worktree-cleanup` / `cmate-orchestrate` /
+  `cmate-orchestrate-monitor` の 3 件**である（`declared_risk` の正本は各 package の
+  `commandmate.skill.yaml`）。install には `--yes` に加えて
+  `--ack-risk <skill-id>@<version>` の完全一致が必要で、2026-07-29 に
+  クリーン環境で実測済み（第 3.1 節）。
 - **Gemini / OpenCode / vibe-local / copilot / antigravity は未計測。**
 - Claude / Codex とも、更新の反映には **新しい session の開始**が要る。
   実効 version は install 済み `commandmate.skill.yaml` の `version` で確認する

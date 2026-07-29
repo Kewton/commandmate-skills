@@ -53,8 +53,13 @@ commandmate skill install <skill-id> --worktree "$WT" --version <version> \
   --yes --ack-risk <skill-id>@<version>
 ```
 
-`declared_risk: high` の package（`cmate-orchestrate` / `cmate-orchestrate-monitor`）は
-`--yes` だけでは通らない。**通ってしまったらそれ自体が不具合**である。
+`declared_risk: high` の package（**`cmate-worktree-cleanup` / `cmate-orchestrate` /
+`cmate-orchestrate-monitor` の 3 件**）は `--yes` だけでは通らない。
+**通ってしまったらそれ自体が不具合**である。
+
+どれが high かを README や本書の列挙で判断しないこと。**正本は各 package の
+`commandmate.skill.yaml` の `declared_risk`** であり、`commandmate skill info <skill-id>`
+の `RISK` 列でも確認できる。
 
 ## 3. 配置を確認する（両 root・byte-identical）
 
