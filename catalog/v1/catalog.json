@@ -129,7 +129,7 @@
         "review",
         "github"
       ],
-      "latest": "0.1.0",
+      "latest": "0.1.1",
       "versions": [
         {
           "version": "0.1.0",
@@ -159,6 +159,50 @@
                 "agent": "codex",
                 "evidence": "Not yet run against a recorded Codex version; opt-in fixture evaluation is described in references/agent-compatibility.md",
                 "support": "unknown"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not evaluated",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not evaluated",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.1.1",
+          "changelog": "cmate-issue-refinement 0.1.1 — 互換宣言を実測へ是正\n\ncodex を unknown → native へ格上げ（根拠を実測で取得したため）。\nclaude の evidence も「.agents/skills からの discovery」という誤記を是正。\n\n2026-07-26 の隔離環境実測:\n- Claude Code 2.1.220 / CommandMate 0.15.0: .claude/skills から発見され\n  slash palette に完全一致で露出（機械的証跡）。\n- Codex CLI 0.145.0: .agents/skills から SKILL.md を読む（self-report）。\n  この version は skill を slash command として露出しないため名前で呼ぶ。\n  rubric 評価は未実施。\n- Gemini / OpenCode は未計測のため unknown のまま据え置き。\n\n手順本体に変更なし。",
+          "published_at": "2026-07-29T10:02:52Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-refinement-v0.1.1",
+            "commit": "ade0ccf51030d764a7c51d1783e47b36eda32ed4"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-refinement-0.1.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-refinement-v0.1.1/cmate-issue-refinement-0.1.1.tar.gz",
+            "sha256": "108ef92574b8d27a083fa71a0176d14dc7055efa56060b15fce17b5752c3d5e4",
+            "size": 18970,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. No rubric evaluation recorded yet.",
+                "support": "native"
               },
               {
                 "agent": "gemini",
