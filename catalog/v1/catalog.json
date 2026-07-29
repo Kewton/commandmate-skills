@@ -240,7 +240,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.7.0",
+      "latest": "0.7.1",
       "versions": [
         {
           "version": "0.4.0",
@@ -313,6 +313,50 @@
               {
                 "agent": "codex",
                 "evidence": "Standard SKILL.md discovery from .agents/skills. Same deterministic runner yields the same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.7.1",
+          "changelog": "cmate-orchestrate 0.7.1 — claude 互換を unknown → native へ是正\n\n0.7.0 の `claude: unknown` は「installer が .agents/skills にしか置かない\n（CommandMate#1460 未解決）」「native discovery 未計測（CommandMate#1246）」を\n根拠にしていたが、この 2 つの前提はいずれも既に成立しない。\n\n- CommandMate#1460 は 0.15.0 で着地済み。installer は .agents/skills と\n  .claude/skills の両方へ byte-identical に配置する。\n- 2026-07-26 の隔離環境実測（Claude Code 2.1.220 / CommandMate 0.15.0）で\n  .claude/skills からの発見と slash palette 完全一致を確認。\n\ncodex の evidence も実測（Codex CLI 0.145.0）へ差し替え。この version は\nskill を slash command として露出しないため名前で呼ぶ。runner は決定論的で\n同一 plan を出す（parity）。\n\nGemini / OpenCode は未計測のため unknown のまま据え置き。runner 本体に変更なし。",
+          "published_at": "2026-07-29T10:05:18Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.7.1",
+            "commit": "ade0ccf51030d764a7c51d1783e47b36eda32ed4"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.7.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.7.1/cmate-orchestrate-0.7.1.tar.gz",
+            "sha256": "99a6009c9b2c0070b811cb3300e6a86d6f2ba495e7f4bec23d4c8d0728b7edf8",
+            "size": 87561,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
                 "support": "native"
               },
               {
