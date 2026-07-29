@@ -59,16 +59,17 @@ python3 scripts/verify_artifact.py --help      # 公開 artifact の keyless 検
 | Skill ID | 内容 | risk |
 |---|---|---|
 | `cmate-repository-analysis` | リポジトリ構造・規約の分析手順 | low |
-| `cmate-issue-refinement` | Issue 精緻化の標準手順 | low |
-| `cmate-acceptance-test` | 受入テストの標準手順 | low |
+| `cmate-issue-refinement` | Issue 精緻化の標準手順 | moderate |
+| `cmate-acceptance-test` | 受入テストの標準手順 | moderate |
 | `cmate-worktree-setup` | 専用 worktree の作成と baseline 取得 | moderate |
-| `cmate-worktree-cleanup` | worktree の安全な後始末 | moderate |
+| `cmate-worktree-cleanup` | worktree の安全な後始末 | **high** |
 | `cmate-orchestrate` | 複数 Issue の計画・dispatch・PR/merge・UAT（Node runner 同梱） | **high** |
 | `cmate-orchestrate-monitor` | 並列 worker 監視の判定コア（bash script 同梱） | **high** |
 
-version は `skills/<skill-id>/commandmate.skill.yaml` の `version` が正本である
-（Catalog は「入手可能なもの」を示す）。high risk の package は install に
-`--yes` と `--ack-risk <skill-id>@<version>` の完全一致が要る。
+version と risk は `skills/<skill-id>/commandmate.skill.yaml` の `version` /
+`declared_risk` が正本である（Catalog は「入手可能なもの」を示す）。high risk の
+package（**`cmate-worktree-cleanup` / `cmate-orchestrate` / `cmate-orchestrate-monitor`
+の 3 件**）は install に `--yes` と `--ack-risk <skill-id>@<version>` の完全一致が要る。
 
 ## 配布の前提
 
