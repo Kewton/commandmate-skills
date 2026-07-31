@@ -10,7 +10,7 @@ immutable commit SHA と artifact SHA-256 を検証したうえで、登録済�
 - 親 Epic: [Kewton/CommandMate#1227](https://github.com/Kewton/CommandMate/issues/1227)
 - 本リポジトリの release pipeline: [Kewton/CommandMate#1238](https://github.com/Kewton/CommandMate/issues/1238)
 
-> **状態**: release pipeline と公式 Skill 7 件が揃っている。
+> **状態**: release pipeline と公式 Skill 8 件が揃っている。
 > どの Agent でどこまで確認済みかは
 > [docs/agent-support-matrix.md](./docs/agent-support-matrix.md) を参照。
 
@@ -65,11 +65,13 @@ python3 scripts/verify_artifact.py --help      # 公開 artifact の keyless 検
 | `cmate-worktree-cleanup` | worktree の安全な後始末 | **high** |
 | `cmate-orchestrate` | 複数 Issue の計画・dispatch・PR/merge・UAT（Node runner 同梱） | **high** |
 | `cmate-orchestrate-monitor` | 並列 worker 監視の判定コア（bash script 同梱） | **high** |
+| `cmate-verify` | 検証ゲートの起案と実 exit code 判定（bash script 同梱） | **high** |
 
 version と risk は `skills/<skill-id>/commandmate.skill.yaml` の `version` /
 `declared_risk` が正本である（Catalog は「入手可能なもの」を示す）。high risk の
-package（**`cmate-worktree-cleanup` / `cmate-orchestrate` / `cmate-orchestrate-monitor`
-の 3 件**）は install に `--yes` と `--ack-risk <skill-id>@<version>` の完全一致が要る。
+package（**`cmate-worktree-cleanup` / `cmate-orchestrate` / `cmate-orchestrate-monitor` /
+`cmate-verify` の 4 件**）は install に `--yes` と `--ack-risk <skill-id>@<version>` の
+完全一致が要る。
 
 ## 配布の前提
 
