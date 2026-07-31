@@ -63,8 +63,44 @@ dispatch 時のシェル展開の欠陥で、worker へ届いた指示文から 
 監視は正しく健全と分類しており誤報ではないが、**監視は「送られた指示の正しさ」を検知できない**
 という限界の実例として記録する。
 
+## 1b. タスク状態を一次ソースにする経路（0.2.0 で追加）
+
+**この経路の実運用実績はまだ無い。** 上の 371 ポーリングはすべて capture ヒューリスティクス
+（現在のフォールバック経路）で得たもので、0.2.0 の変更後もその経路は無修正のまま green である。
+
+参照手段の選定は 2026-07-31 に実測した。
+
+| 実測項目 | 結果 |
+|---|---|
+| `commandmate task list <wid> --limit 1`（tasks あり） | exit 0。TSV `id \t status \t agent \t gates \t title` を新しい順に出力 |
+| 同 `--json` | **裸の JSON 配列**（`{tasks:[…]}` ではない）。key は `id, worktreeId, cliToolId, instanceId, title, goal, contractPath, contract, status, lastVerificationRunId, createdAt, updatedAt, startedAt, finishedAt` |
+| 同（tasks 無し） | exit 0、stdout 空、stderr に `No tasks recorded for worktree '<wid>'.` |
+| `commandmate task show <task-id> --json` | exit 0。top-level は `task` / `lastVerificationRun` の 2 key |
+| `GET /api/worktrees/<wid>/tasks` | 200 `{"tasks":[…]}`。CLI はこの route の薄いクライアント |
+| `GET /api/tasks/<task-id>` | 200 `{task, lastVerificationRun}` |
+| 実在した `status` 値 | `succeeded` / `failed` / `not_started`（実行契約 3 件、L4 認定 Run A–C） |
+
+**CLI を採った理由**: base URL（`CM_PORT`）と認証トークン（`--token` / `CM_AUTH_TOKEN`）の解決を
+CLI が既に持っている。curl では両方を再実装し、トークンをプロセスリストへ晒すことになる。
+`task show` ではなく `task list` なのは、監視ループが知っているのが worktree-id だけだからである。
+
+**バージョンゲートが既定になる、という実測**:
+
+| 対象 | `commandmate task` |
+|---|---|
+| homebrew 導入版 0.10.2 | **無し**（`error: unknown command 'task'`） |
+| npm 公開最新 0.16.0（tarball 検査） | **無し**（`dist/cli/commands/task.js` が存在しない） |
+| tag `v0.15.0` / `v0.16.0` | **無し**（`src/cli/commands/task.ts` が存在しない） |
+| develop（#1566 以降） | 有り |
+
+つまり **2026-07-31 時点の公開版 CommandMate では、この Skill は必ずフォールバックモードで走る。**
+「タスク状態が一次ソース」は、task 台帳を含む CommandMate に対してのみ成立する主張である。
+
 ## 2. 測定の限界（この Skill について）
 
+- **タスク状態経路は fixture / shim テストのみ**。実 worker を契約付きで委任し、
+  `succeeded` / `failed` を実際に読んで監視を終わらせた実績は **未計測**である
+  （公開版 CommandMate に `task` コマンドが無いため、リリース後にしか測れない）。
 - **worker 側 CLI は Claude Code のみ**。同梱の生成中・idle・プロンプトのアンカーは
   その TUI から実際に採取した capture に基づく。他の coding CLI の TUI 文字列は **未計測**である。
 - **rate limit・リトライ枯渇の実地発火は 0 回**。この 2 経路は fixture（実機採取した

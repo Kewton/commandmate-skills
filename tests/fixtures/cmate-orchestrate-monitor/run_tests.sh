@@ -166,6 +166,129 @@ check "below the idle threshold stays WORKING" WORKING \
   "$(verify --started 1 --state IDLE --idle-streak 2 --idle-threshold 5 --commits 1 --uncommitted 0)"
 
 echo
+echo "== verify-completion: task state is the primary source (Issue #1589) =="
+# The six acceptance cases: five task statuses plus the task-absent fallback.
+# Every terminal case is fed inputs whose *heuristic* verdict differs from the
+# expected one, so a green here cannot come from the fallback path happening to
+# agree. The ordering pinned below is CommandMate #1581's, deliberately identical:
+#   live pane state -> adjudicated task status -> STARTED guard -> idle + work.
+
+# 1/6 succeeded: the gates already ran server-side, so no commit corroboration is
+# needed. Heuristics alone would say WORKING (streak below threshold).
+check "1/6 task succeeded -> COMPLETE (heuristics alone would say WORKING)" COMPLETE \
+  "$(verify --started 1 --state IDLE --idle-streak 0 --idle-threshold 5 --commits 0 --uncommitted 0 --task-status succeeded)"
+
+# 2/6 failed: the case the whole change exists for. Idle with commits is exactly
+# what the old core called COMPLETE — "the worker stopped" is not "the work is good".
+check "2/6 task failed -> VERIFY_FAILED (heuristics alone would say COMPLETE)" VERIFY_FAILED \
+  "$(verify --started 1 --state IDLE --idle-streak 10 --idle-threshold 5 --commits 3 --uncommitted 0 --task-status failed)"
+
+# 3/6 not_started: work exists on disk but the server never saw the task start.
+check "3/6 task not_started -> NOT_STARTED (heuristics alone would say COMPLETE)" NOT_STARTED \
+  "$(verify --started 1 --state IDLE --idle-streak 10 --idle-threshold 5 --commits 3 --uncommitted 0 --task-status not_started)"
+
+# 4/6 running: non-terminal, so it does not rule — it falls through to the
+# heuristics. Both halves are pinned because the fall-through is the point:
+# a short-circuit to WORKING would blind the STARTED guard, which is the only
+# thing that catches "the CLI marked it running but Enter never landed".
+check "4/6 task running -> WORKING below the idle threshold" WORKING \
+  "$(verify --started 1 --state IDLE --idle-streak 2 --idle-threshold 5 --commits 3 --uncommitted 0 --task-status running)"
+check "4/6 task running falls through, it does not short-circuit" COMPLETE \
+  "$(verify --started 1 --state IDLE --idle-streak 10 --idle-threshold 5 --commits 3 --uncommitted 0 --task-status running)"
+check "4/6 the STARTED guard still fires under a running task" NOT_STARTED \
+  "$(verify --started 0 --state IDLE --idle-streak 10 --idle-threshold 5 --commits 0 --uncommitted 0 --task-status running)"
+
+# 5/6 verifying: same non-terminal treatment — the gates are still running.
+check "5/6 task verifying -> WORKING below the idle threshold" WORKING \
+  "$(verify --started 1 --state IDLE --idle-streak 2 --idle-threshold 5 --commits 3 --uncommitted 0 --task-status verifying)"
+check "5/6 task verifying falls through, it does not short-circuit" COMPLETE \
+  "$(verify --started 1 --state IDLE --idle-streak 10 --idle-threshold 5 --commits 3 --uncommitted 0 --task-status verifying)"
+
+# 6/6 no task: contract-less delegation and pre-ledger CommandMate. The verdicts
+# must be exactly what they were before the task source existed — both when the
+# flag is empty and when it is absent entirely.
+check "6/6 no task, empty flag -> capture heuristics (COMPLETE)" COMPLETE \
+  "$(verify --started 1 --state IDLE --idle-streak 10 --idle-threshold 5 --commits 3 --uncommitted 0 --task-status '')"
+check "6/6 no task, empty flag -> capture heuristics (NOT_STARTED)" NOT_STARTED \
+  "$(verify --started 1 --state IDLE --idle-streak 10 --idle-threshold 5 --commits 0 --uncommitted 0 --task-status '')"
+check "6/6 no task, flag absent -> identical verdict" COMPLETE \
+  "$(verify --started 1 --state IDLE --idle-streak 10 --idle-threshold 5 --commits 3 --uncommitted 0)"
+# The STARTED guard's distinctive branch, pinned here because demoting the
+# heuristics must not weaken them: work on disk with the generation anchor never
+# latched is "keep watching", not COMPLETE. Mutation-checked — deleting the guard
+# leaves every other case in this file green.
+check "6/6 the STARTED guard still holds: unlatched work is WORKING" WORKING \
+  "$(verify --started 0 --state IDLE --idle-streak 10 --idle-threshold 5 --commits 2 --uncommitted 0)"
+
+# The remaining terminal status, and the two remaining non-terminal ones.
+check "task cancelled -> VERIFY_FAILED, never COMPLETE" VERIFY_FAILED \
+  "$(verify --started 1 --state IDLE --idle-streak 10 --idle-threshold 5 --commits 3 --uncommitted 0 --task-status cancelled)"
+check "task pending falls through to the STARTED guard" NOT_STARTED \
+  "$(verify --started 0 --state IDLE --idle-streak 10 --idle-threshold 5 --commits 0 --uncommitted 0 --task-status pending)"
+check "task waiting_input falls through to the heuristics" COMPLETE \
+  "$(verify --started 1 --state IDLE --idle-streak 10 --idle-threshold 5 --commits 3 --uncommitted 0 --task-status waiting_input)"
+
+# A stale terminal status must not end the watch while the pane is alive: the
+# newest `succeeded` may belong to the previous send, not to this turn.
+check "a live pane vetoes a stale succeeded" WORKING \
+  "$(verify --started 1 --state GENERATING --idle-streak 0 --idle-threshold 5 --commits 0 --uncommitted 0 --task-status succeeded)"
+check "an open prompt vetoes a stale succeeded" WORKING \
+  "$(verify --started 1 --state PROMPT --idle-streak 0 --idle-threshold 5 --commits 0 --uncommitted 0 --task-status succeeded)"
+
+# Unknown values degrade to the heuristics rather than to an undefined verdict.
+# `unavailable` is hooks-task.sh's version-gate sentinel, so this is also what
+# keeps it safe in front of a monitor.sh that predates it.
+check "the unavailable sentinel falls through to the heuristics" COMPLETE \
+  "$(verify --started 1 --state IDLE --idle-streak 10 --idle-threshold 5 --commits 3 --uncommitted 0 --task-status unavailable)"
+check "an unrecognised status falls through to the heuristics" NOT_STARTED \
+  "$(verify --started 1 --state IDLE --idle-streak 10 --idle-threshold 5 --commits 0 --uncommitted 0 --task-status finished)"
+
+echo
+echo "== hooks-task.sh reads the ledger through the CLI =="
+# The CLI is the source, not curl: it already resolves base URL and auth token.
+# Here it is a shim, so the three answers can be produced deterministically.
+HOOKS_TASK="$SCRIPTS/hooks-task.sh"
+TASK_SHIM_DIR="$WORK/task-shim"
+mkdir -p "$TASK_SHIM_DIR"
+
+# read_task <stdout-file> <exit-code> -> read_task_status's answer
+read_task() {
+  printf '#!/bin/sh\ncat %s\nexit %s\n' "$1" "$2" > "$TASK_SHIM_DIR/cm"
+  chmod +x "$TASK_SHIM_DIR/cm"
+  CM="$TASK_SHIM_DIR/cm" bash -c ". \"$HOOKS_TASK\"; read_task_status any-worktree" 2>/dev/null
+}
+
+# The real shape, measured 2026-07-31 against CommandMate develop: tab-separated
+# id / status / agent / gates / title, newest first.
+printf '58d95c4a-ef02-47b9-8411-837cb9e03040\tsucceeded\tclaude\tlint+typecheck\tRun C\n' > "$TASK_SHIM_DIR/succeeded.txt"
+printf '307cff97-f3b8-4bae-8704-12460591099c\tfailed\tclaude\tlint\tRun B\n' > "$TASK_SHIM_DIR/failed.txt"
+printf 'bf1201cc-dc50-4cc7-ad61-90b6c1bbdda5\tnot_started\tclaude\tlint\tRun A\n' > "$TASK_SHIM_DIR/not-started.txt"
+: > "$TASK_SHIM_DIR/empty.txt"
+
+check "a succeeded row yields its status" succeeded "$(read_task "$TASK_SHIM_DIR/succeeded.txt" 0)"
+check "a failed row yields its status" failed "$(read_task "$TASK_SHIM_DIR/failed.txt" 0)"
+check "a not_started row yields its status" not_started "$(read_task "$TASK_SHIM_DIR/not-started.txt" 0)"
+# No tasks: the CLI writes its notice to stderr and exits 0 with empty stdout.
+check "a worktree with no tasks yields nothing, not a verdict" "" "$(read_task "$TASK_SHIM_DIR/empty.txt" 0)"
+# Only the newest row is consulted, whatever --limit did.
+printf 'aaa\trunning\tclaude\tlint\tnewest\nbbb\tsucceeded\tclaude\tlint\tolder\n' > "$TASK_SHIM_DIR/two.txt"
+check "only the newest row is read" running "$(read_task "$TASK_SHIM_DIR/two.txt" 0)"
+# A changed output format must degrade to "no answer", never to a bogus verdict.
+printf 'ID: 123 STATUS: succeeded\n' > "$TASK_SHIM_DIR/reformatted.txt"
+check "a changed output format degrades to no answer" "" "$(read_task "$TASK_SHIM_DIR/reformatted.txt" 0)"
+# The version gate. Measured non-zero exits: CommandMate 0.10.2 and published
+# 0.16.0 have no `task` command (exit 1), a stopped server exits 1, an unknown
+# worktree exits 99. `unavailable` is not a TaskStatus, so it can never decide.
+check "a CLI without 'task' reports unavailable, not 'no tasks'" unavailable \
+  "$(read_task "$TASK_SHIM_DIR/empty.txt" 1)"
+check "an unknown worktree (exit 99) reports unavailable" unavailable \
+  "$(read_task "$TASK_SHIM_DIR/empty.txt" 99)"
+# The exit code must survive: piping the CLI into `head` would hand $? to head
+# and turn every failure above into a silent "no tasks".
+check "a failing CLI that still printed a row reports unavailable" unavailable \
+  "$(read_task "$TASK_SHIM_DIR/succeeded.txt" 1)"
+
+echo
 echo "== verify-scope does not false-positive =="
 check "prose/comment mentions are not violations" CLEAN "$(bash "$SCOPE" --file "$FIXTURES/scope-clean.txt")"
 check "a real bare invocation is counted" VIOLATIONS:1 "$(bash "$SCOPE" --file "$FIXTURES/scope-violation.txt")"
@@ -185,6 +308,12 @@ LOOP_ID=w1
 # run_loop <case-name> <polls> <fixture[,fixture...]> [extra monitor args...]
 # Serves fixture N on poll N and repeats the last one afterwards. Sets
 # LOOP_STDOUT / LOOP_STDERR / LOOP_STATUS / LOOP_CAPTURES / LOOP_TMUX.
+#
+# `commandmate task ...` is answered separately from `capture` so that wiring
+# hooks-task.sh cannot disturb the fixture sequence: LOOP_TASK_OUT (a file, empty
+# by default) is the stdout and LOOP_TASK_EXIT (0 by default) the exit code, and
+# neither advances the capture counter. Runs that never source hooks-task.sh
+# never reach that branch, so their capture log is byte-identical to before.
 run_loop() {
   loop_case=$1; loop_polls=$2; loop_fixtures=$3; shift 3
   loop_dir="$WORK/$loop_case"
@@ -193,10 +322,15 @@ run_loop() {
   loop_tmux_log="$loop_dir/tmux.log"
   : > "$loop_capture_log"
   : > "$loop_tmux_log"
+  cp "${LOOP_TASK_OUT:-/dev/null}" "$loop_dir/task-out"
+  printf '%s\n' "${LOOP_TASK_EXIT:-0}" > "$loop_dir/task-exit"
 
   {
     echo '#!/bin/sh'
     echo "printf '%s\\n' \"\$*\" >> \"$loop_capture_log\""
+    echo 'case "$1" in'
+    echo "  task) cat \"$loop_dir/task-out\"; exit \"\$(cat \"$loop_dir/task-exit\")\" ;;"
+    echo 'esac'
     echo "n=\$(cat \"$loop_dir/counter\" 2>/dev/null || echo 0)"
     echo 'n=$((n + 1))'
     echo "echo \"\$n\" > \"$loop_dir/counter\""
@@ -315,6 +449,86 @@ check "never types into a healthy worker whose pane shows rate-limiter source" "
 run_loop real-rate-limit 1 rate-limit.json
 check_contains "acts on a genuine usage-limit banner" "rate limit -> sending 'a'" "$LOOP_STDOUT"
 check "sends 'a' once" "send-keys -t cm-w1 a Enter" "$LOOP_TMUX"
+
+echo
+echo "== monitor.sh with the task ledger wired (Issue #1589) =="
+TASK_LOOP_DIR="$WORK/task-loop"
+mkdir -p "$TASK_LOOP_DIR"
+printf 'aaaaaaaa-0000-0000-0000-000000000001\tsucceeded\tclaude\tlint\tRun C\n' > "$TASK_LOOP_DIR/succeeded.tsv"
+printf 'aaaaaaaa-0000-0000-0000-000000000002\tfailed\tclaude\tlint\tRun B\n' > "$TASK_LOOP_DIR/failed.tsv"
+printf 'aaaaaaaa-0000-0000-0000-000000000003\trunning\tclaude\tlint\tRun D\n' > "$TASK_LOOP_DIR/running.tsv"
+
+# An adjudicated `succeeded` completes the watch with the work counters still
+# stubbed at 0 — the exact input the fallback path reads as "never sent". This is
+# the demotion, at loop level: the ledger decides, the heuristics do not veto it.
+LOOP_TASK_OUT="$TASK_LOOP_DIR/succeeded.tsv" \
+  run_loop task-succeeded 5 live-idle.json --verbose --hooks "$SCRIPTS/hooks-task.sh"
+check_contains "an adjudicated succeeded reaches COMPLETE without work counters" \
+  "monitor[w1]: COMPLETE (approvals=0)" "$LOOP_STDOUT"
+check "the poll line carries the status it decided on" \
+  "monitor[w1]: poll 1 -> IDLE started=0 streak=1 commits=0 uncommitted=0 verdict=COMPLETE task=succeeded" \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep -E '^monitor\[w1\]: poll 1 ')"
+check_lacks "a wired ledger that answers does not announce the version gate" \
+  "FALLBACK MODE" "$LOOP_STDOUT"
+
+# `failed` is terminal but explicitly not a pass. Before #1589 this run reported
+# COMPLETE once the counters showed work, which is the misreport the change removes.
+LOOP_TASK_OUT="$TASK_LOOP_DIR/failed.tsv" \
+  run_loop task-failed 5 live-idle.json --verbose --hooks "$SCRIPTS/hooks-task.sh"
+check_contains "a failed contract ends the watch as VERIFY_FAILED" \
+  "monitor[w1]: VERIFY_FAILED — contract gates failed; do not merge." "$LOOP_STDOUT"
+check_lacks "a failed contract is never reported as COMPLETE" \
+  "monitor[w1]: COMPLETE" "$LOOP_STDOUT"
+check_contains "a failed contract stops the loop instead of polling forever" \
+  "monitor: all 1 worker(s) complete" "$LOOP_STDOUT"
+
+# A live pane vetoes the ledger: poll 1 is GENERATING, so the stale `succeeded`
+# cannot end the watch until the worker actually goes idle.
+LOOP_TASK_OUT="$TASK_LOOP_DIR/succeeded.tsv" \
+  run_loop task-veto 5 live-generating-token.json,live-idle.json --verbose --hooks "$SCRIPTS/hooks-task.sh"
+check "a generating pane keeps WORKING even with a succeeded task" \
+  "monitor[w1]: poll 1 -> GENERATING started=1 streak=0 commits=0 uncommitted=0 verdict=WORKING task=succeeded" \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep -E '^monitor\[w1\]: poll 1 ')"
+check_contains "the same task completes once the pane goes idle" \
+  "monitor[w1]: COMPLETE (approvals=0)" "$LOOP_STDOUT"
+
+# A non-terminal status leaves the heuristics in charge — with stub counters that
+# means the run never completes, exactly as a contract-less run behaves.
+LOOP_TASK_OUT="$TASK_LOOP_DIR/running.tsv" \
+  run_loop task-running 3 live-idle.json --verbose --hooks "$SCRIPTS/hooks-task.sh"
+check_lacks "a running task does not complete the watch" "COMPLETE" "$LOOP_STDOUT"
+check_contains "a running task is recorded in the evidence line" "task=running" "$LOOP_STDOUT"
+check_contains "a running task runs to --max-polls" "reached --max-polls (3)" "$LOOP_STDOUT"
+
+# The version gate: hooks-task.sh was wired, so task state was promised, and the
+# CLI could not answer (measured exit 1 on every published CommandMate, none of
+# which ship `commandmate task`). Degrading quietly here would leave a log full of
+# plausible COMPLETE lines with nothing saying they were inferred.
+LOOP_TASK_EXIT=1 run_loop task-gate 3 live-idle.json --verbose --hooks "$SCRIPTS/hooks-task.sh"
+check_contains "an unreadable ledger announces fallback mode" \
+  "monitor[w1]: task state unavailable" "$LOOP_STDOUT"
+check_contains "the announcement says completion is inferred, not adjudicated" \
+  "FALLBACK MODE: completion is inferred from capture, not adjudicated." "$LOOP_STDOUT"
+check_contains "the announcement is actionable" \
+  "commandmate task list w1 --limit 1" "$LOOP_STDOUT"
+check "it is announced once, not once per poll" 1 \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep -c 'FALLBACK MODE')"
+check "the fallback verdicts are the pre-#1589 ones" \
+  "monitor[w1]: poll 3 -> IDLE started=0 streak=3 commits=0 uncommitted=0 verdict=NOT_STARTED" \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep -E '^monitor\[w1\]: poll 3 ')"
+check_lacks "the sentinel never leaks into the evidence line" "task=unavailable" "$LOOP_STDOUT"
+
+# Two hooks files: work counters from one, task state from the other. Repeatable
+# --hooks is what makes the primary source and the fallback source composable.
+printf 'count_commits() { echo 4; }\ncount_uncommitted() { echo 0; }\n' > "$WORK/hooks-counters.sh"
+LOOP_TASK_OUT="$TASK_LOOP_DIR/failed.tsv" \
+  run_loop task-two-hooks 3 live-idle.json --verbose \
+  --hooks "$WORK/hooks-counters.sh" --hooks "$SCRIPTS/hooks-task.sh"
+check "both hooks files are sourced, left to right" \
+  "monitor[w1]: poll 1 -> IDLE started=0 streak=1 commits=4 uncommitted=0 verdict=VERIFY_FAILED task=failed" \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep -E '^monitor\[w1\]: poll 1 ')"
+check_contains "a second hooks file that is missing still fails loudly" "hooks file not found" \
+  "$(run_loop task-two-hooks-missing 1 live-idle.json --hooks "$WORK/hooks-counters.sh" --hooks /nonexistent/hooks-task.sh; printf '%s' "$LOOP_STDERR")"
 
 echo
 echo "== hooks-git.sh reference implementation =="

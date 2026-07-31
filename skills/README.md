@@ -15,13 +15,18 @@ skills/<skill-id>/
 
 | Skill ID | version | risk | 内容 |
 |---|---|---|---|
-| `cmate-acceptance-test` | 0.1.1 | low | 受入テストの標準手順 |
-| `cmate-issue-refinement` | 0.1.1 | low | Issue 精緻化の標準手順 |
+| `cmate-acceptance-test` | 0.1.1 | moderate | 受入テストの標準手順 |
+| `cmate-issue-refinement` | 0.1.1 | moderate | Issue 精緻化の標準手順 |
 | `cmate-orchestrate` | 0.7.1 | high | 計画・dispatch・PR/merge・UAT（Node runner 同梱） |
-| `cmate-orchestrate-monitor` | 0.1.0 | high | 並列 worker 監視の判定コア（bash script 同梱） |
+| `cmate-orchestrate-monitor` | 0.2.0 | high | 並列 worker 監視の判定コア（bash script 同梱） |
 | `cmate-repository-analysis` | 0.1.1 | low | リポジトリ構造・規約の分析手順 |
-| `cmate-worktree-cleanup` | 0.1.2 | moderate | worktree の安全な後始末 |
+| `cmate-task-contract` | 0.1.0 | moderate | Issue から実行契約 yaml を起案する手順 |
+| `cmate-verify` | 0.1.0 | high | 検証ゲートの起案と実 exit code 判定（bash script 同梱） |
+| `cmate-worktree-cleanup` | 0.1.2 | high | worktree の安全な後始末 |
 | `cmate-worktree-setup` | 0.1.2 | moderate | 専用 worktree の作成と baseline 取得 |
+
+`cmate-task-contract` と `cmate-verify` は **まだ Catalog に publish されていない**
+（[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開予定）。
 
 この表は目次であって正本ではない。version と risk は各
 `commandmate.skill.yaml` を読むこと。Agent 対応状況は

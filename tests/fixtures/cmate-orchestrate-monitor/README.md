@@ -68,7 +68,7 @@ ANSI を剥がした fixture を持ち込むと、この検査が落ちる。
 2. **分類** — 上表の 15 payload に対する `classify-state.sh` の出力。
 3. **fixture 忠実性** — 前節の 4 点。
 4. **完了判定** — `verify-completion.sh` の STARTED ガード（未起動・作業ゼロ・
-   閾値未満・生成中の 6 通り）。
+   閾値未満・生成中の 6 通り）と、**一次ソースであるタスク状態**（次節）。
 5. **ガードの偽陽性** — `verify-scope.sh`、`quality-gate.sh`（緑に見える出力＋非 0 終了）。
 6. **ループ** — `monitor.sh` を fake launcher と fake tmux で回す。
    - 既定 stdout が **byte 一致で不変**であること（`--verbose` は追加しかしない）
@@ -81,14 +81,48 @@ ANSI を剥がした fixture を持ち込むと、この検査が落ちる。
    未 commit 数を実測どおり返すこと、解決できない id で 0 を返すこと、
    base ref が解決できないときに警告すること、そしてループを COMPLETE まで駆動すること。
 
+## タスク状態を一次ソースにする経路（Issue #1589）
+
+受入条件の 6 ケース（task 状態 5 パターン ＋ task 不在フォールバック）は
+`verify-completion task state as the primary source` セクションに `1/6`〜`6/6` の名前で並ぶ。
+
+終局状態（`succeeded` / `failed` / `not_started`）のケースは、**ヒューリスティクス単独なら
+別の判定になる入力**を与えてある。そうしないと「フォールバックがたまたま同じ答えを出した」
+だけで green になり、一次ソースが効いていることを何も示さない。
+
+非終局状態（`running` / `verifying`）は **短絡させずフォールバックへ落とす**のが仕様なので、
+両側（閾値未満 → `WORKING` ／ 閾値到達 → ヒューリスティクスの答え）を固定してある。
+`running -> WORKING` の短絡を入れると STARTED ガードが盲目になるため、その短絡で赤くなる
+テストを別に置いてある。
+
+台帳の読み出し（`hooks-task.sh`）は CLI を shim に差し替えて検証する。
+実測した出力形（TSV の第 2 列が status、新しい順）と、3 通りの答え
+（status / 空＝契約なし / `unavailable`＝引けない）を固定する。
+
+ループ側は fake launcher の `task` サブコマンドを `LOOP_TASK_OUT`（stdout の file）と
+`LOOP_TASK_EXIT`（終了コード）で制御する。`capture` の fixture 列とは独立に答えるので、
+`hooks-task.sh` を配線してもポーリング順序は変わらない。
+
 ## 変異による健全性確認
 
 この harness は「通ること」ではなく「壊れたら赤くなること」で価値が決まる。
-次の変異でそれぞれ赤くなることを確認してある。
+次の変異でそれぞれ赤くなることを確認してある（`#1589` 分は 2026-07-31 実測、
+それぞれ **suite exit 1**）。
 
 | 変異 | 落ちるテスト |
 |---|---|
 | `ml_has_rate_limit` に裸の `rate.?limit` を戻す | `live-idle-rate-limit-source.json -> IDLE` |
 | `hooks-git.sh` の `count_commits` を 0 固定にする | 参照フックの実測値、および COMPLETE 到達の end-to-end |
+| `succeeded -> COMPLETE` の分岐を削る | `1/6` ＋ ループ 3 件（計 4） |
+| `failed` を COMPLETE 扱いにする | `2/6` ＋ ループ 3 件（計 4） |
+| `not_started -> NOT_STARTED` の分岐を削る | `3/6`（1 件） |
+| `running`/`verifying` を `WORKING` へ短絡させる | `4/6` 2 件 ＋ `5/6`（計 3） |
+| タスク状態をペイン生存 veto より **前** に評価する | 古い裁定の veto 3 件 |
+| STARTED ガードを無効化する | `6/6 the STARTED guard still holds`（1 件） |
+| `hooks-task.sh` を `\| head` にして exit code を失わせる | `unavailable` 3 件 ＋ バージョンゲート 4 件（計 7） |
+| `unavailable` を空文字へ潰す | 同上（計 7） |
+| `FALLBACK MODE` の宣言行を消す | バージョンゲート 4 件 |
+| `monitor.sh` が `--task-status` を渡すのをやめる | ループ 6 件 |
+| ループの `VERIFY_FAILED` 分岐を消す | `failed` の終局化 2 件 |
 
 script を変更したら、**まず変異を入れて赤くなることを確かめてから**直すこと。

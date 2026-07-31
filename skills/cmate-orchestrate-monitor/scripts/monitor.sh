@@ -41,12 +41,15 @@
 #                  and terminal verdicts (Issue #1533).
 #
 #   --hooks <file> source <file> after the built-in count_commits /
-#                  count_uncommitted stubs, so an operator can supply the real
-#                  work counters (Issue #1533). Without it the stubs return 0,
+#                  count_uncommitted / read_task_status stubs, so an operator can
+#                  supply the real data sources (Issue #1533, #1589). Repeatable,
+#                  sourced left to right; giving it at all replaces MONITOR_HOOKS.
+#                  Without it the counters return 0 and the task status is empty,
 #                  which is what keeps the loop runnable standalone — and also what
 #                  makes COMPLETE unreachable, since verify-completion.sh treats
 #                  commits=0 && uncommitted=0 as the signature of an unstarted task.
-#                  See hooks-git.sh for a ready-to-use implementation.
+#                  See hooks-git.sh (work counters) and hooks-task.sh (contract
+#                  status) for ready-to-use implementations.
 #
 # Env:
 #   CM             — commandmate launcher (default: "npx commandmate@latest"; pinned
@@ -61,8 +64,15 @@ RESEND_MESSAGE="continue"  # sent after the CLI exhausts its own retries
 MAX_RESENDS=2
 MAX_POLLS=0               # 0 = poll until every worker is COMPLETE (operator default)
 VERBOSE=0                 # 0 = default stream (interventions + verdicts only)
-HOOKS=${MONITOR_HOOKS:-}
 CM=${CM:-"npx commandmate@latest"}
+
+# bash 3.2: plain indexed array, appended with += so an empty array is never
+# expanded under `set -u`.
+HOOKS_FILES=()
+if [ -n "${MONITOR_HOOKS:-}" ]; then
+  HOOKS_FILES+=("$MONITOR_HOOKS")
+fi
+hooks_from_flag=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -73,7 +83,16 @@ while [ $# -gt 0 ]; do
     --max-resends) shift; MAX_RESENDS=${1:-2};;
     --max-polls) shift; MAX_POLLS=${1:-0};;
     --verbose) VERBOSE=1;;
-    --hooks) shift; HOOKS=${1:-};;
+    --hooks)
+      shift
+      # The first flag drops the MONITOR_HOOKS default (the flag wins); later
+      # ones add to it, so work counters and task status can come from two files.
+      if [ "$hooks_from_flag" = "0" ]; then
+        HOOKS_FILES=()
+        hooks_from_flag=1
+      fi
+      HOOKS_FILES+=("${1:-}")
+      ;;
     --) shift; break;;
     -*) echo "monitor.sh: unknown flag $1" >&2; exit 2;;
     *) break;;
@@ -123,18 +142,29 @@ count_commits() {
   echo 0
 }
 
+# read_task_status <worktree-id>: the status the server recorded for the
+# worktree's newest execution contract, or empty when there is no answer. Stubbed
+# to empty so a contract-less run behaves exactly as before — verify-completion.sh
+# then falls back to the capture heuristics, with no version-gate notice, because
+# nothing was promised. See hooks-task.sh (Issue #1589).
+read_task_status() {
+  echo ""
+}
+
 # Completion hooks. The stubs above are the reason a stock run never reports
 # COMPLETE: verify-completion.sh reads commits=0 && uncommitted=0 as "the task was
 # never sent" (the STARTED-guard signature), so the COMPLETE branch is unreachable
 # until the counters are wired to the worker's checkout. Sourcing happens *after*
-# the stubs so a hooks file that defines either name wins, and a hooks file that
-# defines only one leaves the other stubbed.
-if [ -n "$HOOKS" ]; then
-  if [ ! -f "$HOOKS" ]; then
-    echo "monitor.sh: hooks file not found: $HOOKS" >&2
-    exit 2
-  fi
-  . "$HOOKS"
+# the stubs so a hooks file that defines any of the names wins, and a hooks file
+# that defines only one leaves the others stubbed.
+if [ ${#HOOKS_FILES[@]} -gt 0 ]; then
+  for hooks_file in "${HOOKS_FILES[@]}"; do
+    if [ ! -f "$hooks_file" ]; then
+      echo "monitor.sh: hooks file not found: $hooks_file" >&2
+      exit 2
+    fi
+    . "$hooks_file"
+  done
 fi
 
 echo "monitor: watching $n_ids worker(s), interval=${INTERVAL}s, idle-threshold=${IDLE_THRESHOLD}, max-resends=${MAX_RESENDS}"
@@ -227,13 +257,30 @@ while [ "$done_count" -lt "$n_ids" ]; do
     commits=$(count_commits "$wid")
     uncommitted=$(count_uncommitted "$wid")
 
+    # Primary completion source (Issue #1589). `unavailable` is the version gate:
+    # the hook was wired, so task state was *promised*, and it could not be read.
+    # Announced once per worker and then downgraded to empty, which is what makes
+    # verify-completion.sh fall back to the capture heuristics. Announcing beats
+    # degrading quietly — a run that silently loses its adjudicated source still
+    # prints plausible COMPLETE lines, and nothing in the log says they were
+    # inferred. Polling continues, so a server that comes back is picked up again.
+    task_status=$(read_task_status "$wid")
+    if [ "$task_status" = "unavailable" ]; then
+      task_status=""
+      if [ ! -f "$STATE_DIR/$wid.taskgate" ]; then
+        touch "$STATE_DIR/$wid.taskgate"
+        echo "monitor[$wid]: task state unavailable (CommandMate without 'commandmate task', server down, or unknown worktree) — FALLBACK MODE: completion is inferred from capture, not adjudicated. Diagnose with: commandmate task list $wid --limit 1"
+      fi
+    fi
+
     verdict=$("$VERIFY" \
       --started "$post_started" \
       --state "$state" \
       --idle-streak "$post_streak" \
       --idle-threshold "$IDLE_THRESHOLD" \
       --commits "$commits" \
-      --uncommitted "$uncommitted")
+      --uncommitted "$uncommitted" \
+      --task-status "$task_status")
 
     # POLL_LINE — one line per poll per worker, opt-in via --verbose. Fixed field
     # order so a run can be reduced mechanically, e.g.
@@ -241,13 +288,31 @@ while [ "$done_count" -lt "$n_ids" ]; do
     # gives the state distribution, and the trailing key=value pairs carry the
     # inputs verify-completion.sh actually saw, i.e. the evidence behind the
     # verdict rather than the verdict alone (Issue #1533, #1513 G2).
+    #
+    # `task=` is appended last and only when the ledger answered. Appending keeps
+    # every contract-less poll line byte-identical to the pre-#1589 format — the
+    # regression suite pins those lines, and a `task=-` on runs that never had a
+    # contract would be noise claiming to be evidence. `grep -o 'task=[a-z_]*'`
+    # reduces it the same way the other fields reduce.
     if [ "$VERBOSE" = "1" ]; then
-      echo "monitor[$wid]: poll $((poll_round + 1)) -> $state started=$post_started streak=$post_streak commits=$commits uncommitted=$uncommitted verdict=$verdict"
+      poll_line="monitor[$wid]: poll $((poll_round + 1)) -> $state started=$post_started streak=$post_streak commits=$commits uncommitted=$uncommitted verdict=$verdict"
+      if [ -n "$task_status" ]; then
+        poll_line="$poll_line task=$task_status"
+      fi
+      echo "$poll_line"
     fi
 
     case "$verdict" in
       COMPLETE)
         echo "monitor[$wid]: COMPLETE (approvals=$(read_state "$wid" approvals))"
+        touch "$STATE_DIR/$wid.done"
+        done_count=$((done_count + 1))
+        ;;
+      VERIFY_FAILED)
+        # Terminal like COMPLETE — the contract has been adjudicated, so there is
+        # nothing left to wait for — but explicitly not mergeable. Named
+        # differently so an operator scanning the stream cannot read it as a pass.
+        echo "monitor[$wid]: VERIFY_FAILED — contract gates failed; do not merge. Run 'commandmate verify $wid --json' for the failing gate, then re-instruct"
         touch "$STATE_DIR/$wid.done"
         done_count=$((done_count + 1))
         ;;
