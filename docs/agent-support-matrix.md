@@ -65,7 +65,7 @@ evidence:
 
 install 先は package に依存しないので、この測定は全 package の discovery 経路に効く。
 測定に使った package は 1 件（`cmate-repository-analysis` 0.1.0・low risk・script 無し）だが、
-**publish 後に 7 package 全件で追試済み**（第 3.1 節）。
+**publish 後に当時の 7 package 全件で追試済み**（第 3.1 節）。
 
 ### 3.1 Catalog publish 後の追試（2026-07-29）
 
@@ -117,10 +117,16 @@ Codex では skill 名を自然文で指示するか、同梱 script を直接�
 | `cmate-orchestrate` | 0.7.1 | native | native | unknown | unknown |
 | `cmate-orchestrate-monitor` | 0.1.0 | native | native | unknown | unknown |
 | `cmate-repository-analysis` | 0.1.1 | native | native | unknown | unknown |
+| `cmate-verify` | 0.1.0 | native | native | unknown | unknown |
 | `cmate-worktree-cleanup` | 0.1.2 | native | native | unknown | unknown |
 | `cmate-worktree-setup` | 0.1.2 | native | native | unknown | unknown |
 
 すべて第3節の同一測定に基づく。package ごとに別の測定があるわけではない。
+
+`cmate-verify` 0.1.0 は **まだ Catalog に publish されていない**
+（[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開する）。
+したがって第 3.1 節の catalog 経由 install 追試の対象ではなく、この宣言は
+package 非依存の第 3 節の測定だけに基づく。
 
 ## 5. 既知の制約
 
@@ -128,10 +134,10 @@ Codex では skill 名を自然文で指示するか、同梱 script を直接�
   機械的証跡ではない。
 - **Codex 0.145.0 は skill を slash command として露出しない。**
 - **high risk package は `cmate-worktree-cleanup` / `cmate-orchestrate` /
-  `cmate-orchestrate-monitor` の 3 件**である（`declared_risk` の正本は各 package の
-  `commandmate.skill.yaml`）。install には `--yes` に加えて
+  `cmate-orchestrate-monitor` / `cmate-verify` の 4 件**である（`declared_risk` の正本は
+  各 package の `commandmate.skill.yaml`）。install には `--yes` に加えて
   `--ack-risk <skill-id>@<version>` の完全一致が必要で、2026-07-29 に
-  クリーン環境で実測済み（第 3.1 節）。
+  クリーン環境で実測済み（第 3.1 節。ただし当時の 3 件が対象で、`cmate-verify` は未 publish）。
 - **Gemini / OpenCode / vibe-local / copilot / antigravity は未計測。**
 - Claude / Codex とも、更新の反映には **新しい session の開始**が要る。
   実効 version は install 済み `commandmate.skill.yaml` の `version` で確認する
