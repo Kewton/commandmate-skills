@@ -7,6 +7,11 @@ immutable commit SHA と artifact SHA-256 を検証したうえで、登録済�
 `.agents/skills/<skill-id>/` と `.claude/skills/<skill-id>/` の**両方へ byte-identical に**
 配備する（CommandMate 0.15.0 以降。Claude は後者を、Codex は前者を読む）。
 
+**この両置きは飾りではない。** 2026-07-31 に片側だけ消す対照実験で、
+Claude Code 2.1.220 は `.claude/skills` しか、Codex CLI 0.145.0 は `.agents/skills` しか
+読まないことを確認している（[matrix 第 3.2 節](./docs/agent-support-matrix.md)）。
+片側配置に戻せば、どちらかの Agent から必ず不可視になる。
+
 - 親 Epic: [Kewton/CommandMate#1227](https://github.com/Kewton/CommandMate/issues/1227)
 - 本リポジトリの release pipeline: [Kewton/CommandMate#1238](https://github.com/Kewton/CommandMate/issues/1238)
 
@@ -73,6 +78,24 @@ version と risk は `skills/<skill-id>/commandmate.skill.yaml` の `version` /
 package（**`cmate-worktree-cleanup` / `cmate-orchestrate` / `cmate-orchestrate-monitor` /
 `cmate-verify` の 4 件**）は install に `--yes` と `--ack-risk <skill-id>@<version>` の
 完全一致が要る。
+
+`cmate-task-contract` と `cmate-verify` は **まだ Catalog に publish されていない**
+（[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開予定）。
+それまでは `commandmate skill install` の経路が無いので、使いたい場合は両 root へ手で置く。
+**片側だけに置くと、Claude か Codex のどちらかから必ず不可視になる。**
+
+```bash
+cd <worktree>
+for ROOT in .agents/skills .claude/skills; do
+  mkdir -p "$ROOT"; rm -rf "$ROOT/<skill-id>"
+  cp -R <commandmate-skills>/skills/<skill-id> "$ROOT/<skill-id>"
+done
+diff -r .agents/skills/<skill-id> .claude/skills/<skill-id> && echo "byte-identical"
+```
+
+手動配置には install receipt が付かないため、CommandMate からは未 install に見える
+（`skill status` / `skill uninstall` の対象外）。手順の詳細と注意は
+[docs/runbooks/verify-install.md](./docs/runbooks/verify-install.md) 第 3.1 節にある。
 
 ## 配布の前提
 
