@@ -27,12 +27,14 @@ classify-state.sh --json <file>
 
 ## 2. `verify-completion.sh`
 
-状態と作業量から完了判定を下す。状態の観測（ループ）とは分離してある。
+タスク状態（一次）と capture 由来の推定（フォールバック）から完了判定を下す。
+状態の観測（ループ）とは分離してある。
 
 ```
 verify-completion.sh --started <0|1> --state <STATE> \
                      --idle-streak <n> --idle-threshold <n> \
-                     --commits <n> --uncommitted <n>
+                     --commits <n> --uncommitted <n> \
+                     [--task-status <status>]
 ```
 
 | 引数 | 既定 | 意味 |
@@ -43,14 +45,32 @@ verify-completion.sh --started <0|1> --state <STATE> \
 | `--idle-threshold` | `5` | 完了判定に必要な idle 連続回数 |
 | `--commits` | `0` | base ref からの commit 数 |
 | `--uncommitted` | `0` | 未 commit の変更数（untracked 含む） |
+| `--task-status` | 空 | worktree の最新実行契約の状態（`read_task_status` の出力）。空・未知の値は「答え無し」 |
+
+判定順（**仕様であり実装詳細ではない**。CommandMate 側の同名 Skill と同一）:
+
+```
+1. ペイン生存 veto   state ∈ {GENERATING, PROMPT, PROMPT_LIVE, RATE_LIMIT} -> WORKING
+2. 裁定済みタスク    succeeded -> COMPLETE / failed|cancelled -> VERIFY_FAILED / not_started -> NOT_STARTED
+3. STARTED ガード    started=0 のとき: 作業ゼロ -> NOT_STARTED / 作業あり -> WORKING
+4. idle + 作業量      閾値到達かつ作業あり -> COMPLETE / 閾値到達で作業ゼロ -> NOT_STARTED / それ以外 -> WORKING
+```
+
+1 が 2 より先なのは、古い裁定（前回 send の `succeeded`）で監視を打ち切らせないため。
+2 が終局状態だけを見るのは、`pending` / `running` / `waiting_input` / `verifying` を 3 へ落として
+STARTED ガードを効かせ続けるため（「CLI は running と記録したが Enter が落ちていない」の検出）。
 
 | stdout | 条件 |
 |---|---|
-| `NOT_STARTED` | `started=0` かつ `commits=0` かつ `uncommitted=0`、または `started=1` で idle 閾値到達だが作業の痕跡が無い |
+| `COMPLETE` | `task-status=succeeded`、または（1・2 を抜けて）`started=1` かつ idle 閾値到達かつ（`commits>0` または `uncommitted>0`） |
+| `VERIFY_FAILED` | `task-status` が `failed` / `cancelled`。終局だがマージ不可 |
+| `NOT_STARTED` | `task-status=not_started`、または `started=0` かつ `commits=0` かつ `uncommitted=0`、または `started=1` で idle 閾値到達だが作業の痕跡が無い |
 | `WORKING` | `state` が `GENERATING` / `PROMPT` / `PROMPT_LIVE` / `RATE_LIMIT`、または idle 閾値未到達、または `started=0` だが作業の痕跡がある |
-| `COMPLETE` | `started=1` かつ idle 閾値到達かつ（`commits>0` または `uncommitted>0`） |
 
 exit code は常に 0（判定は stdout で返す）。未知の引数のみ exit 2。
+
+**`COMPLETE` はマージ可否の裁定ではない。** 契約付き委任の最終裁定は
+`commandmate wait --verify` の exit code（ゲート不合格 20 / 検証対象なし 21）である。
 
 ## 3. `monitor.sh`
 
@@ -69,7 +89,7 @@ monitor.sh [flags] <worktree-id> [<worktree-id> ...]
 | `--max-resends <n>` | `2` | 再送の上限。使い切ったらエスカレーション |
 | `--max-polls <n>` | `0` | N ポーリングで exit 0。`0` は全 worker COMPLETE まで回る |
 | `--verbose` | off | 1 ポーリング 1 行の状態ログを **追加**する（既定出力は不変） |
-| `--hooks <file>` | `$MONITOR_HOOKS` | 完了フックを source する |
+| `--hooks <file>` | `$MONITOR_HOOKS` | フックを source する。**繰り返し指定可**（左から順）。1 つでも与えると `MONITOR_HOOKS` は捨てられる |
 
 | env | 既定 | 意味 |
 |---|---|---|
@@ -90,8 +110,10 @@ monitor.sh [flags] <worktree-id> [<worktree-id> ...]
 | `monitor[<wid>]: rate limit -> sending 'a'` | RATE_LIMIT 分類時 |
 | `monitor[<wid>]: terminal API error at an idle prompt -> resending (n/N)` | 再送条件成立時 |
 | `monitor[<wid>]: terminal API error and resend budget spent (N) — operator needed` | 再送上限到達 |
-| `monitor[<wid>]: poll <N> -> <STATE> started=… streak=… commits=… uncommitted=… verdict=…` | `--verbose` 指定時のみ、1 ポーリング 1 行 |
+| `monitor[<wid>]: task state unavailable (…) — FALLBACK MODE: …` | `read_task_status` が `unavailable` を返した。**worker ごとに 1 度だけ** |
+| `monitor[<wid>]: poll <N> -> <STATE> started=… streak=… commits=… uncommitted=… verdict=… [task=…]` | `--verbose` 指定時のみ、1 ポーリング 1 行。`task=` は台帳が答えたときだけ末尾に付く |
 | `monitor[<wid>]: COMPLETE (approvals=<n>)` | 完了判定 |
+| `monitor[<wid>]: VERIFY_FAILED — contract gates failed; do not merge. …` | タスクが `failed` / `cancelled`。COMPLETE と同じく終局（ループを抜ける） |
 | `monitor[<wid>]: NOT_STARTED — idle with no work; check the composer / Enter` | NOT_STARTED かつ idle 閾値到達 |
 | `monitor: reached --max-polls (N) after N poll round(s); stopping` | `--max-polls` 到達 |
 | `monitor: all N worker(s) complete` | 正常終了 |
@@ -103,19 +125,55 @@ worker 横断の状態（streak / started / approvals / resends）は `mktemp -d
 directory 配下の file に持つ。EXIT / INT / TERM で削除される
 （bash 3.2 には連想配列が無いため。[recipe-rationale.md](./recipe-rationale.md) 16）。
 
-## 4. 完了フック
+## 4. フック
 
-`monitor.sh` は 2 つの関数を呼ぶ。どちらも引数は worktree-id 1 つ、stdout に整数 1 つを返す。
+`monitor.sh` は 3 つの関数を呼ぶ。いずれも引数は worktree-id 1 つ、stdout に 1 行を返す。
 
 ```bash
-count_commits()     { echo <n>; }   # base ref からの commit 数
-count_uncommitted() { echo <n>; }   # git status --porcelain 相当の行数
+read_task_status()  { echo <status>; }  # 一次ソース。TaskStatus / 空 / unavailable
+count_commits()     { echo <n>; }       # base ref からの commit 数
+count_uncommitted() { echo <n>; }       # git status --porcelain 相当の行数
 ```
 
-既定はどちらもスタブ（`0`）。`--hooks <file>` / `MONITOR_HOOKS` で渡した file が
-**スタブ定義の後に source** され、定義された関数だけが上書きされる。
+既定はすべてスタブ（`read_task_status` は空、カウンタは `0`）。`--hooks <file>` /
+`MONITOR_HOOKS` で渡した file が **スタブ定義の後に source** され、定義された関数だけが
+上書きされる。`--hooks` は繰り返し指定でき、左から順に source される。
 
-### `hooks-git.sh`（参照実装）
+### `hooks-task.sh`（一次ソース）
+
+`commandmate task list <worktree-id> --limit 1` の**最新行**（TSV の第 2 列）を読む。
+
+| 戻り値 | 意味 | monitor 側の扱い |
+|---|---|---|
+| `pending` / `running` / `waiting_input` / `verifying` / `succeeded` / `failed` / `not_started` / `cancelled` | 台帳が答えた（`TASK_STATUSES`） | そのまま `--task-status` へ渡す |
+| 空 | 台帳は答えたが、この worktree に task が無い（契約なし委任） | 静かにフォールバック。追加の行は出ない |
+| `unavailable` | 台帳を**引けなかった**（非 0 終了） | バージョンゲート行を 1 度出して空へ降格 |
+
+`unavailable` は `TaskStatus` ではないので、この file を知らない旧 `monitor.sh` に配線されても
+`verify-completion.sh` の未知値経路（フォールバック）へ落ちるだけで、誤った裁定にはならない。
+
+実測した非 0 終了（2026-07-31）:
+
+| 状況 | exit | stderr |
+|---|---:|---|
+| CommandMate 0.10.2 / 公開版 0.16.0（`task` コマンド自体が無い） | 1 | `error: unknown option '--limit'` |
+| server 停止中 | 1 | `Error: Server is not running.` |
+| server が知らない worktree | 99 | `Error: Resource not found.` |
+
+**`commandmate task --help` は probe に使えない**（0.10.2 では root help を出して exit 0 になる）。
+実サブコマンドを叩いた終了コードだけが判別材料である。
+`$CM task list … | head` のようにパイプすると `$?` が head のものになり、上記の全失敗が
+静かに「task 無し」に化ける。`hooks-task.sh` は代入で受けて `$?` を保存している。
+
+| env | 既定 | 意味 |
+|---|---|---|
+| `CM` | `npx commandmate@latest` | commandmate launcher（`monitor.sh` から source されると継承される） |
+
+**前提**: 監視中の契約が worktree の**最新タスク**であること。標準手順（契約作成 →
+`send --contract` → 監視）なら成立する。前回の委任のタスクが最新のまま監視を始めると
+その古い裁定を読む（ペインが生きている間だけ、`verify-completion.sh` の veto が守る）。
+
+### `hooks-git.sh`（フォールバック用の参照実装）
 
 | env | 既定 | 意味 |
 |---|---|---|

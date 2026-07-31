@@ -82,6 +82,37 @@
 
 ## 完了検証（`verify-completion.sh` / `verify-scope.sh`）
 
+12b. **文字列解析は一次ソースではない**（Epic #1539 設計原則 4、Issue #1589 / CommandMate #1581）。
+    capture の正規表現解析が答えられるのは「worker が止まったか」だけで、
+    「成果が受入条件を満たしたか」ではない。この 2 つを同じシグナルで表していたことが、
+    **半端な作業のまま COMPLETE と報告する**という誤報の構造的な原因だった。
+    CommandMate にタスク状態機械（#1548）が入って以降、契約付き委任では
+    **サーバが検証ゲートを回した後に書いた裁定**を読める。よって:
+    - 一次ソース = タスク状態（`succeeded` / `failed` / `cancelled` / `not_started`）。
+    - フォールバック = 従来の capture ヒューリスティクス。**削除しない**。契約なし委任と、
+      task 台帳を持たない CommandMate（実測 2026-07-31: **公開版はまだ全部これ**）では
+      これが唯一の判定材料であり、13〜15 と STARTED ガードはそのまま生きている。
+    - `failed` は `COMPLETE` ではなく `VERIFY_FAILED` にする。同じ「終局」でも
+      **マージ可否が逆**なので、オペレータがログを流し読みして取り違えられる名前にしない。
+
+12c. **一次ソースを足しても、順序で守るものが 2 つある**:
+    - **ペイン生存 veto をタスク状態より前に置く**。最新タスクが `succeeded` でもペインが
+      生成中なら、その裁定は前回 send のものである。順序を入れ替えると、次のターンを
+      走らせている worker を「完了」と報告して監視を打ち切る。
+    - **非終局状態（`pending` / `running` / `waiting_input` / `verifying`）は短絡させない**。
+      フォールバックへ落とすことで STARTED ガードが効き続ける。台帳が `running` でも
+      Enter が composer に落ちていない事故は起こりうる（回帰 1 と同じ失敗）。
+      `running -> WORKING` と短絡させると、この唯一の検出手段が盲目になる。
+
+12d. **一次ソースが使えないことは、黙って劣化させず宣言する**（バージョンゲート）。
+    `hooks-task.sh` を配線したのに台帳を引けなかったら、worker ごとに 1 度
+    `FALLBACK MODE` 行を出してから capture ヒューリスティクスで走る。宣言しないと、
+    ログには**もっともらしい COMPLETE 行だけ**が並び、それが推定であったことを示すものが
+    何も残らない。逆に、そもそもフックを配線していない実行（契約なし委任）では
+    何も約束していないので、この行は出さない。
+    実測上の注意: `commandmate task --help` は probe にならない（`task` コマンドが無い
+    0.10.2 でも root help を出して exit 0）。実サブコマンドの終了コードだけが判別材料である。
+
 13. **merge 成否は state を確認してから Issue を close する**（未マージ Issue の誤クローズ防止）。
 
 14. **スコープ充足は受入ゲートではなく grep 実数で検証する**。NUL 混入 file で grep が
@@ -123,11 +154,16 @@
 | 6 | リトライ枯渇死が放置される／半端な作業で COMPLETE 誤報 | #1522 | terminal API error 検出 ＋ `monitor.sh` の再送 |
 | 7 | `rate.?limit` が散文・ソースに一致し **健全な worker へ `a` を注入** | #1522 | バナー限定アンカー ＋ `RATE_LIMIT` を最後に評価 ＋ 現ペイン限定 |
 | 8 | `count_commits` / `count_uncommitted` がスタブ固定で、**COMPLETE 分岐が実運用で一度も発火しない**（完走した worker まで NOT_STARTED と記録される） | #1533 | `--hooks` / `MONITOR_HOOKS` で供給、参照実装 `hooks-git.sh` を同梱 |
+| 9 | 検証ゲート不合格（`failed`）の worker を「止まった＝完了」として COMPLETE と報告し、マージ候補に混ぜる | #1589 | 一次ソースをタスク状態へ切替、`failed` / `cancelled` は `VERIFY_FAILED` |
+| 10 | 前回 send の `succeeded` が残った worktree で、生成中の worker を完了扱いして監視を打ち切る | #1589 | ペイン生存 veto をタスク状態より **前** に評価 |
+| 11 | 台帳が `running` を記録しているが Enter が composer に落ちておらず、短絡すると STARTED ガードが盲目になる | #1589 | 非終局状態はフォールバックへ落とす（短絡しない） |
+| 12 | 一次ソースを引けないまま推定で走り、ログ上は健全な COMPLETE に見える | #1589 | `unavailable` センチネル ＋ worker ごと 1 回の `FALLBACK MODE` 宣言 |
 
 いずれも naive 実装で red → ガード実装で green にした。8 は両方向テスト（対照＋変異注入）で
 固定してある: `--verbose` を既定 ON にする / フックをスタブより先に source する /
 poll 行の書式を変える / 参照フックの commit 数を 0 固定にする、のいずれの変異でも
-テストが赤くなることを確認済みである。
+テストが赤くなることを確認済みである。9〜12 も同様に変異注入で実測済みで、内訳は
+`tests/fixtures/cmate-orchestrate-monitor/README.md` の変異表にある。
 
 回帰 fixture と test runner は配布元リポジトリ
 <https://github.com/Kewton/commandmate-skills> の
