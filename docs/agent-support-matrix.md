@@ -117,15 +117,16 @@ Codex では skill 名を自然文で指示するか、同梱 script を直接�
 | `cmate-orchestrate` | 0.7.1 | native | native | unknown | unknown |
 | `cmate-orchestrate-monitor` | 0.1.0 | native | native | unknown | unknown |
 | `cmate-repository-analysis` | 0.1.1 | native | native | unknown | unknown |
+| `cmate-task-contract` | 0.1.0 | native | native | unknown | unknown |
 | `cmate-verify` | 0.1.0 | native | native | unknown | unknown |
 | `cmate-worktree-cleanup` | 0.1.2 | native | native | unknown | unknown |
 | `cmate-worktree-setup` | 0.1.2 | native | native | unknown | unknown |
 
 すべて第3節の同一測定に基づく。package ごとに別の測定があるわけではない。
 
-`cmate-verify` 0.1.0 は **まだ Catalog に publish されていない**
+`cmate-task-contract` 0.1.0 と `cmate-verify` 0.1.0 は **まだ Catalog に publish されていない**
 （[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開する）。
-したがって第 3.1 節の catalog 経由 install 追試の対象ではなく、この宣言は
+したがって第 3.1 節の catalog 経由 install 追試の対象ではなく、この 2 件の宣言は
 package 非依存の第 3 節の測定だけに基づく。
 
 ## 5. 既知の制約
