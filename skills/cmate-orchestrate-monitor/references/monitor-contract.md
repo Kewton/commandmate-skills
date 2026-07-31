@@ -77,14 +77,20 @@ exit code は常に 0（判定は stdout で返す）。未知の引数のみ ex
 操作エントリ。ループ・worker 横断の状態・介入だけを持ち、分類と完了判定は上の 2 つに委ねる。
 
 ```
-monitor.sh [flags] <worktree-id> [<worktree-id> ...]
+monitor.sh [flags] <worktree-id>[@<instance-id>] [<worktree-id>[@<instance-id>] ...]
 ```
+
+`@<instance-id>` は tool の primary 以外の instance（`w1@codex-2` 等）。**capture 側
+（`--agent <tool> --instance <id>`）と介入の送信先の両方**を切り替え、worker 横断状態と
+log 行の key も `<id>@<instance>` になる。`<worktree-id>` は
+`[a-zA-Z0-9][a-zA-Z0-9_-]*`、`<instance-id>` は `[a-zA-Z0-9_-]+` を満たさないと exit 2
+（tmux target へ補間するため、サーバ側 validator と同じ形を起動前に強制する）。
 
 | flag | 既定 | 意味 |
 |---|---|---|
 | `--interval <sec>` | `20` | ポーリング間隔 |
 | `--idle-threshold <n>` | `8` | 完了判定に必要な idle 連続回数（20s 間隔で 150s 相当） |
-| `--session-prefix <s>` | `cm` | tmux セッション名の prefix（`<prefix>-<worktree-id>`） |
+| `--session-prefix <s>` | 空（＝導出） | **legacy escape hatch。** 導出された `mcbd-<cliToolId>` の**頭だけ**を `<s>` に置換する（instance suffix は維持） |
 | `--resend-message <s>` | `continue` | リトライ枯渇後に送る文字列 |
 | `--max-resends <n>` | `2` | 再送の上限。使い切ったらエスカレーション |
 | `--max-polls <n>` | `0` | N ポーリングで exit 0。`0` は全 worker COMPLETE まで回る |
@@ -99,22 +105,47 @@ monitor.sh [flags] <worktree-id> [<worktree-id> ...]
 | exit | 意味 |
 |---|---|
 | `0` | 全 worker COMPLETE、または `--max-polls` 到達 |
-| `2` | 引数不正（worktree-id 無し・未知のフラグ）、`--hooks` の file が無い |
+| `2` | 引数不正（worktree-id 無し・未知のフラグ・不正な id / instance id）、`--hooks` の file が無い |
+
+### 送信先セッションの導出（Issue #1602）
+
+そのポーリングの capture ペイロードの `cliToolId` から組み立てる（`BaseCLITool.getSessionName`
+と同形）。**分類したペインと入力するペインが同一であること**がこれで保証される。
+
+```
+mcbd-<cliToolId>-<worktree-id>[-<instance suffix>]
+```
+
+instance suffix は `deriveSessionSuffix` と同じで、`<tool>-` を剥がした残り
+（`claude-2` → `2`）。primary（instance 未指定、または instance id が tool id と同一）では
+付かない。`--session-prefix <s>` を与えると `mcbd-<cliToolId>` の頭だけが `<s>` に置き換わる。
+`cliToolId` が無く `--session-prefix` も無い場合は**名前を捏造せず送信を拒否する**。
+
+送信は `send_to_pane()` に一本化してある。
+
+1. セッション名が導出できたか
+2. `tmux has-session -t '=<name>:'` で実在するか（`=…:` は完全一致指定。素の `-t <name>` は
+   完全一致が無いとき前方一致へフォールバックし、`mcbd-claude-w1` が `mcbd-claude-w1-2` へ漏れる）
+3. `tmux send-keys` 自体が成功したか
+
+3 つとも**失敗を stderr へ報告して非 0 を返す**。ログは送信の**結果**を書き、
+**`approvals` と再送予算は 2・3 を通過したときだけ動く**。
 
 ### 出力行
 
 | 行 | 出る条件 |
 |---|---|
 | `monitor: watching N worker(s), interval=…, idle-threshold=…, max-resends=…` | 起動時 |
-| `monitor[<wid>]: capture failed, skipping poll` | capture が非 0。**idle streak を進めない** |
-| `monitor[<wid>]: rate limit -> sending 'a'` | RATE_LIMIT 分類時 |
-| `monitor[<wid>]: terminal API error at an idle prompt -> resending (n/N)` | 再送条件成立時 |
-| `monitor[<wid>]: terminal API error and resend budget spent (N) — operator needed` | 再送上限到達 |
-| `monitor[<wid>]: task state unavailable (…) — FALLBACK MODE: …` | `read_task_status` が `unavailable` を返した。**worker ごとに 1 度だけ** |
-| `monitor[<wid>]: poll <N> -> <STATE> started=… streak=… commits=… uncommitted=… verdict=… [task=…]` | `--verbose` 指定時のみ、1 ポーリング 1 行。`task=` は台帳が答えたときだけ末尾に付く |
-| `monitor[<wid>]: COMPLETE (approvals=<n>)` | 完了判定 |
-| `monitor[<wid>]: VERIFY_FAILED — contract gates failed; do not merge. …` | タスクが `failed` / `cancelled`。COMPLETE と同じく終局（ループを抜ける） |
-| `monitor[<wid>]: NOT_STARTED — idle with no work; check the composer / Enter` | NOT_STARTED かつ idle 閾値到達 |
+| `monitor[<lbl>]: intervention target = <session>` | 送信先を初めて解決したとき。**worker ごとに 1 度だけ** |
+| `monitor[<lbl>]: capture failed, skipping poll` | capture が非 0。**idle streak を進めない** |
+| `monitor[<lbl>]: rate limit -> sent 'a' to <session>` | RATE_LIMIT 分類時、**かつ配信できたとき** |
+| `monitor[<lbl>]: terminal API error at an idle prompt -> resent to <session> (n/N)` | 再送条件成立、**かつ配信できたとき** |
+| `monitor[<lbl>]: terminal API error and resend budget spent (N) — operator needed` | 再送上限到達 |
+| `monitor[<lbl>]: task state unavailable (…) — FALLBACK MODE: …` | `read_task_status` が `unavailable` を返した。**worker ごとに 1 度だけ** |
+| `monitor[<lbl>]: poll <N> -> <STATE> started=… streak=… commits=… uncommitted=… verdict=… [task=…]` | `--verbose` 指定時のみ、1 ポーリング 1 行。`task=` は台帳が答えたときだけ末尾に付く |
+| `monitor[<lbl>]: COMPLETE (approvals=<n>)` | 完了判定 |
+| `monitor[<lbl>]: VERIFY_FAILED — contract gates failed; do not merge. …` | タスクが `failed` / `cancelled`。COMPLETE と同じく終局（ループを抜ける） |
+| `monitor[<lbl>]: NOT_STARTED — idle with no work; check the composer / Enter` | NOT_STARTED かつ idle 閾値到達 |
 | `monitor: reached --max-polls (N) after N poll round(s); stopping` | `--max-polls` 到達 |
 | `monitor: all N worker(s) complete` | 正常終了 |
 

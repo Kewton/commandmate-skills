@@ -305,15 +305,32 @@ echo "== monitor.sh loop =="
 # what makes the loop testable without killing it from the outside.
 LOOP_ID=w1
 
+# The fake tmux's world (Issue #1602). Plain globals rather than an env prefix on
+# the call, because `VAR=x some_function` leaves VAR set afterwards in bash and a
+# leaked session list would silently change a later case. Every override below
+# resets them on the next line.
+#   LOOP_SESSIONS       space-separated session names the fake tmux believes exist.
+#                       `AUTO` = the default CommandMate builds for LOOP_ID; the
+#                       empty string = no session exists at all.
+#   LOOP_TMUX_SENDFAIL  exit code the fake tmux returns for `send-keys`.
+LOOP_SESSIONS=AUTO
+LOOP_TMUX_SENDFAIL=0
+
 # run_loop <case-name> <polls> <fixture[,fixture...]> [extra monitor args...]
 # Serves fixture N on poll N and repeats the last one afterwards. Sets
-# LOOP_STDOUT / LOOP_STDERR / LOOP_STATUS / LOOP_CAPTURES / LOOP_TMUX.
+# LOOP_STDOUT / LOOP_STDERR / LOOP_STATUS / LOOP_CAPTURES / LOOP_CAPTURE_ARGS /
+# LOOP_TMUX.
 #
 # `commandmate task ...` is answered separately from `capture` so that wiring
 # hooks-task.sh cannot disturb the fixture sequence: LOOP_TASK_OUT (a file, empty
 # by default) is the stdout and LOOP_TASK_EXIT (0 by default) the exit code, and
 # neither advances the capture counter. Runs that never source hooks-task.sh
 # never reach that branch, so their capture log is byte-identical to before.
+#
+# The fake tmux answers `has-session` from LOOP_SESSIONS instead of exiting 0 for
+# everything. A shim that accepts every target cannot tell a delivered
+# intervention from a misdirected one — which is exactly the blindness #1602 was
+# hiding in production, so a green suite against such a shim proves nothing.
 run_loop() {
   loop_case=$1; loop_polls=$2; loop_fixtures=$3; shift 3
   loop_dir="$WORK/$loop_case"
@@ -351,7 +368,42 @@ run_loop() {
     echo 'esac'
   } > "$loop_dir/fake-cm"
 
-  printf '#!/bin/sh\nprintf %s\\\\n "$*" >> "%s"\nexit 0\n' '"%s"' "$loop_tmux_log" > "$loop_dir/tmux"
+  if [ "$LOOP_SESSIONS" = AUTO ]; then
+    loop_sessions="mcbd-claude-${LOOP_ID%%@*}"
+  else
+    loop_sessions=$LOOP_SESSIONS
+  fi
+  {
+    echo '#!/bin/sh'
+    echo "printf '%s\\n' \"\$*\" >> \"$loop_tmux_log\""
+    echo "sessions='$loop_sessions'"
+    # Target resolution is modelled the way REAL tmux resolves it, because that
+    # asymmetry is the whole of #1602's 4th point: `=<name>:` matches exactly,
+    # while a bare `<name>` falls back to prefix matching when nothing matches
+    # exactly. Measured on real tmux 2026-08-01:
+    #   send-keys -t zzprobe-w1      -> accepted; zzprobe-w1-2 received the keys
+    #   send-keys -t '=zzprobe-w1:'  -> "can't find session"
+    # A shim that only ever matched exactly would let a bare target pass this
+    # suite, i.e. it would be green against the very bug being fixed.
+    echo 'if [ "$1" = "has-session" ]; then'
+    echo '  t=$3'
+    echo '  case "$t" in'
+    echo '    =*) t=${t#=}; t=${t%:}; exact=1 ;;'
+    echo '    *) exact=0 ;;'
+    echo '  esac'
+    echo '  for s in $sessions; do'
+    echo '    if [ "$s" = "$t" ]; then exit 0; fi'
+    echo '  done'
+    echo '  if [ "$exact" = 0 ]; then'
+    echo '    for s in $sessions; do'
+    echo '      case "$s" in "$t"*) exit 0 ;; esac'
+    echo '    done'
+    echo '  fi'
+    echo '  exit 1'
+    echo 'fi'
+    echo "if [ \"\$1\" = \"send-keys\" ]; then exit $LOOP_TMUX_SENDFAIL; fi"
+    echo 'exit 0'
+  } > "$loop_dir/tmux"
   chmod +x "$loop_dir/fake-cm" "$loop_dir/tmux"
 
   LOOP_STDOUT=$(PATH="$loop_dir:$PATH" CM="$loop_dir/fake-cm" \
@@ -360,6 +412,7 @@ run_loop() {
   LOOP_STATUS=$?
   LOOP_STDERR=$(cat "$loop_dir/stderr")
   LOOP_CAPTURES=$(grep -c . "$loop_capture_log" || true)
+  LOOP_CAPTURE_ARGS=$(cat "$loop_capture_log")
   LOOP_TMUX=$(cat "$loop_tmux_log")
 }
 
@@ -368,8 +421,13 @@ run_loop() {
 run_loop default-stream 3 live-generating-token.json,live-idle.json
 check "default run polls 3 times" 3 "$LOOP_CAPTURES"
 check "default run exits 0" 0 "$LOOP_STATUS"
+# The `intervention target` line is new in this version (Issue #1602) and is
+# deliberately part of the DEFAULT stream, not of --verbose: which pane the loop
+# would type into is otherwise invisible until the first intervention is needed,
+# and by then a missed approval has already stalled the worker.
 expected_default=$(cat <<'EOF'
 monitor: watching 1 worker(s), interval=0s, idle-threshold=1, max-resends=2
+monitor[w1]: intervention target = mcbd-claude-w1
 monitor[w1]: NOT_STARTED — idle with no work; check the composer / Enter
 monitor[w1]: NOT_STARTED — idle with no work; check the composer / Enter
 monitor: reached --max-polls (3) after 3 poll round(s); stopping
@@ -428,9 +486,10 @@ echo "== monitor.sh interventions =="
 # Retry exhaustion: resend once, then escalate instead of typing forever.
 run_loop resend 2 live-api-error-exhausted.json --max-resends 1 --resend-message 'resume please'
 check "resend run polls twice" 2 "$LOOP_CAPTURES"
-check_contains "resends after the CLI gave up" "resending (1/1)" "$LOOP_STDOUT"
+check_contains "resends after the CLI gave up" "resent to mcbd-claude-w1 (1/1)" "$LOOP_STDOUT"
 check_contains "escalates once the budget is spent" "resend budget spent" "$LOOP_STDOUT"
-check "resend types the message exactly once" "send-keys -t cm-w1 resume please Enter" "$LOOP_TMUX"
+check "resend types the message exactly once" "send-keys -t =mcbd-claude-w1: resume please Enter" \
+  "$(printf '%s\n' "$LOOP_TMUX" | grep send-keys)"
 
 # The production harm: input sent mid-backoff is queued and delivered later.
 run_loop backoff 3 live-retrying-529.json
@@ -447,8 +506,181 @@ check "never types into a healthy worker whose pane shows rate-limiter source" "
 
 # …while a genuine banner is still acted on immediately.
 run_loop real-rate-limit 1 rate-limit.json
-check_contains "acts on a genuine usage-limit banner" "rate limit -> sending 'a'" "$LOOP_STDOUT"
-check "sends 'a' once" "send-keys -t cm-w1 a Enter" "$LOOP_TMUX"
+check_contains "acts on a genuine usage-limit banner" "rate limit -> sent 'a' to mcbd-claude-w1" "$LOOP_STDOUT"
+check "sends 'a' once" "send-keys -t =mcbd-claude-w1: a Enter" \
+  "$(printf '%s\n' "$LOOP_TMUX" | grep send-keys)"
+
+echo
+echo "== session-name derivation (Issue #1602) =="
+# Unit level. `cm-<worktree-id>` addressed a session that has never existed, so
+# every intervention was a no-op that the log reported as a success. The name is
+# now derived from the capture payload's cliToolId, the same way the product
+# builds it (BaseCLITool.getSessionName).
+mlib() { bash -c ". \"$SCRIPTS/monitor-lib.sh\"; $1" 2>/dev/null; }
+
+# The list is what resolves `--agent` for a `<id>@<instance>` spec. A drifted list
+# silently puts the CAPTURE on the wrong pane, so it is pinned against the
+# product's CLI_TOOL_IDS (src/lib/cli-tools/types.ts, measured 2026-08-01).
+check "the CLI tool id list matches the product's" \
+  "claude codex gemini vibe-local opencode copilot antigravity" \
+  "$(mlib 'printf "%s" "$ML_CLI_TOOL_IDS"')"
+
+check "the primary session is mcbd-<cliToolId>-<worktree-id>" "mcbd-claude-w1" \
+  "$(mlib 'ml_session_name w1 claude "" ""')"
+check "a codex worker gets a codex session, with no flag" "mcbd-codex-w1" \
+  "$(mlib 'ml_session_name w1 codex "" ""')"
+# deriveSessionSuffix: `claude-2` yields `2`, not `claude-2`.
+check "a named instance appends only its suffix" "mcbd-claude-w1-2" \
+  "$(mlib 'ml_session_name w1 claude claude-2 ""')"
+check "the primary instance id is not a suffix" "mcbd-claude-w1" \
+  "$(mlib 'ml_session_name w1 claude claude ""')"
+# `vibe-local` contains a hyphen, so an id may not be cut at the first one.
+check "a hyphenated tool id is not cut at its hyphen" "mcbd-vibe-local-w1-3" \
+  "$(mlib 'ml_session_name w1 vibe-local vibe-local-3 ""')"
+check "an instance id from another tool keeps its own tool's session" "mcbd-codex-w1-2" \
+  "$(mlib 'ml_session_name w1 codex codex-2 ""')"
+# Refusing beats inventing: a wrong name is what #1602 was.
+check "no cliToolId and no override derives nothing" "" \
+  "$(mlib 'ml_session_name w1 "" "" ""')"
+check "…and says so with a non-zero exit" 1 \
+  "$(mlib 'ml_session_name w1 "" "" "" >/dev/null; printf "%s" $?')"
+# The escape hatch replaces the derived head ONLY. A plain `<prefix>-<id>`
+# concatenation would re-point `w1@codex-2` at its primary's pane — the same
+# misdelivery, reintroduced through the flag meant to work around it.
+check "--session-prefix replaces the head but keeps the instance suffix" "zz-w1-2" \
+  "$(mlib 'ml_session_name w1 codex codex-2 zz')"
+check "--session-prefix on a primary is the plain concatenation" "zz-w1" \
+  "$(mlib 'ml_session_name w1 claude "" zz')"
+
+check "an instance id resolves to its CLI tool" "codex" "$(mlib 'ml_agent_from_instance codex-2')"
+check "a bare tool id resolves to itself" "claude" "$(mlib 'ml_agent_from_instance claude')"
+check "the longest tool id wins" "vibe-local" "$(mlib 'ml_agent_from_instance vibe-local-2')"
+check "an unknown instance resolves to nothing" "" "$(mlib 'ml_agent_from_instance mystery-2')"
+check "…and exits non-zero so the caller can omit --agent" 1 \
+  "$(mlib 'ml_agent_from_instance mystery-2 >/dev/null; printf "%s" $?')"
+
+# `=name:` is the exact-match specifier. Measured on real tmux 2026-08-01: a bare
+# `-t zzprobe-w1` was accepted and delivered to `zzprobe-w1-2`, while
+# `-t '=zzprobe-w1:'` failed with "can't find session".
+check "the tmux target is the exact-match specifier" "=mcbd-claude-w1:" \
+  "$(mlib 'ml_tmux_target mcbd-claude-w1')"
+
+echo
+echo "== monitor.sh types into the session CommandMate actually creates (Issue #1602) =="
+# Acceptance 1/5: the default, with no flag at all, reaches mcbd-claude-<id>.
+run_loop target-default 1 rate-limit.json
+check "the default target is derived from the payload, not from a prefix" "mcbd-claude-w1" \
+  "$(printf '%s\n' "$LOOP_STDOUT" | sed -n 's/^monitor\[w1\]: intervention target = //p')"
+check "every tmux call uses the exact-match specifier" \
+  "has-session -t =mcbd-claude-w1:
+send-keys -t =mcbd-claude-w1: a Enter" "$LOOP_TMUX"
+check_lacks "the pre-#1602 cm- prefix is gone" "cm-w1" "$LOOP_TMUX"
+
+# Acceptance 5/5, the leak that survives a merely-corrected name: only the `-2`
+# instance is running. A bare `-t mcbd-claude-w1` falls back to prefix matching
+# and delivers the keys to `mcbd-claude-w1-2`; `=mcbd-claude-w1:` refuses.
+LOOP_SESSIONS="mcbd-claude-w1-2"
+run_loop target-prefix-leak 1 rate-limit.json
+LOOP_SESSIONS=AUTO
+# The fake tmux resolves a bare target by prefix, so this is the real leak, not a
+# string comparison: drop the `=`…`:` and the has-session below succeeds against
+# mcbd-claude-w1-2 and a send-keys line appears.
+check "a stopped primary does not leak into its -2 instance" "has-session -t =mcbd-claude-w1:" "$LOOP_TMUX"
+check_contains "the miss is reported" "NOT delivered — no tmux session 'mcbd-claude-w1'" "$LOOP_STDERR"
+
+# Acceptance 3/5: a send to a session that does not exist is detected, not
+# swallowed — and it never appears in the intervention stream as a success.
+LOOP_SESSIONS=""
+run_loop target-missing 1 rate-limit.json
+LOOP_SESSIONS=AUTO
+check_contains "a missing session is reported on stderr" \
+  "monitor[w1]: rate limit 'a' NOT delivered — no tmux session 'mcbd-claude-w1'" "$LOOP_STDERR"
+check_contains "the report is actionable" "check 'tmux ls'" "$LOOP_STDERR"
+check_lacks "an undelivered intervention is never claimed on stdout" "sent 'a'" "$LOOP_STDOUT"
+check "nothing is typed" "has-session -t =mcbd-claude-w1:" "$LOOP_TMUX"
+
+# The third failure mode: the session exists and tmux still refuses the keys.
+LOOP_TMUX_SENDFAIL=1
+run_loop target-sendfail 1 rate-limit.json
+LOOP_TMUX_SENDFAIL=0
+check_contains "a refused send-keys is reported too" \
+  "NOT delivered — tmux send-keys to 'mcbd-claude-w1' failed" "$LOOP_STDERR"
+check_lacks "a refused send is not claimed as sent" "sent 'a'" "$LOOP_STDOUT"
+
+# Acceptance 4/5: a payload with no cliToolId and no override refuses to invent a
+# name rather than typing into whatever `cm-w1` happens to match.
+run_loop target-no-tool 1 no-clitoolid-rate-limit.json
+check_contains "a payload without cliToolId refuses to guess" \
+  "NOT delivered — no tmux session could be derived" "$LOOP_STDERR"
+check "nothing is typed when no name can be derived" "" "$LOOP_TMUX"
+check_lacks "and no target is announced" "intervention target" "$LOOP_STDOUT"
+
+# Acceptance 2/5: a non-default instance. `--agent` is recovered from the instance
+# id because the server resolves the tool from the worktree row otherwise, which
+# would poll mcbd-claude-w1-codex-2 — a pane that does not exist. Capture and
+# intervention therefore move together, onto mcbd-codex-w1-2.
+LOOP_ID="w1@codex-2"
+LOOP_SESSIONS="mcbd-codex-w1-2"
+run_loop target-instance 1 codex-rate-limit.json
+check "the instance selects the polled pane" "capture w1 --json --agent codex --instance codex-2" \
+  "$LOOP_CAPTURE_ARGS"
+check "…and the pane that is typed into" \
+  "has-session -t =mcbd-codex-w1-2:
+send-keys -t =mcbd-codex-w1-2: a Enter" "$LOOP_TMUX"
+check_contains "state and log lines are keyed by <id>@<instance>" \
+  "monitor[w1@codex-2]: rate limit -> sent 'a' to mcbd-codex-w1-2" "$LOOP_STDOUT"
+
+# The escape hatch at loop level: the head is replaced, the instance suffix is not.
+LOOP_SESSIONS="zz-w1-2"
+run_loop target-prefix-instance 1 codex-rate-limit.json --session-prefix zz
+LOOP_ID=w1
+LOOP_SESSIONS=AUTO
+check "--session-prefix does not re-point an instance at its primary" \
+  "has-session -t =zz-w1-2:
+send-keys -t =zz-w1-2: a Enter" "$LOOP_TMUX"
+
+# Both ids are interpolated into a tmux target, so they are validated before the
+# loop starts rather than by whatever tmux makes of them.
+bad_status=0
+bad_out=$(bash "$MONITOR" --max-polls 1 'w1@' 2>&1) || bad_status=$?
+check "an empty instance id is rejected" 2 "$bad_status"
+check_contains "…and says which spec was wrong" "'w1@' has no instance id after '@'" "$bad_out"
+bad_status=0
+bad_out=$(bash "$MONITOR" --max-polls 1 'w1;rm' 2>&1) || bad_status=$?
+check "an id that is not safe to interpolate into a tmux target is rejected" 2 "$bad_status"
+check_contains "…and names the expected shape" "expected [a-zA-Z0-9][a-zA-Z0-9_-]*" "$bad_out"
+
+echo
+echo "== counters and budgets move only on a delivered intervention (Issue #1602) =="
+# `approvals=` on the COMPLETE line is the skill's evidence that prompts were
+# answered. Before #1602 it counted attempts at a session that never existed, so
+# a run that approved nothing reported approvals it had never made. Paired arms:
+# same fixtures, same hooks — only whether the session exists differs.
+printf 'count_commits() { echo 2; }\ncount_uncommitted() { echo 5; }\n' > "$WORK/hooks-both.sh"
+APPROVAL_FIXTURES=live-generating-token.json,prompt-yes-no.json,live-idle.json
+
+run_loop approvals-delivered 5 "$APPROVAL_FIXTURES" --hooks "$WORK/hooks-both.sh"
+check_contains "a delivered Enter is counted" "monitor[w1]: COMPLETE (approvals=1)" "$LOOP_STDOUT"
+check "the approval is a real Enter to the derived session" \
+  "send-keys -t =mcbd-claude-w1: Enter" "$(printf '%s\n' "$LOOP_TMUX" | grep send-keys)"
+
+LOOP_SESSIONS=""
+run_loop approvals-undelivered 5 "$APPROVAL_FIXTURES" --hooks "$WORK/hooks-both.sh"
+LOOP_SESSIONS=AUTO
+check_contains "an undelivered Enter is NOT counted" "monitor[w1]: COMPLETE (approvals=0)" "$LOOP_STDOUT"
+check_contains "the missed approval is reported" \
+  "prompt approval Enter NOT delivered" "$LOOP_STDERR"
+
+# The resend budget has the same failure shape, one step worse: spending it on a
+# no-op escalates to "budget spent — operator needed" without a single resend
+# ever having been attempted at a pane.
+LOOP_SESSIONS=""
+run_loop budget-undelivered 3 live-api-error-exhausted.json --max-resends 1
+LOOP_SESSIONS=AUTO
+check_lacks "an undelivered resend does not spend the budget" "resend budget spent" "$LOOP_STDOUT"
+check_lacks "…and is never reported as sent" "resent to" "$LOOP_STDOUT"
+check "the failure is re-reported every poll, so it cannot be missed" 3 \
+  "$(printf '%s\n' "$LOOP_STDERR" | grep -c "NOT delivered")"
 
 echo
 echo "== monitor.sh with the task ledger wired (Issue #1589) =="

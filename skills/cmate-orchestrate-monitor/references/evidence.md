@@ -96,8 +96,36 @@ CLI が既に持っている。curl では両方を再実装し、トークン�
 つまり **2026-07-31 時点の公開版 CommandMate では、この Skill は必ずフォールバックモードで走る。**
 「タスク状態が一次ソース」は、task 台帳を含む CommandMate に対してのみ成立する主張である。
 
+## 1c. 介入の宛先（0.3.0 で修正、Issue #1602）
+
+**第 1 節の「介入 21 件（すべてプロンプト自動承認）」は、実際には 1 件も届いていなかった。**
+0.2.0 までの既定送信先は `cm-<worktree-id>` で、開発機の `tmux ls` に `cm-` で始まる
+セッションは 1 つも存在しない。3 箇所の `tmux send-keys` がすべて `2>/dev/null || true` で
+終わり、rate limit 分岐はログを送信の**前**に出し、承認分岐は無条件にカウンタを進めていたため、
+**空振りが「成功 21 件」として記録されていた**。CommandMate 側の同名 skill にあった同一の欠陥
+（#1601）と行構造まで一致する。
+
+したがって第 1 節の (b)「偽陽性介入 0 件」は**維持される**（そもそも何も送っていない）が、
+「介入 21 件」は**プロンプトを 21 回検出した**という意味に読み替える必要がある。
+21 件のプロンプトは worker 側の autoYes、または人手で処理されていたと考えられる。
+
+実測（2026-08-01、実 tmux）:
+
+| 実測項目 | 結果 |
+|---|---|
+| CommandMate が作るセッション名 | `mcbd-<cliToolId>-<worktreeId>[-<instance suffix>]`（`BaseCLITool.getSessionName`） |
+| `cm-` で始まるセッション | **0 件** |
+| `tmux send-keys -t zzprobe-w1`（`zzprobe-w1` は停止、`zzprobe-w1-2` のみ生存） | 送信成功。**`zzprobe-w1-2` が受信**（前方一致フォールバック） |
+| `tmux send-keys -t '=zzprobe-w1:'` | `can't find session`（正しく拒否） |
+
+**この節も実運用実績ではない。** 修正後の経路は fixture / shim テスト
+（`monitor.sh types into the session CommandMate actually creates` 他 5 変異）で固定してあるが、
+実 worker への配信実績は未計測である。
+
 ## 2. 測定の限界（この Skill について）
 
+- **修正後の介入経路は fixture / shim テストのみ**。実 worker のペインへ Enter / `a` /
+  再送が実際に届いた実績は **未計測**である（第 1b・1c 節）。
 - **タスク状態経路は fixture / shim テストのみ**。実 worker を契約付きで委任し、
   `succeeded` / `failed` を実際に読んで監視を終わらせた実績は **未計測**である
   （公開版 CommandMate に `task` コマンドが無いため、リリース後にしか測れない）。
