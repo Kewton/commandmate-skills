@@ -174,7 +174,7 @@ Codex では skill 名を自然文で指示するか、同梱 script を直接�
 | `cmate-acceptance-test` | 0.1.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
 | `cmate-issue-refinement` | 0.1.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
 | `cmate-orchestrate` | 0.7.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
-| `cmate-orchestrate-monitor` | 0.2.0 | native | native | unknown | unknown | 2026-07-31（**0.1.0 で実測**） | catalog install |
+| `cmate-orchestrate-monitor` | 0.3.0 | native | native | unknown | unknown | 2026-07-31（**0.1.0 で実測**） | catalog install |
 | `cmate-repository-analysis` | 0.1.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
 | `cmate-task-contract` | 0.1.0 | native | native | unknown | unknown | 2026-07-31 | **手動両置き** |
 | `cmate-verify` | 0.1.0 | native | native | unknown | unknown | 2026-07-31 | **手動両置き** |
@@ -192,11 +192,12 @@ Codex では skill 名を自然文で指示するか、同梱 script を直接�
 **publish 後に catalog 経由での追試が要る。**
 
 `cmate-orchestrate-monitor` は [CommandMate#1589](https://github.com/Kewton/CommandMate/issues/1589)
-で 0.2.0 へ bump したが、**第 3.2 節の実測は publish 済みの 0.1.0 に対するものである**
-（0.2.0 は Catalog 未公開で、これも #1592 で公開する）。version 列は manifest の正本に
-合わせて 0.2.0 にし、`claude` / `codex` 列と実測日は 0.1.0 の測定値を据え置いてある。
+で 0.2.0 へ、[CommandMate#1602](https://github.com/Kewton/CommandMate/issues/1602) で 0.3.0 へ
+bump したが、**第 3.2 節の実測は publish 済みの 0.1.0 に対するものである**
+（0.2.0 / 0.3.0 はいずれも Catalog 未公開で、これも #1592 で公開する）。version 列は manifest の
+正本に合わせて 0.3.0 にし、`claude` / `codex` 列と実測日は 0.1.0 の測定値を据え置いてある。
 install 経路も payload の配置規則も変えていないため結果は同じになる見込みだが、
-**見込みは実測ではない。publish 後に 0.2.0 で追試が要る。**
+**見込みは実測ではない。publish 後に 0.3.0 で追試が要る。**
 
 ## 5. 既知の制約
 

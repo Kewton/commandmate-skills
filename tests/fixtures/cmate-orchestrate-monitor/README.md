@@ -59,8 +59,15 @@ ANSI を剥がした fixture を持ち込むと、この検査が落ちる。
 | `live-generating-rate-limit-source.json` | 生成中フレームのバナー風文字列に反応しない（回帰 7） |
 | `live-idle-rate-limit-source.json` | idle ペインの `rate_limit` 識別子は `RATE_LIMIT` ではない（回帰 7） |
 | `live-idle.json` | 健全な idle |
+| `codex-rate-limit.json` | `cliToolId` が `codex` の payload → 送信先が `mcbd-codex-…` になる（回帰 9） |
+| `no-clitoolid-rate-limit.json` | `cliToolId` を欠く payload → 名前を捏造せず送信を拒否する（回帰 9） |
 | `scope-clean.txt` | 禁止パターンがコメント・散文にあるだけなら `CLEAN`（回帰 2） |
 | `scope-violation.txt` | 実 invocation は `VIOLATIONS:1` |
+
+`live-*.json` は実機採取の生 payload である。末尾 2 つは **`rate-limit.json` から
+`cliToolId` だけを差し替え／削除して作った派生 fixture**で、生採取ではない
+（だから `live-` prefix を持たず、fixture 忠実性検査の対象外である）。
+固定したいのはセッション名の導出であって分類ではないため、これで足りる。
 
 ## harness が見るもの
 
@@ -77,6 +84,7 @@ ANSI を剥がした fixture を持ち込むと、この検査が落ちる。
      `--hooks` / `MONITOR_HOOKS` を与えると到達すること（回帰 8）
    - hooks file が無いときに黙ってスタブへ落ちず exit 2 で失敗すること
    - 介入が起きる条件と起きない条件（backoff 中・健全なペインには 1 度も送らない）
+   - **介入が届く先**と、届かなかったときの扱い（次節）
 7. **参照フック** — 実 git worktree を作り、`hooks-git.sh` が commit 数と
    未 commit 数を実測どおり返すこと、解決できない id で 0 を返すこと、
    base ref が解決できないときに警告すること、そしてループを COMPLETE まで駆動すること。
@@ -103,6 +111,37 @@ ANSI を剥がした fixture を持ち込むと、この検査が落ちる。
 `LOOP_TASK_EXIT`（終了コード）で制御する。`capture` の fixture 列とは独立に答えるので、
 `hooks-task.sh` を配線してもポーリング順序は変わらない。
 
+## 介入の宛先と配信の検証（Issue #1602）
+
+`session-name derivation` / `monitor.sh types into the session CommandMate actually creates` /
+`counters and budgets move only on a delivered intervention` の 3 セクション。
+
+0.2.0 までの既定送信先は `cm-<worktree-id>` で、**その名前のセッションは 1 つも存在しない**。
+3 箇所すべてが `2>/dev/null || true` で終わっていたため、全介入が no-op のまま
+「送った」とログに出ていた。ここで固定するのは次の 5 点である。
+
+1. 既定（フラグ無し）で `mcbd-claude-<worktree-id>` へ届く
+2. `<id>@<instance>` 指定が **capture 側（`--agent` / `--instance`）と送信先の両方**に効く
+3. 存在しないセッションへの送信が**握り潰されず** stderr に出る（stdout には出さない）
+4. `cliToolId` を欠く payload では**名前を捏造せず**送信を拒否する
+5. `=<name>:`（完全一致指定）を使う。素の `-t <name>` は前方一致へフォールバックし、
+   primary 停止中に `-2` インスタンスへ漏れる
+
+**fake tmux は本物の tmux の target 解決を模している。** `=<name>:` は完全一致、
+素の `<name>` は「完全一致が無ければ前方一致」である。ここを完全一致だけにすると、
+**素の名前に戻す変異が green のまま通ってしまう**（＝直そうとしているバグに対して緑になる）。
+実 tmux での実測（2026-08-01）:
+
+```
+tmux send-keys -t zzprobe-w1      -> 送信成功。zzprobe-w1-2 が受信した
+tmux send-keys -t '=zzprobe-w1:'  -> can't find session（正しく拒否）
+```
+
+配信できなかったときは **`approvals` も再送予算も動かない**。空振りで予算を消費すると、
+一度も再送していないのに `resend budget spent — operator needed` へエスカレーションする。
+delivered / undelivered の 2 本を同じ fixture・同じ hooks で並べ、
+**セッションが存在するかどうかだけを変えて**固定してある。
+
 ## 変異による健全性確認
 
 この harness は「通ること」ではなく「壊れたら赤くなること」で価値が決まる。
@@ -124,5 +163,15 @@ ANSI を剥がした fixture を持ち込むと、この検査が落ちる。
 | `FALLBACK MODE` の宣言行を消す | バージョンゲート 4 件 |
 | `monitor.sh` が `--task-status` を渡すのをやめる | ループ 6 件 |
 | ループの `VERIFY_FAILED` 分岐を消す | `failed` の終局化 2 件 |
+
+`#1602` 分（2026-08-01 実測、それぞれ **suite exit 1**）。
+
+| 変異 | 落ちるテスト |
+|---|---|
+| 既定を `SESSION_PREFIX="cm"` に戻す | 22 件（既定 stdout・介入 3 セクション・承認カウンタ） |
+| `has-session` の検証を外す（`\|\| true` へ） | 11 件（配信失敗の報告・カウンタ／予算の空振り消費） |
+| `ml_tmux_target` を素の名前に戻す | 10 件（前方一致で `-2` インスタンスへ実際に漏れる） |
+| 承認カウンタと再送予算を配信結果と無関係に進める | 4 件 |
+| `--session-prefix` を素の連結に戻す（instance suffix を落とす） | 2 件 |
 
 script を変更したら、**まず変異を入れて赤くなることを確かめてから**直すこと。

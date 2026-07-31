@@ -1,0 +1,46 @@
+# .commandmate/verify.yaml — v1
+#
+# Declares the gates this repository already had but never told CommandMate
+# about. Without this file `commandmate verify` can only adjudicate work-evidence
+# and scope, so a run that broke a package digest or a fixture test still came
+# back green (Issue #1602).
+#
+# The four gates below are the ones .github/workflows/validate.yml runs, plus the
+# two bash suites CI does not run (they are documented as "run them by hand when
+# you touch the scripts" — which is exactly the kind of gate that gets skipped).
+#
+# Timeouts are the measured wall clock on the development machine (2026-08-01,
+# macOS, warm cache) with generous headroom for a cold CI runner:
+#   validate            0.25s
+#   validate-fixtures   0.13s
+#   selftest            0.86s
+#   monitor-fixtures   18.5s
+#   verify-selftest     2.5s
+#   bash-syntax        <0.1s
+#
+# The runner reads a YAML subset: 2-space indent, single-line scalars, no inline
+# comments. Keep it that way — a file it cannot parse is exit 2, not a partial run.
+version: 1
+gates:
+  - id: validate
+    command: "python3 scripts/validate.py"
+    timeoutSec: 300
+  - id: validate-fixtures
+    command: "python3 scripts/validate.py --skills-root tests/fixtures/skills"
+    timeoutSec: 300
+  - id: selftest
+    command: "python3 scripts/selftest.py"
+    timeoutSec: 300
+  - id: bash-syntax
+    command: "find skills tests -name '*.sh' -print0 | xargs -0 -n1 bash -n"
+    timeoutSec: 120
+  - id: monitor-fixtures
+    command: "bash tests/fixtures/cmate-orchestrate-monitor/run_tests.sh"
+    timeoutSec: 900
+  - id: verify-selftest
+    command: "bash skills/cmate-verify/scripts/tests/run-tests.sh"
+    timeoutSec: 600
+options:
+  baseRef: origin/main
+  skipInPrimaryCheckout: false
+  maxLogTailBytes: 8192

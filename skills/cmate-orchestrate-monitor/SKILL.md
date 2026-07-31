@@ -58,7 +58,7 @@ worker をどう作るか・どう dispatch するか・成果物をどう merge
 | 必要なもの | 用途 | 無いときの動作 |
 |---|---|---|
 | `bash` 3.2 以上 | script の実行 | 成立しない。`process_execution` を要求する |
-| `tmux` | 介入（キー送出） | 分類と完了判定は動くが、介入が届かない |
+| `tmux` | 介入（キー送出・宛先セッションの存在検証） | 分類と完了判定は動くが、介入が届かない（**届かなかったことは stderr に出る**） |
 | `commandmate` | `capture <id> --json` | 監視の主シグナルが取れない。成立しない |
 | `commandmate task`（task 台帳） | 完了判定の一次ソース（`hooks-task.sh`） | 明示メッセージつきでフォールバックモード（第5節）。**公開版にはまだ含まれない** |
 | `git` | フォールバックのフック（`hooks-git.sh`） | フォールバック時に完了判定が発火しない（第8節） |
@@ -83,7 +83,7 @@ MONITOR_HOOKS_BASE=origin/main \
   --hooks <skill-dir>/scripts/hooks-task.sh \
   --hooks <skill-dir>/scripts/hooks-git.sh \
   --interval 20 --idle-threshold 8 \
-  <worktree-id> [<worktree-id> ...] 2>&1 | tee monitor.log
+  <worktree-id>[@<instance-id>] [<worktree-id>[@<instance-id>] ...] 2>&1 | tee monitor.log
 ```
 
 - **`--hooks` を必ず付ける。** 付けないと完了判定が構造的に発火しない（第8節）。
@@ -93,6 +93,10 @@ MONITOR_HOOKS_BASE=origin/main \
   誤報 0 を後から主張できない（第9節）。
 - `MONITOR_HOOKS_BASE` は commit を数える base ref。既定は `origin/develop` なので、
   **base branch が違うリポジトリでは必ず指定する**（解決できない場合は起動時に stderr へ警告が出る）。
+- **`2>&1` を落とさない。** 届かなかった介入は stderr に出る（第7.1節）。落とすと 0.2.0 以前と
+  同じ「空振りが見えない」状態に戻る。
+- 既定の worker は tool の primary instance である。`<worktree-id>@<instance-id>`
+  （例 `w1@codex-2`）で指定した instance は capture 側と送信先の両方に効く。
 
 複数の worktree-id を渡すと 1 プロセスで同時に監督する。全 worker が COMPLETE になると
 `monitor: all N worker(s) complete` を出して exit 0 で終わる。
@@ -208,13 +212,40 @@ NOT_RUNNING → is_retrying(→GENERATING) → PROMPT → GENERATING → RATE_LI
 
 | 状態 | 介入 | 条件 |
 |---|---|---|
-| `PROMPT` | Enter | 分類のみ。サイレント＋カウント（`approvals`） |
+| `PROMPT` | Enter | 分類のみ。サイレント＋カウント（`approvals`。**配信成功時のみ**加算） |
 | `RATE_LIMIT` | `a` | 分類のみ。待たずに即時 |
 | `IDLE` | `--resend-message`（既定 `continue`） | **すべて満たすとき**: idle 閾値到達済み・現在のペインに terminal API error・`--max-resends` 未消化 |
 
 再送分岐は入力を注入するので条件を最小に絞ってある。リトライ **中**（`GENERATING`）と
 プロンプトには絶対に触らない。`--max-resends` を使い切ったらオペレータへエスカレーションする
 （撃ち続けない）。
+
+### 7.1 送信先の決定と配信の検証（Issue #1602）
+
+**送信先は prefix の連結ではなく、そのポーリングの capture ペイロードから導出する。**
+`cliToolId` はサーバがその worktree / instance に対して解決した CLI tool そのものなので、
+**分類したペインと入力するペインが同一であることが構造的に保証される**。
+
+```
+mcbd-<cliToolId>-<worktree-id>[-<instance suffix>]
+```
+
+- 0.2.0 までの既定は `cm-<worktree-id>` で、**この名前のセッションは 1 つも存在しない**。
+  3 箇所すべてが `2>/dev/null || true` で終わり、rate limit 分岐はログを送信の**前**に出し、
+  承認分岐は無条件にカウンタを進めていたため、**全介入が no-op のまま「成功」と記録**されていた。
+- `<worktree-id>@<instance-id>`（例 `w1@codex-2`）で instance を指定できる。指定した instance は
+  **capture 側（`--agent` / `--instance`）と送信先の両方**を切り替える。状態と log 行の key も
+  `<id>@<instance>` になるので、同じ worktree の 2 ペインを混ぜずに監督できる。
+- `--session-prefix` は **escape hatch**として残してあるが、置換するのは導出された
+  `mcbd-<cliToolId>` の**頭だけ**で、instance suffix は維持する。素の連結に戻すと
+  `<id>@<instance>` 指定が primary へ黙って向き直り、同型の誤配送になる。
+- 送信は **`tmux has-session` で存在を検証してから**行い、`=<name>:`（完全一致指定）を使う。
+  素の `-t <name>` は完全一致が無いとき**前方一致へフォールバック**するため、
+  `mcbd-claude-w1`（primary 停止中）への送信が `mcbd-claude-w1-2` へ漏れる。
+- **失敗は握り潰さず stderr へ報告する**（`… NOT delivered — …`）。ログは送信の**結果**を書き、
+  **承認カウンタと再送予算は配信できたときだけ動く**（空振りで予算を消費して
+  「budget spent」へエスカレーションしない）。stdout は介入と終局判定の stream なので、
+  **届かなかった介入は介入として出力しない**。運用の標準形が `2>&1 | tee` なのはこのためである。
 
 ## 8. 完了判定とフック（必ず配線する）
 
@@ -299,7 +330,9 @@ monitor[<wid>]: poll <N> -> <STATE> started=<0|1> streak=<n> commits=<n> uncommi
 | 状態分類の分布 | `grep -oE 'poll [0-9]+ -> [A-Z_]+' monitor.log \| awk '{print $4}' \| sort \| uniq -c` |
 | タスク状態の分布 | `grep -oE 'task=[a-z_]+' monitor.log \| sort \| uniq -c` |
 | 判定が一次ソース由来かフォールバック由来か | 終局判定の poll 行に `task=` があるか／`FALLBACK MODE` 行が出ているか |
-| 介入の全件 | `grep -E "sending 'a'\|resending\|resend budget spent" monitor.log`（プロンプト承認はサイレント。総数は COMPLETE 行の `approvals=` に出る） |
+| 介入の全件（届いたもの） | `grep -E "sent 'a' to\|resent to\|resend budget spent" monitor.log`（プロンプト承認はサイレント。総数は COMPLETE 行の `approvals=` に出る） |
+| 届かなかった介入 | `grep 'NOT delivered' monitor.log`（stderr。`2>&1` で取り込んでいること） |
+| 送信先として解決されたセッション | `grep 'intervention target = ' monitor.log`（worker ごとに 1 行） |
 | 完了判定の根拠 | COMPLETE した poll 行の `started= / streak= / commits= / uncommitted= / task=` |
 | capture 失敗 | `grep -c 'capture failed' monitor.log`（poll 行は出ないので別に数える） |
 
@@ -327,9 +360,15 @@ monitor[<wid>]: poll <N> -> <STATE> started=<0|1> streak=<n> commits=<n> uncommi
 ## 11. 実運用での検証状況
 
 判定コアは 2026-07-28〜29 の 2 運用（単独 1 Issue / 3 並列）で
-**延べ 371 ポーリング・誤報 0 件・介入 21 件（すべてプロンプト自動承認）**の実績がある。
+**延べ 371 ポーリング・誤報 0 件・プロンプト検出 21 件**の実績がある。
 **この実績はすべて capture ヒューリスティクス（現在のフォールバック経路）によるものである。**
 タスク状態を一次ソースとする経路（第5節）の実運用実績は **まだ無い**。
+
+**0.2.0 までの「介入 21 件」は実際には 1 件も届いていなかった**（Issue #1602）。
+既定の送信先 `cm-<worktree-id>` は存在しないセッションで、失敗はすべて握り潰されていた。
+0.3.0 で宛先を導出に変え、配信を検証するようにしたが（第7.1節）、
+**修正後の介入が実 worker へ届いた実績は未計測である**
+（[references/evidence.md](./references/evidence.md) 1c）。
 運用条件・状態分布・介入内訳・完了判定の根拠・測定の限界は
 [references/evidence.md](./references/evidence.md) に記録してある。
 
