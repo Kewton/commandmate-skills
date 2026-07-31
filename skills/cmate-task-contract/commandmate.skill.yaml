@@ -1,0 +1,93 @@
+schema_version: 1
+id: cmate-task-contract
+name: cmate-task-contract
+version: 0.1.0
+summary: GitHub Issue から実行契約 .commandmate/tasks/<name>.yaml v1 を起案し、goal・変更可能 scope・検証ゲートを作業前に宣言して send --contract で送れる状態にする。
+description: >-
+  作業を始める前に「何を達成するのか」「どのパスを変更してよいのか」「何が満たされたら
+  完了なのか」を宣言した実行契約 YAML を、GitHub Issue または作業内容の記述から起案する
+  手順である。契約は commandmate send --contract の入力であり、送信後は組み込みの
+  work-evidence / scope ゲートと verify.yaml のゲートによって wait --verify が
+  合格 0 / 不合格 20 / 未着手 21 で判定する。手順は最初に commandmate send --help へ
+  --contract が存在するかを確認し、無ければ契約を書かずに停止する（契約なしの送信へ
+  黙って落ちない）。Issue 本文がコードについて述べる主張は転記前にリポジトリで裏取りし、
+  食い違えば実測を正とする。verify.gates に書ける id は対象 worktree の
+  .commandmate/verify.yaml に実在するものだけで、空リストは契約エラーである。契約 v1 は
+  閉じた集合なので未知キーは無視されず拒否される。SKILL.md が示す雛形は CommandMate の
+  契約パーサに実際に通して valid を確認したものである。パーサ script は同梱せず、
+  検証は送信時にサーバ側が全違反をまとめて返すため 1 往復で修正できる。
+capabilities:
+  - GitHub Issue または作業内容の記述から、実行契約 .commandmate/tasks/<name>.yaml v1 を起案する
+  - commandmate send --help に --contract が無い環境を検出し、契約を書かずに明示的に停止する
+  - Issue の受入条件を、検証可能なコマンドと判定条件の形へ書き直して goal に転記する
+  - 実装先・テスト・定型の追記先を洗い出し、ディレクトリ粒度の glob として scope.allow に宣言する
+  - verify.gates に書ける id を対象 worktree の .commandmate/verify.yaml から確認し、空リストを避ける
+  - 既定値のままの autoYes / success を書かず、既定から外すときだけ理由付きで明示する
+  - 契約ファイルの追跡可否を .gitignore に照らして確認し、規則を迂回せず利用者へ判断を返す
+  - 送信時に返る契約エラーを全件まとめて 1 往復で修正する手順を示す
+expected_outcomes:
+  - 作業開始前に、達成条件と変更可能範囲と完了判定がレビュー可能な YAML として残る
+  - 契約機能を持たない CommandMate では、契約なしの送信へ黙って落ちずに停止する
+  - scope の宣言漏れによる実走時の検証不合格（exit 20）が、起案時の洗い出しで減る
+  - 完了条件が verify.yaml に実在するゲートで表現され、wait --verify がそのまま判定できる
+  - 契約エラーが 1 往復で解消でき、送信のやり直しが 1 回で済む
+  - 契約が PR のレビュー対象に含まれ、宣言された範囲と実際の変更を後から突き合わせられる
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - task-contract
+  - contract
+  - scope
+  - verification
+  - planning
+  - issue
+  - yaml
+compatibility:
+  commandmate: '>=0.11.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.
+    - agent: codex
+      support: native
+      evidence: Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.
+    - agent: gemini
+      support: unknown
+      evidence: Not verified for this version. Readable as a procedure, discovery and reload unverified.
+    - agent: opencode
+      support: unknown
+      evidence: Not verified for this version. Readable as a procedure, discovery and reload unverified.
+requirements:
+  commands:
+    - name: commandmate
+    - name: gh
+      version_range: '>=2.20.0 <3.0.0'
+    - name: git
+      version_range: '>=2.30.0 <3.0.0'
+  network_hosts:
+    - api.github.com
+declared_permissions:
+  - filesystem_read
+  - filesystem_write
+  - process_execution
+  - network_access
+declared_risk: moderate
+risk_rationale: >-
+  指示文だけで構成され、script も実行可能 file も含まず、install 時に実行されるものは
+  無い。手順が書き込むのは対象 worktree の .commandmate/tasks/<name>.yaml 1 件のみで、
+  実装コードには触れない。読み取りは Issue 本文・verify.yaml・リポジトリの裏取りに限る。
+  実行する command は gh issue view と git の read-only query、commandmate send --help /
+  send --contract / wait --verify であり、api.github.com へ到達する。したがって
+  filesystem_write と process_execution と network access を宣言し、computed_risk と
+  同じ moderate を申告する。破壊的操作（force push、履歴書き換え、file 削除、
+  .gitignore の迂回）は手順として禁止している。
+files:
+  - path: SKILL.md
+    sha256: 2c22a37be2c8e1573366f4b76607e207666a79e04eca12a7a2d987a31d95b24d
+    size: 21021
+    kind: skill_md
+    executable: false
+    script: false

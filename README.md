@@ -10,7 +10,7 @@ immutable commit SHA と artifact SHA-256 を検証したうえで、登録済�
 - 親 Epic: [Kewton/CommandMate#1227](https://github.com/Kewton/CommandMate/issues/1227)
 - 本リポジトリの release pipeline: [Kewton/CommandMate#1238](https://github.com/Kewton/CommandMate/issues/1238)
 
-> **状態**: release pipeline と公式 Skill 8 件が揃っている。
+> **状態**: release pipeline と公式 Skill 9 件が揃っている。
 > どの Agent でどこまで確認済みかは
 > [docs/agent-support-matrix.md](./docs/agent-support-matrix.md) を参照。
 
@@ -60,6 +60,7 @@ python3 scripts/verify_artifact.py --help      # 公開 artifact の keyless 検
 |---|---|---|
 | `cmate-repository-analysis` | リポジトリ構造・規約の分析手順 | low |
 | `cmate-issue-refinement` | Issue 精緻化の標準手順 | moderate |
+| `cmate-task-contract` | Issue から実行契約 `.commandmate/tasks/<name>.yaml` を起案する手順 | moderate |
 | `cmate-acceptance-test` | 受入テストの標準手順 | moderate |
 | `cmate-worktree-setup` | 専用 worktree の作成と baseline 取得 | moderate |
 | `cmate-worktree-cleanup` | worktree の安全な後始末 | **high** |
