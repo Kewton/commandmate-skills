@@ -1,0 +1,48 @@
+{
+  "plan_schema_version": 1,
+  "skill_id": "cmate-issue-authoring",
+  "skill_version": "0.1.0",
+  "plan_id": "split-2959855808c5",
+  "generated_mode": "dry-run",
+  "repository": "Kewton/CommandMate",
+  "source": {
+    "kind": "epic_issue",
+    "ref": "Kewton/CommandMate#1585",
+    "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "issues": [
+    {
+      "key": "cache-read-path",
+      "title": "feat(cache): add a read-through cache in front of the profile lookup",
+      "objective": "profile lookup の read 経路に read-through cache を挟み、同一 profile の連続参照を 1 回の DB 読み取りに落とす。",
+      "acceptance_criteria": ["`npm test -- src/cache` が exit 0 で終わる"],
+      "target_files": ["src/cache/profile.ts"],
+      "reference_files": [],
+      "test_expectations": ["npm test -- src/cache"],
+      "depends_on": [],
+      "labels": [],
+      "size": "s",
+      "parallel_safe": "unknown",
+      "evidence": [
+        {
+          "claim": "profile lookup は毎回 DB を読んでいる",
+          "kind": "file",
+          "ref": "src/cache/profile.ts:24"
+        }
+      ],
+      "body": "profile lookup の read 経路に read-through cache を挟み、同一 profile の連続参照を 1 回の DB 読み取りに落とす。\n\n## 対象ファイル\n\n- `src/cache/profile.ts`\n\n## 受入条件\n\n- [ ] `npm test -- src/cache` が exit 0 で終わる\n\n## 根拠\n\n- src/cache/profile.ts:24 — lookup は毎回 DB を読んでいる\n"
+    }
+  ],
+  "duplicate_suspicions": [],
+  "open_questions": [],
+  "commands": [
+    {
+      "purpose": "既存 Issue との重複を検査する",
+      "command": "gh issue list --repo Kewton/CommandMate --state all --search \"profile cache in:title,body\" --limit 30",
+      "mutating": false,
+      "executed": true
+    }
+  ],
+  "warnings": [],
+  "notes": []
+}

@@ -1,0 +1,154 @@
+schema_version: 1
+id: cmate-issue-authoring
+name: cmate-issue-authoring
+version: 0.1.0
+summary: Feature 記述から実装可能な Issue 群を起案する。read-only の分割計画を schema 準拠 artifact で出し、明示承認の下でだけ依存順に GitHub へ一括登録する 2 phase 手順。
+description: >-
+  Feature 記述・仕様断片・epic Issue を入力に、着手できる Issue 群を起案する手順である。
+  cmate-issue-refinement が「既存 Issue の精錬」であるのに対し、こちらはまだ Issue が
+  1 件も無い段階を担う。目標関数は Issue の件数ではなく、起案した各 Issue が
+  cmate-orchestrate の planner に blocking question を立てられない品質であることに置く。
+  cmate-orchestrate と同じ plan/approve 型で動く。Phase 1（既定）は read-only で、
+  主張をリポジトリ実査で裏取りし、既存 Issue と着地済み PR を検索して重複を警告し、
+  分割計画を versioned schema 準拠の artifact として書き出す。GitHub には一切書かない。
+  決めきれない点は勝手に埋めず open question として人間へ返す。Phase 2 は --register と
+  明示承認の 2 つが揃ったときだけ動き、依存順に gh issue create を実行し、本文中の
+  placeholder を実際の Issue 番号へ置換して相互リンクにし、ラベルを付ける。途中失敗は
+  残りを skipped として報告し、成功に丸めない。登録は receipt に記録し、同じ計画の
+  二度目は既定で拒否する。計画の適合は同梱の validator（Node 標準ライブラリのみ）が
+  schema file を読んで検証し、schema では表現できない規則（依存 DAG の非循環、
+  dry-run に mutating command が無いこと、本文が planner の抽出条件を満たすこと）も
+  同じ run で判定する。exit は 0 合格 / 1 計画が invalid / 2 run 自体の失敗の 3 値である。
+  既存 Issue の編集・クローズ、実行順序の運用、登録後の精錬はスコープ外である。
+capabilities:
+  - Feature 記述・仕様断片・epic Issue から、実装可能な Issue 群への分割を起案する
+  - 本文の主張をリポジトリ実査で裏取りし、トレースできない主張を open question へ落とす
+  - 既存 Issue と着地済み PR の両方を検索し、重複疑いを判定つきで計画に載せる
+  - 分割計画を versioned schema 準拠の artifact として出し、同梱 script で機械検証する
+  - 依存 DAG の非循環・key の実在・本文と依存宣言の一致を、承認前に機械で確かめる
+  - Issue 本文を cmate-orchestrate planner の抽出条件に合わせて描画する
+  - 明示承認の下でだけ gh issue create を依存順に実行し、相互リンクとラベルを付ける
+  - 登録の途中失敗を skipped として報告し、部分成功を成功に丸めない
+  - 同じ計画の二度目の登録を receipt で検出して既定で拒否する
+expected_outcomes:
+  - Feature はあるが Issue が無い状態から、着手できる Issue 群までを 1 手順で渡せる
+  - 起案された Issue が cmate-orchestrate の planner に blocking question を立てさせない
+  - 裏取りできない主張が Issue 本文に入らず、open question として人間に返る
+  - 既存 Issue や着地済み PR と重複した Issue が、作られる前に止まる
+  - 承認前に GitHub が変更されず、計画が後から検証できる artifact として残る
+  - 登録が途中で失敗しても、成功分と未実施分が区別して報告される
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - issue
+  - authoring
+  - split
+  - planning
+  - decomposition
+  - dependency
+  - duplicate-detection
+  - github
+  - schema
+  - dry-run
+compatibility:
+  commandmate: '>=0.11.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.
+    - agent: codex
+      support: native
+      evidence: Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.
+    - agent: gemini
+      support: unknown
+      evidence: Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.
+    - agent: opencode
+      support: unknown
+      evidence: Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.
+requirements:
+  commands:
+    - name: gh
+      version_range: '>=2.20.0 <3.0.0'
+    - name: git
+      version_range: '>=2.30.0 <3.0.0'
+    - name: node
+      version_range: '>=18.0.0'
+  network_hosts:
+    - api.github.com
+declared_permissions:
+  - filesystem_read
+  - filesystem_write
+  - process_execution
+  - network_access
+declared_risk: moderate
+risk_rationale: >-
+  同梱する実行可能 file は無く、install 時に実行されるものも無い。script は
+  validate-plan.mjs 1 本（実行 bit 無し）で、file を 2 つ読んで findings を出すだけであり
+  gh も git も呼ばない。書き込みは計画 artifact（.commandmate/issue-authoring/ 配下）に
+  限り、実装 file には触れない。GitHub への mutation は --register と明示承認が揃った
+  Phase 2 の gh issue create だけで、Issue の追加であって削除・履歴書き換えではない。
+  既存 Issue の本文編集・クローズ・ラベル張り替えは手順として禁止している。
+files:
+  - path: SKILL.md
+    sha256: d83a6a06c2768724708de1a0b35bd6c0acaa5c82017665e644c3641fb9fec01f
+    size: 12735
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/agent-compatibility.md
+    sha256: 3fc17a787fd9316f9b5bb4dc734e53ba7675b23e60e9492c784a361655e8d7b6
+    size: 3630
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/duplicate-guard.md
+    sha256: 964fb911192d63ab997fa171b245610595f54704e50e0f7e28cbcf2ae344f29c
+    size: 3037
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/issue-body-contract.md
+    sha256: 752e1dcabefaa4148588c33039b9774f880df17fd3f86f750eda6332dec664ad
+    size: 5577
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/plan-contract.md
+    sha256: ef5fd5a6c142c9c2ec55bb01c79c8e743566fa70836203e048756185c63ad288
+    size: 5491
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/register-contract.md
+    sha256: 470d05adcd2f91b67225ccc477490cc57a61e54da9398720480bff7c70b411f3
+    size: 4078
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/release-notes.md
+    sha256: e671b2e92614703575f1adc1669fc25fd48939ae80cf76b9769aeba993b517ad
+    size: 3660
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/safety.md
+    sha256: 95c4b244e4be79d13647af4e76768744ef2a2b2af3a54e95985aaad434b41100
+    size: 3411
+    kind: instruction
+    executable: false
+    script: false
+  - path: schemas/issue-split-plan.v1.json
+    sha256: 3fd436c846291492d78f23291d8588e435b78ba6bc923d899434c2a634480dba
+    size: 10070
+    kind: asset
+    executable: false
+    script: false
+  - path: scripts/validate-plan.mjs
+    sha256: fc2802c2eda23f7c0b8603bec3c60b97393433940d4c8529c91b6b4a03b72850
+    size: 22651
+    kind: script
+    executable: false
+    script: true

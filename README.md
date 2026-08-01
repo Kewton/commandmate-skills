@@ -15,7 +15,7 @@ Claude Code 2.1.220 は `.claude/skills` しか、Codex CLI 0.145.0 は `.agents
 - 親 Epic: [Kewton/CommandMate#1227](https://github.com/Kewton/CommandMate/issues/1227)
 - 本リポジトリの release pipeline: [Kewton/CommandMate#1238](https://github.com/Kewton/CommandMate/issues/1238)
 
-> **状態**: release pipeline と公式 Skill 9 件が揃っている。
+> **状態**: release pipeline と公式 Skill 10 件が揃っている。
 > どの Agent でどこまで確認済みかは
 > [docs/agent-support-matrix.md](./docs/agent-support-matrix.md) を参照。
 
@@ -64,6 +64,7 @@ python3 scripts/verify_artifact.py --help      # 公開 artifact の keyless 検
 | Skill ID | 内容 | risk |
 |---|---|---|
 | `cmate-repository-analysis` | リポジトリ構造・規約の分析手順 | low |
+| `cmate-issue-authoring` | Feature 記述から Issue 群を起案し、承認後に一括登録する手順 | moderate |
 | `cmate-issue-refinement` | Issue 精緻化の標準手順 | moderate |
 | `cmate-task-contract` | Issue から実行契約 `.commandmate/tasks/<name>.yaml` を起案する手順 | moderate |
 | `cmate-acceptance-test` | 受入テストの標準手順 | moderate |
@@ -79,7 +80,8 @@ package（**`cmate-worktree-cleanup` / `cmate-orchestrate` / `cmate-orchestrate-
 `cmate-verify` の 4 件**）は install に `--yes` と `--ack-risk <skill-id>@<version>` の
 完全一致が要る。
 
-`cmate-task-contract` と `cmate-verify` は **まだ Catalog に publish されていない**
+`cmate-issue-authoring` と `cmate-task-contract` と `cmate-verify` は
+**まだ Catalog に publish されていない**
 （[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開予定）。
 それまでは `commandmate skill install` の経路が無いので、使いたい場合は両 root へ手で置く。
 **片側だけに置くと、Claude か Codex のどちらかから必ず不可視になる。**

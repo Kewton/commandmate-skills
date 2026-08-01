@@ -16,6 +16,7 @@ skills/<skill-id>/
 | Skill ID | version | risk | 内容 |
 |---|---|---|---|
 | `cmate-acceptance-test` | 0.1.1 | moderate | 受入テストの標準手順 |
+| `cmate-issue-authoring` | 0.1.0 | moderate | Feature 記述から Issue 群を起案（計画 validator 同梱） |
 | `cmate-issue-refinement` | 0.1.1 | moderate | Issue 精緻化の標準手順 |
 | `cmate-orchestrate` | 0.7.1 | high | 計画・dispatch・PR/merge・UAT（Node runner 同梱） |
 | `cmate-orchestrate-monitor` | 0.3.0 | high | 並列 worker 監視の判定コア（bash script 同梱） |
@@ -25,7 +26,8 @@ skills/<skill-id>/
 | `cmate-worktree-cleanup` | 0.1.2 | high | worktree の安全な後始末 |
 | `cmate-worktree-setup` | 0.1.2 | moderate | 専用 worktree の作成と baseline 取得 |
 
-`cmate-task-contract` と `cmate-verify` は **まだ Catalog に publish されていない**
+`cmate-issue-authoring` と `cmate-task-contract` と `cmate-verify` は
+**まだ Catalog に publish されていない**
 （[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開予定）。
 
 この表は目次であって正本ではない。version と risk は各
