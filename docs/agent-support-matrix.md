@@ -177,7 +177,7 @@ Codex では skill 名を自然文で指示するか、同梱 script を直接�
 | `cmate-orchestrate-monitor` | 0.3.0 | native | native | unknown | unknown | 2026-07-31（**0.1.0 で実測**） | catalog install |
 | `cmate-repository-analysis` | 0.1.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
 | `cmate-task-contract` | 0.1.0 | native | native | unknown | unknown | 2026-07-31 | **手動両置き** |
-| `cmate-verify` | 0.1.0 | native | native | unknown | unknown | 2026-07-31 | **手動両置き** |
+| `cmate-verify` | 0.1.1 | native | native | unknown | unknown | 2026-07-31（**0.1.0 で実測**） | **手動両置き** |
 | `cmate-worktree-cleanup` | 0.1.2 | native | native | unknown | unknown | 2026-07-31 | catalog install |
 | `cmate-worktree-setup` | 0.1.2 | native | native | unknown | unknown | 2026-07-31 | catalog install |
 
@@ -185,7 +185,7 @@ Codex では skill 名を自然文で指示するか、同梱 script を直接�
 （それ以前は第 3 節の 1 package の測定を install 経路の共通性から全件に敷衍していた）。
 `gemini` / `opencode` は依然としてどの package でも測っていない。
 
-`cmate-task-contract` 0.1.0 と `cmate-verify` 0.1.0 は **まだ Catalog に publish されていない**
+`cmate-task-contract` 0.1.0 と `cmate-verify` 0.1.1 は **まだ Catalog に publish されていない**
 （[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開する）。
 `skill info` は exit 2 `SKILL_NOT_FOUND` を返す。第 3.2 節ではこの 2 件だけ
 [verify-install.md](./runbooks/verify-install.md) の**手動両置き手順**で配置して測った。

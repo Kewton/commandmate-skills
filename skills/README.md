@@ -21,7 +21,7 @@ skills/<skill-id>/
 | `cmate-orchestrate-monitor` | 0.3.0 | high | 並列 worker 監視の判定コア（bash script 同梱） |
 | `cmate-repository-analysis` | 0.1.1 | low | リポジトリ構造・規約の分析手順 |
 | `cmate-task-contract` | 0.1.0 | moderate | Issue から実行契約 yaml を起案する手順 |
-| `cmate-verify` | 0.1.0 | high | 検証ゲートの起案と実 exit code 判定（bash script 同梱） |
+| `cmate-verify` | 0.1.1 | high | 検証ゲートの起案と実 exit code 判定（bash script 同梱） |
 | `cmate-worktree-cleanup` | 0.1.2 | high | worktree の安全な後始末 |
 | `cmate-worktree-setup` | 0.1.2 | moderate | 専用 worktree の作成と baseline 取得 |
 
