@@ -138,6 +138,9 @@ instance suffix は `deriveSessionSuffix` と同じで、`<tool>-` を剥がし�
 | `monitor: watching N worker(s), interval=…, idle-threshold=…, max-resends=…` | 起動時 |
 | `monitor[<lbl>]: intervention target = <session>` | 送信先を初めて解決したとき。**worker ごとに 1 度だけ** |
 | `monitor[<lbl>]: capture failed, skipping poll` | capture が非 0。**idle streak を進めない** |
+| `monitor[<lbl>]: classify-state failed (exit N), skipping poll` | `classify-state.sh` が非 0、または空を返した。capture 失敗と同じ扱い（**idle streak を進めない**）。空 state を完了判定へ渡さないためのガード（CommandMate #1614） |
+| `monitor[<lbl>]: verify-completion failed (exit N), no verdict this poll (state=… started=… streak=… commits=… uncommitted=… task=…)` | `verify-completion.sh` が非 0、または空を返した。判定なしでそのポーリングを捨てる。入力を併記するのは手で再現できるようにするため（CommandMate #1614） |
+| `monitor hooks: [<wid>] …` （stderr） | `hooks-git.sh` の `git` 呼び出しが失敗した／worktree-id が checkout へ解決できなかった。**原因ごとに worker 1 回**。カウンタは 0 だが「測れなかった 0」であることを示す（CommandMate #1614） |
 | `monitor[<lbl>]: rate limit -> sent 'a' to <session>` | RATE_LIMIT 分類時、**かつ配信できたとき** |
 | `monitor[<lbl>]: terminal API error at an idle prompt -> resent to <session> (n/N)` | 再送条件成立、**かつ配信できたとき** |
 | `monitor[<lbl>]: terminal API error and resend budget spent (N) — operator needed` | 再送上限到達 |

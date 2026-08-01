@@ -799,6 +799,221 @@ check "hooks-git.sh drives the loop to COMPLETE" \
 LOOP_ID=w1
 
 echo
+echo "== exit codes of the commands the decision depends on (CommandMate #1614) =="
+# Two failure families, pinned in SEPARATE cases on purpose: a run where git
+# could not answer and a run where the worker genuinely wrote nothing produce the
+# same counters (0), so only an assertion on the *report* can tell them apart.
+
+REAL_GIT=$(command -v git)
+
+# mk_repo <root> <commits> <changes> — a worktree carrying exactly that much
+# work. Its id is generateWorktreeId('feature/x', 'myrepo') = myrepo-feature-x.
+mk_repo() {
+  mr__root=$1; mr__commits=$2; mr__changes=$3
+  mkdir -p "$mr__root"
+  git -c init.defaultBranch=main init --quiet "$mr__root/myrepo"
+  printf 'base\n' > "$mr__root/myrepo/README.md"
+  git -C "$mr__root/myrepo" add . >/dev/null
+  git -C "$mr__root/myrepo" -c user.email=t@t -c user.name=t commit --quiet -m base
+  git -C "$mr__root/myrepo" -c user.email=t@t -c user.name=t \
+    worktree add --quiet -b feature/x "$mr__root/myrepo-x" >/dev/null 2>&1
+  mr__n=0
+  while [ "$mr__n" -lt "$mr__commits" ]; do
+    mr__n=$((mr__n + 1))
+    printf '%s\n' "$mr__n" > "$mr__root/myrepo-x/c$mr__n.txt"
+    git -C "$mr__root/myrepo-x" add . >/dev/null
+    git -C "$mr__root/myrepo-x" -c user.email=t@t -c user.name=t commit --quiet -m "work $mr__n"
+  done
+  mr__n=0
+  while [ "$mr__n" -lt "$mr__changes" ]; do
+    mr__n=$((mr__n + 1))
+    printf '%s\n' "$mr__n" > "$mr__root/myrepo-x/wip$mr__n.txt"
+  done
+}
+
+# git_shim <name> <subcommand> <exit-code> — a `git` that fails for exactly one
+# subcommand and calls through for the rest, so the two counters can disagree
+# about whether they were measurable.
+git_shim() {
+  gs__dir="$WORK/gitshim-$1"
+  mkdir -p "$gs__dir"
+  {
+    echo '#!/bin/sh'
+    echo 'for a in "$@"; do'
+    echo "  if [ \"\$a\" = \"$2\" ]; then"
+    echo "    echo 'git $2: simulated failure' >&2"
+    echo "    exit $3"
+    echo '  fi'
+    echo 'done'
+    echo "exec $REAL_GIT \"\$@\""
+  } > "$gs__dir/git"
+  chmod +x "$gs__dir/git"
+  printf '%s' "$gs__dir"
+}
+
+# counts_of <repo> <id> [<shim-dir>] — sets COUNTS_OUT to "<commits> <uncommitted>"
+# and COUNTS_STDERR to the hook's stderr.
+#
+# Globals rather than a stdout contract on purpose: `$(counts_of …)` would run the
+# whole thing in a subshell and COUNTS_STDERR would never reach the caller — the
+# assertions on the warning would then pass against an empty string, i.e. they
+# would be green whether or not the guard exists.
+counts_of() {
+  co__repo=$1; co__id=$2; co__shim=${3:-}
+  co__path=$PATH
+  [ -n "$co__shim" ] && co__path="$co__shim:$PATH"
+  PATH="$co__path" MONITOR_HOOKS_REPO="$co__repo" MONITOR_HOOKS_BASE=main bash -c \
+    ". \"$HOOKS_GIT\"; printf '%s %s' \"\$(count_commits $co__id)\" \"\$(count_uncommitted $co__id)\"" \
+    > "$WORK/counts-out" 2> "$WORK/counts-stderr"
+  COUNTS_OUT=$(cat "$WORK/counts-out")
+  COUNTS_STDERR=$(cat "$WORK/counts-stderr")
+}
+
+# Zero / one / many. All three sizes are pinned because the obvious way to read
+# git's exit code — capture the output first, then count it — breaks the count
+# itself: `$()` strips the trailing newline, so `printf '%s' "$out" | wc -l`
+# reports one line fewer than there are (bash 3.2.57: 1 record -> 0, 2 -> 1).
+mk_repo "$WORK/n0" 0 0
+mk_repo "$WORK/n1" 1 1
+mk_repo "$WORK/n3" 3 2
+counts_of "$WORK/n0/myrepo" myrepo-feature-x
+check "counts 0 commits / 0 changes"  "0 0" "$COUNTS_OUT"
+# The control arm for every failure case below, and the reason they cannot
+# satisfy each other's assertion: true zero-work must stay silent. Warning here
+# would train the operator to ignore the line that matters.
+check "a worker that genuinely did nothing produces no warning" "" "$COUNTS_STDERR"
+
+counts_of "$WORK/n1/myrepo" myrepo-feature-x
+check "counts 1 commit / 1 change"    "1 1" "$COUNTS_OUT"
+counts_of "$WORK/n3/myrepo" myrepo-feature-x
+check "counts 3 commits / 2 changes"  "3 2" "$COUNTS_OUT"
+
+# `git worktree list` is the worst of the three: path resolution feeds BOTH
+# counters, so one failure sinks them together and the worker reads exactly like
+# a session whose task never left the composer.
+counts_of "$WORK/n3/myrepo" myrepo-feature-x "$(git_shim wt worktree 128)"
+check "a failing 'git worktree list' still answers 0" "0 0" "$COUNTS_OUT"
+check_contains "a failing 'git worktree list' is reported, not swallowed" \
+  "worktree list --porcelain' failed (exit 128)" "$COUNTS_STDERR"
+check_contains "the report says the counters are unknown, not zero" \
+  "UNKNOWN and reported as 0" "$COUNTS_STDERR"
+
+# Asymmetry on purpose: `git status` is untouched, so this proves the commit
+# counter alone went unknown rather than the whole hook giving up.
+counts_of "$WORK/n3/myrepo" myrepo-feature-x "$(git_shim lg log 129)"
+check "a failing 'git log' leaves the uncommitted counter answering" "0 2" "$COUNTS_OUT"
+check_contains "a failing 'git log' is reported" \
+  "log --oneline main..HEAD' failed (exit 129)" "$COUNTS_STDERR"
+
+counts_of "$WORK/n3/myrepo" myrepo-feature-x "$(git_shim st status 130)"
+check "a failing 'git status' leaves the commit counter answering" "3 0" "$COUNTS_OUT"
+check_contains "a failing 'git status' is reported" \
+  "status --porcelain' failed (exit 130)" "$COUNTS_STDERR"
+
+# Not a git failure, the same silent floor of 0: the search ran and matched
+# nothing. The base-ref warning exists for this shape of mistake already.
+counts_of "$WORK/n3/myrepo" nope-nope
+check "an unresolvable id still answers 0 0" "0 0" "$COUNTS_OUT"
+check_contains "an unresolvable id is reported too" "[nope-nope] no checkout resolved" "$COUNTS_STDERR"
+check_contains "the report rules out 'the worker did nothing'" \
+  "not because the worker did nothing" "$COUNTS_STDERR"
+
+# Once per worker, not once per poll: at the operator's 20s interval a per-poll
+# line buries the stream it exists to make readable, and the cause cannot change.
+LOOP_ID=myrepo-feature-x
+PATH="$(git_shim wt2 worktree 128):$PATH" MONITOR_HOOKS_REPO="$WORK/n3/myrepo" MONITOR_HOOKS_BASE=main \
+  run_loop git-warn-once 4 live-idle.json --hooks "$HOOKS_GIT"
+check "the git failure run polls 4 times" 4 "$LOOP_CAPTURES"
+check "the git failure is reported once, not once per poll" 1 \
+  "$(printf '%s\n' "$LOOP_STDERR" | grep -c "worktree list --porcelain' failed" || true)"
+LOOP_ID=w1
+
+# Characterisation, not a wish: this is WHY monitor.sh may never hand
+# verify-completion.sh an empty state. Measured on bash 3.2.57.
+check "an empty --state is not a live signal, so an idle streak with commits COMPLETEs" \
+  COMPLETE \
+  "$(bash "$VERIFY" --started 1 --state '' --idle-streak 10 --idle-threshold 5 \
+      --commits 2 --uncommitted 0 --task-status '')"
+check "the same inputs with the real GENERATING stay WORKING" \
+  WORKING \
+  "$(bash "$VERIFY" --started 1 --state GENERATING --idle-streak 10 --idle-threshold 5 \
+      --commits 2 --uncommitted 0 --task-status '')"
+
+# stage_scripts <name> — a copy of the shipped scripts a helper can be replaced
+# in. monitor.sh resolves CLASSIFY / VERIFY from its own directory, which is why
+# a dying helper is simulated by a copy rather than by a flag.
+stage_scripts() {
+  ss__dir="$WORK/staged-$1"
+  mkdir -p "$ss__dir"
+  cp "$SCRIPTS"/*.sh "$ss__dir/"
+  chmod +x "$ss__dir"/*.sh
+  printf '%s' "$ss__dir"
+}
+
+# Polls 1-3 classify for real: the worker latches started=1 and the idle streak
+# reaches the threshold while the counters are still 0 (NOT_STARTED, correctly).
+# The classifier then dies on poll 4, at the moment the worker's first commit
+# lands. With the exit code ignored, `state` is empty, the streak keeps the value
+# it had, and the completion decision reports COMPLETE for a worker whose pane
+# nobody could read.
+STAGED=$(stage_scripts classify)
+{
+  echo '#!/bin/sh'
+  echo "n=\$(cat \"$WORK/classify-calls\" 2>/dev/null || echo 0)"
+  echo 'n=$((n + 1))'
+  echo "echo \"\$n\" > \"$WORK/classify-calls\""
+  echo 'if [ "$n" -ge 4 ]; then exit 7; fi'
+  echo "exec \"$CLASSIFY\" \"\$@\""
+} > "$STAGED/classify-state.sh"
+chmod +x "$STAGED/classify-state.sh"
+{
+  echo 'count_commits() {'
+  echo "  n=\$(cat \"$WORK/commit-calls\" 2>/dev/null || echo 0)"
+  echo '  n=$((n + 1))'
+  echo "  echo \"\$n\" > \"$WORK/commit-calls\""
+  echo '  if [ "$n" -ge 4 ]; then echo 2; else echo 0; fi'
+  echo '}'
+} > "$WORK/hooks-latecomer.sh"
+
+MONITOR_REAL=$MONITOR
+MONITOR=$STAGED/monitor.sh
+run_loop classify-dies 6 live-generating-token.json,live-idle.json \
+  --idle-threshold 2 --verbose --hooks "$WORK/hooks-latecomer.sh"
+check_contains "a dying classifier is reported instead of producing an empty state" \
+  "monitor[w1]: classify-state failed (exit 7), skipping poll" "$LOOP_STDOUT"
+check_lacks "a worker whose pane could not be read is never reported done" \
+  "COMPLETE" "$LOOP_STDOUT"
+check "only the polls that classified produce a poll line" 3 \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep -c ' poll [0-9]* -> ' || true)"
+
+# The control: without it, "no COMPLETE" above could be an artifact of the
+# fixture sequence rather than of the guard.
+rm -f "$WORK/commit-calls"
+MONITOR=$MONITOR_REAL
+run_loop classify-lives 6 live-generating-token.json,live-idle.json \
+  --idle-threshold 2 --verbose --hooks "$WORK/hooks-latecomer.sh"
+check_contains "the same schedule reaches COMPLETE when the classifier works" \
+  "monitor[w1]: COMPLETE (approvals=0)" "$LOOP_STDOUT"
+
+# `case "$verdict"` has no default arm, so before this guard the poll passed
+# through in total silence — the loop looked healthy while deciding nothing.
+STAGED=$(stage_scripts verify)
+printf '#!/bin/sh\nexit 9\n' > "$STAGED/verify-completion.sh"
+chmod +x "$STAGED/verify-completion.sh"
+MONITOR=$STAGED/monitor.sh
+run_loop verify-dies 2 live-generating-token.json,live-idle.json --verbose
+check_contains "a dying completion decision is reported with the inputs it was given" \
+  "monitor[w1]: verify-completion failed (exit 9), no verdict this poll (state=GENERATING started=1 streak=0 commits=0 uncommitted=0 task=-)" \
+  "$LOOP_STDOUT"
+check_contains "the second poll reports its own inputs" \
+  "monitor[w1]: verify-completion failed (exit 9), no verdict this poll (state=IDLE started=1 streak=1 commits=0 uncommitted=0 task=-)" \
+  "$LOOP_STDOUT"
+check "both polls happened" 2 "$LOOP_CAPTURES"
+check "no poll line claims a verdict" 0 \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep -c ' poll [0-9]* -> ' || true)"
+MONITOR=$MONITOR_REAL
+
+echo
 echo "-------------------------------------------"
 printf '%s passed, %s failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ] || exit 1

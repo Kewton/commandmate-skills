@@ -122,6 +122,39 @@ CLI が既に持っている。curl では両方を再実装し、トークン�
 （`monitor.sh types into the session CommandMate actually creates` 他 5 変異）で固定してあるが、
 実 worker への配信実績は未計測である。
 
+## 1d. 外部コマンドの終了コード（0.4.0 で修正、CommandMate #1614）
+
+**1c と同じ型が 4 箇所残っていた**: 外部コマンドの結果を確かめずに次を決める。
+0.3.0 では `capture` の終了コードだけが見られており、その 8 行下の `classify-state.sh`、
+完了判定の `verify-completion.sh`、`hooks-git.sh` の 3 つの `git` 呼び出しは見ていなかった。
+
+| 経路 | 0.3.0 の挙動 | 実害 |
+|---|---|---|
+| `git … \| wc -l`（`log` / `status`） | pipeline 後段の終了コードが採用され、`git` の失敗が `0` として出る | 完走した worker が `NOT_STARTED` |
+| `git worktree list` をヒアドキュメント内で実行 | 終了コードが到達不能。空の record 集合が「該当 worktree 無し」と区別できない | **両カウンタが同時に 0 へ沈む** |
+| `state=$("$CLASSIFY" …)` | 空 state は `case` を素通りするが、**完了判定へはそのまま渡る** | 空 state は生存信号とみなされずヒューリスティクスへ落ちる → **稼働中の worker が COMPLETE** |
+| `verdict=$("$VERIFY" …)` | `case "$verdict"` に default が無い | そのポーリングが無言で素通り（silent skip） |
+
+実測（bash 3.2.57、2026-08-01）:
+
+```
+verify-completion.sh --started 1 --state '' --idle-streak 10 --idle-threshold 5 \
+  --commits 2 --uncommitted 0 --task-status ''                   -> COMPLETE
+verify-completion.sh --started 1 --state GENERATING …（他は同じ） -> WORKING
+```
+
+**起票時の「誤 COMPLETE は起きない」という評価は誤りだった。** 最も危険な向きの欠陥は
+`state=""` にあり、heuristic COMPLETE の `commits >= 1` 要求は空 state の経路を止めない。
+
+数え方も併せて実測した。**0.3.0 の `wc -l` は過少計数していない**（0 件→0 / 1 件→1 / 2 件→2）。
+過少計数は「終了コードを見るために出力を先に変数へ受ける」修正形で初めて起きる
+（`$()` が末尾改行を落とすため 1 件→0 / 2 件→1）。そのため 0.4.0 は
+`printf '%s' "$out" | grep -c . || true` を採用し、0 件 / 1 件 / 複数件の 3 サイズを回帰で固定した。
+
+**この節も実運用実績ではない。** 4 経路とも fixture / shim テストで固定し、変異注入
+（ガードを 1 つずつ外す / 数え方を `wc -l` へ戻す）でそれぞれ赤くなることを確認しているが、
+実運用で `git` や判定器が落ちた実績は未計測である。
+
 ## 2. 測定の限界（この Skill について）
 
 - **修正後の介入経路は fixture / shim テストのみ**。実 worker のペインへ Enter / `a` /

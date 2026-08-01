@@ -174,4 +174,17 @@ delivered / undelivered の 2 本を同じ fixture・同じ hooks で並べ、
 | 承認カウンタと再送予算を配信結果と無関係に進める | 4 件 |
 | `--session-prefix` を素の連結に戻す（instance suffix を落とす） | 2 件 |
 
+`CommandMate#1614` 分（2026-08-01 実測、それぞれ **suite exit 1**）。
+
+| 変異 | 落ちるテスト |
+|---|---|
+| `monitor.sh` の `classify-state` 終了コード判定を外す | 3 件（空 state が完了判定へ渡り、実際に `COMPLETE` が出る） |
+| `monitor.sh` の `verify-completion` 終了コード判定を外す | 3 件（判定なしのポーリングが無言で素通りする） |
+| `hooks-git.sh` を CommandMate#1614 以前へ全戻し | 7 件（`git` 失敗 3 経路 ＋ 解決不能 id ＋ worker 1 回の報告） |
+| 数え方を `printf \| wc -l` へ戻す | 6 件（1 件以上の計数が 1 つずつ減る。0 件のケースは緑のまま） |
+
+**「`git` が失敗した」と「本当に作業ゼロ」は別のテストが担保している**:
+後者（`a worker that genuinely did nothing produces no warning`）は stderr が空であることを
+固定しているので、前者の assertion では満たせない。上の 4 変異のいずれでも後者は緑のままである。
+
 script を変更したら、**まず変異を入れて赤くなることを確かめてから**直すこと。

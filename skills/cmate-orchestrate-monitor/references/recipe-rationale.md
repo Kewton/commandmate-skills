@@ -158,12 +158,16 @@
 | 10 | 前回 send の `succeeded` が残った worktree で、生成中の worker を完了扱いして監視を打ち切る | #1589 | ペイン生存 veto をタスク状態より **前** に評価 |
 | 11 | 台帳が `running` を記録しているが Enter が composer に落ちておらず、短絡すると STARTED ガードが盲目になる | #1589 | 非終局状態はフォールバックへ落とす（短絡しない） |
 | 12 | 一次ソースを引けないまま推定で走り、ログ上は健全な COMPLETE に見える | #1589 | `unavailable` センチネル ＋ worker ごと 1 回の `FALLBACK MODE` 宣言 |
+| 13 | **外部コマンドの終了コードを見ずに次を決める**（`git \| wc -l` が git の失敗を「作業 0」として返し、完走 worker を NOT_STARTED と誤報／`classify-state.sh` が落ちると空 state が完了判定へ渡り、生存ペインとみなされず **稼働中の worker が COMPLETE**／`verify-completion.sh` が落ちると `case` に default が無く **そのポーリングが無言で素通り**） | CommandMate #1614 | `hooks-git.sh` の 3 つの `git` 呼び出しを終了コード判定＋原因ごと worker 1 回の stderr 報告に、`monitor.sh` の `CLASSIFY` / `VERIFY` を `capture`（既存）と同じ扱いに |
 
 いずれも naive 実装で red → ガード実装で green にした。8 は両方向テスト（対照＋変異注入）で
 固定してある: `--verbose` を既定 ON にする / フックをスタブより先に source する /
 poll 行の書式を変える / 参照フックの commit 数を 0 固定にする、のいずれの変異でも
 テストが赤くなることを確認済みである。9〜12 も同様に変異注入で実測済みで、内訳は
 `tests/fixtures/cmate-orchestrate-monitor/README.md` の変異表にある。
+13 は 7 変異で実測した（`classify` ガード削除で実際に
+`poll 4 -> <空> … verdict=COMPLETE` が出ること、`git` 失敗と真の作業ゼロが別テストで赤くなること、
+数え方を `wc -l` へ戻すと 1 件以上の計数が崩れることを含む）。
 
 回帰 fixture と test runner は配布元リポジトリ
 <https://github.com/Kewton/commandmate-skills> の
