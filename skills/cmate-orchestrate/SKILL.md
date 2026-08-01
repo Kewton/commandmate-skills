@@ -1,6 +1,6 @@
 ---
 name: cmate-orchestrate
-description: 複数 Issue を並列実行するための計画を dry-run で立て、承認後にその計画を監督付きで実行する。計画では Issue 品質・依存（explicit/inferred）・file conflict を分析し、cycle や不完全 override を拒否したうえで、file 衝突の無い承認可能な Wave plan・risk・権限・実行 command を決定的な artifact として返す。実行では public commandmate（worktree-id ベースの send/wait/capture）で self-contained な generic worker を dispatch し、worker が各ターン後に idle 化するため wait の idle を完了とみなさず worktree ブランチの新規 commit を完了判定として継続 nudge で駆動し、Wave barrier（前 Wave 全 worker が commit で完了）と verification gate（worktree 内で profile baseline を再実行した pass）で監督し、prompt 検出時は自動応答せず human へ提示して停止する。
+description: 複数 Issue を並列実行するための計画を dry-run で立て、承認後にその計画を監督付きで実行する。計画では Issue 品質・依存（explicit/inferred）・file conflict を分析し、cycle や不完全 override を拒否したうえで、file 衝突の無い承認可能な Wave plan・risk・権限・実行 command を決定的な artifact として返す。実行では plan から実行契約 yaml（goal / scope.allow）を決定的に生成して worktree へ配置し、public commandmate で `send --contract`（task id が返る）し、裁定は `wait --verify` の exit code を一次ソースにする（0 合格 / 20 判定して不合格→失敗ゲートを特定し再指示 / 21 作業証跡ゼロ / 10 prompt は自動応答せず human 提示 / 99 判定に到達せず→再指示せず human へ）。契約非対応の CommandMate では明示メッセージつきで profile baseline 再実行のフォールバックに落ちる（黙って劣化しない）。worker が各ターン後に idle 化するため wait の idle を完了とみなさず worktree ブランチの新規 commit を完了判定として継続 nudge で駆動し、Wave barrier と verification gate で監督する。
 ---
 
 # cmate-orchestrate（計画コア + dispatch・監督 + PR/CI/merge + UAT 修正ループ）
@@ -14,7 +14,9 @@ verification pass 後の**PR 作成・CI 確認・guarded merge** と、納品�
   mutation は一切しない。default invocation はこれである。
 - **実行（dispatch, `scripts/dispatch.mjs`）** — 承認済み plan を入力に取り、
   public `commandmate` で worker を dispatch し、Wave barrier と verification gate で
-  監督する。mutation を伴う。
+  監督する。裁定は CommandMate の**実行契約**（`send --contract` / `wait --verify` の
+  exit code）を一次ソースとし、契約非対応の CLI では profile baseline 再実行の
+  フォールバックに明示的に落ちる。mutation を伴う。
 - **納品（merge, `scripts/merge.mjs`）** — dispatch report で verification pass した
   Issue だけを対象に、明示承認の下で PR 作成（`--create-prs`）または CI 確認付きの
   guarded merge（`--merge-prs`）を、1 invocation で1 phase だけ行う。mutation を伴う。
@@ -183,9 +185,11 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 | `--git <path>` | 任意 | `git` | drift 確認に使う git |
 | `--gh <path>` | 任意 | `gh` | repo 到達性確認に使う gh |
 | `--auto-yes` | 任意 | **off** | worker prompt を自動応答する。既定 off（prompt で停止し human へ提示） |
+| `--contract-mode <m>` | 任意 | `auto` | `auto`（契約が使えれば使い、無ければ明示メッセージつきでフォールバック）/ `require`（フォールバックを拒否して停止）/ `off`（probe せず従来の baseline 裁定）。第8.1節 |
+| `--verify-gates <ids>` | 任意 | なし（＝全ゲート） | 契約の `verify.gates` に載せる `verify.yaml` の gate id（comma 区切り）。**存在しない id を発明しない**ため既定は省略＝全ゲート |
 | `--expect-branch <name>` | 任意 | なし | plan 承認時の統合 branch。不一致なら drift |
 | `--wait-timeout <sec>` | 任意 | `300` | `commandmate wait` の1回あたり timeout |
-| `--max-turns <n>` | 任意 | `8` | 各 worker を駆動する最大ターン数（初回 send + nudge）。未 commit で到達なら failed |
+| `--max-turns <n>` | 任意 | `8` | 各 worker を駆動する最大ターン数（初回 send + nudge / 再指示）。未 commit で到達なら failed |
 | `--poll-limit <n>` | 任意 | `120` | 互換のため保持（wait は block するので poll しない） |
 
 `commandmatedev` は使わない。公式経路は public `commandmate` である（ADR
@@ -207,30 +211,62 @@ Wave を plan の順に処理する。各 Wave について:
 `worktrees_present` は非 blocking で `limitations` に記録して続行する。最初の Wave 前の
 drift は `failure`、途中の Wave 前は `partial`。stop_reason は `drift`。
 
-### Step D2. self-contained な generic worker を dispatch する
+### Step D2. 実行契約を生成して dispatch する
 
-Wave の各 Issue について、plan だけから **generic worker prompt** を構成し
-（objective・受入条件・対象 file の境界・branch/worktree・baseline・**「完了時に単一 commit せよ」**・
-「blocked なら止まって聞け」）、`<out>/prompts/issue-<n>.md` に残したうえで、worktree-id を解決して
-`commandmate send <worktree-id> <message>`（positional。task id は返らない）で dispatch する。
-worktree-id は plan の `worktree_id`（あれば）→ なければ `commandmate ls --json` を branch で
-突き合わせて解決する（`commandmate sync` は無い）。repository-local な worker Skill を必須依存に
-しない。worktree path は path escape 検査を通す。
+Wave の各 Issue について、plan だけから **実行契約 yaml**（CommandMate の
+`docs/design/task-contract.md` v1）を**決定的に**生成し、worktree の
+`.commandmate/tasks/cmate-orchestrate-issue-<n>.yaml` に配置して
+`commandmate send <worktree-id> --contract <path>` で dispatch する。**返る task id を
+`worker.task_id` に記録する**（`send --contract` は task id を stdout に返す）。契約の中身は:
 
-### Step D3. 監督ループで駆動する（send 確定 / wait / commit 判定 / nudge）（#1468）
+| キー | 生成規則 |
+|---|---|
+| `version` | 常に `1` |
+| `title` | `#<n> <Issue title>`（200 文字上限で切り詰め） |
+| `goal` | plan の objective・受入条件・対象 file・rules。CommandMate が前文（許可 path・commit 要求・**verify.yaml から解決した実 command**）を先に付けるので、goal 側で profile baseline を重ねて書かない（judge と違うものを worker に指示しないため） |
+| `scope.allow` | Issue の `suspected_files` を**ソート・重複除去**したもの。絶対 path・`..`・NUL・長すぎる pattern は落とす |
+| `scope.deny` | `[]` |
+| `verify.gates` | `--verify-gates` 指定時のみ。既定は**キーごと省略＝全ゲート**（存在しない gate id は `send --contract` を exit 2 で落とすので発明しない） |
+| `autoYes.mode` | `--auto-yes` 無しなら `"off"`（積極的な禁止）、有りなら `"safe"`。第9.1節 |
+| `success` | `requireWorkEvidence: true` / `requireScopeClean: <allow が非空か>` / `autoVerifyOnStop: false` |
 
-実 Claude worker は **1メッセージ＝1ターン**で動き、各ターン後に **idle 化**する。`commandmate wait`
-はその idle で **exit 0** を返すが、これは「タスク完了」ではない。したがって各 worker を次の監督ループで
-駆動する。**完了の ground truth は worktree ブランチの新規 commit** である。
+**同一 plan → byte-identical な契約**である（時刻・乱数・環境を読まない）。plan が対象 file を1つも
+挙げていない Issue は、scope を捏造せず `allow: []` + `requireScopeClean: false` とし
+`contract_scope_unknown` を limitation に記録する。契約は `<out>/contracts/issue-<n>.yaml` にも
+残す（worktree の写しは worker が書き換えうるため）。worktree-id は plan の `worktree_id`（あれば）→
+なければ `commandmate ls --json` を branch で突き合わせて解決する（`commandmate sync` は無い）。
+worktree path は path escape 検査を通す。repository-local な worker Skill を必須依存にしない。
+
+フォールバック時（第8.1節）は従来どおり、plan だけから構成した **generic worker prompt** を
+`commandmate send <worktree-id> <message>`（positional）で送る。どちらのモードでも worker が読む本文は
+`<out>/prompts/issue-<n>.md` に残す。
+
+### Step D3. 監督ループで駆動する（send 確定 / wait --verify / exit code 分岐 / 再指示）
+
+実 Claude worker は **1メッセージ＝1ターン**で動き、各ターン後に **idle 化**する（#1468）。したがって
+各 worker を監督ループで駆動する。**裁定の ground truth は `wait --verify` の exit code**、
+**完了の ground truth は worktree ブランチの新規 commit** であり、この2つは別物である。
 
 1. dispatch 開始前に `git rev-parse HEAD`（cwd=worktree）で開始時 SHA を記録する。
-2. `send` 直後に `commandmate capture <worktree-id> --json` で worker が動き出したかを確認し、
-   未確定（Enter 未送信）なら **1回だけ再送**して送信を確定させる。
-3. `commandmate wait <worktree-id> --timeout <sec>` で idle 化を待つ（block）。**prompt（exit 10）は停止し
-   `capture` で human 提示、自動応答しない**（`--auto-yes` 時のみ `respond ... yes`）。timeout（124）→
-   `timeout`、その他非0 → `failed`。
-4. idle（exit 0）になったら HEAD SHA を再取得する。**新規 commit あり → `completed`**。無ければ
-   **継続 nudge**（「続けて実装を完遂し単一 commit してください」）を send（+確定）して 3 へ戻る。
+2. `send --contract` 直後に `commandmate capture <worktree-id> --json` で worker が動き出したかを確認し、
+   未確定（Enter 未送信）なら **plain message を1回だけ送って**送信を確定させる
+   （`--contract` での再送は task 行を二重に作るのでしない）。
+3. `commandmate wait <worktree-id> --on-prompt agent --verify --timeout <sec>` で待つ（block）。
+   `--on-prompt` は「**誰が prompt に答えるか**」であり、`agent` は「呼び出し元（この runner）に
+   exit 10 で返す」、`human` は「人が UI で答えるまで wait が block し 10 を返さない」である。
+   本 runner の方針は「自動応答せず停止して human へ提示」なので **`agent` が正しい**。
+4. exit code で分岐する。
+
+| exit | 意味 | 本 runner の扱い |
+|---|---|---|
+| `0` | 全ゲート pass | 裁定 **pass**。新規 commit あり → `completed`。commit が無ければ「ゲートは通ったが未 commit」なので commit 要求を送り、以降は `--verify` を**付けずに** wait する（pass で task は `succeeded` に遷移済みで、再検証は契約に束ならず exit 99 になる。#1620） |
+| `20` | 判定して不合格 | `commandmate verify <wt> --json` で**失敗ゲートを特定**し、その内訳を引用して**再指示**。`--max-turns` 到達でなお不合格なら、worker は `completed`／verification は `fail` として記録し **success に丸めない** |
+| `21` | 作業証跡ゼロ（未着手） | pass ではない。継続 nudge を送って再度 `--verify` で待つ。`--max-turns` 到達でなお 21 なら **dispatch 失敗系**として `failed` |
+| `10` | prompt 検出 | `capture` で内容を取得して human へ提示し停止。**自動応答しない**（`--auto-yes` 明示時のみ `respond yes`） |
+| `99` | **判定に到達しなかった**（run が error / cancelled） | pass でも 20 でもない。**再指示ループへ流さない**（判定していないものの修正を worker に求めることになる）。verification は `not_run`、`verification_not_judged` を blocking に載せ `human_required` で停止する |
+| `124` | timeout | `timeout` |
+| `1` / `2` / その他 | インフラ系 | `failed` |
+
 5. ターン数が `--max-turns`（既定 8）に達しても未 commit なら、当該 worker を `failed` とし honest に報告する
    （idle を完了と誤認しない）。
 
@@ -240,10 +276,29 @@ Wave の **全 worker が `completed`（新規 commit を検出）** でなけ�
 
 ### Step D5. verification gate
 
-`completed` の worker それぞれについて、**profile の baseline を worktree 内で再実行**して検証する
-（`commandmate verify` は無い）。全 baseline command が exit 0 の worker が揃ってはじめて次 Wave を
+`completed` の worker それぞれの裁定を集約する。契約経路では監督ループで得た exit code 由来の verdict を
+そのまま使う（**同じ worktree を弱い judge で測り直さない**）。フォールバック経路では
+**profile の baseline を worktree 内で再実行**する。どちらでも、pass の worker が揃ってはじめて次 Wave を
 dispatch する。**worker completion を verification success と同一視しない。** 未完了 worker は検証せず、
-worktree が無い・いずれかの baseline command が非 0 なら pass として扱わない。
+`not_run` のままにする。**検証していないものを pass に丸めない。**
+
+## 8.1 バージョンゲート（契約対応の確認。黙って劣化しない）
+
+実行契約（`send --contract`）と契約裁定（`wait --verify` / `commandmate verify`）は
+**CommandMate 0.17.0** で入った（[#1544](https://github.com/Kewton/CommandMate/issues/1544) /
+[#1545](https://github.com/Kewton/CommandMate/issues/1545)）。それより古い CLI にはどれも無い。
+そこで dispatch runner は**最初の Wave の前に一度だけ** `commandmate send --help` と
+`commandmate wait --help` を実行し、`--contract` / `--verify` が載っているかを確認する。
+
+| `--contract-mode` | 契約が使える | 契約が使えない |
+|---|---|---|
+| `auto`（既定） | 契約経路で dispatch する | **フォールバック**: 従来どおり profile baseline を再実行して裁定し、`contract_unsupported` を limitation に記録して理由を明示する |
+| `require` | 契約経路で dispatch する | **停止**: 1件も dispatch せず `contract_unsupported` を blocking に載せ `failure` で終了する（弱い裁定に落ちるくらいなら実行しない） |
+| `off` | probe せずフォールバック。`contract_disabled` を limitation に記録 | 同左 |
+
+**どのモードでも、どちらの裁定機構で判定したかを report と summary に明示する。**
+フォールバックは「同じ `verification.outcome: pass` を、より弱い判定で出す」ことになるので、
+黙って落ちてはならない。
 
 ## 9. dispatch の出力
 
@@ -256,10 +311,35 @@ stdout に、`<out>/dispatch-report.json` と `<out>/dispatch-summary.md` を fi
 | `partial` | 途中停止（worker 失敗・timeout・verification 失敗・prompt・drift） | 7 |
 | `failure` | 1件も dispatch できない（plan 不正・最初の Wave 前 drift・CLI 不在） | 1 |
 
-`stop_reason` の優先順位は `human_required` > `worker_failed` > `timeout` >
-`verification_failed`。report は5つの completion check（`plan_approved`・
+`stop_reason` の優先順位は `human_required` > **`verification_not_judged`（exit 99。`stop_reason` は
+`dispatch_error`）** > `worker_failed` > `timeout` > `verification_failed` である。99 を
+`worker_failed` や `verification_failed` より先に見るのは、**再 dispatch では解けない**からである
+（誰も判定していない）。report は5つの completion check（`plan_approved`・
 `drift_reconfirmed`・`parallelism_bounded`・`barrier_enforced`・`no_auto_prompt_response`）を
 自己申告する。token・secret・絶対 path・raw terminal 全量は report に残さない（redaction）。
+
+`dispatch_schema_version` は **1 のまま**である。契約対応で新しい field は増やしていない
+（`task_id` が契約経路では実 task id を運ぶようになり、`verification.outcome` の `not_run` が
+「判定していない」を含むよう記述を明確化しただけ）。merge / uat runner は
+`worker_state === 'completed'` と `verification.outcome === 'pass'` の2つしか読まず、その enum 値と
+意味は変えていないので、**両 runner は無改修で動く**。
+
+## 9.1 Auto-Yes と契約 `autoYes` ポリシーの関係
+
+この Skill の既定は **Auto-Yes off**（prompt は自動応答せず human へ提示）であり、契約導入後も変えない。
+関係する機構は3つあり、**層が違う**。
+
+| 層 | 誰が動くか | この runner での既定 |
+|---|---|---|
+| `--auto-yes`（本 runner の flag） | runner 自身が exit 10 のとき `commandmate respond <wt> yes` を送る | **off**。prompt は停止して human 提示 |
+| 契約の `autoYes.mode` | CommandMate **サーバ側**の Auto-Yes poller が、契約の宣言に従ってプロンプトへの自動応答を**抑止**する（enforcement は #1547 で実装済み。ポリシーは抑止しかせず、答えを増やすことはない） | `--auto-yes` 無し → `"off"`（積極的な禁止）／`--auto-yes` 有り → `"safe"`（`yes_no` のみ） |
+| `commandmate send --auto-yes` | 送信時にセッションの Auto-Yes を有効化する | **使わない** |
+
+生成する契約が `mode: "off"` を書くのは、**runner の既定とサーバ側ポリシーを一致させる**ためである。
+契約に `autoYes` ブロックを書かない（= `mode: null`）は「契約は何も述べていない」であって `off` とは
+別であり、その場合サーバ側の従来動作がそのまま残る。ここを黙って `null` にすると、「runner は答えない
+が、サーバは答えるかもしれない」という状態になる。`--auto-yes` を明示したときだけ `"safe"` に緩め、
+その事実は `auto_yes: true` と limitation `auto_yes_used` として report に残る。
 
 ## 10. 完了条件
 
@@ -277,6 +357,10 @@ dispatch:
 - [ ] prompt 検出時に自動応答せず human-required として停止している
 - [ ] worker completion だけを success 扱いしていない
 - [ ] mutation 前に drift を再確認している
+- [ ] 同一 plan から byte-identical な契約が生成されている（Claude/Codex parity）
+- [ ] 契約対応の有無を実行冒頭で確認し、フォールバック／停止のどちらに入ったかを明示している
+- [ ] exit 99（判定に到達せず）を 20（判定して不合格）の再指示ループへ流していない
+- [ ] exit 21（作業証跡ゼロ）・99・124 を pass に丸めていない
 
 ---
 

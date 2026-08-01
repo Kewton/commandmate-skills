@@ -1,0 +1,39 @@
+{
+  "description": "バージョンゲートの停止経路: `--contract-mode require` は契約非対応の CLI へのフォールバックを拒否する。1 件も dispatch せず（send ゼロ）、`contract_unsupported` を blocking として failure で終了する。弱い裁定に落ちるくらいなら実行しない、という選択を明示できることの確認。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--contract-mode",
+    "require"
+  ],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "waves_count": 0,
+    "no_respond": true,
+    "never_sent": [
+      201,
+      200
+    ],
+    "blocking_codes": [
+      "contract_unsupported"
+    ],
+    "no_contract_calls": true
+  }
+}

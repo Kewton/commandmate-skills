@@ -1,0 +1,63 @@
+{
+  "description": "実行契約経路の正道（#1588）: CLI が `send --contract` と `wait --verify` を持つので、plan から決定的に生成した契約を worktree に配置して dispatch し、裁定は `wait --verify` の exit 0 を一次ソースとする。裁定は verification.outcome に、返った task id は worker.task_id に記録し、profile baseline は一度も走らない。契約は golden と byte 一致し、同一 plan の 2 回目の dispatch でも byte 一致する。この case の Issue は **複数 file を保有**する（1 file の fixture では順序を崩す変異が検出できない）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-multifile.json",
+    "orchestrate_args": [
+      "210",
+      "211",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [
+      true,
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      211,
+      210
+    ],
+    "send_counts": {
+      "211": 1,
+      "210": 1
+    },
+    "worker_states": {
+      "211": "completed",
+      "210": "completed"
+    },
+    "verification_outcomes": {
+      "211": "pass",
+      "210": "pass"
+    },
+    "task_ids": {
+      "211": "task-issue-211",
+      "210": "task-issue-210"
+    },
+    "contract_issues": [
+      211,
+      210
+    ],
+    "wait_verify_calls_min": 2,
+    "verify_calls": 0,
+    "absent_limitation_codes": [
+      "contract_unsupported",
+      "contract_disabled"
+    ]
+  }
+}

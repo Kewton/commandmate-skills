@@ -1,0 +1,50 @@
+{
+  "description": "`--contract-mode off`: CLI が契約に対応していても、明示的に従来の baseline 裁定を選べる。probe は行わず契約も生成せず、`contract_disabled` を limitation として記録する（選択もまた黙って行わない）。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--contract-mode",
+    "off"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [
+      true,
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      201,
+      200
+    ],
+    "verification_outcomes": {
+      "201": "pass",
+      "200": "pass"
+    },
+    "limitation_codes": [
+      "contract_disabled"
+    ],
+    "absent_limitation_codes": [
+      "contract_unsupported"
+    ],
+    "no_contract_calls": true
+  }
+}

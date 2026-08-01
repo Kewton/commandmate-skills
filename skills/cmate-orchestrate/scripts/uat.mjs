@@ -20,8 +20,13 @@
 //                               attempt cap.
 //
 // Adjudication is TWO layers (#1616). The machine gate is a profile-baseline run
-// INSIDE the worktree, not a `commandmate uat`/`verify` call (those subcommands do
-// not exist, #1467). The semantic gate is a cmate-acceptance-test result document
+// INSIDE the worktree, not a `commandmate uat`/`verify` call. `commandmate uat`
+// still does not exist; `commandmate verify` DOES since CommandMate 0.17.0
+// (#1544), and the dispatch runner now adjudicates with it (#1588). This runner
+// deliberately keeps the baseline re-run: a UAT fix worktree is created after that
+// issue's contract task has already terminated, so a verification run there has no
+// live contract to bind to (#1620). Moving UAT onto `verify` is its own change,
+// not a side effect of that one. The semantic gate is a cmate-acceptance-test result document
 // (`acceptance-result.v1.json`) produced by the agent BEFORE this runner is
 // invoked and handed over via --acceptance-dir; this runner only reads, validates
 // and composes it. No LLM judgement happens here — the composition is a pure
@@ -69,7 +74,7 @@ import { mkdirSync, existsSync, writeFileSync, appendFileSync, readFileSync } fr
 import { join, dirname } from 'node:path';
 
 const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.8.0';
+const SKILL_VERSION = '0.9.0';
 const UAT_SCHEMA_VERSION = 1;
 const SUPPORTED_PLAN_SCHEMA_VERSION = 1;
 const SUPPORTED_DISPATCH_SCHEMA_VERSION = 1;
@@ -462,7 +467,8 @@ function deriveWorktreeId(repository, branch) {
 }
 
 // The acceptance/verification signal in the worktree-based model: run the profile
-// baseline INSIDE a worktree (there is no `commandmate uat`/`verify`). Passes only
+// baseline INSIDE a worktree (there is no `commandmate uat`; see the module header
+// for why the contract verdict is not used here either). Passes only
 // when every baseline command exits zero. A missing worktree or any non-zero step
 // is a fail. Returns { outcome, checks, note } where checks label the steps run.
 function runBaseline(baseline, worktreePath) {

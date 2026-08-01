@@ -1,0 +1,62 @@
+{
+  "description": "exit 20（判定して不合格）の分岐: `wait --verify` が 20 を返したら `commandmate verify --json` で失敗ゲートを特定し、その内訳を引用して再指示する。回数上限（--max-turns 2）到達でも成功に丸めず、worker は completed・verification は fail として別々に記録し、次 Wave（#200）は dispatch しない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "2"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "verification_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      201
+    ],
+    "never_sent": [
+      200
+    ],
+    "send_counts": {
+      "201": 2
+    },
+    "worker_states": {
+      "201": "completed"
+    },
+    "verification_outcomes": {
+      "201": "fail"
+    },
+    "completed_but_unverified": [
+      201
+    ],
+    "task_ids": {
+      "201": "task-issue-201"
+    },
+    "contract_issues": [
+      201
+    ],
+    "wave0_all_workers_completed": true,
+    "wave0_all_verifications_passed": false,
+    "verify_calls": 2,
+    "wait_verify_calls_min": 2
+  }
+}

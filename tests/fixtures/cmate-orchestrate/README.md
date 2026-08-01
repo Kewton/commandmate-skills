@@ -9,6 +9,8 @@ cases/<case-id>/case.json       引数と、機械で判定できる期待値
 cases/<case-id>/expected-plan.json  （任意）golden な plan。byte 一致で照合
 dispatch-cases/<id>/case.json   plan 生成引数・scenario・dispatch 期待値
 dispatch-cases/<id>/scenario.json  fake CLI に注入する worker/verify/drift の挙動
+dispatch-cases/<id>/contracts/  （契約 case のみ）生成された実行契約の golden。byte 一致で照合
+dispatch-cases/issues-multifile.json  複数 file を保有する Issue fixture（契約決定性の case 用）
 merge-cases/<id>/case.json      plan/dispatch 生成・merge scenario・merge 期待値（scenario は inline）
 uat-cases/<id>/case.json        plan/dispatch 生成・uat scenario・UAT/修正ループ 期待値（scenario は inline）
 fake-cli.mjs                    commandmate/git/gh を模した stub（failure injection）
@@ -64,6 +66,15 @@ idle 化し（`wait` は exit 0 を返す）、`commit_on`（既定 1）ター�
 いない」と見せ、送信確定（再送）の経路を試せる。`fake-cli.mjs` は各呼び出しを `CMATE_FAKE_LOG` に
 JSONL で記録するので、`respond` が呼ばれていないことや `send`（初回 + nudge）の回数まで検証できる。
 
+**実行契約（#1588）**: `cli_contract: true` の scenario は CommandMate 0.17.0 相当の CLI を模し、
+`send --contract` / `wait --verify` / `verify --json` を受け付け、`<sub> --help` にもそれらを載せる。
+false（既定）の scenario は逆にそれらを**拒否**し `--help` からも隠すので、runner のバージョンゲートと
+フォールバックが実際に効いているかを試せる。契約経路の裁定は `verify_exits`（ターンごとに消費する
+exit code の列。`0` / `20` / `21` / `99`）で、`failed_gates` が `commandmate verify --json` の
+失敗ゲートになる。契約 case では生成された契約を `contracts/` の golden と byte 比較し、さらに
+**同じ plan で 2 回目の dispatch を回して byte 一致**を確かめる（決定性）。1 file しか持たない Issue では
+並びを崩す変異を検出できないため、決定性の case は `issues-multifile.json`（1 Issue に 3 file）を使う。
+
 | case | 何を見るための case か |
 |---|---|
 | `d01-two-waves-success` | 全 worker 完了（commit 検出）・全 verification pass で2 Wave を通過し success になるか |
@@ -76,6 +87,16 @@ JSONL で記録するので、`respond` が呼ばれていないことや `send`
 | `d08-nudge-until-commit` | idle だが未 commit の worker を継続 nudge で駆動し、3ターン目の commit を完了判定にするか（#1468） |
 | `d09-blocked-max-turns` | 永遠に未 commit の worker を `--max-turns` 到達で failed とし、idle を完了と誤認しないか（#1468） |
 | `d10-send-confirm` | 送信未確定（Enter 未送信）を `capture` で検出して1回だけ再送し、その後 commit まで駆動するか（#1468） |
+| `d11-worktree-path-mismatch` | 登録 path が plan template と違っても branch で解決し、git 操作を同じ worktree に向けるか（#1473） |
+| `d12-parallel-supervision` | Wave 内の worker を逐次でなく並行に監督するか（send の crossover で確認、#1474） |
+| `d13-contract-verified-pass` | 契約を決定的に生成して配置・`send --contract` し、`wait --verify` の exit 0 を裁定とし task id を記録するか（#1588） |
+| `d14-contract-verify-failed` | exit 20 で `commandmate verify --json` から失敗ゲートを特定して再指示し、上限到達でも success に丸めないか |
+| `d15-contract-not-started` | exit 21 を pass に丸めず nudge し、上限到達で dispatch 失敗系（failed）とするか |
+| `d16-contract-prompt-halts` | 契約経路でも exit 10 を自動応答せず human 提示で停止するか（`--on-prompt agent` を渡していること） |
+| `d17-contract-no-verdict` | **exit 99 を 20 の再指示ループへ流さず**、`not_run` として human へ上げるか（本 Issue の中心規則） |
+| `d18-contract-fallback-unsupported` | 契約非対応 CLI で明示メッセージつきに baseline 裁定へフォールバックするか（黙って劣化しない） |
+| `d19-contract-required-refuses` | `--contract-mode require` がフォールバックを拒否し、1件も dispatch せず failure で止まるか |
+| `d20-contract-mode-off` | 契約対応 CLI でも `--contract-mode off` で従来裁定を選べ、その選択を limitation に残すか |
 
 ## merge case 一覧
 
@@ -141,10 +162,14 @@ Agent を実際に動かした評価は、実施のたびに次の表へ追記�
 |---|---|---|---|---|---|
 | — | 未実施 | — | — | — | — |
 
-**この version（0.4.0, release candidate）の時点で、実機評価は未実施である。**
-実施済みなのは `run_tests.mjs`（9 plan case + 7 dispatch case + 12 merge case + 8 uat case が緑）だけ
-である。dispatch の実機確認（2 Issue / 2 並列の dispatch→wait→verification）、PR 作成→CI 確認→merge の
-実機確認（2 Issue）、UAT 不合格→fix worktree→修正→再検証→再merge の実機確認は live 環境で別途行う。
+**この version（0.9.0）の時点で、実機評価は未実施である。**
+実施済みなのは `run_tests.mjs`（9 plan case + 20 dispatch case + 12 merge case + 17 uat case が緑）だけ
+である。dispatch の実機確認（2 Issue / 2 並列の dispatch→`send --contract`→`wait --verify`）、PR 作成→
+CI 確認→merge の実機確認（2 Issue）、UAT 不合格→fix worktree→修正→再検証→再merge の実機確認は live
+環境で別途行う。契約 yaml が CommandMate の実パーサ（`src/lib/tasks/contract-parser.ts`）を通ることは
+0.9.0 の実装時に手元で確認済みだが（scope あり/なし・`verify.gates` あり/なし・`autoYes` off/safe の
+4 形）、この harness は Node stdlib のみなので YAML パースは行わず、閉じたキー集合・必須キー・
+`verify.gates: []` の不在という構造条件のみを検査する。
 `commandmate.skill.yaml` の `compatibility.agents` が `claude` と `codex` を
 `native` と宣言しているのは SKILL.md の discovery 経路と runner の決定性についてであり、
 品質評価の結果ではない。

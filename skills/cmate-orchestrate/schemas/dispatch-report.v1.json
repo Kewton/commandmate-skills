@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/dispatch-report.v1.json",
   "title": "cmate-orchestrate dispatch report v1",
-  "description": "Report printed to stdout and written to dispatch-report.json by the cmate-orchestrate dispatch runner. Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records the supervised execution of an already-approved plan: per-wave dispatch, worker supervision, the wave barrier, and the verification gate. Worker completion and verification success are reported as separate facts and are never conflated.",
+  "description": "Report printed to stdout and written to dispatch-report.json by the cmate-orchestrate dispatch runner. Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records the supervised execution of an already-approved plan: per-wave dispatch, worker supervision, the wave barrier, and the verification gate. Worker completion and verification success are reported as separate facts and are never conflated. Since Skill 0.9.0 the verification verdict may come either from CommandMate's execution contract (`commandmate wait --verify`'s exit code) or from the profile-baseline fallback; the field set and the meaning of every enum value are identical in both modes, so a reader (the merge and UAT runners) needs no change. Which mode ran is stated in limitations/blocking_reasons and in summary_markdown.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -43,11 +43,11 @@
         "drift",
         "dispatch_error"
       ],
-      "description": "Why the loop stopped. completed: all waves finished and passed. human_required: a worker raised a prompt and the loop halted without auto-responding. The rest name the first blocking condition."
+      "description": "Why the loop stopped. completed: all waves finished and passed. human_required: a worker raised a prompt and the loop halted without auto-responding. dispatch_error also covers the two version-gate/verdict stops: contract_unsupported (the CLI has no execution contract and --contract-mode require refused to fall back) and verification_not_judged (verification exited 99, meaning the run ended error/cancelled and no gate judged the work). The rest name the first blocking condition."
     },
     "human_required": {
       "type": "boolean",
-      "description": "True when a worker raised a prompt and the loop halted for a human. When true, no prompt was auto-answered unless auto_yes was set."
+      "description": "True when the loop halted for a human: a worker raised a prompt, or verification returned no verdict at all (exit 99), which no re-dispatch can resolve. When true, no prompt was auto-answered unless auto_yes was set."
     },
     "plan_run_id": { "$ref": "#/$defs/run_id" },
     "out_dir": {
@@ -185,7 +185,7 @@
             },
             "all_verifications_passed": {
               "type": "boolean",
-              "description": "A versioned verification report with outcome pass was produced for every worker."
+              "description": "Every worker of this wave reached a passing verification verdict — the exit code of commandmate wait --verify under a contract, or a clean profile-baseline re-run without one."
             },
             "advanced": {
               "type": "boolean",
@@ -201,7 +201,10 @@
       "required": ["issue", "task_id", "worker_state", "verification", "prompt", "note"],
       "properties": {
         "issue": { "$ref": "#/$defs/issue_number" },
-        "task_id": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] },
+        "task_id": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+          "description": "Under an execution contract this is the task id `commandmate send --contract` returned, so the run can be traced back to the recorded task. Without one the public CLI has no task id and the field carries the CommandMate worktree id instead. Null when the worker was never dispatched."
+        },
         "worker_state": {
           "enum": ["completed", "failed", "timeout", "prompt", "not_dispatched"],
           "description": "completed is worker completion only; it is not verification success. Those are gated separately."
@@ -214,11 +217,11 @@
             "ran": { "type": "boolean" },
             "report_schema_version": {
               "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 1 }],
-              "description": "Version of the verification report the worker produced. Null when verification did not run."
+              "description": "Version of the verification report the worker produced. Always null in practice: the profile baseline produces no versioned document, and CommandMate's verification run document carries no schema version either. Kept so a future versioned report can be recorded without a schema change."
             },
             "outcome": {
               "enum": ["pass", "fail", "not_run"],
-              "description": "not_run when the worker did not complete: an incomplete worker is never verified, and never counts as verified."
+              "description": "pass and fail are verdicts. not_run means NOTHING JUDGED THIS: the worker did not complete, or the verification run itself ended error/cancelled (exit 99) so no gate reached a verdict. not_run is never a pass, and it is deliberately not a fail either — 'we could not judge' must not be re-instructed as 'we judged it and it failed'."
             },
             "checks": { "type": "array", "items": { "type": "string", "minLength": 1 } }
           }

@@ -1,26 +1,34 @@
 {
-  "description": "The commandmate CLI subcommands and options the cmate-orchestrate runners are allowed to use, transcribed verbatim from `commandmate <cmd> --help` (CommandMate 0.12.0). The fake CLI enforces this surface and the contract-parity test asserts the runners only ever call subcommands/flags listed here — so a runner that reaches for a non-existent flag (the #1467 regression) fails the suite instead of only failing in production. When a real `commandmate` binary is on PATH the parity test additionally checks these flags are a subset of the live `--help`.",
-  "source": "commandmate 0.12.0 --help",
+  "description": "The commandmate CLI subcommands and options the cmate-orchestrate runners are allowed to use, transcribed verbatim from `commandmate <cmd> --help` (CommandMate 0.17.0). The fake CLI enforces this surface and the contract-parity test asserts the runners only ever call subcommands/flags listed here — so a runner that reaches for a non-existent flag (the #1467 regression) fails the suite instead of only failing in production. When a real `commandmate` binary is on PATH the parity test additionally checks these flags are a subset of the live `--help`.",
+  "source": "commandmate 0.17.0 --help",
+  "version_gating": "`since` marks a subcommand, and `since_flags` marks individual flags, that a specific CommandMate version introduced (Issue #1588: the execution contract and the contract verdict both arrived in 0.17.0). The live `--help` parity check skips those entries when the installed binary predates them, and says out loud which ones it skipped — an older CLI legitimately does not list them, and asserting anyway would report a supported fallback as a contract drift. Entries with no `since` are asserted against every version.",
   "subcommands": {
     "send": {
-      "positionals": "2",
-      "flags": ["--agent", "--instance", "--register", "--model", "--auto-yes", "--duration", "--stop-pattern", "--token"]
+      "positionals": "1-2",
+      "flags": ["--agent", "--instance", "--register", "--model", "--auto-yes", "--duration", "--stop-pattern", "--contract", "--token", "--help"],
+      "since_flags": { "--contract": "0.17.0" }
     },
     "wait": {
       "positionals": "1+",
-      "flags": ["--timeout", "--on-prompt", "--stall-timeout", "--instance", "--token"]
+      "flags": ["--timeout", "--on-prompt", "--stall-timeout", "--instance", "--verify", "--require-work", "--token", "--help"],
+      "since_flags": { "--verify": "0.17.0", "--require-work": "0.17.0" }
     },
     "capture": {
       "positionals": "1",
-      "flags": ["--json", "--agent", "--instance", "--token"]
+      "flags": ["--json", "--agent", "--instance", "--token", "--help"]
     },
     "respond": {
       "positionals": "2",
-      "flags": ["--agent", "--instance", "--token"]
+      "flags": ["--agent", "--instance", "--token", "--help"]
     },
     "ls": {
       "positionals": "0",
-      "flags": ["--json", "--quiet", "--branch", "--id", "--token"]
+      "flags": ["--json", "--quiet", "--branch", "--id", "--token", "--help"]
+    },
+    "verify": {
+      "positionals": "1",
+      "flags": ["--instance", "--gates", "--json", "--timeout", "--token", "--help"],
+      "since": "0.17.0"
     }
   }
 }

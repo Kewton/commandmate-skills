@@ -1,0 +1,49 @@
+{
+  "description": "バージョンゲートのフォールバック経路: `send --help` に `--contract` が無い（0.17.0 未満相当の）CLI では契約を使わず、profile baseline を worktree 内で再実行する従来動作に戻る。黙って劣化せず `contract_unsupported` を limitation として明示する。`--contract` も `wait --verify` も `commandmate verify` も一度も呼ばない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [
+      true,
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      201,
+      200
+    ],
+    "worker_states": {
+      "201": "completed",
+      "200": "completed"
+    },
+    "verification_outcomes": {
+      "201": "pass",
+      "200": "pass"
+    },
+    "limitation_codes": [
+      "contract_unsupported"
+    ],
+    "no_contract_calls": true
+  }
+}

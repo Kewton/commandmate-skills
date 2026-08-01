@@ -1,8 +1,8 @@
 schema_version: 1
 id: cmate-orchestrate
 name: cmate-orchestrate
-version: 0.8.0
-summary: 複数 Issue の並列実行を dry-run で計画し、承認後に public commandmate で Wave barrier・verification gate 付きに dispatch、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT を実行し不合格なら回数上限つき修正ループを回し上限到達時は blocked で停止する。
+version: 0.9.0
+summary: 複数 Issue の並列実行を dry-run で計画し、承認後に実行契約付きで dispatch して commandmate の検証 exit code で裁定し、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT を実行し不合格なら回数上限つき修正ループを回し上限到達時は blocked で停止する。
 description: >-
   複数 Issue を並列で進めるための、計画（dry-run）・その承認後の監督付き実行・verification pass 後の
   納品（PR 作成・CI 確認・guarded merge）・納品後の受入（UAT と回数上限つき修正ループ）を行う標準
@@ -11,11 +11,14 @@ description: >-
   違反を拒否し、file 衝突のある Issue を同一 Wave に置かない Wave plan と merge 順、risk、要求権限、実行
   command を生成する。同じ入力からは同じ plan が出る（Claude/Codex parity）。run artifact は unique run
   ID 配下に生成し、既存 run を上書きしない。承認後は同梱の dispatch runner が、その plan を入力に取り、
-  public commandmate（worktree-id ベースの send/wait/capture）で self-contained な generic worker を
-  dispatch し、mutation 前に drift（branch/HEAD/permission）を再確認し、前 Wave の全 worker 完了と、
-  worktree 内で profile baseline を再実行した pass を次 Wave dispatch の条件にする。worker completion と
-  verification success は別々に判定し、prompt
-  検出時は自動応答せず停止して human へ提示する（Auto Yes は既定 off）。納品は同梱の merge runner が、
+  plan から実行契約 yaml（goal・scope.allow）を決定的に生成して worktree に配置し、public commandmate の
+  send --contract で dispatch して返る task id を記録し、mutation 前に drift（branch/HEAD/permission）を
+  再確認し、裁定は wait --verify の exit code を一次ソースにする（0 合格 / 20 判定して不合格は失敗ゲートを
+  特定して再指示 / 21 作業証跡ゼロ / 10 prompt は自動応答せず human 提示 / 99 判定に到達せずは再指示せず
+  human へ）。実行冒頭で契約対応を確認し、非対応なら明示メッセージつきで profile baseline 再実行の
+  フォールバックに落ちるか停止するかを選ぶ（黙って劣化しない）。前 Wave の全 worker 完了と verification
+  pass を次 Wave dispatch の条件とし、worker completion と verification success は別々に判定する
+  （Auto Yes は既定 off）。納品は同梱の merge runner が、
   dispatch report で verification pass した Issue だけを対象に、CommandAgent の explicit phase flag 設計
   （--create-prs / --merge-prs）を踏襲して 1 invocation で 1 mutating phase だけを有効化し、明示承認
   （--approve）無しに push・PR 作成・merge をせず、CI pass 無しに merge しない。受入は同梱の uat runner
@@ -32,8 +35,8 @@ capabilities:
   - cycle・不完全 override・依存順違反を安全に検出して拒否する
   - file 衝突のある Issue を同一 Wave に置かない bounded な Wave plan を生成する
   - 同一入力から決定的な plan・run_id を返し、既存 run を上書きしない
-  - 承認済み plan を public commandmate で dispatch し、Wave barrier と verification gate で監督する（prompt 検出時は自動応答せず停止）
-  - worker completion と verification success を分離し、mutation 前に drift を再確認する
+  - 承認済み plan から決定的な実行契約を生成し、commandmate の検証 exit code（0/20/21/10/99）で裁定して Wave barrier と verification gate で監督する
+  - 契約対応の有無を実行冒頭で確認し、非対応なら明示メッセージつきでフォールバックするか停止する（黙って劣化しない）
   - verification pass した Issue を、明示承認と CI pass の 2 gate の下で 1 invocation 1 phase で PR 作成・guarded merge する
   - 納品後の UAT 不合格を、fix worktree→修正→再検証→再merge の回数上限つき修正ループで修復し、上限到達時は blocked として停止する
   - PR/CI/merge/UAT の失敗を success に丸めず blocked/partial として記録し、attempt 履歴を上書きせず append する
@@ -42,7 +45,7 @@ expected_outcomes:
   - 危険な依存グラフ（cycle・不完全 override）が計画段階で止まる
   - 同じ入力を別 Agent で回しても同じ plan が再現でき、突き合わせられる
   - 承認済み plan を監督付きで段階実行でき、Wave barrier と verification gate で安全に進む
-  - prompt は自動応答されず human 判断に委ねられ、worker 完了と検証成功が別々に判定される
+  - prompt は自動応答されず human 判断に委ねられ、判定に到達しなかった検証（exit 99）も不合格に丸めず human へ上がる
   - verification pass した Issue が、明示承認と CI pass の 2 gate の下でのみ PR 作成・merge される
   - PR 作成失敗・CI failure・merge conflict が success に丸められず、blocked/partial として記録される
   - 納品後の UAT 不合格が、回数上限つきの修正ループ（fix worktree→修正→再検証→再merge）で自動修復を試みられる
@@ -93,16 +96,15 @@ declared_permissions:
 declared_risk: high
 risk_rationale: >-
   Ships executable runners (high risk). The planner only reads issues and writes a
-  dry-run plan. The dispatch runner mutates via commandmate, guarded by a drift
-  re-check, a wave barrier, a verification gate and halted prompts. The merge runner
-  opens PRs and merges verified issues only, never without explicit approval and
-  green CI. The UAT runner repairs UAT failures within a fixed cap, stopping as
-  blocked and appending attempts without overwriting the artifact. Secrets and paths
-  are redacted.
+  dry-run plan. The dispatch runner mutates via commandmate: it places an execution
+  contract in each worktree and dispatches it, guarded by a drift re-check, a wave
+  barrier, the contract's verdict and halted prompts. The merge runner opens PRs and
+  merges verified issues only, never without approval and green CI. The UAT runner
+  repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: 0682af53bb670f4a097b34e1083eb52d94c667a7df238f49e17697085fd502cd
-    size: 35237
+    sha256: ec706c58c7da727b9a86d643f854e88c01e77b22908db6b1a3032e5df8ace151
+    size: 44090
     kind: skill_md
     executable: false
     script: false
@@ -113,8 +115,8 @@ files:
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: 10904c77f57f5e87a269fa3e2d395cafef0494b06ee9154cd65ac5f27fd453e8
-    size: 13392
+    sha256: 26f4ea647287f78964cd44ef96077f785371830c0b253a3112db7be546bf5158
+    size: 25049
     kind: instruction
     executable: false
     script: false
@@ -143,8 +145,8 @@ files:
     executable: false
     script: false
   - path: schemas/dispatch-report.v1.json
-    sha256: a8593238af784d83a555166a8272570a6b39599ed3dac583610314292a0ca5f5
-    size: 9692
+    sha256: c6793683385d47cdb0899165ebe90f73a62c0babe4b1884d79d23e3192d4ede2
+    size: 11308
     kind: asset
     executable: false
     script: false
@@ -173,26 +175,26 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: 95aaf07aa58abae80547a71a304e5c273f9fc3378ef3b435df863b6b720ef113
-    size: 50676
+    sha256: 2c2e7164e326e972879a3edddf11eeec314fc21850b9218e6b5390d4f09349b3
+    size: 87154
     kind: script
     executable: true
     script: true
   - path: scripts/merge.mjs
-    sha256: d2da30454086dbf9d84e66b401809fc98b5e6c5276ce5b0c7394d228e3440163
+    sha256: 5ec2347c0240bd7e5812066f079bb1d95ec2e43ae14d127569538c909ffc4590
     size: 36851
     kind: script
     executable: true
     script: true
   - path: scripts/orchestrate.mjs
-    sha256: 00b2702d88ac9b0c777b7db604d89323a30aa5448e697b57885aa90dd3819df3
+    sha256: a0f0d8d3ab61382dcf3a26160e71a1e4f8308f647c453cc5db6e56d66e9b35ca
     size: 46878
     kind: script
     executable: true
     script: true
   - path: scripts/uat.mjs
-    sha256: e9a7c14532f755ad09ed5529db3038cc113480079892d579bd54cd5ccf9cc116
-    size: 74155
+    sha256: a027bea43ac2be0e1db78efaef70c0c10ddb41dd32b6c0f256ac497d76c67967
+    size: 74640
     kind: script
     executable: true
     script: true
