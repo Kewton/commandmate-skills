@@ -1,0 +1,9 @@
+# One gate, so a 120-run history stays small enough to read.
+version: 1
+gates:
+  - id: unit
+    command: "npm run test:unit"
+    timeoutSec: 900
+options:
+  baseRef: origin/main
+  skipInPrimaryCheckout: false

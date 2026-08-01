@@ -1,0 +1,7 @@
+version: 1
+gates:
+  - id: lint
+    command: "npm run lint"
+    retries: 3
+options:
+  baseRef: origin/main

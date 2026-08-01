@@ -1,0 +1,35 @@
+{
+  "_comment": "Layer-2 proposals as the SKILL.md procedure produces them. One is a weakening, one is a strengthening; NEITHER may be applied, because layer 2 is proposal-only whatever direction it points in.",
+  "proposals": [
+    {
+      "kind": "add-gate",
+      "gate": {
+        "id": "migration-check",
+        "command": "npm run check:migrations",
+        "timeoutSec": 300
+      },
+      "position": "after:typecheck",
+      "rationale": "run 103 passed and the change it verified was reverted the next day; no declared gate reads the migration files",
+      "evidence": [
+        { "runId": 103, "at": "2026-07-12T09:00:00.000Z", "gateId": "unit", "fact": "status=failed exit=1" }
+      ]
+    },
+    {
+      "kind": "remove-gate",
+      "gateId": "build",
+      "rationale": "asserted to be redundant with typecheck — a weakening, and therefore a claim a human has to check",
+      "evidence": [
+        { "runId": 108, "at": "2026-07-17T09:00:00.000Z", "gateId": "build", "fact": "status=passed exit=0" }
+      ]
+    },
+    {
+      "kind": "set-option",
+      "key": "maxLogTailBytes",
+      "value": 512,
+      "rationale": "asserted to keep reports short — shrinking the log budget is a weakening",
+      "evidence": [
+        { "runId": 108, "at": "2026-07-17T09:00:00.000Z", "gateId": "unit", "fact": "logTailBytes=0" }
+      ]
+    }
+  ]
+}

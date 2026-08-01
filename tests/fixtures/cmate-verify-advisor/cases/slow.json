@@ -1,0 +1,934 @@
+{
+  "history": [
+    {
+      "id": 208,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-17T09:00:00.000Z",
+      "finishedAt": "2026-07-17T09:00:00.000Z",
+      "gates": [
+        {
+          "gateId": "work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30
+        },
+        {
+          "gateId": "lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 2075
+        },
+        {
+          "gateId": "typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1540
+        },
+        {
+          "gateId": "unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1507000
+        },
+        {
+          "gateId": "build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 60800
+        }
+      ]
+    },
+    {
+      "id": 207,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-16T09:00:00.000Z",
+      "finishedAt": "2026-07-16T09:00:00.000Z",
+      "gates": [
+        {
+          "gateId": "work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30
+        },
+        {
+          "gateId": "lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 2050
+        },
+        {
+          "gateId": "typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1520
+        },
+        {
+          "gateId": "unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1506000
+        },
+        {
+          "gateId": "build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 60400
+        }
+      ]
+    },
+    {
+      "id": 206,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-15T09:00:00.000Z",
+      "finishedAt": "2026-07-15T09:00:00.000Z",
+      "gates": [
+        {
+          "gateId": "work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30
+        },
+        {
+          "gateId": "lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 2025
+        },
+        {
+          "gateId": "typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1500
+        },
+        {
+          "gateId": "unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1505000
+        },
+        {
+          "gateId": "build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 60000
+        }
+      ]
+    },
+    {
+      "id": 205,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-14T09:00:00.000Z",
+      "finishedAt": "2026-07-14T09:00:00.000Z",
+      "gates": [
+        {
+          "gateId": "work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30
+        },
+        {
+          "gateId": "lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 2000
+        },
+        {
+          "gateId": "typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1480
+        },
+        {
+          "gateId": "unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1504000
+        },
+        {
+          "gateId": "build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 59600
+        }
+      ]
+    },
+    {
+      "id": 204,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-13T09:00:00.000Z",
+      "finishedAt": "2026-07-13T09:00:00.000Z",
+      "gates": [
+        {
+          "gateId": "work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30
+        },
+        {
+          "gateId": "lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1975
+        },
+        {
+          "gateId": "typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1460
+        },
+        {
+          "gateId": "unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1503000
+        },
+        {
+          "gateId": "build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 59200
+        }
+      ]
+    },
+    {
+      "id": 203,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-12T09:00:00.000Z",
+      "finishedAt": "2026-07-12T09:00:00.000Z",
+      "gates": [
+        {
+          "gateId": "work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30
+        },
+        {
+          "gateId": "lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1950
+        },
+        {
+          "gateId": "typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1440
+        },
+        {
+          "gateId": "unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1502000
+        },
+        {
+          "gateId": "build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 58800
+        }
+      ]
+    },
+    {
+      "id": 202,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-11T09:00:00.000Z",
+      "finishedAt": "2026-07-11T09:00:00.000Z",
+      "gates": [
+        {
+          "gateId": "work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30
+        },
+        {
+          "gateId": "lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1925
+        },
+        {
+          "gateId": "typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1420
+        },
+        {
+          "gateId": "unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1501000
+        },
+        {
+          "gateId": "build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 58400
+        }
+      ]
+    },
+    {
+      "id": 201,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-10T09:00:00.000Z",
+      "finishedAt": "2026-07-10T09:00:00.000Z",
+      "gates": [
+        {
+          "gateId": "work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30
+        },
+        {
+          "gateId": "lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1900
+        },
+        {
+          "gateId": "typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1400
+        },
+        {
+          "gateId": "unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1500000
+        },
+        {
+          "gateId": "build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 58000
+        }
+      ]
+    }
+  ],
+  "details": [
+    {
+      "id": 201,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-10T09:00:00.000Z",
+      "finishedAt": "2026-07-10T09:00:00.000Z",
+      "gates": [
+        {
+          "id": 20100,
+          "runId": 201,
+          "gateId": "work-evidence",
+          "command": "command for work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30,
+          "logTail": null,
+          "startedAt": "2026-07-10T09:00:00.000Z",
+          "finishedAt": "2026-07-10T09:00:00.000Z"
+        },
+        {
+          "id": 20101,
+          "runId": 201,
+          "gateId": "lint",
+          "command": "command for lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1900,
+          "logTail": null,
+          "startedAt": "2026-07-10T09:00:00.000Z",
+          "finishedAt": "2026-07-10T09:00:00.000Z"
+        },
+        {
+          "id": 20102,
+          "runId": 201,
+          "gateId": "typecheck",
+          "command": "command for typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1400,
+          "logTail": null,
+          "startedAt": "2026-07-10T09:00:00.000Z",
+          "finishedAt": "2026-07-10T09:00:00.000Z"
+        },
+        {
+          "id": 20103,
+          "runId": 201,
+          "gateId": "unit",
+          "command": "command for unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1500000,
+          "logTail": null,
+          "startedAt": "2026-07-10T09:00:00.000Z",
+          "finishedAt": "2026-07-10T09:00:00.000Z"
+        },
+        {
+          "id": 20104,
+          "runId": 201,
+          "gateId": "build",
+          "command": "command for build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 58000,
+          "logTail": null,
+          "startedAt": "2026-07-10T09:00:00.000Z",
+          "finishedAt": "2026-07-10T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": 202,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-11T09:00:00.000Z",
+      "finishedAt": "2026-07-11T09:00:00.000Z",
+      "gates": [
+        {
+          "id": 20200,
+          "runId": 202,
+          "gateId": "work-evidence",
+          "command": "command for work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30,
+          "logTail": null,
+          "startedAt": "2026-07-11T09:00:00.000Z",
+          "finishedAt": "2026-07-11T09:00:00.000Z"
+        },
+        {
+          "id": 20201,
+          "runId": 202,
+          "gateId": "lint",
+          "command": "command for lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1925,
+          "logTail": null,
+          "startedAt": "2026-07-11T09:00:00.000Z",
+          "finishedAt": "2026-07-11T09:00:00.000Z"
+        },
+        {
+          "id": 20202,
+          "runId": 202,
+          "gateId": "typecheck",
+          "command": "command for typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1420,
+          "logTail": null,
+          "startedAt": "2026-07-11T09:00:00.000Z",
+          "finishedAt": "2026-07-11T09:00:00.000Z"
+        },
+        {
+          "id": 20203,
+          "runId": 202,
+          "gateId": "unit",
+          "command": "command for unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1501000,
+          "logTail": null,
+          "startedAt": "2026-07-11T09:00:00.000Z",
+          "finishedAt": "2026-07-11T09:00:00.000Z"
+        },
+        {
+          "id": 20204,
+          "runId": 202,
+          "gateId": "build",
+          "command": "command for build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 58400,
+          "logTail": null,
+          "startedAt": "2026-07-11T09:00:00.000Z",
+          "finishedAt": "2026-07-11T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": 203,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-12T09:00:00.000Z",
+      "finishedAt": "2026-07-12T09:00:00.000Z",
+      "gates": [
+        {
+          "id": 20300,
+          "runId": 203,
+          "gateId": "work-evidence",
+          "command": "command for work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30,
+          "logTail": null,
+          "startedAt": "2026-07-12T09:00:00.000Z",
+          "finishedAt": "2026-07-12T09:00:00.000Z"
+        },
+        {
+          "id": 20301,
+          "runId": 203,
+          "gateId": "lint",
+          "command": "command for lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1950,
+          "logTail": null,
+          "startedAt": "2026-07-12T09:00:00.000Z",
+          "finishedAt": "2026-07-12T09:00:00.000Z"
+        },
+        {
+          "id": 20302,
+          "runId": 203,
+          "gateId": "typecheck",
+          "command": "command for typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1440,
+          "logTail": null,
+          "startedAt": "2026-07-12T09:00:00.000Z",
+          "finishedAt": "2026-07-12T09:00:00.000Z"
+        },
+        {
+          "id": 20303,
+          "runId": 203,
+          "gateId": "unit",
+          "command": "command for unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1502000,
+          "logTail": null,
+          "startedAt": "2026-07-12T09:00:00.000Z",
+          "finishedAt": "2026-07-12T09:00:00.000Z"
+        },
+        {
+          "id": 20304,
+          "runId": 203,
+          "gateId": "build",
+          "command": "command for build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 58800,
+          "logTail": null,
+          "startedAt": "2026-07-12T09:00:00.000Z",
+          "finishedAt": "2026-07-12T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": 204,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-13T09:00:00.000Z",
+      "finishedAt": "2026-07-13T09:00:00.000Z",
+      "gates": [
+        {
+          "id": 20400,
+          "runId": 204,
+          "gateId": "work-evidence",
+          "command": "command for work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30,
+          "logTail": null,
+          "startedAt": "2026-07-13T09:00:00.000Z",
+          "finishedAt": "2026-07-13T09:00:00.000Z"
+        },
+        {
+          "id": 20401,
+          "runId": 204,
+          "gateId": "lint",
+          "command": "command for lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1975,
+          "logTail": null,
+          "startedAt": "2026-07-13T09:00:00.000Z",
+          "finishedAt": "2026-07-13T09:00:00.000Z"
+        },
+        {
+          "id": 20402,
+          "runId": 204,
+          "gateId": "typecheck",
+          "command": "command for typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1460,
+          "logTail": null,
+          "startedAt": "2026-07-13T09:00:00.000Z",
+          "finishedAt": "2026-07-13T09:00:00.000Z"
+        },
+        {
+          "id": 20403,
+          "runId": 204,
+          "gateId": "unit",
+          "command": "command for unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1503000,
+          "logTail": null,
+          "startedAt": "2026-07-13T09:00:00.000Z",
+          "finishedAt": "2026-07-13T09:00:00.000Z"
+        },
+        {
+          "id": 20404,
+          "runId": 204,
+          "gateId": "build",
+          "command": "command for build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 59200,
+          "logTail": null,
+          "startedAt": "2026-07-13T09:00:00.000Z",
+          "finishedAt": "2026-07-13T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": 205,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-14T09:00:00.000Z",
+      "finishedAt": "2026-07-14T09:00:00.000Z",
+      "gates": [
+        {
+          "id": 20500,
+          "runId": 205,
+          "gateId": "work-evidence",
+          "command": "command for work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30,
+          "logTail": null,
+          "startedAt": "2026-07-14T09:00:00.000Z",
+          "finishedAt": "2026-07-14T09:00:00.000Z"
+        },
+        {
+          "id": 20501,
+          "runId": 205,
+          "gateId": "lint",
+          "command": "command for lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 2000,
+          "logTail": null,
+          "startedAt": "2026-07-14T09:00:00.000Z",
+          "finishedAt": "2026-07-14T09:00:00.000Z"
+        },
+        {
+          "id": 20502,
+          "runId": 205,
+          "gateId": "typecheck",
+          "command": "command for typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1480,
+          "logTail": null,
+          "startedAt": "2026-07-14T09:00:00.000Z",
+          "finishedAt": "2026-07-14T09:00:00.000Z"
+        },
+        {
+          "id": 20503,
+          "runId": 205,
+          "gateId": "unit",
+          "command": "command for unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1504000,
+          "logTail": null,
+          "startedAt": "2026-07-14T09:00:00.000Z",
+          "finishedAt": "2026-07-14T09:00:00.000Z"
+        },
+        {
+          "id": 20504,
+          "runId": 205,
+          "gateId": "build",
+          "command": "command for build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 59600,
+          "logTail": null,
+          "startedAt": "2026-07-14T09:00:00.000Z",
+          "finishedAt": "2026-07-14T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": 206,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-15T09:00:00.000Z",
+      "finishedAt": "2026-07-15T09:00:00.000Z",
+      "gates": [
+        {
+          "id": 20600,
+          "runId": 206,
+          "gateId": "work-evidence",
+          "command": "command for work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30,
+          "logTail": null,
+          "startedAt": "2026-07-15T09:00:00.000Z",
+          "finishedAt": "2026-07-15T09:00:00.000Z"
+        },
+        {
+          "id": 20601,
+          "runId": 206,
+          "gateId": "lint",
+          "command": "command for lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 2025,
+          "logTail": null,
+          "startedAt": "2026-07-15T09:00:00.000Z",
+          "finishedAt": "2026-07-15T09:00:00.000Z"
+        },
+        {
+          "id": 20602,
+          "runId": 206,
+          "gateId": "typecheck",
+          "command": "command for typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1500,
+          "logTail": null,
+          "startedAt": "2026-07-15T09:00:00.000Z",
+          "finishedAt": "2026-07-15T09:00:00.000Z"
+        },
+        {
+          "id": 20603,
+          "runId": 206,
+          "gateId": "unit",
+          "command": "command for unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1505000,
+          "logTail": null,
+          "startedAt": "2026-07-15T09:00:00.000Z",
+          "finishedAt": "2026-07-15T09:00:00.000Z"
+        },
+        {
+          "id": 20604,
+          "runId": 206,
+          "gateId": "build",
+          "command": "command for build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 60000,
+          "logTail": null,
+          "startedAt": "2026-07-15T09:00:00.000Z",
+          "finishedAt": "2026-07-15T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": 207,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-16T09:00:00.000Z",
+      "finishedAt": "2026-07-16T09:00:00.000Z",
+      "gates": [
+        {
+          "id": 20700,
+          "runId": 207,
+          "gateId": "work-evidence",
+          "command": "command for work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30,
+          "logTail": null,
+          "startedAt": "2026-07-16T09:00:00.000Z",
+          "finishedAt": "2026-07-16T09:00:00.000Z"
+        },
+        {
+          "id": 20701,
+          "runId": 207,
+          "gateId": "lint",
+          "command": "command for lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 2050,
+          "logTail": null,
+          "startedAt": "2026-07-16T09:00:00.000Z",
+          "finishedAt": "2026-07-16T09:00:00.000Z"
+        },
+        {
+          "id": 20702,
+          "runId": 207,
+          "gateId": "typecheck",
+          "command": "command for typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1520,
+          "logTail": null,
+          "startedAt": "2026-07-16T09:00:00.000Z",
+          "finishedAt": "2026-07-16T09:00:00.000Z"
+        },
+        {
+          "id": 20703,
+          "runId": 207,
+          "gateId": "unit",
+          "command": "command for unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1506000,
+          "logTail": null,
+          "startedAt": "2026-07-16T09:00:00.000Z",
+          "finishedAt": "2026-07-16T09:00:00.000Z"
+        },
+        {
+          "id": 20704,
+          "runId": 207,
+          "gateId": "build",
+          "command": "command for build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 60400,
+          "logTail": null,
+          "startedAt": "2026-07-16T09:00:00.000Z",
+          "finishedAt": "2026-07-16T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": 208,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-17T09:00:00.000Z",
+      "finishedAt": "2026-07-17T09:00:00.000Z",
+      "gates": [
+        {
+          "id": 20800,
+          "runId": 208,
+          "gateId": "work-evidence",
+          "command": "command for work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30,
+          "logTail": null,
+          "startedAt": "2026-07-17T09:00:00.000Z",
+          "finishedAt": "2026-07-17T09:00:00.000Z"
+        },
+        {
+          "id": 20801,
+          "runId": 208,
+          "gateId": "lint",
+          "command": "command for lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 2075,
+          "logTail": null,
+          "startedAt": "2026-07-17T09:00:00.000Z",
+          "finishedAt": "2026-07-17T09:00:00.000Z"
+        },
+        {
+          "id": 20802,
+          "runId": 208,
+          "gateId": "typecheck",
+          "command": "command for typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1540,
+          "logTail": null,
+          "startedAt": "2026-07-17T09:00:00.000Z",
+          "finishedAt": "2026-07-17T09:00:00.000Z"
+        },
+        {
+          "id": 20803,
+          "runId": 208,
+          "gateId": "unit",
+          "command": "command for unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1507000,
+          "logTail": null,
+          "startedAt": "2026-07-17T09:00:00.000Z",
+          "finishedAt": "2026-07-17T09:00:00.000Z"
+        },
+        {
+          "id": 20804,
+          "runId": 208,
+          "gateId": "build",
+          "command": "command for build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 60800,
+          "logTail": null,
+          "startedAt": "2026-07-17T09:00:00.000Z",
+          "finishedAt": "2026-07-17T09:00:00.000Z"
+        }
+      ]
+    }
+  ]
+}

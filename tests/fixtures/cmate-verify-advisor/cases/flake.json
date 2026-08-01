@@ -1,0 +1,238 @@
+{
+  "history": [
+    {
+      "id": 402,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-11T09:00:00.000Z",
+      "finishedAt": "2026-07-11T09:00:00.000Z",
+      "gates": [
+        {
+          "gateId": "work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30
+        },
+        {
+          "gateId": "lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1910
+        },
+        {
+          "gateId": "typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1410
+        },
+        {
+          "gateId": "unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 39100
+        },
+        {
+          "gateId": "build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 58000
+        }
+      ]
+    },
+    {
+      "id": 401,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "failed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-10T09:00:00.000Z",
+      "finishedAt": "2026-07-10T09:00:00.000Z",
+      "gates": [
+        {
+          "gateId": "work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30
+        },
+        {
+          "gateId": "lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1900
+        },
+        {
+          "gateId": "typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1400
+        },
+        {
+          "gateId": "unit",
+          "status": "failed",
+          "exitCode": 1,
+          "durationMs": 39000
+        },
+        {
+          "gateId": "build",
+          "status": "skipped",
+          "exitCode": null,
+          "durationMs": 0
+        }
+      ]
+    }
+  ],
+  "details": [
+    {
+      "id": 401,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "failed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-10T09:00:00.000Z",
+      "finishedAt": "2026-07-10T09:00:00.000Z",
+      "gates": [
+        {
+          "id": 40100,
+          "runId": 401,
+          "gateId": "work-evidence",
+          "command": "command for work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30,
+          "logTail": null,
+          "startedAt": "2026-07-10T09:00:00.000Z",
+          "finishedAt": "2026-07-10T09:00:00.000Z"
+        },
+        {
+          "id": 40101,
+          "runId": 401,
+          "gateId": "lint",
+          "command": "command for lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1900,
+          "logTail": null,
+          "startedAt": "2026-07-10T09:00:00.000Z",
+          "finishedAt": "2026-07-10T09:00:00.000Z"
+        },
+        {
+          "id": 40102,
+          "runId": 401,
+          "gateId": "typecheck",
+          "command": "command for typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1400,
+          "logTail": null,
+          "startedAt": "2026-07-10T09:00:00.000Z",
+          "finishedAt": "2026-07-10T09:00:00.000Z"
+        },
+        {
+          "id": 40103,
+          "runId": 401,
+          "gateId": "unit",
+          "command": "command for unit",
+          "status": "failed",
+          "exitCode": 1,
+          "durationMs": 39000,
+          "logTail": null,
+          "startedAt": "2026-07-10T09:00:00.000Z",
+          "finishedAt": "2026-07-10T09:00:00.000Z"
+        },
+        {
+          "id": 40104,
+          "runId": 401,
+          "gateId": "build",
+          "command": "command for build",
+          "status": "skipped",
+          "exitCode": null,
+          "durationMs": 0,
+          "logTail": null,
+          "startedAt": "2026-07-10T09:00:00.000Z",
+          "finishedAt": "2026-07-10T09:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": 402,
+      "worktreeId": "demo-app-feature-x",
+      "instanceId": null,
+      "taskId": null,
+      "trigger": "wait",
+      "status": "passed",
+      "baseRef": "origin/main",
+      "startedAt": "2026-07-11T09:00:00.000Z",
+      "finishedAt": "2026-07-11T09:00:00.000Z",
+      "gates": [
+        {
+          "id": 40200,
+          "runId": 402,
+          "gateId": "work-evidence",
+          "command": "command for work-evidence",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 30,
+          "logTail": null,
+          "startedAt": "2026-07-11T09:00:00.000Z",
+          "finishedAt": "2026-07-11T09:00:00.000Z"
+        },
+        {
+          "id": 40201,
+          "runId": 402,
+          "gateId": "lint",
+          "command": "command for lint",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1910,
+          "logTail": null,
+          "startedAt": "2026-07-11T09:00:00.000Z",
+          "finishedAt": "2026-07-11T09:00:00.000Z"
+        },
+        {
+          "id": 40202,
+          "runId": 402,
+          "gateId": "typecheck",
+          "command": "command for typecheck",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 1410,
+          "logTail": null,
+          "startedAt": "2026-07-11T09:00:00.000Z",
+          "finishedAt": "2026-07-11T09:00:00.000Z"
+        },
+        {
+          "id": 40203,
+          "runId": 402,
+          "gateId": "unit",
+          "command": "command for unit",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 39100,
+          "logTail": null,
+          "startedAt": "2026-07-11T09:00:00.000Z",
+          "finishedAt": "2026-07-11T09:00:00.000Z"
+        },
+        {
+          "id": 40204,
+          "runId": 402,
+          "gateId": "build",
+          "command": "command for build",
+          "status": "passed",
+          "exitCode": 0,
+          "durationMs": 58000,
+          "logTail": null,
+          "startedAt": "2026-07-11T09:00:00.000Z",
+          "finishedAt": "2026-07-11T09:00:00.000Z"
+        }
+      ]
+    }
+  ]
+}
