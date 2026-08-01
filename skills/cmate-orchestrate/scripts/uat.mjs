@@ -19,8 +19,23 @@
 //                               it, and re-runs UAT — repeating up to a fixed
 //                               attempt cap.
 //
-// Acceptance and re-verification are a profile-baseline run INSIDE the worktree,
-// not a `commandmate uat`/`verify` call (those subcommands do not exist, #1467).
+// Adjudication is TWO layers (#1616). The machine gate is a profile-baseline run
+// INSIDE the worktree, not a `commandmate uat`/`verify` call (those subcommands do
+// not exist, #1467). The semantic gate is a cmate-acceptance-test result document
+// (`acceptance-result.v1.json`) produced by the agent BEFORE this runner is
+// invoked and handed over via --acceptance-dir; this runner only reads, validates
+// and composes it. No LLM judgement happens here — the composition is a pure
+// function of the two gates:
+//
+//   baseline pass + acceptance `go`             -> pass
+//   baseline pass + acceptance `conditional_go` -> conditional (human, never pass)
+//   baseline pass + acceptance `no_go`          -> fail (findings drive the fix)
+//   baseline fail                               -> fail (whatever acceptance said)
+//   no result / not schema-conformant / wrong issue
+//                                               -> baseline alone, recorded as the
+//                                                  `acceptance_not_run` limitation;
+//                                                  a fail under --require-acceptance
+//
 // The commandmate calls are `send <worktree-id> <message>` / `capture` / `wait
 // <worktree-id>` for the fix worker; its worktree id is derived from the fix
 // branch (a freshly-created worktree is not yet in `ls`). Like a dispatch worker,
@@ -54,10 +69,18 @@ import { mkdirSync, existsSync, writeFileSync, appendFileSync, readFileSync } fr
 import { join, dirname } from 'node:path';
 
 const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.7.0';
+const SKILL_VERSION = '0.8.0';
 const UAT_SCHEMA_VERSION = 1;
 const SUPPORTED_PLAN_SCHEMA_VERSION = 1;
 const SUPPORTED_DISPATCH_SCHEMA_VERSION = 1;
+
+// The semantic gate's input contract: cmate-acceptance-test's result document
+// (skills/cmate-acceptance-test/schemas/acceptance-result.v1.json).
+const ACCEPTANCE_SKILL_ID = 'cmate-acceptance-test';
+const SUPPORTED_ACCEPTANCE_SCHEMA_VERSION = 1;
+// How many findings/conditions are lifted out of one acceptance document. The
+// report stays bounded; the document itself remains the full record.
+const MAX_ACCEPTANCE_ITEMS = 8;
 
 // A CommandMate worktree id (mirrors the CLI's isValidWorktreeId).
 const WORKTREE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/;
@@ -136,6 +159,16 @@ function excerpt(value, limit = 280) {
   return `…${text.slice(text.length - limit)}`;
 }
 
+// A redacted, bounded excerpt that keeps the HEAD. `excerpt` above keeps the TAIL
+// because a failing command puts its error last; a structured finding is the
+// opposite — its criterion id and text come first, so truncating from the end
+// would throw away exactly the part that identifies it.
+function clip(value, limit = 300) {
+  const text = redact(String(value)).replace(/\s+/g, ' ').trim();
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit)}…`;
+}
+
 function redactionsList() {
   return [...redactionTally.entries()]
     .filter(([, count]) => count > 0)
@@ -167,6 +200,13 @@ Options:
                          WITHOUT it the loop is a no-mutation preview.
   --max-attempts <1-${MAX_ATTEMPTS_CEILING}>    Fix-attempt cap (default ${DEFAULT_MAX_ATTEMPTS}). The loop never exceeds it;
                          reaching it with failures remaining is reported as blocked.
+  --acceptance-dir <dir> Directory holding one cmate-acceptance-test result document
+                         per issue, named issue-<n>.json. Read-only: this runner
+                         validates and composes them, it never produces a verdict.
+                         Without it the adjudication is the baseline alone.
+  --require-acceptance   A missing, non-conformant or wrong-issue acceptance result
+                         is a FAILURE instead of a recorded limitation. Needs
+                         --acceptance-dir.
   --out <dir>            Where UAT artifacts are written (default: <dispatch-dir>/<phase>).
   --cli <path>           The commandmate CLI to drive (default "commandmate").
   --git <path>           The git CLI for base/worktree/re-merge (default "git").
@@ -193,6 +233,8 @@ function parseCli(argv) {
         'create-uat-fix-worktrees': { type: 'boolean' },
         approve: { type: 'boolean' },
         'max-attempts': { type: 'string' },
+        'acceptance-dir': { type: 'string' },
+        'require-acceptance': { type: 'boolean' },
         out: { type: 'string' },
         cli: { type: 'string' },
         git: { type: 'string' },
@@ -240,12 +282,20 @@ function resolveInputs(parsed) {
   if (!values.plan) throw new SkillError('invalid_input', '--plan <path> is required', 3);
   if (!values.dispatch) throw new SkillError('invalid_input', '--dispatch <path> is required', 3);
 
+  // Requiring a gate that was never wired up cannot be satisfied by any input, so
+  // it is an invocation error rather than a run that fails every issue.
+  if (values['require-acceptance'] && !values['acceptance-dir']) {
+    throw new SkillError('invalid_input', '--require-acceptance needs --acceptance-dir <dir>: there is nowhere to read an acceptance result from', 3);
+  }
+
   return {
     phase: phases[0],
     planPath: values.plan,
     dispatchPath: values.dispatch,
     approve: Boolean(values.approve),
     maxAttempts: positiveInt(values['max-attempts'], 'max-attempts', DEFAULT_MAX_ATTEMPTS, MAX_ATTEMPTS_CEILING),
+    acceptanceDir: values['acceptance-dir'] ?? null,
+    requireAcceptance: Boolean(values['require-acceptance']),
     outDir: values.out ?? null,
     cli: values.cli ?? 'commandmate',
     git: values.git ?? 'git',
@@ -433,6 +483,211 @@ function runBaseline(baseline, worktreePath) {
 }
 
 // =============================================================================
+// Acceptance gate (semantic layer, #1616) — read, validate, never judge
+// =============================================================================
+//
+// The acceptance verdict is produced by cmate-acceptance-test BEFORE this runner
+// runs, and handed over as one result document per issue at
+// `<--acceptance-dir>/issue-<n>.json`. This runner is deterministic Node stdlib:
+// it reads the document, checks it against acceptance-result.v1 and confirms it
+// targets the issue at hand. It never interprets an acceptance criterion itself.
+//
+// Every way the document can be unusable is a NAMED state, never a silent pass:
+//
+//   not_configured  --acceptance-dir was not given; adjudication is baseline-only
+//                   and says so. This is the pre-#1616 behavior, unchanged.
+//   missing         the directory was given but holds no document for this issue
+//   invalid         not JSON, or not conformant to acceptance-result.v1
+//   mismatched      conformant, but its target.issue_ref names a different issue
+//   loaded          conformant and on target; its verdict enters the composition
+
+const ACCEPTANCE_VERDICTS = new Set(['go', 'conditional_go', 'no_go']);
+const ACCEPTANCE_STATUSES = new Set(['success', 'partial', 'failure']);
+
+// The top-level fields acceptance-result.v1 requires. A document missing any of
+// them is not the contract, whatever else it contains.
+const ACCEPTANCE_REQUIRED_FIELDS = [
+  'result_schema_version', 'skill', 'generated_at', 'status', 'verdict', 'verdict_reason',
+  'target', 'environment', 'criteria', 'checks', 'confirmations', 'evidence',
+  'next_actions', 'blocking_reasons', 'limitations',
+];
+
+// Criterion outcomes that are NOT a resolved pass/fail. acceptance-result.v1 keeps
+// them distinct on purpose, and so does the report: they are the conditions a
+// human has to close, not findings a fix worker can repair.
+const UNRESOLVED_CRITERION_OUTCOMES = new Set(['flaky', 'blocked', 'not_run', 'manual_pending', 'not_verifiable']);
+
+function acceptanceFileName(number) {
+  return `issue-${number}.json`;
+}
+
+// The issue an acceptance document targets. `issue_ref` is free-form by contract
+// ("Issue 番号または Issue URL"), so the three shapes the acceptance Skill emits
+// are all accepted: an issue URL, `owner/repo#<n>`, and a bare number. Anything
+// else is unresolvable — which is a mismatch, never an assumed match.
+function issueNumberOfRef(ref) {
+  if (typeof ref !== 'string') return null;
+  const url = /\/issues\/(\d+)(?:\D|$)/.exec(ref);
+  if (url) return Number.parseInt(url[1], 10);
+  const hash = /#(\d+)\s*$/.exec(ref);
+  if (hash) return Number.parseInt(hash[1], 10);
+  const bare = /^\s*(\d+)\s*$/.exec(ref);
+  if (bare) return Number.parseInt(bare[1], 10);
+  return null;
+}
+
+// Conformance against acceptance-result.v1, limited to what the composition
+// depends on. Returns null when the document is usable, or the reason it is not.
+function acceptanceNonConformance(doc) {
+  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return 'not a JSON object';
+  for (const field of ACCEPTANCE_REQUIRED_FIELDS) {
+    if (!(field in doc)) return `missing required field "${field}"`;
+  }
+  if (doc.result_schema_version !== SUPPORTED_ACCEPTANCE_SCHEMA_VERSION) {
+    return `unsupported result_schema_version ${JSON.stringify(doc.result_schema_version)}; this runner understands ${SUPPORTED_ACCEPTANCE_SCHEMA_VERSION}`;
+  }
+  const skill = doc.skill;
+  if (!skill || typeof skill !== 'object' || skill.id !== ACCEPTANCE_SKILL_ID) {
+    return `skill.id is not ${ACCEPTANCE_SKILL_ID}`;
+  }
+  if (typeof skill.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(skill.version)) {
+    return 'skill.version is not a semantic version';
+  }
+  if (!ACCEPTANCE_VERDICTS.has(doc.verdict)) return `verdict ${JSON.stringify(doc.verdict)} is not one of go/conditional_go/no_go`;
+  if (!ACCEPTANCE_STATUSES.has(doc.status)) return `status ${JSON.stringify(doc.status)} is not one of success/partial/failure`;
+  if (typeof doc.verdict_reason !== 'string' || doc.verdict_reason.length === 0) return 'verdict_reason is empty';
+  const target = doc.target;
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return 'target is not an object';
+  if (typeof target.issue_ref !== 'string' || target.issue_ref.length === 0) return 'target.issue_ref is empty';
+  for (const field of ['criteria', 'checks', 'next_actions', 'blocking_reasons', 'limitations']) {
+    if (!Array.isArray(doc[field])) return `${field} is not an array`;
+  }
+  return null;
+}
+
+function acceptanceState(state, note) {
+  return {
+    state,
+    verdict: null,
+    status: null,
+    issue_ref: null,
+    verdict_reason: '',
+    findings: [],
+    conditions: [],
+    note,
+  };
+}
+
+// What a fix worker has to repair: the criteria that resolved to a failure, plus
+// the reasons the acceptance run itself called blocking.
+function acceptanceFindings(doc) {
+  const items = [];
+  for (const criterion of doc.criteria) {
+    if (criterion && criterion.outcome === 'fail') {
+      items.push(`${criterion.id} fail: ${criterion.text}${criterion.notes ? ` — ${criterion.notes}` : ''}`);
+    }
+  }
+  for (const reason of doc.blocking_reasons) items.push(`blocking: ${String(reason)}`);
+  return items.slice(0, MAX_ACCEPTANCE_ITEMS).map((item) => clip(item, 300));
+}
+
+// What a human has to close: the criteria that never resolved, and the next
+// actions the acceptance run attached to them.
+function acceptanceConditions(doc) {
+  const items = [];
+  for (const criterion of doc.criteria) {
+    if (criterion && UNRESOLVED_CRITERION_OUTCOMES.has(criterion.outcome)) {
+      items.push(`${criterion.id} ${criterion.outcome}: ${criterion.text}${criterion.notes ? ` — ${criterion.notes}` : ''}`);
+    }
+  }
+  for (const action of doc.next_actions) {
+    if (action && typeof action === 'object') items.push(`next: ${String(action.action)}（owner: ${String(action.owner)}）`);
+  }
+  for (const limitation of doc.limitations) items.push(`limitation: ${String(limitation)}`);
+  return items.slice(0, MAX_ACCEPTANCE_ITEMS).map((item) => clip(item, 300));
+}
+
+// Load one issue's acceptance result. Only the file NAME is ever recorded, never
+// the operator-supplied directory, so no host path reaches the report.
+function loadAcceptance(inputs, number) {
+  if (!inputs.acceptanceDir) {
+    return acceptanceState('not_configured', 'acceptance gate not configured (--acceptance-dir was not given); adjudicated on the baseline alone');
+  }
+  const name = acceptanceFileName(number);
+  let text;
+  try {
+    text = readFileSync(join(inputs.acceptanceDir, name), 'utf8');
+  } catch {
+    return acceptanceState('missing', `no acceptance result ${name} under --acceptance-dir`);
+  }
+  let doc;
+  try {
+    doc = JSON.parse(text);
+  } catch {
+    return acceptanceState('invalid', `${name} is not valid JSON`);
+  }
+  const nonConformance = acceptanceNonConformance(doc);
+  if (nonConformance !== null) {
+    return acceptanceState('invalid', `${name} does not conform to acceptance-result.v${SUPPORTED_ACCEPTANCE_SCHEMA_VERSION}: ${nonConformance}`);
+  }
+
+  const targeted = issueNumberOfRef(doc.target.issue_ref);
+  if (targeted !== number) {
+    const mismatched = acceptanceState(
+      'mismatched',
+      targeted === null
+        ? `${name} target.issue_ref does not name an issue number, so it cannot be confirmed to cover #${number}`
+        : `${name} targets #${targeted}, not #${number}`,
+    );
+    mismatched.issue_ref = clip(doc.target.issue_ref, 120);
+    return mismatched;
+  }
+
+  return {
+    state: 'loaded',
+    verdict: doc.verdict,
+    status: doc.status,
+    issue_ref: clip(doc.target.issue_ref, 120),
+    verdict_reason: clip(doc.verdict_reason, 300),
+    findings: acceptanceFindings(doc),
+    conditions: acceptanceConditions(doc),
+    note: `${name}: ${ACCEPTANCE_SKILL_ID} ${doc.skill.version} returned ${doc.verdict} (run status ${doc.status})`,
+  };
+}
+
+// Compose the machine gate (baseline) with the semantic gate (acceptance) into one
+// per-issue verdict. This is the whole point of #1616 and it never rounds up: a
+// conditional_go stays conditional, a no_go fails, and an acceptance that could not
+// be read degrades LOUDLY — to a recorded limitation, or to a failure when the
+// operator declared the gate mandatory.
+//
+// It reads only the baseline OUTCOME, not how the baseline was measured, so it is
+// unaffected by #1588 replacing that measurement with a contract `wait --verify`
+// exit code.
+function composeVerdict(baselineOutcome, acceptance, requireAcceptance) {
+  if (baselineOutcome !== 'pass') return { verdict: 'fail', source: 'baseline' };
+  switch (acceptance.state) {
+    case 'loaded':
+      if (acceptance.verdict === 'go') return { verdict: 'pass', source: 'acceptance_go' };
+      if (acceptance.verdict === 'conditional_go') return { verdict: 'conditional', source: 'acceptance_conditional_go' };
+      return { verdict: 'fail', source: 'acceptance_no_go' };
+    case 'not_configured':
+      return { verdict: 'pass', source: 'baseline_only' };
+    default:
+      // missing / invalid / mismatched.
+      return requireAcceptance
+        ? { verdict: 'fail', source: 'acceptance_required' }
+        : { verdict: 'pass', source: 'baseline_only_degraded' };
+  }
+}
+
+// The issues whose adjudication silently lost its semantic layer — the ones the
+// `acceptance_not_run` limitation has to name.
+function acceptanceDegraded(uatResult) {
+  return uatResult.verdict_source === 'baseline_only_degraded';
+}
+
+// =============================================================================
 // Preflight (read-only; mirrors merge's delivery-scoped drift re-check)
 // =============================================================================
 
@@ -456,21 +711,44 @@ function preflight(inputs, plan) {
 // UAT assessment (read-only)
 // =============================================================================
 
-// Run acceptance for one issue by executing the profile baseline inside the
-// worktree that currently holds its work (its dispatch worktree, or — after a
-// fix landed — that fix's worktree). There is no `commandmate uat`; the acceptance
-// signal is a real baseline run. A missing worktree or a non-zero step is a fail,
-// never an optimistic pass.
+// Adjudicate one issue on both gates. The machine gate executes the profile
+// baseline inside the worktree that currently holds its work (its dispatch
+// worktree, or — after a fix landed — that fix's worktree); there is no
+// `commandmate uat`, so the signal is a real baseline run. The semantic gate reads
+// that issue's acceptance result. A missing worktree, a non-zero step, a no_go or
+// (under --require-acceptance) an unreadable result is a fail, never an optimistic
+// pass; a conditional_go is neither, and is reported as such.
 function runUat(inputs, plan, number, worktreePath) {
   const baseline = runBaseline(plan.profile.baseline, worktreePath);
+  const acceptance = loadAcceptance(inputs, number);
+  const composed = composeVerdict(baseline.outcome, acceptance, inputs.requireAcceptance);
   return {
     issue: number,
     ran: true,
     report_schema_version: null,
-    outcome: baseline.outcome,
+    // The legacy tri-state, kept as a projection of the composite verdict: `pass`
+    // ONLY for a composite pass. A v1 reader that knows nothing about the
+    // acceptance gate therefore can never read a conditional or failing issue as
+    // passed — the precise value is in `verdict`.
+    outcome: composed.verdict === 'pass' ? 'pass' : 'fail',
     scenarios: baseline.checks,
-    note: baseline.note,
+    note: [baseline.note, acceptance.note].filter(Boolean).join('; '),
+    verdict: composed.verdict,
+    verdict_source: composed.source,
+    baseline: { outcome: baseline.outcome, checks: baseline.checks, note: baseline.note },
+    acceptance,
   };
+}
+
+// The two ways an assessment falls short, kept apart on purpose: a `fail` is a
+// defect the bounded fix loop may try to repair, a `conditional` is a human
+// decision the loop must never auto-answer by repairing or by passing.
+function failingOf(results) {
+  return results.filter((result) => result.verdict === 'fail').map((result) => result.issue);
+}
+
+function conditionalOf(results) {
+  return results.filter((result) => result.verdict === 'conditional').map((result) => result.issue);
 }
 
 // =============================================================================
@@ -530,7 +808,30 @@ function bullets(items, fallback) {
   return items.map((item) => `- ${redact(String(item))}`).join('\n');
 }
 
-function buildFixPrompt(plan, issue, failingScenarios) {
+// The semantic gate's own words, quoted into the fix prompt. A no_go names WHICH
+// criterion failed and why; handing the worker that instead of "UAT failed" is the
+// difference between a targeted repair and a guess. When acceptance did not run,
+// say so plainly rather than implying a judgement that was never made.
+function acceptanceSection(acceptance) {
+  if (!acceptance || acceptance.state !== 'loaded') {
+    const state = acceptance ? acceptance.state : 'not_configured';
+    return [
+      `An acceptance verdict was not available for this issue (${state}), so the failure`,
+      'above is the repository baseline alone. Do not assume the acceptance criteria pass.',
+    ].join('\n');
+  }
+  return [
+    `Verdict: ${acceptance.verdict} — ${acceptance.verdict_reason}`,
+    '',
+    'Findings to repair:',
+    bullets(acceptance.findings, 'The acceptance run recorded no individual finding; reproduce its verdict and fix the cause.'),
+    '',
+    'Unresolved conditions (do not silently close these):',
+    bullets(acceptance.conditions, 'None recorded.'),
+  ].join('\n');
+}
+
+function buildFixPrompt(plan, issue, failingScenarios, acceptance) {
   return [
     `# UAT fix task — issue #${issue.number}`,
     '',
@@ -543,6 +844,9 @@ function buildFixPrompt(plan, issue, failingScenarios) {
     '',
     '## Failing acceptance scenarios',
     bullets(failingScenarios, 'The UAT report did not name a scenario; reproduce the acceptance check and fix the failure.'),
+    '',
+    '## Acceptance verdict (cmate-acceptance-test)',
+    acceptanceSection(acceptance),
     '',
     '## Objective (unchanged)',
     redact(issue.objective ?? issue.title ?? `Resolve issue #${issue.number}.`),
@@ -745,10 +1049,17 @@ function baseReport(inputs, plan, eligible, outDir) {
       base: plan.profile.base,
       verified: plan.profile.verified === true,
     },
+    acceptance: {
+      configured: inputs.acceptanceDir !== null,
+      required: inputs.requireAcceptance,
+      issues_evaluated: 0,
+      verdicts: { go: 0, conditional_go: 0, no_go: 0, missing: 0, invalid: 0, mismatched: 0, not_configured: 0 },
+    },
     eligible_issues: eligible.slice(),
     preflight: [],
     attempts: [],
     unresolved_issues: [],
+    conditional_issues: [],
     blocking_reasons: [],
     limitations: [],
     redactions: [],
@@ -779,7 +1090,8 @@ function runWriteUat(inputs, plan, eligible, outDir, report) {
   const historyPath = join(attemptsRoot, 'history.jsonl');
 
   const uatResults = eligible.map((n) => runUat(inputs, plan, n, issueOf(plan, n).worktree));
-  const failing = eligible.filter((n) => uatResults.find((u) => u.issue === n).outcome !== 'pass');
+  const failing = failingOf(uatResults);
+  const conditional = conditionalOf(uatResults);
   const attempt = {
     index: 0,
     kind: 'assess',
@@ -789,7 +1101,7 @@ function runWriteUat(inputs, plan, eligible, outDir, report) {
     worktrees: [],
     fixes: [],
     remerge: null,
-    advanced: failing.length === 0,
+    advanced: failing.length === 0 && conditional.length === 0,
   };
   appendAttempt(report, attempt, historyPath);
 
@@ -801,6 +1113,27 @@ function runWriteUat(inputs, plan, eligible, outDir, report) {
       owner: 'operator',
     });
   }
+  haltOnConditional(report, uatResults);
+}
+
+// A conditional_go is not a defect to repair and not a pass to grant: it is a
+// human decision. It never becomes success, it never enters the fix loop, and the
+// conditions travel into the report so whoever decides can see them.
+function haltOnConditional(report, uatResults) {
+  const conditional = [...new Set(conditionalOf(uatResults))];
+  if (conditional.length === 0) return;
+  const named = conditional.map((n) => `#${n}`).join(', ');
+  halt(
+    report,
+    'partial',
+    'acceptance_conditional',
+    'acceptance_conditional',
+    `acceptance returned conditional_go for ${named}; the conditions are unverified and are not rounded up to pass`,
+  );
+  report.next_actions.push({
+    action: `human decision: review the recorded acceptance conditions for ${named} and accept or reject them`,
+    owner: 'human',
+  });
 }
 
 // =============================================================================
@@ -815,6 +1148,10 @@ function runFixLoop(inputs, plan, eligible, outDir, report) {
   let target = eligible.slice();
   let fixCount = 0;
   let iteration = 0;
+  // Issues held for a human by a conditional_go. They leave `target` at the
+  // assessment that found them — the loop must not repair a decision — and are
+  // reported once the loop stops, whichever way it stopped.
+  const conditionalResults = [];
 
   // Each issue is assessed in the worktree that currently holds its work: its
   // dispatch worktree initially, and — once a fix re-verifies and re-merges — that
@@ -829,7 +1166,11 @@ function runFixLoop(inputs, plan, eligible, outDir, report) {
     //    target's current worktree. Read-only, so it runs in a preview too — the
     //    difference is that a preview never fixes.
     const uatResults = target.map((n) => runUat(inputs, plan, n, worktreeOf.get(n)));
-    const failing = target.filter((n) => uatResults.find((u) => u.issue === n).outcome !== 'pass');
+    const failing = failingOf(uatResults);
+    const conditional = conditionalOf(uatResults);
+    for (const result of uatResults) {
+      if (result.verdict === 'conditional') conditionalResults.push(result);
+    }
 
     const attempt = {
       index: iteration,
@@ -840,7 +1181,7 @@ function runFixLoop(inputs, plan, eligible, outDir, report) {
       worktrees: [],
       fixes: [],
       remerge: null,
-      advanced: failing.length === 0,
+      advanced: failing.length === 0 && conditional.length === 0,
     };
 
     // 2. UAT passed for every target → success.
@@ -908,9 +1249,10 @@ function runFixLoop(inputs, plan, eligible, outDir, report) {
     for (const number of failing) {
       const wt = attempt.worktrees.find((w) => w.issue === number);
       const issue = issueOf(plan, number);
-      const failingScenarios = attempt.uat_results.find((u) => u.issue === number)?.scenarios ?? [];
+      const assessed = attempt.uat_results.find((u) => u.issue === number);
+      const failingScenarios = assessed?.scenarios ?? [];
       const promptFile = join(attemptDir, `fix-issue-${number}.md`);
-      const message = buildFixPrompt(plan, issue, failingScenarios);
+      const message = buildFixPrompt(plan, issue, failingScenarios, assessed?.acceptance ?? null);
       writeFileSync(promptFile, `${message}\n`, 'utf8');
       const fix = dispatchFix(inputs, plan, number, wt.branch, wt.directory, message);
       attempt.fixes.push(fix);
@@ -948,6 +1290,9 @@ function runFixLoop(inputs, plan, eligible, outDir, report) {
   }
 
   report.attempts_used = fixCount;
+  // Whichever way the loop stopped, a conditional_go that was found along the way
+  // still blocks an unqualified success.
+  haltOnConditional(report, conditionalResults);
 }
 
 // =============================================================================
@@ -961,6 +1306,15 @@ function buildCompletionCheck(report, inputs) {
     (a.remerge?.merged_issues ?? []).every((n) => a.fixes.find((f) => f.issue === n)?.verification.outcome === 'pass'),
   );
   const hasUnresolved = report.unresolved_issues.length > 0;
+
+  // The #1616 honesty invariant, checked rather than asserted: an acceptance
+  // verdict that was not `go` never becomes a passing issue, and a run that is
+  // still holding a conditional_go for a human is never an unqualified success.
+  const allResults = report.attempts.flatMap((a) => a.uat_results);
+  const noRoundedAcceptance = allResults.every((result) => !(
+    result.verdict === 'pass' && result.acceptance && result.acceptance.state === 'loaded' && result.acceptance.verdict !== 'go'
+  ));
+  const conditionalHeld = (report.conditional_issues ?? []).length === 0 || report.status !== 'success';
 
   const checks = [
     {
@@ -992,6 +1346,13 @@ function buildCompletionCheck(report, inputs) {
       passed: uatTargetsEligible && remergeGated,
       detail: 'every UAT target was a verification-passed issue, and every re-merged fix had re-verified',
     },
+    {
+      id: 'acceptance_not_rounded',
+      passed: noRoundedAcceptance && conditionalHeld,
+      detail: noRoundedAcceptance && conditionalHeld
+        ? 'no issue with a non-go acceptance verdict was reported as passed, and no conditional_go was rounded up to success'
+        : 'an acceptance verdict that was not go reached a passing outcome — the composition is wrong',
+    },
   ];
   const passed = checks.every((c) => c.passed) && report.status !== 'failure';
   return { passed, checks };
@@ -1016,12 +1377,29 @@ function renderSummary(report) {
   lines.push('## eligible（verification pass 済み）');
   lines.push(report.eligible_issues.length ? `- ${report.eligible_issues.map((n) => `#${n}`).join(', ')}` : '- なし（verification pass した Issue が無い）。');
   lines.push('');
+  lines.push('## 受入判定（機械ゲート + 意味ゲート）');
+  if (!report.acceptance.configured) {
+    lines.push('- `--acceptance-dir` 無し。baseline（機械ゲート）のみで裁定した。受入条件の意味判定は行っていない。');
+  } else {
+    const v = report.acceptance.verdicts;
+    lines.push(`- acceptance result を ${report.acceptance.issues_evaluated} 件の Issue について読み込んだ（required=${report.acceptance.required}）。`);
+    lines.push(`- verdict 内訳: go=${v.go}, conditional_go=${v.conditional_go}, no_go=${v.no_go}, 欠落=${v.missing}, schema 不適合=${v.invalid}, Issue 不一致=${v.mismatched}`);
+  }
+  if (report.conditional_issues.length > 0) {
+    lines.push(`- **conditional_go（human 判断待ち。pass に丸めない）**: ${report.conditional_issues.map((n) => `#${n}`).join(', ')}`);
+    for (const result of lastAssessments(report)) {
+      if (result.verdict !== 'conditional') continue;
+      lines.push(`  - #${result.issue}: ${result.acceptance.verdict_reason}`);
+      for (const condition of result.acceptance.conditions) lines.push(`    - 条件: ${condition}`);
+    }
+  }
+  lines.push('');
   lines.push('## attempt 履歴');
   if (report.attempts.length === 0) {
     lines.push('- attempt なし。');
   } else {
     for (const a of report.attempts) {
-      const uat = a.uat_results.map((u) => `#${u.issue}=${u.outcome}`).join(', ') || 'なし';
+      const uat = a.uat_results.map((u) => `#${u.issue}=${u.verdict}（baseline ${u.baseline.outcome} / acceptance ${u.acceptance.state === 'loaded' ? u.acceptance.verdict : u.acceptance.state}）`).join(', ') || 'なし';
       const fix = a.fix_performed ? ` / fix=${a.fixes.map((f) => `#${f.issue}:${f.worker_state}/${f.verification.outcome}`).join(', ')}` : '';
       const rem = a.remerge && a.remerge.outcome !== 'not_attempted' ? ` / re-merge=${a.remerge.outcome}` : '';
       lines.push(`- attempt ${a.index} (${a.kind}): UAT ${uat}${fix}${rem}`);
@@ -1032,7 +1410,9 @@ function renderSummary(report) {
   for (const c of report.preflight) lines.push(`- ${c.code}: ${c.ok ? 'ok' : 'NG'}`);
   lines.push('');
   lines.push('## 未解決と next action');
-  if (report.unresolved_issues.length === 0 && report.blocking_reasons.length === 0) {
+  // A limitation alone is enough to break the "nothing to report" case: a run that
+  // lost its acceptance gate must not read as a clean pass in the human summary.
+  if (report.unresolved_issues.length === 0 && report.blocking_reasons.length === 0 && report.limitations.length === 0) {
     lines.push('- なし。全 eligible が UAT を通過した。');
   } else {
     if (report.unresolved_issues.length > 0) lines.push(`- 未解決（UAT 未通過）: ${report.unresolved_issues.map((n) => `#${n}`).join(', ')}`);
@@ -1077,7 +1457,42 @@ function runUatPhase(inputs, plan, dispatch, outDir) {
   return report;
 }
 
+// The last assessment of each issue, in the order the issues were adjudicated.
+// The fix loop re-assesses an issue several times; only its final verdict is the
+// run's verdict for it.
+function lastAssessments(report) {
+  const latest = new Map();
+  for (const attempt of report.attempts) {
+    for (const result of attempt.uat_results) latest.set(result.issue, result);
+  }
+  return [...latest.values()];
+}
+
+// Roll the per-issue acceptance states up into the report, and record the
+// degradation as a limitation when the semantic gate was asked for but could not
+// be applied. Silence here would read as "acceptance passed", so this is the
+// difference between a degraded run and a dishonest one.
+function summarizeAcceptance(report) {
+  const results = lastAssessments(report);
+  report.conditional_issues = results.filter((r) => r.verdict === 'conditional').map((r) => r.issue);
+  report.acceptance.issues_evaluated = results.length;
+  for (const result of results) {
+    const acceptance = result.acceptance;
+    const key = acceptance.state === 'loaded' ? acceptance.verdict : acceptance.state;
+    if (key in report.acceptance.verdicts) report.acceptance.verdicts[key] += 1;
+  }
+
+  const degraded = results.filter(acceptanceDegraded);
+  if (degraded.length > 0) {
+    report.limitations.push({
+      code: 'acceptance_not_run',
+      detail: `the acceptance gate did not contribute a verdict for ${degraded.map((r) => `#${r.issue} (${r.acceptance.state})`).join(', ')}; those issues were adjudicated on the baseline alone. Re-run with a conformant acceptance result, or with --require-acceptance to make this a failure.`,
+    });
+  }
+}
+
 function finalize(report, inputs) {
+  summarizeAcceptance(report);
   report.completion_check = buildCompletionCheck(report, inputs);
   if (!report.completion_check.passed && report.status === 'success') {
     report.status = 'partial';
@@ -1111,10 +1526,17 @@ function uatFailure(error, phase) {
     max_attempts: DEFAULT_MAX_ATTEMPTS,
     attempts_used: 0,
     profile: { id: 'unknown', repository: 'unknown/unknown', base: 'unknown', verified: false },
+    acceptance: {
+      configured: false,
+      required: false,
+      issues_evaluated: 0,
+      verdicts: { go: 0, conditional_go: 0, no_go: 0, missing: 0, invalid: 0, mismatched: 0, not_configured: 0 },
+    },
     eligible_issues: [],
     preflight: [],
     attempts: [],
     unresolved_issues: [],
+    conditional_issues: [],
     blocking_reasons: [{ code: error.code, detail: redact(error.detail ?? error.message) }],
     limitations: [],
     redactions: redactionsList(),

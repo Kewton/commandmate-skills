@@ -1,0 +1,261 @@
+{
+  "description": "#1616 が塞ぐ穴そのもの: #200 は baseline（機械ゲート）が green でも受入判定が no_go。合成裁定は fail となり、success に丸めず partial（uat_failed）で不合格 Issue を名指しする。",
+  "phase": "write_uat",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "uat_scenario": {
+    "uat": {
+      "200": "pass",
+      "201": "pass"
+    }
+  },
+  "acceptance_results": {
+    "200": {
+      "result_schema_version": 1,
+      "skill": {
+        "id": "cmate-acceptance-test",
+        "version": "0.1.1"
+      },
+      "generated_at": "2026-08-01T00:10:00Z",
+      "status": "success",
+      "verdict": "no_go",
+      "verdict_reason": "#200 の受入条件 2 件を検証し、1 件 (AC-02) が満たされていなかった。",
+      "target": {
+        "issue_ref": "Kewton/CommandMate#200",
+        "issue_title": null,
+        "repository": "Kewton/CommandMate",
+        "branch": "feature/issue-200",
+        "commit": null,
+        "dirty": false
+      },
+      "environment": {
+        "agent": "claude",
+        "agent_version": "2.1.220",
+        "commandmate_version": "0.15.0",
+        "invocation": "interactive"
+      },
+      "criteria": [
+        {
+          "id": "AC-01",
+          "text": "受入 command が exit 0 で終わる",
+          "classification": "automated",
+          "risk_tier": "safe",
+          "outcome": "pass",
+          "evidence_ids": [
+            "EV-01"
+          ],
+          "notes": "exit 0 を実測した。"
+        },
+        {
+          "id": "AC-02",
+          "text": "worktree 削除後に lock file が残らない",
+          "classification": "automated",
+          "risk_tier": "safe",
+          "outcome": "fail",
+          "evidence_ids": [
+            "EV-02"
+          ],
+          "notes": "削除が途中で失敗する経路で lock file が残った。"
+        }
+      ],
+      "checks": [
+        {
+          "id": "CK-01",
+          "kind": "command",
+          "description": "AC-01 を検証する command を実行する",
+          "criterion_ids": [
+            "AC-01"
+          ],
+          "risk_tier": "safe",
+          "executed": true,
+          "skip_reason": null,
+          "evidence_ids": [
+            "EV-01"
+          ]
+        },
+        {
+          "id": "CK-02",
+          "kind": "command",
+          "description": "AC-02 を検証する command を実行する",
+          "criterion_ids": [
+            "AC-02"
+          ],
+          "risk_tier": "safe",
+          "executed": true,
+          "skip_reason": null,
+          "evidence_ids": [
+            "EV-02"
+          ]
+        }
+      ],
+      "confirmations": [],
+      "evidence": [
+        {
+          "id": "EV-01",
+          "type": "command",
+          "collected_at": "2026-08-01T00:05:00Z",
+          "summary": "受入 command が exit 0 で終了した。",
+          "redacted": false,
+          "path": null,
+          "command": "cat cmate-verify-ok",
+          "exit_code": 0,
+          "output_excerpt": null,
+          "truncated": false
+        },
+        {
+          "id": "EV-02",
+          "type": "command",
+          "collected_at": "2026-08-01T00:05:00Z",
+          "summary": "lock file が残る経路を再現した。",
+          "redacted": false,
+          "path": null,
+          "command": "node test/worktree-lock.test.mjs",
+          "exit_code": 1,
+          "output_excerpt": null,
+          "truncated": false
+        }
+      ],
+      "next_actions": [
+        {
+          "action": "削除失敗経路で lock を解放する処理を修正する",
+          "owner": "実装担当",
+          "criterion_ids": [
+            "AC-02"
+          ]
+        }
+      ],
+      "blocking_reasons": [
+        "AC-02 が満たされていない: 削除が途中で失敗した場合に lock file が残る"
+      ],
+      "limitations": [],
+      "evidence_dir": "./acceptance-evidence/",
+      "summary_text": null
+    },
+    "201": {
+      "result_schema_version": 1,
+      "skill": {
+        "id": "cmate-acceptance-test",
+        "version": "0.1.1"
+      },
+      "generated_at": "2026-08-01T00:10:00Z",
+      "status": "success",
+      "verdict": "go",
+      "verdict_reason": "#201 の受入条件 1 件を検証し、満たされていた。",
+      "target": {
+        "issue_ref": "Kewton/CommandMate#201",
+        "issue_title": null,
+        "repository": "Kewton/CommandMate",
+        "branch": "feature/issue-201",
+        "commit": null,
+        "dirty": false
+      },
+      "environment": {
+        "agent": "claude",
+        "agent_version": "2.1.220",
+        "commandmate_version": "0.15.0",
+        "invocation": "interactive"
+      },
+      "criteria": [
+        {
+          "id": "AC-01",
+          "text": "受入 command が exit 0 で終わる",
+          "classification": "automated",
+          "risk_tier": "safe",
+          "outcome": "pass",
+          "evidence_ids": [
+            "EV-01"
+          ],
+          "notes": "exit 0 を実測した。"
+        }
+      ],
+      "checks": [
+        {
+          "id": "CK-01",
+          "kind": "command",
+          "description": "AC-01 を検証する command を実行する",
+          "criterion_ids": [
+            "AC-01"
+          ],
+          "risk_tier": "safe",
+          "executed": true,
+          "skip_reason": null,
+          "evidence_ids": [
+            "EV-01"
+          ]
+        }
+      ],
+      "confirmations": [],
+      "evidence": [
+        {
+          "id": "EV-01",
+          "type": "command",
+          "collected_at": "2026-08-01T00:05:00Z",
+          "summary": "受入 command が exit 0 で終了した。",
+          "redacted": false,
+          "path": null,
+          "command": "cat cmate-verify-ok",
+          "exit_code": 0,
+          "output_excerpt": null,
+          "truncated": false
+        }
+      ],
+      "next_actions": [],
+      "blocking_reasons": [],
+      "limitations": [],
+      "evidence_dir": "./acceptance-evidence/",
+      "summary_text": null
+    }
+  },
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "uat_failed",
+    "approved": false,
+    "mutated": false,
+    "attempts_used": 0,
+    "eligible": [
+      201,
+      200
+    ],
+    "unresolved": [
+      200
+    ],
+    "conditional": [],
+    "attempts_count": 1,
+    "no_mutation": true,
+    "verdicts": {
+      "200": "fail",
+      "201": "pass"
+    },
+    "verdict_sources": {
+      "200": "acceptance_no_go",
+      "201": "acceptance_go"
+    },
+    "acceptance_states": {
+      "200": "loaded",
+      "201": "loaded"
+    },
+    "acceptance_verdicts": {
+      "200": "no_go",
+      "201": "go"
+    },
+    "acceptance_summary": {
+      "go": 1,
+      "conditional_go": 0,
+      "no_go": 1
+    },
+    "next_actions_min": 1,
+    "completion_passed": true
+  }
+}

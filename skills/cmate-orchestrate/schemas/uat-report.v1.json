@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/uat-report.v1.json",
   "title": "cmate-orchestrate UAT report v1",
-  "description": "Report printed to stdout and written to uat-report.json by the cmate-orchestrate UAT runner (scripts/uat.mjs). Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records one UAT phase over the verification-passed issues of an already-delivered plan: either a read-only acceptance assessment (write_uat) or a bounded fix loop (fix_uat) that, when UAT fails, creates fix worktrees, dispatches a fix, re-verifies and re-merges, and repeats up to a fixed attempt cap. Reaching the cap with issues still failing is reported as blocked — never rounded up to success. Each attempt is appended to the history; a prior attempt is never overwritten.",
+  "description": "Report printed to stdout and written to uat-report.json by the cmate-orchestrate UAT runner (scripts/uat.mjs). Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records one UAT phase over the verification-passed issues of an already-delivered plan: either a read-only acceptance assessment (write_uat) or a bounded fix loop (fix_uat) that, when UAT fails, creates fix worktrees, dispatches a fix, re-verifies and re-merges, and repeats up to a fixed attempt cap. Reaching the cap with issues still failing is reported as blocked — never rounded up to success. Each attempt is appended to the history; a prior attempt is never overwritten. Since 0.8.0 (#1616) adjudication is two-layered: a machine gate (the profile baseline) and a semantic gate (a cmate-acceptance-test acceptance-result.v1 document, read and validated but never produced here) compose into a per-issue verdict. That extension is additive — every field it introduced is optional, so a report written before it still conforms.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -46,6 +46,7 @@
       "enum": [
         "completed",
         "uat_failed",
+        "acceptance_conditional",
         "max_attempts_reached",
         "worktree_failed",
         "fix_failed",
@@ -53,7 +54,7 @@
         "preflight_failed",
         "runner_error"
       ],
-      "description": "Why the phase stopped. completed: every eligible issue passed UAT (possibly after a fix), or there was nothing eligible to do. max_attempts_reached: the fix loop hit its cap with failures remaining (status blocked). The rest name the first blocking condition; a failure is never reported as completed."
+      "description": "Why the phase stopped. completed: every eligible issue passed UAT (possibly after a fix), or there was nothing eligible to do. acceptance_conditional: the machine gate passed but the acceptance gate returned conditional_go for at least one issue, so the run is held for a human decision instead of being rounded up (status partial). max_attempts_reached: the fix loop hit its cap with failures remaining (status blocked). The rest name the first blocking condition; a failure is never reported as completed."
     },
     "approved": {
       "type": "boolean",
@@ -95,6 +96,38 @@
       "description": "Issues drawn from the dispatch report whose worker completed AND whose verification passed. Only these are ever subjected to UAT or repaired: an unverified issue is never fixed or re-merged.",
       "items": { "$ref": "#/$defs/issue_number" }
     },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["configured", "required", "issues_evaluated", "verdicts"],
+      "description": "Optional (added in 0.8.0, #1616): how the semantic gate was applied to this run. Absent in a report written before the gate existed, which is why it is not required. configured false means --acceptance-dir was not given and every issue was adjudicated on the baseline alone — the pre-0.8.0 behavior, stated rather than implied.",
+      "properties": {
+        "configured": {
+          "type": "boolean",
+          "description": "Whether --acceptance-dir was given. False means the semantic gate did not participate at all."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether --require-acceptance was given, making a missing, non-conformant or wrong-issue acceptance result a failure instead of a recorded limitation."
+        },
+        "issues_evaluated": { "type": "integer", "minimum": 0 },
+        "verdicts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["go", "conditional_go", "no_go", "missing", "invalid", "mismatched", "not_configured"],
+          "description": "Counts over each issue's FINAL assessment. go/conditional_go/no_go are verdicts an acceptance document actually carried; missing/invalid/mismatched/not_configured are the named ways it did not.",
+          "properties": {
+            "go": { "type": "integer", "minimum": 0 },
+            "conditional_go": { "type": "integer", "minimum": 0 },
+            "no_go": { "type": "integer", "minimum": 0 },
+            "missing": { "type": "integer", "minimum": 0 },
+            "invalid": { "type": "integer", "minimum": 0 },
+            "mismatched": { "type": "integer", "minimum": 0 },
+            "not_configured": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
     "preflight": {
       "type": "array",
       "description": "Read-only preflight probes run before any mutation (commandmate availability, repo access, base resolvable). A blocking failure yields status failure and nothing is attempted.",
@@ -117,7 +150,12 @@
     },
     "unresolved_issues": {
       "type": "array",
-      "description": "Issues still failing UAT when the run stopped. Non-empty exactly when status is blocked (cap reached) or partial (a preview or a fix that could not be attempted).",
+      "description": "Issues whose composite verdict was FAIL when the run stopped. Non-empty whenever status is blocked (cap reached), and whenever partial was caused by a failing assessment (a preview or a fix that could not be attempted). An issue held for a human by a conditional_go acceptance verdict is not failing and is listed in conditional_issues instead, so a partial run may have this empty and that one non-empty.",
+      "items": { "$ref": "#/$defs/issue_number" }
+    },
+    "conditional_issues": {
+      "type": "array",
+      "description": "Optional (added in 0.8.0, #1616): issues whose machine gate passed but whose acceptance verdict was conditional_go. They are neither passed nor repaired — a conditional_go is a human decision, and the bounded fix loop never auto-answers one. Non-empty forces status away from success.",
       "items": { "$ref": "#/$defs/issue_number" }
     },
     "blocking_reasons": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
@@ -156,7 +194,8 @@
         "checks": {
           "type": "array",
           "minItems": 5,
-          "maxItems": 5,
+          "maxItems": 6,
+          "description": "Five checks before 0.8.0; six since (#1616 added acceptance_not_rounded). The bound stays open at five so a report written by the earlier runner still conforms.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -168,7 +207,8 @@
                   "approval_enforced",
                   "attempts_bounded",
                   "blocked_reported",
-                  "verification_gated"
+                  "verification_gated",
+                  "acceptance_not_rounded"
                 ]
               },
               "passed": { "type": "boolean" },
@@ -210,6 +250,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["issue", "ran", "report_schema_version", "outcome", "scenarios", "note"],
+      "description": "One issue's adjudication. Since 0.8.0 (#1616) it carries both gates separately — `baseline` (machine) and `acceptance` (semantic) — plus the `verdict` they compose into. Those three are optional so a report written before the semantic gate existed still conforms; `outcome` remains required and remains the value an older reader consumes.",
       "properties": {
         "issue": { "$ref": "#/$defs/issue_number" },
         "ran": { "type": "boolean" },
@@ -219,12 +260,78 @@
         },
         "outcome": {
           "enum": ["pass", "fail", "not_run"],
-          "description": "Measured, never rounded. not_run only in a preview."
+          "description": "Measured, never rounded. Since 0.8.0 this is the composite `verdict` projected onto the original tri-state: `pass` ONLY when the composite verdict is pass, so a reader that predates the acceptance gate can never mistake a conditional or failing issue for a passing one. A conditional verdict therefore appears here as fail — the exact value is in `verdict`. not_run only in a preview."
         },
+        "verdict": {
+          "enum": ["pass", "conditional", "fail", "not_run"],
+          "description": "Optional (0.8.0, #1616). The composition of both gates. pass: the baseline passed and acceptance said go (or the semantic gate was not configured). conditional: the baseline passed and acceptance said conditional_go — held for a human, never rounded up. fail: the baseline failed, acceptance said no_go, or --require-acceptance was given and no usable acceptance result existed."
+        },
+        "verdict_source": {
+          "enum": [
+            "baseline",
+            "acceptance_go",
+            "acceptance_conditional_go",
+            "acceptance_no_go",
+            "baseline_only",
+            "baseline_only_degraded",
+            "acceptance_required"
+          ],
+          "description": "Optional (0.8.0, #1616). Which gate decided the verdict, so a reader never has to infer it. baseline: the machine gate failed. baseline_only: --acceptance-dir was not given. baseline_only_degraded: it was given but this issue had no usable result, so the verdict rests on the baseline alone and the run records the acceptance_not_run limitation. acceptance_required: the same situation under --require-acceptance, which fails instead."
+        },
+        "baseline": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["outcome", "checks", "note"],
+          "description": "Optional (0.8.0, #1616). The machine gate on its own, kept separate from the composition so replacing how it is measured (#1588 moves it to a contract verify exit code) does not disturb the semantic gate.",
+          "properties": {
+            "outcome": { "enum": ["pass", "fail", "not_run"] },
+            "checks": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "note": { "type": "string" }
+          }
+        },
+        "acceptance": { "$ref": "#/$defs/acceptance_result" },
         "scenarios": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 },
           "description": "Redacted names of the acceptance scenarios that were checked. Never a raw terminal or a secret."
+        },
+        "note": { "type": "string" }
+      }
+    },
+    "acceptance_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "verdict", "status", "issue_ref", "verdict_reason", "findings", "conditions", "note"],
+      "description": "Optional (0.8.0, #1616). What the semantic gate contributed for one issue, read from a cmate-acceptance-test acceptance-result.v1 document. The UAT runner never produces a verdict — it validates the document, confirms it targets this issue, and records what it said.",
+      "properties": {
+        "state": {
+          "enum": ["not_configured", "missing", "invalid", "mismatched", "loaded"],
+          "description": "How far reading got. not_configured: --acceptance-dir was not given. missing: no issue-<n>.json under it. invalid: not JSON, or not conformant to acceptance-result.v1. mismatched: conformant but its target.issue_ref names a different issue. loaded: usable, and `verdict` below is what it said. Only `loaded` ever contributes a verdict — the other four are named so a degraded run is visible rather than silent."
+        },
+        "verdict": {
+          "oneOf": [{ "type": "null" }, { "enum": ["go", "conditional_go", "no_go"] }],
+          "description": "The acceptance document's verdict, verbatim. Null unless state is loaded."
+        },
+        "status": {
+          "oneOf": [{ "type": "null" }, { "enum": ["success", "partial", "failure"] }],
+          "description": "How far the acceptance run itself got, verbatim. Independent of verdict: a run that verified everything and found a failure is status success and verdict no_go."
+        },
+        "issue_ref": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1, "maxLength": 200 }],
+          "description": "The document's target.issue_ref, redacted. Recorded for a loaded or mismatched document so a wrong-target result can be diagnosed."
+        },
+        "verdict_reason": { "type": "string", "maxLength": 300 },
+        "findings": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Bounded, redacted excerpts of the criteria that resolved to fail plus the run's blocking reasons — what a fix worker has to repair. Quoted into the fix prompt so a repair targets the actual finding instead of guessing."
+        },
+        "conditions": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Bounded, redacted excerpts of the criteria that never resolved (flaky, blocked, not_run, manual_pending, not_verifiable) plus the run's next actions and limitations — what a human has to close before a conditional_go can become an acceptance."
         },
         "note": { "type": "string" }
       }

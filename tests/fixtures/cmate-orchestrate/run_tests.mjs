@@ -43,6 +43,13 @@ const resultSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'orchestrate-resul
 const dispatchSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'dispatch-report.v1.json'), 'utf8'));
 const mergeSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'merge-report.v1.json'), 'utf8'));
 const uatSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'uat-report.v1.json'), 'utf8'));
+// The semantic gate's input contract, owned by cmate-acceptance-test. The UAT
+// runner consumes it and never writes it, so the fixtures are validated against
+// the producing Skill's schema rather than against a local copy.
+const acceptanceSchema = JSON.parse(readFileSync(
+  join(REPO_ROOT, 'skills', 'cmate-acceptance-test', 'schemas', 'acceptance-result.v1.json'),
+  'utf8',
+));
 
 // A dispatch scenario where both issues of the two-wave fixture complete and
 // pass verification, so both are eligible for the merge phase. Merge cases that
@@ -169,6 +176,9 @@ function resolveRef(root, ref) {
 }
 
 function typeOk(type, value) {
+  // JSON Schema allows a union of types (`"type": ["string", "null"]`), which the
+  // acceptance-result schema uses for its optional fields.
+  if (Array.isArray(type)) return type.some((member) => typeOk(member, value));
   switch (type) {
     case 'object': return value !== null && typeof value === 'object' && !Array.isArray(value);
     case 'array': return Array.isArray(value);
@@ -697,6 +707,78 @@ function uatSpecPasses(scenario, number) {
   return (uat[number] ?? uat[String(number)]) === 'pass';
 }
 
+// The semantic gate's input (#1616): one cmate-acceptance-test result document per
+// issue at <dir>/issue-<n>.json. A case declares them as `acceptance_results`,
+// mapping an issue number to either an object (written as JSON) or a raw string —
+// the string form is how the not-valid-JSON branch is exercised. A case may also
+// set `acceptance_dir: true` with no results at all, which is the directory-given-
+// but-document-missing branch. Returns the directory to pass as --acceptance-dir,
+// or null when the case does not configure the gate.
+function setupAcceptanceDir(spec, work) {
+  const results = spec.acceptance_results;
+  const wanted = spec.acceptance_dir ?? results !== undefined;
+  if (!wanted) return null;
+  const dir = join(work, 'acceptance');
+  mkdirSync(dir, { recursive: true });
+  const deliberatelyBroken = new Set((spec.acceptance_nonconformant ?? []).map(String));
+  for (const [number, document] of Object.entries(results ?? {})) {
+    const path = join(dir, `issue-${number}.json`);
+    writeFileSync(path, typeof document === 'string' ? document : `${JSON.stringify(document, null, 2)}\n`);
+    // A fixture that is supposed to be a real acceptance result is validated
+    // against cmate-acceptance-test's own schema, so the go/conditional_go/no_go
+    // branches are exercised with documents that Skill could actually have
+    // produced — not with a shape invented here. The deliberately broken ones are
+    // exempt: being rejected is what they test.
+    if (deliberatelyBroken.has(String(number)) || typeof document === 'string') continue;
+    const errors = validateAgainst(acceptanceSchema, document, `acceptance/issue-${number}`);
+    check(errors.length === 0, `acceptance fixture for #${number} is not acceptance-result.v1: ${errors.slice(0, 3).join('; ')}`);
+  }
+  return dir;
+}
+
+// The run's verdict for an issue is its LAST assessment: the fix loop re-assesses,
+// and an earlier attempt's failure is history, not the outcome.
+function lastAssessmentOf(report, issue) {
+  let found;
+  for (const attempt of report.attempts) {
+    for (const result of attempt.uat_results) {
+      if (result.issue === issue) found = result;
+    }
+  }
+  return found;
+}
+
+function allAssessments(report) {
+  return report.attempts.flatMap((attempt) => attempt.uat_results);
+}
+
+// The #1616 central rule, asserted on EVERY uat case rather than only the ones that
+// configure acceptance: nothing that was not verified is reported as passed. A
+// conditional_go or no_go must never reach a passing verdict, must never surface as
+// the legacy `outcome: pass` an older reader would consume, and a run still holding
+// a conditional_go must not be an unqualified success.
+function checkAcceptanceNeverRounded(report) {
+  for (const result of allAssessments(report)) {
+    const acceptance = result.acceptance;
+    if (!acceptance || acceptance.state !== 'loaded' || acceptance.verdict === 'go') continue;
+    check(result.verdict !== 'pass', `#${result.issue}: acceptance ${acceptance.verdict} was composed into verdict "pass"`);
+    check(result.outcome !== 'pass', `#${result.issue}: acceptance ${acceptance.verdict} surfaced as the legacy outcome "pass"`);
+  }
+  const conditional = (report.conditional_issues ?? []);
+  if (conditional.length > 0) {
+    check(report.status !== 'success', `conditional_go for ${JSON.stringify(conditional)} but the run reported success`);
+  }
+  for (const result of allAssessments(report)) {
+    if (result.verdict === 'conditional') {
+      check(conditional.includes(result.issue), `#${result.issue} was conditional but is not in conditional_issues`);
+    }
+  }
+  const gate = report.completion_check.checks.find((c) => c.id === 'acceptance_not_rounded');
+  if (check(gate !== undefined, 'completion_check is missing acceptance_not_rounded')) {
+    check(gate.passed === true, 'the acceptance_not_rounded completion check did not pass');
+  }
+}
+
 function runUatRunner(planPath, dispatchPath, outDir, phaseFlag, extraArgs, env, cwd) {
   const args = [
     UAT_RUNNER,
@@ -742,8 +824,11 @@ function runUatCase(caseId) {
   const scenarioPath = writeScenario(workUat, 'uat-scenario.json', { ...uatScenario, worktrees: planToWorktrees(plan) });
   const env = { ...process.env, CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath, CMATE_FAKE_STATE: workUat };
 
+  const acceptanceDir = setupAcceptanceDir(spec, workUat);
+  const uatArgs = [...(spec.uat_args ?? []), ...(acceptanceDir ? ['--acceptance-dir', acceptanceDir] : [])];
+
   const phaseFlag = spec.phase === 'fix_uat' ? '--create-uat-fix-worktrees' : '--write-uat';
-  const { exit, stdout } = runUatRunner(planPath, dispatchPath, uatOut, phaseFlag, spec.uat_args ?? [], env, integration);
+  const { exit, stdout } = runUatRunner(planPath, dispatchPath, uatOut, phaseFlag, uatArgs, env, integration);
 
   let report;
   try {
@@ -766,9 +851,66 @@ function runUatCase(caseId) {
   if (expect.attempts_used !== undefined) check(report.attempts_used === expect.attempts_used, `attempts_used ${report.attempts_used} !== ${expect.attempts_used}`);
   if (expect.eligible) check(deepEqual(report.eligible_issues, expect.eligible), `eligible ${JSON.stringify(report.eligible_issues)} !== ${JSON.stringify(expect.eligible)}`);
   if (expect.unresolved) check(deepEqual(report.unresolved_issues, expect.unresolved), `unresolved ${JSON.stringify(report.unresolved_issues)} !== ${JSON.stringify(expect.unresolved)}`);
+  if (expect.conditional) check(deepEqual(report.conditional_issues, expect.conditional), `conditional ${JSON.stringify(report.conditional_issues)} !== ${JSON.stringify(expect.conditional)}`);
   if (expect.attempts_count !== undefined) check(report.attempts.length === expect.attempts_count, `attempts ${report.attempts.length} !== ${expect.attempts_count}`);
   if (expect.completion_passed !== undefined) check(report.completion_check.passed === expect.completion_passed, `completion_check.passed ${report.completion_check.passed} !== ${expect.completion_passed}`);
   if (expect.next_actions_min !== undefined) check(report.next_actions.length >= expect.next_actions_min, `next_actions ${report.next_actions.length} < ${expect.next_actions_min}`);
+
+  // Two-layer adjudication (#1616): the per-issue composite verdict, the state the
+  // semantic gate reached, and the verdict its document carried are all asserted
+  // separately, so a case cannot pass by accident with the gates conflated.
+  for (const [num, verdict] of Object.entries(expect.verdicts ?? {})) {
+    const assessment = lastAssessmentOf(report, Number(num));
+    if (check(assessment !== undefined, `#${num} has no assessment`)) {
+      check(assessment.verdict === verdict, `#${num} verdict "${assessment.verdict}" !== "${verdict}"`);
+    }
+  }
+  for (const [num, state] of Object.entries(expect.acceptance_states ?? {})) {
+    const assessment = lastAssessmentOf(report, Number(num));
+    if (check(assessment !== undefined, `#${num} has no assessment`)) {
+      check(assessment.acceptance.state === state, `#${num} acceptance state "${assessment.acceptance.state}" !== "${state}"`);
+    }
+  }
+  for (const [num, verdict] of Object.entries(expect.acceptance_verdicts ?? {})) {
+    const assessment = lastAssessmentOf(report, Number(num));
+    if (check(assessment !== undefined, `#${num} has no assessment`)) {
+      check(assessment.acceptance.verdict === verdict, `#${num} acceptance verdict ${JSON.stringify(assessment.acceptance.verdict)} !== ${JSON.stringify(verdict)}`);
+    }
+  }
+  for (const [num, source] of Object.entries(expect.verdict_sources ?? {})) {
+    const assessment = lastAssessmentOf(report, Number(num));
+    if (check(assessment !== undefined, `#${num} has no assessment`)) {
+      check(assessment.verdict_source === source, `#${num} verdict_source "${assessment.verdict_source}" !== "${source}"`);
+    }
+  }
+  // A degraded acceptance gate is recorded, never silent.
+  for (const code of expect.limitation_codes ?? []) {
+    check(report.limitations.some((entry) => entry.code === code), `limitation "${code}" was expected but not recorded`);
+  }
+  for (const code of expect.absent_limitation_codes ?? []) {
+    check(!report.limitations.some((entry) => entry.code === code), `limitation "${code}" should be absent but was recorded`);
+  }
+  for (const code of expect.blocking_codes ?? []) {
+    check(report.blocking_reasons.some((entry) => entry.code === code), `blocking reason "${code}" was expected but not recorded`);
+  }
+  if (expect.acceptance_summary) {
+    for (const [key, count] of Object.entries(expect.acceptance_summary)) {
+      check(report.acceptance.verdicts[key] === count, `acceptance verdict count ${key}=${report.acceptance.verdicts[key]} !== ${count}`);
+    }
+  }
+  if (expect.acceptance_configured !== undefined) {
+    check(report.acceptance.configured === expect.acceptance_configured, `acceptance.configured ${report.acceptance.configured} !== ${expect.acceptance_configured}`);
+  }
+  // The no_go findings must actually reach the fix worker: a repair driven by
+  // "UAT failed" is a guess, one driven by the failing criterion is not.
+  for (const [num, needles] of Object.entries(expect.fix_prompt_contains ?? {})) {
+    const promptPath = join(uatOut, 'attempts', 'attempt-0', `fix-issue-${num}.md`);
+    if (check(existsSync(promptPath), `fix prompt for #${num} was not written at attempts/attempt-0/`)) {
+      const prompt = readFileSync(promptPath, 'utf8');
+      for (const needle of needles) check(prompt.includes(needle), `fix prompt for #${num} does not quote ${JSON.stringify(needle)}`);
+    }
+  }
+  checkAcceptanceNeverRounded(report);
 
   // The bounded-loop guarantee: attempts_used never exceeds max_attempts.
   check(report.attempts_used <= report.max_attempts, `attempts_used ${report.attempts_used} exceeded max_attempts ${report.max_attempts}`);
@@ -809,13 +951,29 @@ function runUatCase(caseId) {
       check(deepEqual(indices, indices.map((_, i) => i)), `attempt indices ${JSON.stringify(indices)} are not a 0..n append sequence`);
     }
     // The output directory must refuse to be overwritten on a second run.
-    const second = runUatRunner(planPath, dispatchPath, uatOut, phaseFlag, spec.uat_args ?? [], env, integration);
+    const second = runUatRunner(planPath, dispatchPath, uatOut, phaseFlag, uatArgs, env, integration);
     let secondReport;
     try {
       secondReport = JSON.parse(second.stdout);
       check(secondReport.blocking_reasons.some((r) => r.code === 'out_exists'), 're-running into the same out dir did not refuse with out_exists');
     } catch {
       check(false, 'second uat run did not emit a JSON failure envelope');
+    }
+  }
+
+  // Determinism of the composition (#1616): the same acceptance documents and the
+  // same worktree world must yield the same per-issue adjudication. Only the
+  // read-only phase is re-run — a fix loop mutates the fake CLI's state, so a
+  // second run of it is a different world by construction, not a different verdict.
+  if (acceptanceDir && spec.phase !== 'fix_uat') {
+    const third = runUatRunner(planPath, dispatchPath, join(workUat, 'uat-again'), phaseFlag, uatArgs, env, integration);
+    try {
+      const repeat = JSON.parse(third.stdout);
+      check(third.exit === exit, `re-run exit ${third.exit} !== ${exit} — the adjudication is not deterministic`);
+      const shapeOf = (r) => allAssessments(r).map((u) => [u.issue, u.verdict, u.verdict_source, u.acceptance.state, u.acceptance.verdict]);
+      check(deepEqual(shapeOf(repeat), shapeOf(report)), 'the composed adjudication differs across two identical runs');
+    } catch {
+      check(false, 'the determinism re-run did not emit a JSON report');
     }
   }
 }
