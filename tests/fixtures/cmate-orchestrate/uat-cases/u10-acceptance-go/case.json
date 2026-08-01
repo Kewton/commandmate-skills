@@ -1,0 +1,218 @@
+{
+  "description": "意味ゲート統合（#1616）: 両 Issue の acceptance result が go。機械ゲート（baseline）と意味ゲート（受入判定）を合成して pass となり、phase は success。acceptance_not_run limitation は記録されない。",
+  "phase": "write_uat",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "uat_scenario": {
+    "uat": {
+      "200": "pass",
+      "201": "pass"
+    }
+  },
+  "acceptance_results": {
+    "200": {
+      "result_schema_version": 1,
+      "skill": {
+        "id": "cmate-acceptance-test",
+        "version": "0.1.1"
+      },
+      "generated_at": "2026-08-01T00:10:00Z",
+      "status": "success",
+      "verdict": "go",
+      "verdict_reason": "#200 の受入条件 1 件を検証し、満たされていた。",
+      "target": {
+        "issue_ref": "Kewton/CommandMate#200",
+        "issue_title": null,
+        "repository": "Kewton/CommandMate",
+        "branch": "feature/issue-200",
+        "commit": null,
+        "dirty": false
+      },
+      "environment": {
+        "agent": "claude",
+        "agent_version": "2.1.220",
+        "commandmate_version": "0.15.0",
+        "invocation": "interactive"
+      },
+      "criteria": [
+        {
+          "id": "AC-01",
+          "text": "受入 command が exit 0 で終わる",
+          "classification": "automated",
+          "risk_tier": "safe",
+          "outcome": "pass",
+          "evidence_ids": [
+            "EV-01"
+          ],
+          "notes": "exit 0 を実測した。"
+        }
+      ],
+      "checks": [
+        {
+          "id": "CK-01",
+          "kind": "command",
+          "description": "AC-01 を検証する command を実行する",
+          "criterion_ids": [
+            "AC-01"
+          ],
+          "risk_tier": "safe",
+          "executed": true,
+          "skip_reason": null,
+          "evidence_ids": [
+            "EV-01"
+          ]
+        }
+      ],
+      "confirmations": [],
+      "evidence": [
+        {
+          "id": "EV-01",
+          "type": "command",
+          "collected_at": "2026-08-01T00:05:00Z",
+          "summary": "受入 command が exit 0 で終了した。",
+          "redacted": false,
+          "path": null,
+          "command": "cat cmate-verify-ok",
+          "exit_code": 0,
+          "output_excerpt": null,
+          "truncated": false
+        }
+      ],
+      "next_actions": [],
+      "blocking_reasons": [],
+      "limitations": [],
+      "evidence_dir": "./acceptance-evidence/",
+      "summary_text": null
+    },
+    "201": {
+      "result_schema_version": 1,
+      "skill": {
+        "id": "cmate-acceptance-test",
+        "version": "0.1.1"
+      },
+      "generated_at": "2026-08-01T00:10:00Z",
+      "status": "success",
+      "verdict": "go",
+      "verdict_reason": "#201 の受入条件 1 件を検証し、満たされていた。",
+      "target": {
+        "issue_ref": "Kewton/CommandMate#201",
+        "issue_title": null,
+        "repository": "Kewton/CommandMate",
+        "branch": "feature/issue-201",
+        "commit": null,
+        "dirty": false
+      },
+      "environment": {
+        "agent": "claude",
+        "agent_version": "2.1.220",
+        "commandmate_version": "0.15.0",
+        "invocation": "interactive"
+      },
+      "criteria": [
+        {
+          "id": "AC-01",
+          "text": "受入 command が exit 0 で終わる",
+          "classification": "automated",
+          "risk_tier": "safe",
+          "outcome": "pass",
+          "evidence_ids": [
+            "EV-01"
+          ],
+          "notes": "exit 0 を実測した。"
+        }
+      ],
+      "checks": [
+        {
+          "id": "CK-01",
+          "kind": "command",
+          "description": "AC-01 を検証する command を実行する",
+          "criterion_ids": [
+            "AC-01"
+          ],
+          "risk_tier": "safe",
+          "executed": true,
+          "skip_reason": null,
+          "evidence_ids": [
+            "EV-01"
+          ]
+        }
+      ],
+      "confirmations": [],
+      "evidence": [
+        {
+          "id": "EV-01",
+          "type": "command",
+          "collected_at": "2026-08-01T00:05:00Z",
+          "summary": "受入 command が exit 0 で終了した。",
+          "redacted": false,
+          "path": null,
+          "command": "cat cmate-verify-ok",
+          "exit_code": 0,
+          "output_excerpt": null,
+          "truncated": false
+        }
+      ],
+      "next_actions": [],
+      "blocking_reasons": [],
+      "limitations": [],
+      "evidence_dir": "./acceptance-evidence/",
+      "summary_text": null
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": false,
+    "mutated": false,
+    "attempts_used": 0,
+    "eligible": [
+      201,
+      200
+    ],
+    "unresolved": [],
+    "conditional": [],
+    "attempts_count": 1,
+    "no_mutation": true,
+    "acceptance_configured": true,
+    "verdicts": {
+      "200": "pass",
+      "201": "pass"
+    },
+    "verdict_sources": {
+      "200": "acceptance_go",
+      "201": "acceptance_go"
+    },
+    "acceptance_states": {
+      "200": "loaded",
+      "201": "loaded"
+    },
+    "acceptance_verdicts": {
+      "200": "go",
+      "201": "go"
+    },
+    "acceptance_summary": {
+      "go": 2,
+      "conditional_go": 0,
+      "no_go": 0,
+      "missing": 0,
+      "invalid": 0,
+      "mismatched": 0
+    },
+    "absent_limitation_codes": [
+      "acceptance_not_run"
+    ],
+    "completion_passed": true
+  }
+}

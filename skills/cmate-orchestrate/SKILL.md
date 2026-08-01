@@ -22,6 +22,9 @@ verification pass 後の**PR 作成・CI 確認・guarded merge** と、納品�
   （`--write-uat`）、不合格なら fix worktree 作成 → 修正 → 再検証 → 再merge を
   **回数上限つき**で繰り返す（`--create-uat-fix-worktrees`）。上限到達時は `blocked` で
   停止し成功に丸めない。1 invocation で1 phase だけ、mutation は明示承認の下でのみ行う。
+  裁定は **機械ゲート（profile baseline）+ 意味ゲート（受入条件の Go/Conditional Go/No-Go）の
+  二層**である。意味ゲートの判定は cmate-acceptance-test がエージェント側の手順として出し、
+  uat runner はその result document を検証して**合成するだけ**である（runner 内で LLM 判定はしない）。
 
 Issue 本文の自動編集、回数無制限のループ、crash 後の resume/attempt retry、cross-model review は
 この Skill の **スコープ外** である。どの mutating runner も、明示承認・verification pass・
@@ -375,6 +378,12 @@ dispatch report で verification pass した Issue に受入テスト（UAT）�
 修正する。契約の正本は [references/uat-contract.md](./references/uat-contract.md)、report の schema は
 [schemas/uat-report.v1.json](./schemas/uat-report.v1.json) である。
 
+裁定は **機械ゲート（profile baseline の再実行）と意味ゲート（Issue の受入条件に対する判定）の二層**で
+ある。意味ゲートの入力は [cmate-acceptance-test](../cmate-acceptance-test/) の result document
+（[`acceptance-result.v1`](../cmate-acceptance-test/schemas/acceptance-result.v1.json)）であり、その
+**生成はエージェント側の手順**（第15節 Step U0-b）、**合成は uat runner の決定的処理**である。
+「baseline は green だが受入条件は未達」を `success` に丸めないことがこの二層化の目的である。
+
 ## 14. uat runner の入力
 
 ```
@@ -393,6 +402,8 @@ CommandAgent の explicit phase flag 設計（`--write-uat` / `--create-uat-fix-
 | `--write-uat` / `--create-uat-fix-worktrees` | どちらか1つ | なし | 有効化する phase |
 | `--approve` | 任意 | **off** | fix loop の明示承認。無ければ mutation しない preview |
 | `--max-attempts <1-5>` | 任意 | `2` | fix 試行の回数上限。ループはこれを超えない |
+| `--acceptance-dir <dir>` | 任意 | なし | 意味ゲートの入力。`issue-<n>.json`（`acceptance-result.v1`）を置いた directory。無ければ機械ゲートのみで裁定する |
+| `--require-acceptance` | 任意 | off | result 欠落・schema 不適合・対象 Issue 不一致を limitation ではなく **不合格** として扱う。`--acceptance-dir` が必須 |
 | `--out <dir>` | 任意 | `<dispatch-dir>/<phase>` | 出力先。既存なら `out_exists` |
 | `--cli` / `--git` / `--gh <path>` | 任意 | `commandmate`/`git`/`gh` | UAT・fix dispatch・再検証・再merge・preflight に使う CLI |
 
@@ -402,23 +413,66 @@ CommandAgent の explicit phase flag 設計（`--write-uat` / `--create-uat-fix-
 の継承）。plan の `merge_order` 順に処理する。eligible が空なら `no_eligible_issues` を載せて no-op
 success とする。
 
-### Step U0. preflight（read-only）
+裁定は **二層**である（[#1616](https://github.com/Kewton/CommandMate/issues/1616)）。
+
+| 層 | 何を見るか | 誰が出すか |
+|---|---|---|
+| **機械ゲート** | profile の baseline（lint/test/build 等）が worktree 内で全部 exit 0 か | uat runner（決定的） |
+| **意味ゲート** | Issue の**受入条件**が満たされているか（Go / Conditional Go / No-Go） | **エージェント**が cmate-acceptance-test を実行して出す |
+
+**判定の生成はエージェント側の手順（Step U0-b）であり、uat runner の中で LLM 判定はしない。** runner は
+result document を読み・schema 検証し・対象 Issue を照合して**合成するだけ**である。
+
+### Step U0-a. preflight（read-only）
 
 `commandmate --version`・`gh repo view`・`git rev-parse --verify <base>` を確認する。blocking な失敗が
 あれば `failure`（`preflight_failed`）で、何も試さず終了する。
 
+### Step U0-b. 受入判定を生成する（エージェントの手順・意味ゲート）
+
+dispatch 完了後・UAT 裁定前に、**eligible な Issue ごとに** [cmate-acceptance-test](../cmate-acceptance-test/)
+を実行し、その result document を `<out>/acceptance/issue-<n>.json` に置く。
+
+1. eligible 集合を dispatch report から取る（`worker_state: completed` かつ `verification.outcome: pass`）。
+2. 各 Issue について cmate-acceptance-test を、`issue_ref` = その Issue、`target_ref` = その Issue の
+   **worktree**（plan の `worktree`）、`result_path` = `<acceptance-dir>/issue-<n>.json` で実行する。
+   Issue 本文は read-only で取得する（**書き戻さない**）。
+3. 出力が [`acceptance-result.v1`](../cmate-acceptance-test/schemas/acceptance-result.v1.json) に適合し、
+   `target.issue_ref` がその Issue を指していることを確認する。**別 Issue の result を流用しない。**
+4. その directory を `--acceptance-dir` として uat runner に渡す。受入判定を必須にするなら
+   `--require-acceptance` も渡す。
+
+生成できない Issue があるときに、他 Issue の result を代用したり、判定を推測で書いたりしてはならない。
+**生成できなかったこと自体が記録すべき事実**である（runner が `acceptance_not_run` として記録する）。
+
 ### Step U1-a. `--write-uat`（read-only assessment）
 
-各 eligible の worktree 内で **profile の baseline を実行**して受入を判定する（`commandmate uat` は
-無い。全 baseline command が exit 0 なら pass）。全 pass なら `success`、不合格があれば
-`partial`（`uat_failed`）とし、不合格 Issue と next action を返す。worktree も fix も再merge もしない。
+各 eligible の worktree 内で **profile の baseline を実行**して機械ゲートを判定し（`commandmate uat` は
+無い。全 baseline command が exit 0 なら pass）、`--acceptance-dir` があれば意味ゲートと合成する。
+合成規則は次のとおりで、**検証していないものを pass に丸めない**。
+
+| 機械ゲート | 意味ゲート | 合成 verdict | 扱い |
+|---|---|---|---|
+| pass | `go` | `pass` | 合格 |
+| pass | `conditional_go` | `conditional` | **pass に丸めない**。条件を report に記録し `partial`（`acceptance_conditional`）で human に提示する。fix loop は自動修正しない |
+| pass | `no_go` | `fail` | 不合格。findings を fix worker prompt に引用する |
+| fail | 任意 | `fail` | 不合格（機械ゲートで既に落ちている） |
+| pass | result 無し / schema 不適合 / 対象 Issue 不一致 | `pass` | 従来どおり baseline のみで裁定し、`limitations` に `acceptance_not_run` を記録する（**黙って劣化しない**）。`--require-acceptance` 時は `fail` |
+| pass | `--acceptance-dir` 未指定 | `pass` | 意味ゲート無し。従来挙動（回帰なし）。report にその旨を記録する |
+
+全 pass なら `success`、不合格があれば `partial`（`uat_failed`）、`conditional` が残れば
+`partial`（`acceptance_conditional`）とし、該当 Issue と next action を返す。worktree も fix も
+再merge もしない。per-issue の baseline・acceptance・合成 verdict は uat-report に記録する。
 
 ### Step U1-b. `--create-uat-fix-worktrees`（回数上限つき修正ループ）
 
 `target` を eligible として、各反復（= 1 attempt、`attempts[]` に **append**）で:
 
 1. **assess** — `target` の各 Issue の現行 worktree（初回は dispatch worktree、fix が成立した後はその
-   fix worktree）で **baseline を再実行**する（read-only）。全 pass ならループを抜けて `success`。
+   fix worktree）で **baseline を再実行**し、意味ゲートと合成する（read-only）。合成 verdict が
+   `conditional` の Issue は **`target` から外す**（human 判断であって自動修正の対象ではない）。
+   `fail` が無くなればループを抜ける。`conditional` が残っていれば `success` にはせず
+   `partial`（`acceptance_conditional`）とする。
 2. **preview** — `--approve` が無ければ、不合格集合を報告して停止する（`partial`）。mutation しない。
 3. **上限判定** — これまでの fix 回数が `--max-attempts` に達していれば、不合格を `unresolved_issues` に
    載せて **`blocked`（`max_attempts_reached`）** で停止する。**成功に丸めない。**
@@ -428,7 +482,9 @@ success とする。
    で送信確定を確認、未確定なら1回だけ再送）→ `commandmate wait` で idle 化を待つ。**wait の idle は完了
    ではない**。fix branch に新規 commit が出れば `completed`、未 commit なら継続 nudge を送って `wait` へ
    戻る（fix prompt に「完了時に単一 commit」を明記）。prompt・`--max-turns`（既定 8）到達で未 commit なら
-   `fix_failed` で停止。完了した fix のみ **fix worktree 内で baseline を再実行して再検証**する。
+   `fix_failed` で停止。fix worker prompt には、意味ゲートが `no_go` を出していればその **verdict と
+   findings（fail した受入条件・blocking reason）を引用**する（「UAT に失敗した」だけを渡さない）。
+   完了した fix のみ **fix worktree 内で baseline を再実行して再検証**する。
    再検証 pass した fix branch のみ `git merge` で **再merge** する（再検証不合格は再merge せず、次反復で
    再試行）。worktree 作成失敗・再merge conflict はそれぞれ `worktree_failed`/`remerge_failed` で停止する。
    `target` を不合格集合に更新して次の反復（再UAT）へ進む。
@@ -443,14 +499,15 @@ uat runner は report（[schemas/uat-report.v1.json](./schemas/uat-report.v1.jso
 
 | status | 条件 | exit |
 |---|---|---|
-| `success` | 全 eligible が UAT を通過（修正後の pass を含む）／eligible なしの no-op | 0 |
-| `partial` | preview・UAT 不合格の assess・fix 途中停止（worktree/fix/remerge 失敗） | 7 |
+| `success` | 全 eligible が合成裁定を通過（修正後の pass を含む）／eligible なしの no-op | 0 |
+| `partial` | preview・不合格の assess・`conditional_go` の保持・fix 途中停止（worktree/fix/remerge 失敗） | 7 |
 | `blocked` | fix 上限到達でなお不合格が残る（成功に丸めない） | 8 |
 | `failure` | 何も試せない（preflight 失敗・plan/dispatch 不正・invalid input） | 1 |
 
-report は5つの completion check（`single_phase`・`approval_enforced`・`attempts_bounded`・
-`blocked_reported`・`verification_gated`）を自己申告し、`next_actions` に次の一手を返す。
-token・secret・絶対 path・raw terminal は report/artifact に残さない（redaction）。
+report は6つの completion check（`single_phase`・`approval_enforced`・`attempts_bounded`・
+`blocked_reported`・`verification_gated`・`acceptance_not_rounded`）を自己申告し、`next_actions` に
+次の一手を返す。token・secret・絶対 path・raw terminal は report/artifact に残さない（redaction）。
+acceptance result の directory path も report に残さない（file 名のみ記録する）。
 
 uat 完了条件:
 
@@ -460,6 +517,8 @@ uat 完了条件:
 - [ ] 上限到達でなお不合格なら `blocked` で停止し success に丸めていない
 - [ ] verification pass した Issue だけを対象にし、再merge した fix はすべて再検証 pass だった
 - [ ] 既存 run artifact を上書きせず attempt を append している
+- [ ] `conditional_go` を pass に丸めず、`no_go` を不合格として扱っている
+- [ ] 受入判定が得られなかった Issue を、黙って baseline のみの pass にしていない（`acceptance_not_run`）
 
 ## 17. 参照
 
@@ -467,7 +526,8 @@ uat 完了条件:
 - [references/plan-contract.md](./references/plan-contract.md) — 依存・Wave・risk・result の契約
 - [references/dispatch-contract.md](./references/dispatch-contract.md) — dispatch・監督ループ・verification gate の契約
 - [references/merge-contract.md](./references/merge-contract.md) — PR 作成・CI 確認・guarded merge の契約
-- [references/uat-contract.md](./references/uat-contract.md) — UAT 実行・回数上限つき修正ループの契約
+- [references/uat-contract.md](./references/uat-contract.md) — UAT 実行・二層裁定・回数上限つき修正ループの契約
+- [../cmate-acceptance-test/schemas/acceptance-result.v1.json](../cmate-acceptance-test/schemas/acceptance-result.v1.json) — 意味ゲートの入力（受入判定 result document）の schema
 - [references/agent-compatibility.md](./references/agent-compatibility.md) — Agent 差異と fallback
 - [schemas/execution-plan.v1.json](./schemas/execution-plan.v1.json) — plan の機械検証用 schema
 - [schemas/orchestrate-result.v1.json](./schemas/orchestrate-result.v1.json) — planner result envelope の schema

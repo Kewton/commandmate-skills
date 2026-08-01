@@ -174,7 +174,7 @@ Codex では skill 名を自然文で指示するか、同梱 script を直接�
 | `cmate-acceptance-test` | 0.1.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
 | `cmate-issue-authoring` | 0.1.0 | native | native | unknown | unknown | **未実測** | 未 publish |
 | `cmate-issue-refinement` | 0.1.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
-| `cmate-orchestrate` | 0.7.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
+| `cmate-orchestrate` | 0.8.0 | native | native | unknown | unknown | 2026-07-31（**0.7.1 で実測**） | catalog install |
 | `cmate-orchestrate-monitor` | 0.4.0 | native | native | unknown | unknown | 2026-07-31（**0.1.0 で実測**） | catalog install |
 | `cmate-repository-analysis` | 0.1.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
 | `cmate-task-contract` | 0.1.0 | native | native | unknown | unknown | 2026-07-31 | **手動両置き** |
