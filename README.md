@@ -32,6 +32,7 @@ scripts/                    # reproducible release pipeline (#1238)
 tests/fixtures/skills/
   pipeline-selftest/        # pipeline を通す最小の package。新規 Skill の雛形
 tests/fixtures/<skill-id>/  # 各 Skill の評価・回帰テスト（package には含まれない）
+docs/quickstart-vibe-engineering.md # 導入から契約付きタスク 1 本までの導線
 docs/agent-support-matrix.md # どの Agent でどこまで実測したか
 docs/design/                # 設計（pipeline / 契約 mirror の同期手順）
 docs/runbooks/              # release・rollback・artifact 検証・導入検証の手順書
@@ -52,6 +53,9 @@ python3 scripts/manifest_files.py <skill-dir>  # manifest の files: を生成
 python3 scripts/verify_artifact.py --help      # 公開 artifact の keyless 検証
 ```
 
+- **はじめて使う / 1 本通してみる**:
+  [docs/quickstart-vibe-engineering.md](./docs/quickstart-vibe-engineering.md)
+  （セットアップ → Skill install → 検証ゲート起案 → 契約付きタスク 1 本 → メトリクス）
 - Skill を追加する: [CONTRIBUTING.md](./CONTRIBUTING.md)
 - release する / 失敗から戻す: [docs/runbooks/release.md](./docs/runbooks/release.md)
 - 配布物を独立に検証する: [docs/runbooks/verify-artifact.md](./docs/runbooks/verify-artifact.md)
