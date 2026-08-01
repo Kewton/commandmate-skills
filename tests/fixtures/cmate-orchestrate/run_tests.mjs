@@ -429,6 +429,70 @@ function allWorkers(report) {
   return report.waves.flatMap((wave) => wave.workers);
 }
 
+// CommandMate's task contract v1 is a CLOSED key set (docs/design/task-contract.md):
+// an unknown top-level key is a contract error, not something the parser ignores.
+const CONTRACT_TOP_LEVEL_KEYS = new Set(['version', 'title', 'goal', 'scope', 'verify', 'autoYes', 'success']);
+
+// Structural conformance of a generated contract, checked without a YAML parser
+// (this suite is Node-stdlib only). It asserts the properties whose violation
+// makes `send --contract` exit 2: an off-contract key, a missing required key,
+// and the `verify.gates: []` that the parser rejects outright.
+function checkContractShape(text, label) {
+  const topKeys = text
+    .split('\n')
+    .filter((line) => /^[A-Za-z]/.test(line))
+    .map((line) => line.split(':')[0]);
+  for (const key of topKeys) {
+    check(CONTRACT_TOP_LEVEL_KEYS.has(key), `${label}: off-contract top-level key "${key}" (v1 is a closed set)`);
+  }
+  for (const required of ['version', 'title', 'goal', 'scope', 'autoYes', 'success']) {
+    check(topKeys.includes(required), `${label}: missing required key "${required}"`);
+  }
+  check(/^version: 1$/m.test(text), `${label}: version must be 1`);
+  check(!/gates:\s*\[\]/.test(text), `${label}: verify.gates: [] is a contract error`);
+  // requireScopeClean true with an empty allow list is a contract error too.
+  if (/^\s*requireScopeClean: true$/m.test(text)) {
+    check(!/^\s*allow: \[\]$/m.test(text), `${label}: requireScopeClean is true but scope.allow is empty`);
+  }
+}
+
+// Contract generation (#1588): byte-identical for the same plan, matching a
+// checked-in golden, actually placed in the worktree, and actually named by the
+// `send --contract` call. Determinism is proved by a SECOND dispatch of the same
+// plan into a fresh world, so a generator that depended on a clock, on the
+// filesystem or on iteration order would diverge here.
+function checkContracts(spec, expect, planPath, scenarioObject, caseDir, outDir, cliLog) {
+  const numbers = expect.contract_issues;
+  const secondWork = mkdtempSync(join(tmpdir(), 'cmate-disp-det-'));
+  const secondOut = join(secondWork, 'dispatch');
+  runDispatchRunner(planPath, scenarioObject, secondWork, secondOut, spec.dispatch_args ?? [], null);
+
+  for (const number of numbers) {
+    const label = `contract #${number}`;
+    const artifact = join(outDir, 'contracts', `issue-${number}.yaml`);
+    if (!check(existsSync(artifact), `${label}: no artifact was written to <out>/contracts/`)) continue;
+    const text = readFileSync(artifact, 'utf8');
+    checkContractShape(text, label);
+
+    const goldenPath = join(caseDir, 'contracts', `issue-${number}.yaml`);
+    if (check(existsSync(goldenPath), `${label}: golden contracts/issue-${number}.yaml is missing`)) {
+      check(text === readFileSync(goldenPath, 'utf8'), `${label}: does not match the golden contract byte for byte`);
+    }
+
+    const repeatPath = join(secondOut, 'contracts', `issue-${number}.yaml`);
+    if (check(existsSync(repeatPath), `${label}: missing on the determinism re-run`)) {
+      check(text === readFileSync(repeatPath, 'utf8'), `${label}: is not byte-identical across two runs of the same plan`);
+    }
+
+    // The send must have named this contract; the fake exits 2 when the file is
+    // not in the worktree, so a send that succeeded also proves it was placed.
+    const relative = `.commandmate/tasks/cmate-orchestrate-issue-${number}.yaml`;
+    const named = cliLog.some((entry) =>
+      entry.sub === 'send' && /issue-(\d+)/.exec(entry.args[0] ?? '')?.[1] === String(number) && entry.args.includes(relative));
+    check(named, `${label}: no "send --contract ${relative}" was logged for #${number}`);
+  }
+}
+
 function runDispatchCase(caseId) {
   const caseDir = join(DISPATCH_CASES_DIR, caseId);
   const spec = JSON.parse(readFileSync(join(caseDir, 'case.json'), 'utf8'));
@@ -555,6 +619,54 @@ function runDispatchCase(caseId) {
   // reported as a missing worktree.
   for (const code of expect.absent_limitation_codes ?? []) {
     check(!report.limitations.some((entry) => entry.code === code), `limitation "${code}" should be absent but was recorded`);
+  }
+  // The version gate is never silent: falling back to the profile baseline, or
+  // refusing to fall back, is stated in the report (#1588).
+  for (const code of expect.limitation_codes ?? []) {
+    check(report.limitations.some((entry) => entry.code === code), `limitation "${code}" was expected but not recorded`);
+  }
+  for (const code of expect.blocking_codes ?? []) {
+    check(report.blocking_reasons.some((entry) => entry.code === code), `blocking reason "${code}" was expected but not recorded`);
+  }
+  for (const code of expect.absent_blocking_codes ?? []) {
+    check(!report.blocking_reasons.some((entry) => entry.code === code), `blocking reason "${code}" should be absent but was recorded`);
+  }
+
+  // Contract adjudication (#1588). The per-issue verification outcome is asserted
+  // separately from worker_state so a case cannot pass with the two conflated —
+  // in particular exit 99 must land as `not_run` (not judged), never as `fail`
+  // (judged and failed) and never as `pass`.
+  for (const [num, outcome] of Object.entries(expect.verification_outcomes ?? {})) {
+    const worker = allWorkers(report).find((w) => w.issue === Number(num));
+    if (check(worker !== undefined, `#${num} has no worker record`)) {
+      check(worker.verification.outcome === outcome, `#${num} verification.outcome "${worker.verification.outcome}" !== "${outcome}"`);
+    }
+  }
+  for (const [num, taskId] of Object.entries(expect.task_ids ?? {})) {
+    const worker = allWorkers(report).find((w) => w.issue === Number(num));
+    if (check(worker !== undefined, `#${num} has no worker record`)) {
+      check(worker.task_id === taskId, `#${num} task_id ${JSON.stringify(worker.task_id)} !== ${JSON.stringify(taskId)}`);
+    }
+  }
+  // `commandmate verify --json` names the failing gates of a 20. It must NOT be
+  // reached by a 99: "we could not judge" is not a verification failure to fix.
+  const verifyCalls = cliLog.filter((entry) => entry.sub === 'verify').length;
+  if (expect.verify_calls !== undefined) {
+    check(verifyCalls === expect.verify_calls, `commandmate verify was called ${verifyCalls} time(s) !== ${expect.verify_calls}`);
+  }
+  const waitVerifyCalls = cliLog.filter((entry) => entry.sub === 'wait' && entry.args.includes('--verify')).length;
+  if (expect.wait_verify_calls_min !== undefined) {
+    check(waitVerifyCalls >= expect.wait_verify_calls_min, `wait --verify was called ${waitVerifyCalls} time(s) < ${expect.wait_verify_calls_min}`);
+  }
+  // The fallback path must stay the pre-contract path: no --contract, no --verify.
+  if (expect.no_contract_calls) {
+    const contractSends = cliLog.filter((entry) => entry.sub === 'send' && entry.args.includes('--contract')).length;
+    check(contractSends === 0, `send --contract was called ${contractSends} time(s) on the fallback path`);
+    check(waitVerifyCalls === 0, `wait --verify was called ${waitVerifyCalls} time(s) on the fallback path`);
+    check(verifyCalls === 0, `commandmate verify was called ${verifyCalls} time(s) on the fallback path`);
+  }
+  if (expect.contract_issues) {
+    checkContracts(spec, expect, planPath, scenarioObject, caseDir, outDir, cliLog);
   }
 
   // Redaction: a secret shape in a captured prompt must not survive into the
@@ -991,26 +1103,53 @@ function runUatCase(caseId) {
 // is itself a subset of the live `--help`. The fake CLI additionally rejects any
 // off-contract flag at call time, so every fixture case is a parity check too.
 
-const COMMANDMATE_SUBS = ['ls', 'send', 'wait', 'capture', 'respond'];
+const COMMANDMATE_SUBS = ['ls', 'send', 'wait', 'capture', 'respond', 'verify'];
 
 function resolveRealCli() {
   const bin = process.env.CMATE_REAL_CLI || 'commandmate';
   try {
-    execFileSync(bin, ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] });
-    return bin;
+    const version = execFileSync(bin, ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return { bin, version: parseVersion(version) };
   } catch (error) {
     // ENOENT => not installed (skip live check); any other error => it exists.
-    return error.code === 'ENOENT' ? null : bin;
+    return error.code === 'ENOENT' ? null : { bin, version: null };
   }
 }
 
+function parseVersion(text) {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(String(text ?? ''));
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+// Is the installed CLI at least `since`? An unreadable version is treated as
+// "too old" so the check errs toward skipping rather than toward a false drift.
+function atLeast(version, since) {
+  const want = parseVersion(since);
+  if (!want) return true;
+  if (!version) return false;
+  for (let i = 0; i < 3; i += 1) {
+    if (version[i] !== want[i]) return version[i] > want[i];
+  }
+  return true;
+}
+
+// (C) Contract ⊆ real CLI. Entries carrying a `since` (Issue #1588: `verify`,
+// `send --contract`, `wait --verify`) are asserted only against a binary new
+// enough to have them, and every skip is printed — a silent skip would let the
+// contract drift on exactly the flags the version gate exists for.
 function liveContractCheck(contract) {
-  const bin = resolveRealCli();
-  if (!bin) {
+  const real = resolveRealCli();
+  if (!real) {
     log('    (no real commandmate on PATH; skipping live --help parity)');
     return;
   }
+  const { bin, version } = real;
+  log(`    (live commandmate ${version ? version.join('.') : 'version unknown'})`);
   for (const [sub, spec] of Object.entries(contract.subcommands)) {
+    if (spec.since && !atLeast(version, spec.since)) {
+      log(`    (skipping live parity for "${sub}": needs commandmate >= ${spec.since})`);
+      continue;
+    }
     let help = '';
     try {
       help = execFileSync(bin, [sub, '--help'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -1019,6 +1158,11 @@ function liveContractCheck(contract) {
     }
     if (!check(help.length > 0, `real commandmate ${sub} --help produced no output (subcommand missing?)`)) continue;
     for (const flag of spec.flags) {
+      const since = spec.since_flags?.[flag];
+      if (since && !atLeast(version, since)) {
+        log(`    (skipping live parity for "${sub} ${flag}": needs commandmate >= ${since})`);
+        continue;
+      }
       check(help.includes(flag), `real commandmate ${sub} --help does not list ${flag} — the contract drifted from the CLI`);
     }
   }
@@ -1030,8 +1174,13 @@ function parityTest() {
   const subs = contract.subcommands ?? {};
   check(COMMANDMATE_SUBS.every((s) => subs[s]), 'the CLI contract is missing a commandmate subcommand the runners use');
 
-  // (B) Runner ⊆ contract. An --auto-yes prompt run exercises the full surface:
-  // ls (resolve id) -> send -> wait (prompt) -> capture -> respond -> wait.
+  // (B) Runner ⊆ contract. Two runs are needed to reach the whole surface:
+  //   1. a legacy --auto-yes prompt run: ls -> send -> wait (prompt) -> capture
+  //      -> respond -> wait;
+  //   2. a contract run whose verdict is 20: send --help / wait --help (the
+  //      version gate) -> send --contract -> wait --verify -> verify --json.
+  // Both logs are unioned, so a flag that only the contract path uses is still
+  // parity-checked (Issue #1588).
   const runsDir = mkdtempSync(join(tmpdir(), 'cmate-parity-plan-'));
   const spec = { plan: { issues_fixture: 'cases/02-explicit-dependency/issues.json', orchestrate_args: ['200', '201', '--max-parallel', '3', '--run-id', 'plan'] } };
   const planPath = generatePlan(spec, runsDir);
@@ -1051,7 +1200,20 @@ function parityTest() {
   };
   runDispatchRunner(planPath, scenario, work, outDir, ['--auto-yes'], logPath);
 
-  const calls = readCliLog(logPath).filter((entry) => COMMANDMATE_SUBS.includes(entry.sub));
+  const contractWork = mkdtempSync(join(tmpdir(), 'cmate-parity-contract-'));
+  const contractLog = join(contractWork, 'cli.log');
+  runDispatchRunner(planPath, {
+    cli_available: true,
+    cli_contract: true,
+    git: { branch: 'feature/integration', dirty: false },
+    gh: { repo_access: true },
+    workers: {
+      201: { state: 'completed', verify_exits: [20], failed_gates: ['lint'] },
+      200: { state: 'completed', verify_exits: [0] },
+    },
+  }, contractWork, join(contractWork, 'dispatch'), ['--max-turns', '1'], contractLog);
+
+  const calls = [...readCliLog(logPath), ...readCliLog(contractLog)].filter((entry) => COMMANDMATE_SUBS.includes(entry.sub));
   const used = new Set(calls.map((entry) => entry.sub));
   for (const sub of COMMANDMATE_SUBS) {
     check(used.has(sub), `the runner never exercised commandmate ${sub}, so its parity is untested`);

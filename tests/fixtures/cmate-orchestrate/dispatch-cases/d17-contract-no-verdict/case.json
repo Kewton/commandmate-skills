@@ -1,0 +1,62 @@
+{
+  "description": "exit 99（判定に到達しなかった）の分岐 — 本 Issue の中心規則: 99 は「判定して不合格」ではないので 20 の再指示ループへ流さない。`commandmate verify` を呼ばず、再指示も送らず、verification.outcome は fail でも pass でもなく not_run として記録し、`verification_not_judged` を blocking として human へ上げて停止する。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "dispatch_error",
+    "human_required": true,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      201
+    ],
+    "never_sent": [
+      200
+    ],
+    "send_counts": {
+      "201": 1
+    },
+    "worker_states": {
+      "201": "completed"
+    },
+    "verification_outcomes": {
+      "201": "not_run"
+    },
+    "task_ids": {
+      "201": "task-issue-201"
+    },
+    "contract_issues": [
+      201
+    ],
+    "blocking_codes": [
+      "verification_not_judged"
+    ],
+    "wave0_all_workers_completed": true,
+    "wave0_all_verifications_passed": false,
+    "verify_calls": 0,
+    "wait_verify_calls_min": 1
+  }
+}

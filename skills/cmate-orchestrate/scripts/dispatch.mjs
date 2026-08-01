@@ -7,13 +7,19 @@
 // public `commandmate` CLI:
 //
 //   - it resolves each issue's CommandMate worktree id AND real path from a single
-//     `commandmate ls --json` row matched on the plan's branch (Issue #1473), and
-//     dispatches a self-contained, generic worker prompt to it with `commandmate
-//     send <worktree-id> <message>` (the public CLI is worktree-id based; there is
-//     no task id, --worktree or --prompt-file). Because `send`/`wait`/`capture`
-//     (id) and the git operations below (path) both come from that one row, they
-//     can never diverge onto different worktrees; the plan's template path is only
-//     a fallback when `ls` omits a path;
+//     `commandmate ls --json` row matched on the plan's branch (Issue #1473).
+//     Because `send`/`wait`/`capture` (id) and the git operations below (path)
+//     both come from that one row, they can never diverge onto different
+//     worktrees; the plan's template path is only a fallback when `ls` omits a
+//     path;
+//   - it dispatches each issue under an EXECUTION CONTRACT when the CommandMate in
+//     front of it supports one (Issue #1588): it generates
+//     `.commandmate/tasks/cmate-orchestrate-issue-<n>.yaml` deterministically from
+//     the approved plan, places it in the worktree, and sends it with `commandmate
+//     send <worktree-id> --contract <path>`, which records a task row and prints
+//     the TASK ID on stdout. (`send` also still takes a plain positional message —
+//     that is the fallback path below.) The verdict then comes from CommandMate
+//     itself instead of from a re-implementation here;
 //   - it supervises each worker as a loop, not a single wait (Issue #1468): a real
 //     worker idles after every turn, so `commandmate wait` returning exit 0 means
 //     "idle", not "done". Completion is a NEW COMMIT on the worktree branch (read
@@ -27,9 +33,16 @@
 //     slowest single worker instead of the sum, with runtime parallelism bounded
 //     by the wave width (already <= max_parallel);
 //   - it enforces a wave barrier: the next wave dispatches only when every worker
-//     of the previous wave completed (committed) AND its profile baseline, re-run
-//     inside the worktree, passed (there is no `commandmate verify`). Worker
-//     completion and verification success are kept strictly separate;
+//     of the previous wave completed (committed) AND its verification passed.
+//     Under a contract the verdict is `commandmate wait --verify`'s EXIT CODE
+//     (0 pass / 20 judged-and-failed / 21 no work evidence / 99 NO VERDICT AT ALL);
+//     without one it falls back to re-running the profile baseline inside the
+//     worktree. Worker completion and verification success are kept strictly
+//     separate, and a 99 is never folded into 20 — "we could not judge" must not
+//     be re-instructed as "we judged it and it failed";
+//   - it version-gates that choice out loud: `send --help` / `wait --help` are
+//     probed once at start-up and the mode it settled on is stated in the report,
+//     so the run never degrades silently to the weaker check;
 //   - it honors max_parallel (1-3): a wave is never wider than the bound;
 //   - before every mutating wave it re-checks post-plan drift
 //     (branch / HEAD / worktree / permission) and refuses to dispatch on drift.
@@ -46,7 +59,7 @@ import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.8.0';
+const SKILL_VERSION = '0.9.0';
 const DISPATCH_SCHEMA_VERSION = 1;
 const SUPPORTED_PLAN_SCHEMA_VERSION = 1;
 
@@ -66,6 +79,59 @@ const WORKTREE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/;
 const WAIT_EXIT_IDLE = 0;
 const WAIT_EXIT_PROMPT = 10;
 const WAIT_EXIT_TIMEOUT = 124;
+
+// `commandmate wait --verify` and `commandmate verify` report the VERDICT by exit
+// code (CommandMate 0.17.0 / Issue #1544):
+//
+//   0    passed          — every gate ran and passed
+//   20   VERIFY_FAILED   — a gate failed, timed out or errored: judged, and failed
+//   21   NOT_STARTED     — the work-evidence gate found no commit and no change
+//   99   UNEXPECTED_ERROR— the run ended `error`/`cancelled`: NO VERDICT WAS REACHED
+//   124  TIMEOUT
+//   1/2  infrastructure (dependency / configuration)
+//
+// 99 is the one that must never be folded into 20. CommandMate's own source says
+// why: "`error` and `cancelled` mean no verdict was reached, so they take the
+// generic UNEXPECTED_ERROR code rather than VERIFY_FAILED — a caller branching on
+// 20 must be able to trust that gates actually ran and judged the work." A 99 is
+// therefore escalated to a human, not fed to the re-instruction loop: asking a
+// worker to repair something nobody ever judged is asking it to guess.
+const VERIFY_EXIT_PASS = 0;
+const VERIFY_EXIT_FAILED = 20;
+const VERIFY_EXIT_NOT_STARTED = 21;
+const VERIFY_EXIT_NO_VERDICT = 99;
+
+// Gate statuses that mean the gate did not pass (mirrors FAILED_GATE_STATUSES in
+// CommandMate's verify command). `skipped` is not a failure.
+const FAILED_GATE_STATUSES = new Set(['failed', 'timeout', 'error']);
+
+// How the run decides whether to dispatch under an execution contract.
+//   auto    probe the CLI; use a contract when it has one, fall back (loudly) otherwise
+//   require probe the CLI; refuse to dispatch at all when it has none
+//   off     do not probe; use the legacy profile-baseline verification
+const CONTRACT_MODES = ['auto', 'require', 'off'];
+const DEFAULT_CONTRACT_MODE = 'auto';
+
+// Where the contract is placed inside the worktree. CommandMate resolves
+// `--contract` relative to the worktree root, and `.commandmate/tasks/**` is
+// excluded from both the work-evidence count and the scope gate (#1580), so
+// dropping the file in needs neither a commit nor a base merge.
+const CONTRACT_DIR = '.commandmate/tasks';
+const CONTRACT_FILE_PREFIX = 'cmate-orchestrate-issue-';
+
+// Bounds from CommandMate's contract parser (docs/design/task-contract.md v1).
+// Enforced here so a contract this runner writes is rejected locally rather than
+// by the server after a task row already exists.
+const MAX_CONTRACT_TITLE = 200;
+const MAX_CONTRACT_GOAL = 8000;
+const MAX_SCOPE_PATTERNS = 200;
+const MAX_SCOPE_PATTERN_LENGTH = 200;
+const MAX_GATE_IDS = 32;
+const GATE_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+// The id `send --contract` prints on stdout. Kept deliberately permissive (the
+// real one is a UUID) but bounded, so a stray log line never becomes a task id.
+const TASK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 // The per-worker `commandmate wait` timeout. `wait` blocks internally until the
 // worker idles, raises a prompt, or this timeout elapses. --poll-limit is retained
@@ -160,6 +226,14 @@ Options:
   --gh <path>            The gh CLI used for the repo-access check (default "gh").
   --auto-yes             Answer worker prompts automatically. OFF by default; a
                          prompt otherwise halts the loop for a human.
+  --contract-mode <m>    auto (default) | require | off. auto dispatches under an
+                         execution contract when the CLI supports one and falls
+                         back to the profile baseline with an explicit limitation
+                         otherwise; require refuses to fall back; off never
+                         probes and always uses the profile baseline.
+  --verify-gates <ids>   Comma-separated verify.yaml gate ids to name in the
+                         contract's verify.gates. Omitted means every gate the
+                         repository declares (this runner never invents an id).
   --expect-branch <name> Integration branch the plan was approved from; a
                          mismatch at dispatch time is treated as drift.
   --wait-timeout <sec>   --timeout passed to commandmate wait (default ${DEFAULT_WAIT_TIMEOUT_SECONDS}).
@@ -185,6 +259,8 @@ function parseCli(argv) {
         git: { type: 'string' },
         gh: { type: 'string' },
         'auto-yes': { type: 'boolean' },
+        'contract-mode': { type: 'string' },
+        'verify-gates': { type: 'string' },
         'expect-branch': { type: 'string' },
         'wait-timeout': { type: 'string' },
         'max-turns': { type: 'string' },
@@ -206,6 +282,42 @@ function positiveInt(raw, name, fallback) {
   return Number.parseInt(raw, 10);
 }
 
+// `--contract-mode` is validated here rather than defaulted silently: a typo'd
+// mode that fell back to `auto` would look like the operator chose the fallback.
+function resolveContractMode(raw) {
+  if (raw === undefined) return DEFAULT_CONTRACT_MODE;
+  if (!CONTRACT_MODES.includes(raw)) {
+    throw new SkillError('invalid_input', `--contract-mode must be one of ${CONTRACT_MODES.join(', ')}`, 3);
+  }
+  return raw;
+}
+
+// Gate ids for the contract's `verify.gates`. They are checked against
+// CommandMate's own GATE_ID_PATTERN and bounds so an unusable list fails here,
+// where the message is about the flag, instead of at `send --contract` (exit 2)
+// where it is about a file this runner wrote.
+function resolveVerifyGates(raw) {
+  if (raw === undefined) return [];
+  const ids = String(raw).split(',').map((value) => value.trim()).filter((value) => value !== '');
+  if (ids.length === 0) {
+    throw new SkillError('invalid_input', '--verify-gates must name at least one gate id', 3);
+  }
+  if (ids.length > MAX_GATE_IDS) {
+    throw new SkillError('invalid_input', `--verify-gates accepts at most ${MAX_GATE_IDS} gate ids`, 3);
+  }
+  const seen = new Set();
+  for (const id of ids) {
+    if (!GATE_ID_RE.test(id)) {
+      throw new SkillError('invalid_input', `--verify-gates: "${id}" is not a valid gate id (${GATE_ID_RE.source})`, 3);
+    }
+    if (seen.has(id)) {
+      throw new SkillError('invalid_input', `--verify-gates: duplicate gate id "${id}"`, 3);
+    }
+    seen.add(id);
+  }
+  return ids;
+}
+
 function resolveInputs(parsed) {
   const { values } = parsed;
   if (!values.plan) {
@@ -218,6 +330,8 @@ function resolveInputs(parsed) {
     git: values.git ?? 'git',
     gh: values.gh ?? 'gh',
     autoYes: Boolean(values['auto-yes']),
+    contractMode: resolveContractMode(values['contract-mode']),
+    verifyGates: resolveVerifyGates(values['verify-gates']),
     expectBranch: values['expect-branch'] ?? null,
     waitTimeout: positiveInt(values['wait-timeout'], 'wait-timeout', DEFAULT_WAIT_TIMEOUT_SECONDS),
     maxTurns: positiveInt(values['max-turns'], 'max-turns', DEFAULT_MAX_TURNS),
@@ -438,6 +552,213 @@ function driftChecks(inputs, plan, waveIndex, resolutions) {
 }
 
 // =============================================================================
+// Version gate: does this CommandMate speak the execution contract? (#1588)
+// =============================================================================
+
+// The execution contract (`send --contract`) and the contract verdict
+// (`wait --verify`, `commandmate verify`) landed together in CommandMate 0.17.0
+// (Issues #1544 / #1545). Rather than assume, the runner asks the binary in front
+// of it once, before the first wave, and records the answer. The point of the
+// probe is not the branch, it is the DISCLOSURE: falling back silently would keep
+// reporting `verification.outcome: pass` while the thing that produced it had
+// changed from "every declared gate passed" to "the profile baseline exited 0".
+function probeContractSupport(inputs) {
+  const send = runCli(inputs.cli, ['send', '--help']);
+  const wait = runCli(inputs.cli, ['wait', '--help']);
+  const hasContract = send.ok && `${send.stdout}${send.stderr}`.includes('--contract');
+  const hasVerify = wait.ok && `${wait.stdout}${wait.stderr}`.includes('--verify');
+  if (hasContract && hasVerify) {
+    return { supported: true, detail: 'commandmate accepts send --contract and wait --verify' };
+  }
+  if (!send.ok && !wait.ok) {
+    return {
+      supported: false,
+      detail: 'commandmate did not answer `send --help` / `wait --help` (not installed, not on PATH, or not permitted)',
+    };
+  }
+  const missing = [];
+  if (!hasContract) missing.push('send --contract');
+  if (!hasVerify) missing.push('wait --verify');
+  return {
+    supported: false,
+    detail: `commandmate is missing ${missing.join(' and ')} (the execution contract needs CommandMate >= 0.17.0)`,
+  };
+}
+
+// =============================================================================
+// Execution contract generation (CommandMate task contract v1)
+// =============================================================================
+//
+// Canonical spec: CommandMate's docs/design/task-contract.md. v1 is a CLOSED key
+// set — version / title / goal / scope / verify / autoYes / success — where an
+// unknown key is a hard error, `title` and `goal` are required, `verify.gates: []`
+// is an error, and `scope.allow` is effectively required because
+// `success.requireScopeClean` defaults to true.
+//
+// Everything below is derived from the approved plan alone, in a fixed order,
+// with no clock, no randomness and no environment read: the same plan must
+// produce a BYTE-IDENTICAL contract. That is the same Claude/Codex parity rule
+// the planner already lives under, and it is what makes a contract reviewable —
+// a diff between two runs is a change in the plan, never a change in the runner.
+
+// A double-quoted YAML scalar. JSON string escaping is a strict subset of YAML
+// 1.2's double-quoted style, so JSON.stringify is both correct and stable — and,
+// unlike a bare scalar, the result can never be re-read as a boolean (`off`), a
+// number, or the start of a comment (`#123 …`).
+function yamlString(value) {
+  return JSON.stringify(String(value));
+}
+
+// The goal as a literal block scalar. The contract is a reviewed, committed
+// artifact rather than a wire format, so the goal stays readable instead of
+// becoming one escaped line. The text is normalised first — CR removed, trailing
+// whitespace removed, trailing blank lines dropped — so the block can never
+// acquire an ambiguous indentation, and buildContractGoal always opens with a
+// header line (a whitespace-led first line would need an explicit indentation
+// indicator to be legal).
+function yamlBlockScalar(key, text, indent = '  ') {
+  const lines = String(text)
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/, ''));
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  const body = lines.map((line) => (line === '' ? '' : `${indent}${line}`)).join('\n');
+  return `${key}: |\n${body}`;
+}
+
+// `scope.allow` for one issue: the files the plan says this issue owns.
+//
+// Patterns the contract parser would reject (absolute, `..`-escaping, over-long,
+// NUL-bearing, Windows drive or backslash paths) are dropped rather than sent —
+// a contract rejected at `send` is a dispatch that never happens. The result is
+// sorted so the contract does not depend on the plan's iteration order, and
+// de-duplicated so a file listed twice does not produce two identical patterns.
+function contractScopeAllow(issue) {
+  const seen = new Set();
+  const allow = [];
+  const files = Array.isArray(issue.suspected_files) ? issue.suspected_files : [];
+  for (const raw of files) {
+    if (typeof raw !== 'string') continue;
+    const pattern = raw.trim();
+    if (pattern === '' || pattern.length > MAX_SCOPE_PATTERN_LENGTH) continue;
+    if (pattern.startsWith('/') || /^[A-Za-z]:/.test(pattern) || pattern.includes('\\')) continue;
+    if (pattern.split('/').includes('..') || pattern.includes('\u0000')) continue;
+    if (seen.has(pattern)) continue;
+    seen.add(pattern);
+    allow.push(pattern);
+  }
+  allow.sort();
+  return allow.slice(0, MAX_SCOPE_PATTERNS);
+}
+
+function contractTitle(issue) {
+  const title = typeof issue.title === 'string' ? issue.title.trim() : '';
+  const raw = redact(title === '' ? `Issue #${issue.number}` : `#${issue.number} ${title}`);
+  return raw.length > MAX_CONTRACT_TITLE ? `${raw.slice(0, MAX_CONTRACT_TITLE - 1)}…` : raw;
+}
+
+// The contract's `goal` — the body CommandMate sends after the preamble it
+// composes itself.
+//
+// Deliberately NOT the same text as buildWorkerPrompt(): the preamble already
+// states the allowed paths, the commit requirement and the completion criterion,
+// and it writes that criterion out as the REAL gate commands resolved from
+// verify.yaml. Repeating the profile baseline here would tell the worker to
+// satisfy one thing while a different thing judges it.
+function buildContractGoal(plan, issue) {
+  const goal = [
+    `# Issue #${issue.number} — ${issue.title ?? 'no title'}`,
+    '',
+    `Repository: ${plan.profile.repository}`,
+    `Base branch: ${plan.profile.base}`,
+    `Work branch: ${issue.branch ?? '(from profile template)'}`,
+    `Worktree: ${issue.worktree ?? '(from profile template)'}`,
+    '',
+    '## Objective',
+    issue.objective ?? issue.title ?? `Resolve issue #${issue.number}.`,
+    '',
+    '## Acceptance criteria',
+    bullets(issue.acceptance_criteria, 'Derive from the issue; if unclear, stop and ask.'),
+    '',
+    '## Files you may change',
+    bullets(issue.suspected_files, 'Unknown — inspect first; do not touch files owned by another issue.'),
+    '',
+    '## Rules',
+    '- Stay within this issue. Do not modify files another issue in the plan owns.',
+    '- The completion criterion above is the contract\'s, not a suggestion: run those',
+    '  commands yourself and make them pass before reporting done. Do not report done',
+    '  on a failing gate — the same gates decide the verdict.',
+    '- Keep working across turns until the whole task is finished; do not stop half-done.',
+    '- When the work is complete, make a SINGLE commit of this issue\'s changes on the',
+    '  work branch. Verification can pass on uncommitted work, but nothing downstream',
+    '  can deliver it, so the commit is what ends the task.',
+    '- If a step is destructive, ambiguous, or blocked, STOP and ask. Do not guess.',
+    '- Do not print tokens, secrets, or absolute host paths.',
+  ].join('\n');
+  const redacted = redact(goal);
+  if (redacted.length <= MAX_CONTRACT_GOAL) return redacted;
+  const marker = '\n\n（この goal は契約の上限 8000 文字に合わせて切り詰められています）';
+  return `${redacted.slice(0, MAX_CONTRACT_GOAL - marker.length)}${marker}`;
+}
+
+// The contract document for one issue. Field order is fixed, so is every list.
+function buildTaskContract(plan, issue, inputs) {
+  const allow = contractScopeAllow(issue);
+  const lines = [];
+  lines.push('# Generated by cmate-orchestrate (dispatch runner) from an approved plan.');
+  lines.push('# Do not edit by hand: the same plan regenerates this file byte for byte.');
+  lines.push('version: 1');
+  lines.push(`title: ${yamlString(contractTitle(issue))}`);
+  lines.push(yamlBlockScalar('goal', buildContractGoal(plan, issue)));
+  lines.push('scope:');
+  if (allow.length === 0) {
+    lines.push('  allow: []');
+  } else {
+    lines.push('  allow:');
+    for (const pattern of allow) lines.push(`    - ${yamlString(pattern)}`);
+  }
+  lines.push('  deny: []');
+  // `verify` is omitted unless the operator named gates: this runner cannot know
+  // a repository's verify.yaml, and an id that does not exist there makes
+  // `send --contract` exit 2. Omitting the key means "run every declared gate",
+  // which is the stricter reading, never the looser one.
+  if (inputs.verifyGates.length > 0) {
+    lines.push('verify:');
+    lines.push('  gates:');
+    for (const gate of inputs.verifyGates) lines.push(`    - ${yamlString(gate)}`);
+  }
+  // The contract states the same Auto-Yes stance the runner itself takes, so the
+  // server-side policy and the supervision loop cannot disagree. `off` is an
+  // active prohibition (distinct from omitting the block, which says nothing).
+  lines.push('autoYes:');
+  lines.push(`  mode: ${yamlString(inputs.autoYes ? 'safe' : 'off')}`);
+  lines.push('success:');
+  lines.push('  requireWorkEvidence: true');
+  // Declaring requireScopeClean while listing no path would make the scope gate
+  // reject every change. When the plan named no file we say so in the contract
+  // and record a limitation, rather than inventing a scope or claiming one.
+  lines.push(`  requireScopeClean: ${allow.length > 0}`);
+  lines.push('  autoVerifyOnStop: false');
+  return `${lines.join('\n')}\n`;
+}
+
+function contractRelativePath(issueNumber) {
+  return `${CONTRACT_DIR}/${CONTRACT_FILE_PREFIX}${issueNumber}.yaml`;
+}
+
+// Place the contract in the worktree (what `send --contract` reads) and keep a
+// copy in the run artifact (what a human or a later audit reads — the worktree
+// copy can be edited or deleted by the worker it constrains).
+function placeContract(worktreePath, issueNumber, text, artifactDir) {
+  const relative = contractRelativePath(issueNumber);
+  const target = join(worktreePath, relative);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, text, 'utf8');
+  writeFileSync(join(artifactDir, `issue-${issueNumber}.yaml`), text, 'utf8');
+  return relative;
+}
+
+// =============================================================================
 // Worker prompt (self-contained, generic — no repository-local worker Skill)
 // =============================================================================
 
@@ -562,6 +883,259 @@ const NUDGE_MESSAGE = [
   'まだ変更が commit されていません。完了したら work ブランチに単一 commit を作成してください（それが完了の合図です）。',
 ].join('\n');
 
+// Sent after a `send --contract` that capture says never started. It doubles as
+// the submission the first send may have left unconfirmed and as a harmless nudge
+// if it did register.
+const CONTRACT_CONFIRM_MESSAGE = [
+  '上の実行契約に従って作業を開始してください。',
+  '完了したら work ブランチに単一 commit を作成してください（それが完了の合図です）。',
+].join('\n');
+
+// Sent when the gates passed but nothing was committed. work-evidence counts
+// uncommitted changes, so this is a real pass on work nothing downstream can
+// deliver — the commit, not the verdict, is what is missing.
+const COMMIT_REQUEST_MESSAGE = [
+  '検証（ゲート）は通りましたが、変更がまだ commit されていません。',
+  'この Issue の変更を work ブランチに単一 commit として作成してください（それが完了の合図です）。',
+].join('\n');
+
+// `commandmate send <worktree-id> --contract <path>`: CommandMate parses the
+// contract, records a task row, composes preamble + goal as the message, and
+// prints the TASK ID on stdout. A contract the server rejects exits 2 with every
+// violation on stderr and sends nothing, so a rejected contract is an honest
+// failed dispatch — never a quiet downgrade to a plain send.
+async function sendContractAndConfirm(inputs, worktreeId, relativeContractPath) {
+  const first = await runCliAsync(inputs.cli, ['send', worktreeId, '--contract', relativeContractPath]);
+  if (!first.ok) {
+    return { sent: false, taskId: null, note: excerpt(first.stderr || first.stdout || 'contract send failed') };
+  }
+  const taskId = readTaskId(first.stdout);
+  const capture = parseCliJson(await runCliAsync(inputs.cli, ['capture', worktreeId, '--json']));
+  const started = capture && (capture.isGenerating === true || capture.isRunning === true || capture.isPromptWaiting === true);
+  if (started) return { sent: true, taskId, confirmed: true, note: '' };
+  // Re-sending WITH --contract would create a second task row for the same work
+  // and leave the first one running forever, so the confirmation is a plain
+  // message: it submits whatever the first send left in the input box.
+  const again = await runCliAsync(inputs.cli, ['send', worktreeId, CONTRACT_CONFIRM_MESSAGE]);
+  if (!again.ok) {
+    return { sent: true, taskId, confirmed: false, note: 'the contract send may not have submitted and the confirmation send failed' };
+  }
+  return { sent: true, taskId, confirmed: false, note: 're-sent a plain confirmation after an unconfirmed contract send' };
+}
+
+// The task id `send --contract` prints. The last non-empty stdout line is the id;
+// anything that does not look like one is treated as absent rather than recorded.
+function readTaskId(stdout) {
+  const lines = String(stdout ?? '').split('\n').map((line) => line.trim()).filter(Boolean);
+  const last = lines.length > 0 ? lines[lines.length - 1] : null;
+  return last && TASK_ID_RE.test(last) ? last : null;
+}
+
+// `commandmate verify <worktree-id> --json` prints the verification run document
+// (CommandMate's VerificationRunView), whose `gates[]` is what turns "verification
+// failed" into something a worker can act on.
+//
+// NOTE: this starts a SECOND run, so its own verdict can differ from the wait's.
+// The wait's exit code stays the verdict; this call is used only to NAME gates.
+// When it cannot, that is recorded rather than papered over — a re-instruction
+// that cannot say what failed is a guess, and the worker should be told so.
+//
+// Async on purpose: it runs inside the per-worker supervision that a wave drives
+// concurrently (#1474). A synchronous execFileSync here would block the event loop
+// for a whole gate run and stall every other worker in the wave.
+async function describeFailingGates(inputs, worktreeId) {
+  const run = parseCliJson(await runCliAsync(inputs.cli, ['verify', worktreeId, '--json']));
+  const gates = run && Array.isArray(run.gates) ? run.gates : null;
+  if (!gates) {
+    return {
+      failing: [],
+      checks: [`commandmate wait --verify → exit ${VERIFY_EXIT_FAILED} (a gate failed; the breakdown could not be read from commandmate verify --json)`],
+      summary: 'the failing gates could not be read from commandmate verify --json',
+    };
+  }
+  const failing = gates
+    .filter((gate) => gate && FAILED_GATE_STATUSES.has(gate.status))
+    .map((gate) => ({
+      id: redact(String(gate.gateId ?? 'unknown')),
+      status: String(gate.status),
+      exitCode: Number.isInteger(gate.exitCode) ? gate.exitCode : null,
+      tail: excerpt(gate.logTail ?? '', 200),
+    }));
+  if (failing.length === 0) {
+    return {
+      failing,
+      checks: [`commandmate wait --verify → exit ${VERIFY_EXIT_FAILED} (a gate failed; the confirming commandmate verify run named none)`],
+      summary: 'the confirming verify run named no failing gate',
+    };
+  }
+  return {
+    failing,
+    checks: failing.map((gate) => `gate ${gate.id}: ${gate.status}${gate.exitCode !== null ? ` (exit ${gate.exitCode})` : ''}`),
+    summary: failing.map((gate) => gate.id).join(', '),
+  };
+}
+
+// The re-instruction sent to a worker whose contract verification failed. It
+// quotes the gates, because "verification failed" alone makes the worker guess.
+function buildVerifyReinstruction(failing) {
+  const lines = ['検証（commandmate verify）が不合格でした。次のゲートが通っていません。'];
+  if (failing.length === 0) {
+    lines.push('- （失敗ゲートの内訳を取得できませんでした。`commandmate verify <worktree-id>` を自分で実行して確認してください）');
+  }
+  for (const gate of failing) {
+    const exit = gate.exitCode !== null ? ` (exit ${gate.exitCode})` : '';
+    const tail = gate.tail ? ` — ${gate.tail}` : '';
+    lines.push(`- ${gate.id}: ${gate.status}${exit}${tail}`);
+  }
+  lines.push('原因を修正し、すべてのゲートが通る状態にしてから、work ブランチに単一 commit を作成してください。');
+  lines.push('判断が要る・直しようがない場合は推測せず停止して質問してください。');
+  return lines.join('\n');
+}
+
+// Has the worker committed since dispatch started? Null HEAD (a broken or absent
+// worktree) is "no commit yet", never "done" — the same rule as the legacy loop.
+async function hasNewCommit(inputs, worktreePath, baseSha) {
+  const current = await worktreeHeadSha(inputs, worktreePath);
+  return current !== null && current !== baseSha;
+}
+
+// Supervise one worker that was dispatched under an execution contract.
+//
+// The verdict is CommandMate's, read from `commandmate wait --verify`'s exit code
+// — the runner no longer re-implements verification. Completion is still a NEW
+// COMMIT (#1468), because a verdict and a deliverable are different things:
+// work-evidence counts uncommitted changes, so the gates can pass on a tree that
+// nothing downstream can push.
+//
+// `--on-prompt agent` is explicit and deliberate. The mode names who ANSWERS the
+// prompt: `agent` returns it to this caller as exit 10 (which is how the runner
+// halts and shows it to a human), while `human` makes `wait` block until someone
+// answers it in the UI and never returns 10 at all. The Issue body's
+// `--on-prompt human` would therefore have replaced "stop and present the prompt"
+// with "hang until --timeout, then report a timeout" — the opposite of the
+// human-in-the-loop rule it was written to serve.
+async function superviseWithContract(inputs, worktreeId, worktreePath, relativeContractPath) {
+  const baseSha = await worktreeHeadSha(inputs, worktreePath);
+  let autoResponded = false;
+
+  const sent0 = await sendContractAndConfirm(inputs, worktreeId, relativeContractPath);
+  if (!sent0.sent) {
+    return {
+      state: 'failed', taskId: null, verdict: null, notJudged: false,
+      promptExcerpt: null, nudges: 0, autoResponded,
+      note: `contract dispatch failed: ${sent0.note}`,
+    };
+  }
+  const taskId = sent0.taskId;
+  let turns = 1;
+  // Once a pass is in hand it is FINAL for this run: the passing run moved the
+  // task to `succeeded`, and a later verification run that cannot bind to a live
+  // contract is exactly the detached-contract `error` → exit 99 case (#1620).
+  // Asking twice would manufacture the very "no verdict" state we escalate on.
+  let verdict = null;
+  let passed = false;
+
+  const hardIterations = inputs.maxTurns * 4 + 8;
+  for (let i = 0; i < hardIterations; i += 1) {
+    const waitArgs = passed
+      ? ['wait', worktreeId, '--on-prompt', 'agent', '--timeout', String(inputs.waitTimeout)]
+      : ['wait', worktreeId, '--on-prompt', 'agent', '--verify', '--timeout', String(inputs.waitTimeout)];
+    const waited = await runCliAsync(inputs.cli, waitArgs);
+    const code = waited.ok ? VERIFY_EXIT_PASS : (waited.status ?? null);
+    const done = (state, note) => ({ state, taskId, verdict, notJudged: false, promptExcerpt: null, nudges: turns - 1, autoResponded, note });
+
+    if (code === WAIT_EXIT_PROMPT) {
+      const promptExcerpt = await capturePrompt(inputs, worktreeId);
+      if (inputs.autoYes) {
+        autoResponded = true;
+        await respondWorker(inputs, worktreeId);
+        continue; // answered; wait again within the same turn
+      }
+      return { state: 'prompt', taskId, verdict, notJudged: false, promptExcerpt, nudges: turns - 1, autoResponded, note: '' };
+    }
+    if (code === WAIT_EXIT_TIMEOUT) {
+      return done('timeout', `wait timed out after ${inputs.waitTimeout}s`);
+    }
+
+    if (!passed && code === VERIFY_EXIT_NO_VERDICT) {
+      // No gate judged this work. That is neither a pass nor a failure, so it is
+      // not re-instructed, not retried, and not rounded either way.
+      verdict = {
+        ran: true,
+        outcome: 'not_run',
+        checks: [`commandmate wait --verify → exit ${VERIFY_EXIT_NO_VERDICT} (the verification run ended error/cancelled; no verdict was reached)`],
+      };
+      const committed = await hasNewCommit(inputs, worktreePath, baseSha);
+      return {
+        state: committed ? 'completed' : 'failed',
+        taskId, verdict, notJudged: true, promptExcerpt: null, nudges: turns - 1, autoResponded,
+        note: 'verification reached no verdict (exit 99: the run ended error/cancelled); escalated to a human rather than re-instructed as a verification failure',
+      };
+    }
+
+    if (code === VERIFY_EXIT_PASS) {
+      if (!passed) {
+        passed = true;
+        verdict = {
+          ran: true,
+          outcome: 'pass',
+          checks: [`commandmate wait --verify → exit ${VERIFY_EXIT_PASS} (every declared gate passed)`],
+        };
+      }
+      if (await hasNewCommit(inputs, worktreePath, baseSha)) {
+        const note = turns > 1
+          ? `completed after ${turns - 1} follow-up message(s); verification passed and a new commit was detected`
+          : 'completed; verification passed and a new commit was detected';
+        return done('completed', note);
+      }
+      if (turns >= inputs.maxTurns) {
+        return done('failed', `verification passed but no commit was produced after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap`);
+      }
+      const asked = await sendAndConfirm(inputs, worktreeId, COMMIT_REQUEST_MESSAGE);
+      if (!asked.sent) return done('failed', `commit request failed: ${asked.note}`);
+      turns += 1;
+      continue;
+    }
+
+    if (code === VERIFY_EXIT_NOT_STARTED) {
+      // work-evidence found no commit and no change: the worker has not started,
+      // or has nothing to show yet. Never a pass.
+      verdict = {
+        ran: true,
+        outcome: 'fail',
+        checks: [`commandmate wait --verify → exit ${VERIFY_EXIT_NOT_STARTED} (work-evidence found no commit and no uncommitted change)`],
+      };
+      if (turns >= inputs.maxTurns) {
+        return done('failed', `no work evidence after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap`);
+      }
+      const nudged = await sendAndConfirm(inputs, worktreeId, NUDGE_MESSAGE);
+      if (!nudged.sent) return done('failed', `nudge failed: ${nudged.note}`);
+      turns += 1;
+      continue;
+    }
+
+    if (code === VERIFY_EXIT_FAILED) {
+      const failing = await describeFailingGates(inputs, worktreeId);
+      verdict = { ran: true, outcome: 'fail', checks: failing.checks };
+      const committed = await hasNewCommit(inputs, worktreePath, baseSha);
+      if (turns >= inputs.maxTurns) {
+        return done(
+          committed ? 'completed' : 'failed',
+          `verification failed (${failing.summary}) and the --max-turns ${inputs.maxTurns} cap was reached${committed ? '' : ' with no commit'}`,
+        );
+      }
+      const resent = await sendAndConfirm(inputs, worktreeId, buildVerifyReinstruction(failing.failing));
+      if (!resent.sent) return done('failed', `re-instruction failed: ${resent.note}`);
+      turns += 1;
+      continue;
+    }
+
+    // 1 / 2 / anything else: infrastructure, not a verdict.
+    return done('failed', excerpt(waited.stderr || waited.stdout || `wait exited ${code ?? 'with an error'}`));
+  }
+  return { state: 'failed', taskId, verdict, notJudged: false, promptExcerpt: null, nudges: turns - 1, autoResponded, note: 'supervision exceeded its hard iteration bound' };
+}
+
 // Supervise one worker to a real completion. A worker idles after every turn, so
 // the loop drives it turn by turn: dispatch, then wait; on idle-with-no-new-commit
 // nudge it and wait again, until it commits (completed), raises a prompt, times
@@ -629,10 +1203,12 @@ async function capturePrompt(inputs, worktreeId) {
   return excerpt(raw) ?? 'a prompt is awaiting input';
 }
 
-// The independent verification gate. Worker completion got us here; this re-runs
-// the profile baseline INSIDE the worktree (there is no `commandmate verify`) and
-// passes only when every baseline command exits zero. A missing worktree or any
-// non-zero step is a fail — never optimistically opened.
+// The FALLBACK verification gate, used when the CLI has no execution contract
+// (`--contract-mode off`, or a CommandMate older than 0.17.0). Worker completion
+// got us here; this re-runs the profile baseline INSIDE the worktree and passes
+// only when every baseline command exits zero. A missing worktree or any non-zero
+// step is a fail — never optimistically opened. Under a contract this is not
+// called at all: the verdict is `commandmate wait --verify`'s exit code.
 function verifyWorker(inputs, worktreePath, baseline) {
   if (!Array.isArray(baseline) || baseline.length === 0) {
     return { ran: true, outcome: 'fail', checks: [], note: 'profile has no baseline to verify against' };
@@ -704,6 +1280,39 @@ async function runDispatch(inputs, plan, outDir) {
     report.blocking_reasons.push({ code, detail });
     stopped = true;
   };
+
+  // The version gate (#1588). Decided ONCE, before the first wave, and always
+  // stated: `auto` falls back with an explicit limitation, `require` refuses to
+  // fall back at all, `off` never probes. What is not allowed is degrading in
+  // silence — the fallback reports the same `verification.outcome: pass` from a
+  // materially weaker check.
+  let contractMode = false;
+  if (inputs.contractMode === 'off') {
+    report.limitations.push({
+      code: 'contract_disabled',
+      detail: '--contract-mode off: dispatched without an execution contract; verification is the profile baseline re-run inside the worktree',
+    });
+  } else {
+    const probe = probeContractSupport(inputs);
+    if (probe.supported) {
+      contractMode = true;
+    } else if (inputs.contractMode === 'require') {
+      halt('failure', 'dispatch_error', 'contract_unsupported',
+        `${probe.detail}; --contract-mode require refuses to fall back, so nothing was dispatched`);
+    } else {
+      report.limitations.push({
+        code: 'contract_unsupported',
+        detail: `${probe.detail}; falling back to the profile-baseline verification (the pre-contract behaviour)`,
+      });
+    }
+  }
+  const contractsDir = join(outDir, 'contracts');
+  if (contractMode) mkdirSync(contractsDir, { recursive: true });
+  // Issues whose verification reached NO verdict (exit 99). Kept beside the
+  // report rather than inside it: dispatch_schema_version 1 is a closed field set
+  // and merge/uat both refuse any other version, so the fact travels through the
+  // blocking reason and the worker note instead of a new field.
+  const notJudged = new Set();
 
   for (let waveIndex = 0; waveIndex < plan.waves.length && !stopped; waveIndex += 1) {
     const waveIssues = plan.waves[waveIndex];
@@ -780,15 +1389,41 @@ async function runDispatch(inputs, plan, outDir) {
         workers.push(worker);
         continue;
       }
-      worker.task_id = res.resolved.id;
+      // Without a contract the worktree id is the only handle the public CLI
+      // gives a worker, so it is what `task_id` carries. With one, the field
+      // holds the REAL task id `send --contract` returns — recorded below, once
+      // the send actually happened, so a failed dispatch reports no task rather
+      // than a plausible-looking wrong one.
+      worker.task_id = contractMode ? null : res.resolved.id;
       worktreePaths.set(number, res.worktreePath);
 
+      let contractPath = null;
+      if (contractMode) {
+        const allow = contractScopeAllow(res.issue);
+        if (allow.length === 0) {
+          report.limitations.push({
+            code: 'contract_scope_unknown',
+            detail: `#${number}: the plan names no suspected file, so the contract declares no scope and sets success.requireScopeClean false; the scope gate cannot judge a boundary that was never declared`,
+          });
+        }
+        try {
+          contractPath = placeContract(res.worktreePath, number, buildTaskContract(plan, res.issue, inputs), contractsDir);
+        } catch (error) {
+          worker.worker_state = 'failed';
+          worker.note = redact(`could not place the execution contract in the worktree: ${error.message}`);
+          workers.push(worker);
+          continue;
+        }
+      }
+
       const promptFile = join(promptsDir, `issue-${number}.md`);
-      const prompt = buildWorkerPrompt(plan, res.issue);
+      // In contract mode the artifact is the goal — the body CommandMate sends
+      // after its own preamble — so the file still shows what the worker read.
+      const prompt = contractMode ? buildContractGoal(plan, res.issue) : buildWorkerPrompt(plan, res.issue);
       writeFileSync(promptFile, `${prompt}\n`, 'utf8');
 
       workers.push(worker);
-      supervisable.push({ worker, worktreeId: res.resolved.id, worktreePath: res.worktreePath, prompt });
+      supervisable.push({ worker, worktreeId: res.resolved.id, worktreePath: res.worktreePath, prompt, contractPath });
     }
 
     // 3b. Supervise the wave's workers CONCURRENTLY (Issue #1474). Each worker
@@ -799,10 +1434,16 @@ async function runDispatch(inputs, plan, outDir) {
     //     single worker instead of the sum. Each worker's commit detection,
     //     --max-turns, prompt handling and auto-yes respond stay strictly
     //     independent; the wave barrier below is unchanged.
-    await Promise.all(supervisable.map(async ({ worker, worktreeId, worktreePath, prompt }) => {
-      const supervised = await superviseUntilCommit(inputs, worktreeId, worktreePath, prompt);
+    const contractVerdicts = new Map();
+    await Promise.all(supervisable.map(async ({ worker, worktreeId, worktreePath, prompt, contractPath }) => {
+      const supervised = contractMode
+        ? await superviseWithContract(inputs, worktreeId, worktreePath, contractPath)
+        : await superviseUntilCommit(inputs, worktreeId, worktreePath, prompt);
       worker.worker_state = supervised.state;
       worker.note = redact(supervised.note);
+      if (supervised.taskId) worker.task_id = supervised.taskId;
+      if (supervised.verdict) contractVerdicts.set(worker.issue, supervised.verdict);
+      if (supervised.notJudged) notJudged.add(worker.issue);
       if (supervised.autoResponded) autoResponded = true;
       if (supervised.state === 'prompt') {
         worker.prompt = { detected: true, excerpt: supervised.promptExcerpt };
@@ -821,16 +1462,26 @@ async function runDispatch(inputs, plan, outDir) {
     let allVerified = allCompleted;
     if (allCompleted) {
       for (const worker of workers) {
-        const worktreePath = worktreePaths.get(worker.issue) ?? safeWorktreeTarget(issueOf(plan, worker.issue).worktree ?? '');
-        const verification = verifyWorker(inputs, worktreePath, plan.profile.baseline);
-        worker.verification = {
-          ran: verification.ran,
-          report_schema_version: null,
-          outcome: verification.outcome,
-          checks: verification.checks,
-        };
-        if (verification.note) worker.note = worker.note ? `${worker.note}; ${verification.note}` : verification.note;
-        if (verification.outcome !== 'pass') allVerified = false;
+        if (contractMode) {
+          // The verdict already exists: it is the exit code CommandMate returned
+          // while the worker was supervised. Re-running anything here would be a
+          // second opinion from a weaker judge.
+          const verdict = contractVerdicts.get(worker.issue);
+          worker.verification = verdict
+            ? { ran: verdict.ran, report_schema_version: null, outcome: verdict.outcome, checks: verdict.checks }
+            : { ran: false, report_schema_version: null, outcome: 'not_run', checks: [] };
+        } else {
+          const worktreePath = worktreePaths.get(worker.issue) ?? safeWorktreeTarget(issueOf(plan, worker.issue).worktree ?? '');
+          const verification = verifyWorker(inputs, worktreePath, plan.profile.baseline);
+          worker.verification = {
+            ran: verification.ran,
+            report_schema_version: null,
+            outcome: verification.outcome,
+            checks: verification.checks,
+          };
+          if (verification.note) worker.note = worker.note ? `${worker.note}; ${verification.note}` : verification.note;
+        }
+        if (worker.verification.outcome !== 'pass') allVerified = false;
       }
     }
 
@@ -848,9 +1499,16 @@ async function runDispatch(inputs, plan, outDir) {
     //    here — the barrier and the verification gate are enforced by that break.
     if (!advanced) {
       const prompted = workers.find((worker) => worker.prompt.detected && worker.worker_state === 'prompt');
+      const unjudged = workers.find((worker) => notJudged.has(worker.issue));
       if (prompted) {
         report.human_required = true;
         halt('partial', 'human_required', 'human_input_required', `#${prompted.issue} raised a prompt; halted for a human (no auto-response)`);
+      } else if (unjudged) {
+        // Ranked above worker_failed and verification_failed on purpose: 99 is
+        // "nothing judged this", which no amount of re-dispatching can resolve.
+        report.human_required = true;
+        halt('partial', 'dispatch_error', 'verification_not_judged',
+          `#${unjudged.issue}: verification exited ${VERIFY_EXIT_NO_VERDICT} — the run ended error/cancelled, so no gate judged the work. Halted for a human; not re-instructed as a verification failure (exit ${VERIFY_EXIT_FAILED}) and not rounded to a pass`);
       } else if (workers.some((worker) => worker.worker_state === 'failed')) {
         const failed = workers.find((worker) => worker.worker_state === 'failed');
         halt('partial', 'worker_failed', 'worker_failed', `#${failed.issue} did not complete; the next wave was not dispatched`);
@@ -889,7 +1547,7 @@ async function runDispatch(inputs, plan, outDir) {
   }
 
   report.redactions = redactionsList();
-  report.summary_markdown = renderSummary(report);
+  report.summary_markdown = renderSummary(report, contractMode);
   return report;
 }
 
@@ -911,12 +1569,17 @@ function buildCompletionCheck({ planApproved, driftReconfirmed, parallelismBound
 // Summary
 // =============================================================================
 
-function renderSummary(report) {
+function renderSummary(report, contractMode = false) {
   const lines = [];
   lines.push('## 対象と結論');
   const verb = report.status === 'success' ? '完了' : report.status === 'partial' ? '途中停止' : '未実行';
   lines.push(`plan ${report.plan_run_id} を ${report.profile.repository} に dispatch: ${report.status}（${verb}, stop=${report.stop_reason}）。`);
-  if (report.human_required) lines.push('worker が prompt を出したため、自動応答せず human 提示で停止した。');
+  lines.push(contractMode
+    ? '裁定: 実行契約（`commandmate send --contract` / `wait --verify` の exit code）を一次ソースにした。'
+    : '裁定: 実行契約は使わず、profile baseline を worktree 内で再実行するフォールバックで判定した。');
+  const notJudged = report.blocking_reasons.find((reason) => reason.code === 'verification_not_judged');
+  if (notJudged) lines.push('検証が判定に到達しなかった（exit 99）ため、不合格として再指示せず human 提示で停止した。');
+  else if (report.human_required) lines.push('worker が prompt を出したため、自動応答せず human 提示で停止した。');
   lines.push('');
   lines.push('## Wave');
   if (report.waves.length === 0) {
@@ -955,7 +1618,18 @@ function renderSummary(report) {
   } else {
     for (const reason of report.blocking_reasons) lines.push(`- blocking: ${reason.code} — ${reason.detail}`);
     for (const limitation of report.limitations) lines.push(`- limitation: ${limitation.code} — ${limitation.detail}`);
-    if (report.human_required) lines.push('- next: 提示した prompt を human が確認し、承認のうえ再開する（owner: human）。');
+    if (report.human_required && !report.blocking_reasons.some((reason) => reason.code === 'verification_not_judged')) {
+      lines.push('- next: 提示した prompt を human が確認し、承認のうえ再開する（owner: human）。');
+    }
+    if (report.blocking_reasons.some((reason) => reason.code === 'verification_not_judged')) {
+      lines.push('- next: 判定に到達しなかった検証 run（exit 99）を human が調べる。契約が run に束ねられたか・タスクが既に終端でないかを確認する。20（判定して不合格）ではないので worker への再指示ループには流さない（owner: human）。');
+    }
+    if (report.blocking_reasons.some((reason) => reason.code === 'contract_unsupported')) {
+      lines.push('- next: CommandMate を 0.17.0 以上へ更新して契約経路で再実行するか、`--contract-mode auto` でフォールバック実行する（owner: operator）。');
+    }
+    if (report.limitations.some((reason) => reason.code === 'contract_unsupported')) {
+      lines.push('- next: 契約非対応の CLI だったため裁定はフォールバック（baseline 再実行）である。契約ゲートで裁定したい場合は CommandMate を 0.17.0 以上へ更新する（owner: operator）。');
+    }
     if (report.stop_reason === 'verification_failed') lines.push('- next: verification 失敗の worktree を診断し、修正後に再 dispatch する（owner: operator）。');
     if (report.stop_reason === 'drift') lines.push('- next: drift（branch/base/permission）を解消し、plan を再確認して再開する（owner: operator）。');
   }

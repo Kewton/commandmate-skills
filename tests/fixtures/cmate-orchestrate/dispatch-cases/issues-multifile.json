@@ -1,0 +1,17 @@
+{
+  "_comment": "Two issues that each own SEVERAL files, listed in the body in an order that is not their sorted order. The single-file fixtures cannot tell a deterministic contract generator from a non-deterministic one — a one-element list survives any shuffle — so the contract determinism case (#1588) uses this one instead.",
+  "issues": [
+    {
+      "number": 210,
+      "title": "feat: add a session store",
+      "body": "Add the session store across `src/store/write.ts`, `src/store/index.ts` and `src/store/read.ts`.\n\n## Acceptance criteria\n- [ ] `src/store/write.ts` persists a session\n- [ ] `src/store/read.ts` returns the last write\n\n## Dependencies\n- Depends on #211\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 211,
+      "title": "feat: add base configuration loader",
+      "body": "Add the base configuration loader across `src/config/schema.ts`, `src/config/base.ts` and `src/config/env.ts`.\n\n## Acceptance criteria\n- [ ] `src/config/base.ts` reads config from disk\n- [ ] `src/config/env.ts` overlays environment values\n",
+      "labels": ["feature"]
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "description": "exit 21（作業証跡ゼロ）の分岐: work-evidence が commit も未 commit 変更も見つけない間は nudge して再度 `wait --verify` する。--max-turns 3 到達でなお 21 なら worker は failed（dispatch 失敗系）であり、pass にも 20 にも丸めない。`commandmate verify` は呼ばず、次 Wave も dispatch しない。 worker は 2 ターン目から commit を出すが、21 の間は runner が HEAD を見に行かない（判定が「作業ゼロ」なので完了確認に進まない）ことも固定する。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      201
+    ],
+    "never_sent": [
+      200
+    ],
+    "send_counts": {
+      "201": 3
+    },
+    "worker_states": {
+      "201": "failed"
+    },
+    "verification_outcomes": {
+      "201": "not_run"
+    },
+    "contract_issues": [
+      201
+    ],
+    "wave0_all_workers_completed": false,
+    "verify_calls": 0,
+    "wait_verify_calls_min": 3
+  }
+}

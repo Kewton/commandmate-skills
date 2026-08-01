@@ -34,11 +34,24 @@
 // message unsubmitted); `confirm_after: N` withholds the "generating" signal until
 // the N-th send so the send-confirm/re-send path is exercisable.
 //
-// Verification/UAT is NOT a commandmate call in the real CLI: the runners run the
-// profile baseline inside the worktree. The tests model that with the node-fake
-// profile whose baseline is `cat cmate-verify-ok`, so a worktree "passes" iff it
-// contains that marker file. This fake writes the marker into a fix worktree it
-// creates when the scenario says that fix should succeed.
+// Execution contract (Issue #1588). CommandMate 0.17.0 added `send --contract`,
+// `wait --verify` and a `verify` subcommand; older CLIs have none of them. A
+// scenario opts in with `cli_contract: true`, and when it is false this fake
+// REJECTS those flags the way an older binary would (unknown option) and omits
+// them from `<sub> --help` — which is what the runner's version gate probes. That
+// is what makes the fallback path a tested path rather than dead code.
+//
+// Under a contract the verdict is an EXIT CODE, not a marker file:
+// `wait --verify` returns the scenario's `workers.<n>.verify_exits` entry for the
+// current turn (0 pass / 20 judged-and-failed / 21 no work evidence / 99 NO
+// VERDICT REACHED), and `verify <id> --json` prints a verification run document
+// whose failing gates come from `workers.<n>.failed_gates`.
+//
+// Without a contract, verification is NOT a commandmate call in the real CLI: the
+// runners run the profile baseline inside the worktree. The tests model that with
+// the node-fake profile whose baseline is `cat cmate-verify-ok`, so a worktree
+// "passes" iff it contains that marker file. This fake writes the marker into a
+// fix worktree it creates when the scenario says that fix should succeed.
 //
 // A PR number in this fake is always equal to its issue number, so that
 // `pr view` (keyed by branch) and `pr checks`/`pr merge` (keyed by number) can
@@ -64,13 +77,33 @@ const sub = argv[0] ?? '';
 const VERIFY_MARKER = 'cmate-verify-ok';
 
 // commandmate subcommands this fake emulates. Only these are contract-checked.
-const COMMANDMATE_SUBS = new Set(['ls', 'send', 'wait', 'capture', 'respond']);
+const COMMANDMATE_SUBS = new Set(['ls', 'send', 'wait', 'capture', 'respond', 'verify']);
+
+// The flags a pre-0.17.0 commandmate does not have. A scenario without
+// `cli_contract: true` refuses them and hides them from --help, so the runner's
+// version gate sees exactly what an older binary would show it.
+const CONTRACT_GATED_FLAGS = { send: ['--contract'], wait: ['--verify', '--require-work'] };
+
+// The options each subcommand lists in `commandmate <sub> --help`, in the real
+// CLI's order. The gated ones above are appended only when the scenario says the
+// CLI is new enough.
+const HELP_FLAGS = {
+  send: ['--agent', '--instance', '--register', '--model', '--auto-yes', '--duration', '--stop-pattern', '--token'],
+  wait: ['--timeout', '--on-prompt', '--stall-timeout', '--instance', '--token'],
+  capture: ['--json', '--agent', '--instance', '--token'],
+  respond: ['--agent', '--instance', '--token'],
+  ls: ['--json', '--quiet', '--branch', '--id', '--token'],
+  verify: ['--instance', '--gates', '--json', '--timeout', '--token'],
+};
 
 // wait exit codes (mirror the real CLI's WaitExitCode).
 const WAIT_COMPLETED = 0;
 const WAIT_PROMPT = 10;
 const WAIT_TIMEOUT = 124;
 const WAIT_FAILED = 1;
+
+// verify / wait --verify verdict exit codes (mirror VerifyExitCode + ExitCode).
+const VERIFY_FAILED = 20;
 
 function scenario() {
   const path = process.env.CMATE_FAKE_SCENARIO;
@@ -223,6 +256,42 @@ function headShaFor(spec, issue) {
   return String(commitsFor(spec, issue)).padStart(40, '0');
 }
 
+// Does this scenario's CommandMate speak the execution contract (0.17.0+)?
+function contractCapable(spec) {
+  return spec.cli_contract === true;
+}
+
+// `commandmate <sub> --help`. The runner's version gate reads exactly this, so a
+// pre-contract CLI must not list the gated flags.
+function helpFor(sub, spec) {
+  const flags = [...(HELP_FLAGS[sub] ?? [])];
+  if (contractCapable(spec)) flags.push(...(CONTRACT_GATED_FLAGS[sub] ?? []));
+  const lines = [`Usage: commandmate ${sub} [options]`, '', 'Options:'];
+  for (const flag of flags) lines.push(`  ${flag} <value>`);
+  lines.push('  -h, --help                 display help for command');
+  return lines.join('\n');
+}
+
+// An older binary rejects the 0.17.0 flags outright. Without this the fallback
+// cases would "pass" against a fake that quietly accepted a flag the CLI they
+// model does not have.
+function refuseGatedFlags(spec) {
+  if (contractCapable(spec)) return;
+  for (const flag of CONTRACT_GATED_FLAGS[sub] ?? []) {
+    if (argv.includes(flag)) fail(`error: unknown option '${flag}'`, 1);
+  }
+}
+
+// The verdict `wait --verify` returns on this turn. `verify_exits` is consumed
+// per turn (one send = one turn) so a scenario can model "20, then 0 after the
+// re-instruction"; the last entry repeats once the list runs out.
+function verifyExitFor(worker, issue) {
+  const exits = Array.isArray(worker.verify_exits) ? worker.verify_exits : null;
+  if (!exits || exits.length === 0) return WAIT_COMPLETED;
+  const turn = Math.max(1, readSends(issue));
+  return exits[Math.min(turn - 1, exits.length - 1)];
+}
+
 function emit(object) {
   process.stdout.write(`${JSON.stringify(object)}\n`);
   process.exit(0);
@@ -236,6 +305,16 @@ function main() {
   logInvocation();
   enforceContract();
   const spec = scenario();
+
+  // --- commandmate <sub> --help (the runner's version gate) ----------------
+  if (COMMANDMATE_SUBS.has(sub) && argv.includes('--help')) {
+    if (sub === 'verify' && !contractCapable(spec)) {
+      fail(`error: unknown command 'verify'`, 1);
+    }
+    process.stdout.write(`${helpFor(sub, spec)}\n`);
+    process.exit(0);
+  }
+  refuseGatedFlags(spec);
 
   // --- commandmate availability probe -------------------------------------
   if (sub === '--version') {
@@ -378,20 +457,43 @@ function main() {
     process.exit(0);
   }
   if (sub === 'send') {
-    // `commandmate send <worktree-id> <message>` — positional, no task id back.
+    // `commandmate send <worktree-id> [message]` — positional. With --contract
+    // the message is omitted (the server composes it) and the TASK ID is printed
+    // on stdout; that id is what the runner records (Issue #1588/#1545).
     const worktreeId = argv[1];
     const issue = issueFromId(worktreeId);
     if (!issue) fail('send: could not determine worktree');
     const worker = workerSpec(spec, issue);
     if (worker.send === 'fail') fail('send: worker dispatch refused');
+    const contractPath = optionValue('--contract');
+    if (contractPath !== null) {
+      if (worker.contract === 'reject') {
+        fail('Error: invalid task contract:\n  - scope.allow: at least one pattern is required while success.requireScopeClean is true', 2);
+      }
+      // The real CLI resolves --contract relative to the worktree root and exits
+      // 2 when the file is not there. Checking it here is what proves the runner
+      // actually placed the contract in the worktree it dispatched to.
+      const row = (spec.worktrees ?? []).find((entry) => entry.id === worktreeId);
+      const absolute = resolve(process.cwd(), row?.path ?? '.', contractPath);
+      if (!existsSync(absolute)) {
+        fail(`Error: invalid task contract:\n  - ${contractPath}: contract file not found in the worktree`, 2);
+      }
+      const taskId = `task-issue-${issue}`;
+      process.stderr.write(`Task created: ${taskId}\n`);
+      process.stdout.write(`${taskId}\n`);
+    }
     // A successful send drives the worker one more turn (Issue #1468).
     bumpSends(issue);
     process.stderr.write('Message sent.\n');
     process.exit(0);
   }
   if (sub === 'wait') {
-    // `commandmate wait <worktree-id> [--timeout <s>]`. State is the EXIT CODE:
-    // 0 completed, 10 prompt (prompt JSON on stdout), 124 timeout, 1 failed.
+    // `commandmate wait <worktree-id> [--timeout <s>] [--verify]`. State is the
+    // EXIT CODE: 0 completed, 10 prompt (prompt JSON on stdout), 124 timeout,
+    // 1 failed. With --verify the completion path returns the VERDICT instead:
+    // 0 pass / 20 judged-and-failed / 21 no work evidence / 99 no verdict.
+    // Prompts and timeouts are returned unchanged and never verified — the real
+    // CLI only verifies a worktree whose completion it detected (#1544).
     const worktreeId = argv[1];
     const issue = issueFromId(worktreeId);
     const worker = workerSpec(spec, issue);
@@ -399,7 +501,9 @@ function main() {
     // Once a prompt has been answered (auto-yes), the worker moves on.
     const marker = respondedMarkerPath(issue);
     if (state === 'prompt' && marker && existsSync(marker)) state = 'completed';
-    if (state === 'completed') process.exit(WAIT_COMPLETED);
+    if (state === 'completed') {
+      process.exit(argv.includes('--verify') ? verifyExitFor(worker, issue) : WAIT_COMPLETED);
+    }
     if (state === 'prompt') {
       process.stdout.write(`${JSON.stringify({ worktreeId, cliToolId: 'claude', type: 'confirm', question: worker.prompt ?? 'Proceed? [y/N]', options: [], status: 'pending' })}\n`);
       process.exit(WAIT_PROMPT);
@@ -408,6 +512,35 @@ function main() {
     // failed
     process.stderr.write(`${worker.detail ?? 'worker exited non-zero'}\n`);
     process.exit(WAIT_FAILED);
+  }
+  if (sub === 'verify') {
+    // `commandmate verify <worktree-id> --json` — the verification run document
+    // (VerificationRunView). The runner reads `gates[]` only to NAME the gates a
+    // failing verdict is about; the verdict itself stays the wait's exit code.
+    if (!contractCapable(spec)) fail(`error: unknown command 'verify'`, 1);
+    const worktreeId = argv[1];
+    const issue = issueFromId(worktreeId);
+    const worker = workerSpec(spec, issue);
+    const failedGates = Array.isArray(worker.failed_gates) ? worker.failed_gates : [];
+    const gates = [
+      { gateId: 'work-evidence', status: 'passed', exitCode: null, durationMs: 12, logTail: 'commits=1 uncommitted=0' },
+      ...failedGates.map((gateId) => ({ gateId, status: 'failed', exitCode: 1, durationMs: 340, logTail: `${gateId}: 1 problem` })),
+    ];
+    if (argv.includes('--json')) {
+      process.stdout.write(`${JSON.stringify({
+        id: 1,
+        worktreeId,
+        instanceId: null,
+        taskId: `task-issue-${issue}`,
+        trigger: 'manual',
+        status: failedGates.length > 0 ? 'failed' : 'passed',
+        baseRef: 'origin/develop',
+        startedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: '2026-01-01T00:00:01.000Z',
+        gates,
+      })}\n`);
+    }
+    process.exit(failedGates.length > 0 ? VERIFY_FAILED : 0);
   }
   if (sub === 'capture') {
     // `commandmate capture <worktree-id> --json` — CurrentOutputResponse shape.
