@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-verify
 name: cmate-verify
-version: 0.1.0
+version: 0.1.1
 summary: 検証ゲートを .commandmate/verify.yaml に宣言し、未着手ガードとプライマリ checkout skip を挟んで worktree で逐次実行し、出力ではなく実 exit code で合否を判定する bash 3.2 互換ランナー。
 description: >-
   「このリポジトリで何が通れば合格か」を `.commandmate/verify.yaml`（形式 v1）に宣言し、
@@ -99,8 +99,8 @@ risk_rationale: >-
   verify.yaml に限られる。credential は読まない。
 files:
   - path: SKILL.md
-    sha256: f57ebc6866aa933a58f0ffd6675b5f6bcece70335eb2b32d68a9780a5e6f8578
-    size: 9958
+    sha256: dcaabf06ac8e9a4d9cd8b89b1164bace76a53a2f0fd7a8c0a4e4f6a0e11b7493
+    size: 11534
     kind: skill_md
     executable: false
     script: false
@@ -224,6 +224,12 @@ files:
     kind: asset
     executable: false
     script: false
+  - path: scripts/tests/fixtures/no-log-tail.yaml
+    sha256: 7cddb975d5c3af7f4b316e879bd20cf12ecc64b121934d3b5db328692bbbde33
+    size: 341
+    kind: asset
+    executable: false
+    script: false
   - path: scripts/tests/fixtures/one-fail.yaml
     sha256: 62580fa87300a3e79736df33a2c4e2e4a7b5260ee3455c1de329ce4c07f56993
     size: 428
@@ -242,6 +248,12 @@ files:
     kind: asset
     executable: false
     script: false
+  - path: scripts/tests/fixtures/silent-fail.yaml
+    sha256: a3a640a9f4ad179f802cf411d6ce51f551ca8691a1e7b829165438335f5888bb
+    size: 553
+    kind: asset
+    executable: false
+    script: false
   - path: scripts/tests/fixtures/timeout.yaml
     sha256: 8ba1f347093da9d80378d75e403279954339cd63232616a218607238f381350d
     size: 585
@@ -249,14 +261,14 @@ files:
     executable: false
     script: false
   - path: scripts/tests/run-tests.sh
-    sha256: 29b4bd4fbd8a426af74c9d7436ac79cc42129fda833b8beeac2640171a18bccd
-    size: 16080
+    sha256: 98088d3f0fac0b57cd8dde8ded0b397e51c10bef3d7abb82dc6f948cba3a27d7
+    size: 24767
     kind: script
     executable: true
     script: true
   - path: scripts/verify-run.sh
-    sha256: 48fc31e601f423473579500a15153b8c1f905bac4b7368fd25c499d872f0d144
-    size: 14875
+    sha256: ac506c17daba1207a109f2716e625ba01a17318630c4670bc7474461f8f9edc4
+    size: 16486
     kind: script
     executable: true
     script: true
