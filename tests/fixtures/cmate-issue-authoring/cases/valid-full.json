@@ -1,0 +1,143 @@
+{
+  "plan_schema_version": 1,
+  "skill_id": "cmate-issue-authoring",
+  "skill_version": "0.1.0",
+  "plan_id": "split-ae26c30119f1",
+  "generated_mode": "dry-run",
+  "repository": "Kewton/CommandMate",
+  "source": {
+    "kind": "text",
+    "ref": "Feature description supplied inline by the caller",
+    "digest": "9f2c1a0d4b8e7f6a5c3d2b1e0f9a8c7b6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f10"
+  },
+  "issues": [
+    {
+      "key": "session-store-rotation",
+      "title": "feat(auth): rotate the refresh token on every use in the session store",
+      "objective": "refresh token を 1 回使うたびに rotate し、使用済み token での更新要求を失効させる。",
+      "acceptance_criteria": [
+        "`npm test -- src/auth` が exit 0 で終わる",
+        "使用済み refresh token での更新要求が 401 を返す"
+      ],
+      "target_files": ["src/auth/session-store.ts", "src/auth/refresh.ts"],
+      "reference_files": ["docs/auth/sessions.md"],
+      "test_expectations": ["npm test -- src/auth"],
+      "depends_on": [],
+      "labels": ["feature", "auth"],
+      "size": "m",
+      "parallel_safe": "no",
+      "evidence": [
+        {
+          "claim": "現在の実装は refresh token を再発行せず同じ値を返す",
+          "kind": "file",
+          "ref": "src/auth/session-store.ts:118"
+        },
+        {
+          "claim": "rotation は Feature 記述の必須要件として挙げられている",
+          "kind": "input",
+          "ref": "feature description, paragraph 2"
+        }
+      ],
+      "body": "refresh token を 1 回使うたびに rotate し、使用済み token での更新要求を失効させる。\n\n## 対象ファイル\n\n- `src/auth/session-store.ts`\n- `src/auth/refresh.ts`\n\n参考: `docs/auth/sessions.md`\n\n## 受入条件\n\n- [ ] `npm test -- src/auth` が exit 0 で終わる\n- [ ] 使用済み refresh token での更新要求が 401 を返す\n\n## 依存\n\n- なし\n\n## 根拠\n\n- src/auth/session-store.ts:118 — 現在の実装は token を再発行せず同じ値を返す\n"
+    },
+    {
+      "key": "rotation-metrics",
+      "title": "feat(auth): expose rotation and reuse-detection counters on the metrics endpoint",
+      "objective": "rotate 回数と再利用検知回数を metrics endpoint から取得できるようにする。",
+      "acceptance_criteria": [
+        "`npm test -- src/metrics` が exit 0 で終わる",
+        "metrics endpoint が auth_refresh_rotated_total を返す"
+      ],
+      "target_files": ["src/metrics/auth.ts"],
+      "reference_files": [],
+      "test_expectations": ["npm test -- src/metrics"],
+      "depends_on": ["session-store-rotation"],
+      "labels": ["feature", "observability"],
+      "size": "s",
+      "parallel_safe": "yes",
+      "evidence": [
+        {
+          "claim": "metrics endpoint の counter は src/metrics/auth.ts に集約されている",
+          "kind": "file",
+          "ref": "src/metrics/auth.ts:1"
+        }
+      ],
+      "body": "rotate 回数と再利用検知回数を metrics endpoint から取得できるようにする。\n\n## 対象ファイル\n\n- `src/metrics/auth.ts`\n\n## 受入条件\n\n- [ ] `npm test -- src/metrics` が exit 0 で終わる\n- [ ] metrics endpoint が auth_refresh_rotated_total を返す\n\n## 依存\n\n- depends on {{issue:session-store-rotation}}（counter が数える事象を先に作る必要がある）\n\n## 根拠\n\n- src/metrics/auth.ts:1 — counter の登録はこの file に集約されている\n"
+    },
+    {
+      "key": "reuse-detection-tests",
+      "title": "test(auth): pin reuse detection against a replayed refresh token",
+      "objective": "再利用された refresh token を replay する回帰テストを追加する。",
+      "acceptance_criteria": ["`npm test -- src/auth` が新規ケースを含めて exit 0 で終わる"],
+      "target_files": ["tests/auth/refresh.test.ts"],
+      "reference_files": [],
+      "test_expectations": ["npm test -- src/auth"],
+      "depends_on": ["session-store-rotation"],
+      "labels": ["test"],
+      "size": "xs",
+      "parallel_safe": "yes",
+      "evidence": [
+        {
+          "claim": "既存の refresh テストは rotation を扱っていない",
+          "kind": "file",
+          "ref": "tests/auth/refresh.test.ts:1"
+        }
+      ],
+      "body": "再利用された refresh token を replay する回帰テストを追加する。\n\n## 対象ファイル\n\n- `tests/auth/refresh.test.ts`\n\n## 受入条件\n\n- [ ] `npm test -- src/auth` が新規ケースを含めて exit 0 で終わる\n\n## 依存\n\n- depends on {{issue:session-store-rotation}}\n\n## 根拠\n\n- tests/auth/refresh.test.ts:1 — 既存ケースは rotation を扱っていない\n"
+    }
+  ],
+  "duplicate_suspicions": [
+    {
+      "issue_key": "rotation-metrics",
+      "kind": "existing_issue",
+      "ref": "#1204",
+      "overlap": "#1204 も src/metrics/auth.ts に counter を足すが、対象は login 失敗回数で refresh rotation ではない",
+      "verdict": "overlapping"
+    },
+    {
+      "issue_key": "reuse-detection-tests",
+      "kind": "merged_pr",
+      "ref": "PR #1188",
+      "overlap": "PR #1188 が tests/auth/refresh.test.ts に replay ケースを追加済みで、範囲がそのまま重なる",
+      "verdict": "duplicate"
+    }
+  ],
+  "open_questions": [
+    {
+      "id": "q-replay-test-duplicate",
+      "question": "PR #1188 の replay ケースで足りるか、rotation 前提の追加ケースが要るか",
+      "why_blocking": "足りるなら reuse-detection-tests は登録せず取り下げる",
+      "options": ["#1188 で足りるので取り下げる", "rotation 前提のケースを追加する"],
+      "blocks": ["reuse-detection-tests"]
+    }
+  ],
+  "commands": [
+    {
+      "purpose": "既存 Issue との重複を検査する",
+      "command": "gh issue list --repo Kewton/CommandMate --state all --search \"refresh token rotation in:title,body\" --limit 30",
+      "mutating": false,
+      "executed": true
+    },
+    {
+      "purpose": "着地済み PR との重複を検査する",
+      "command": "gh pr list --repo Kewton/CommandMate --state merged --search \"refresh token rotation\" --limit 30",
+      "mutating": false,
+      "executed": true
+    },
+    {
+      "purpose": "対象ファイルの実在を確認する",
+      "command": "git ls-files src/auth src/metrics tests/auth",
+      "mutating": false,
+      "executed": true
+    }
+  ],
+  "warnings": [
+    {
+      "code": "duplicate_suspected",
+      "detail": "reuse-detection-tests は PR #1188 と重複の疑いがある。承認前に q-replay-test-duplicate を解消すること"
+    }
+  ],
+  "notes": [
+    "3 件はいずれも src/auth/session-store.ts を共有しないが、session-store-rotation は他 2 件の前提である"
+  ]
+}
