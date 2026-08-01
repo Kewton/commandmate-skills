@@ -15,7 +15,7 @@ Claude Code 2.1.220 は `.claude/skills` しか、Codex CLI 0.145.0 は `.agents
 - 親 Epic: [Kewton/CommandMate#1227](https://github.com/Kewton/CommandMate/issues/1227)
 - 本リポジトリの release pipeline: [Kewton/CommandMate#1238](https://github.com/Kewton/CommandMate/issues/1238)
 
-> **状態**: release pipeline と公式 Skill 10 件が揃っている。
+> **状態**: release pipeline と公式 Skill 11 件が揃っている。
 > どの Agent でどこまで確認済みかは
 > [docs/agent-support-matrix.md](./docs/agent-support-matrix.md) を参照。
 
@@ -77,6 +77,7 @@ python3 scripts/verify_artifact.py --help      # 公開 artifact の keyless 検
 | `cmate-orchestrate` | 複数 Issue の計画・dispatch・PR/merge・UAT（Node runner 同梱） | **high** |
 | `cmate-orchestrate-monitor` | 並列 worker 監視の判定コア（bash script 同梱） | **high** |
 | `cmate-verify` | 検証ゲートの起案と実 exit code 判定（bash script 同梱） | **high** |
+| `cmate-verify-advisor` | 検証履歴から verify.yaml の改善案を出す（強化は適用可・弱体化は提案止まり。Node script 同梱） | moderate |
 
 version と risk は `skills/<skill-id>/commandmate.skill.yaml` の `version` /
 `declared_risk` が正本である（Catalog は「入手可能なもの」を示す）。high risk の
@@ -84,8 +85,8 @@ package（**`cmate-worktree-cleanup` / `cmate-orchestrate` / `cmate-orchestrate-
 `cmate-verify` の 4 件**）は install に `--yes` と `--ack-risk <skill-id>@<version>` の
 完全一致が要る。
 
-`cmate-issue-authoring` と `cmate-task-contract` と `cmate-verify` は
-**まだ Catalog に publish されていない**
+`cmate-issue-authoring` と `cmate-task-contract` と `cmate-verify` と
+`cmate-verify-advisor` は **まだ Catalog に publish されていない**
 （[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開予定）。
 それまでは `commandmate skill install` の経路が無いので、使いたい場合は両 root へ手で置く。
 **片側だけに置くと、Claude か Codex のどちらかから必ず不可視になる。**

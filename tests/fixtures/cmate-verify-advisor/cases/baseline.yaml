@@ -1,0 +1,25 @@
+# A verify.yaml with the shapes the advisor has to survive:
+#
+#  - a gate whose timeoutSec is wildly larger than anything ever measured
+#  - a gate that carries a comment explaining its own timeout (the comment must
+#    travel with the gate when the order changes)
+#  - a gate with no timeoutSec: at all (the 600s default applies)
+#  - an options: block that already declares maxLogTailBytes
+version: 1
+gates:
+  - id: lint
+    command: "npm run lint"
+    timeoutSec: 600
+  - id: typecheck
+    command: "npx tsc --noEmit"
+  # 1800s because the suite talks to a container that can take a minute to come up.
+  - id: unit
+    command: "npm run test:unit"
+    timeoutSec: 1800
+  - id: build
+    command: "npm run build"
+    timeoutSec: 900
+options:
+  baseRef: origin/main
+  skipInPrimaryCheckout: false
+  maxLogTailBytes: 4096

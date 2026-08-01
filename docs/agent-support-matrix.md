@@ -179,6 +179,7 @@ Codex では skill 名を自然文で指示するか、同梱 script を直接�
 | `cmate-repository-analysis` | 0.1.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
 | `cmate-task-contract` | 0.1.0 | native | native | unknown | unknown | 2026-07-31 | **手動両置き** |
 | `cmate-verify` | 0.1.1 | native | native | unknown | unknown | 2026-07-31（**0.1.0 で実測**） | **手動両置き** |
+| `cmate-verify-advisor` | 0.1.0 | native | native | unknown | unknown | **未実測** | 未 publish |
 | `cmate-worktree-cleanup` | 0.1.2 | native | native | unknown | unknown | 2026-07-31 | catalog install |
 | `cmate-worktree-setup` | 0.1.2 | native | native | unknown | unknown | 2026-07-31 | catalog install |
 
@@ -186,13 +187,15 @@ Codex では skill 名を自然文で指示するか、同梱 script を直接�
 （それ以前は第 3 節の 1 package の測定を install 経路の共通性から全件に敷衍していた）。
 `gemini` / `opencode` は依然としてどの package でも測っていない。
 
-**`cmate-issue-authoring` 0.1.0 は第 3.2 節の実測（9 package）に含まれていない。**
-2026-08-01 に追加した package であり、`claude` / `codex` の `native` は第 3.2 節が示した
-「install 先が package に依存しない」ことからの敷衍である。install 経路も payload の
-配置規則も他 package と同じなので同じ結果になる見込みだが、**見込みは実測ではない。**
+**`cmate-issue-authoring` 0.1.0 と `cmate-verify-advisor` 0.1.0 は第 3.2 節の実測
+（9 package）に含まれていない。** それぞれ 2026-08-01 / 2026-08-02 に追加した package であり、
+`claude` / `codex` の `native` は第 3.2 節が示した「install 先が package に依存しない」ことからの
+敷衍である。install 経路も payload の配置規則も他 package と同じなので同じ結果になる見込みだが、
+**見込みは実測ではない。**
 publish 後に [verify-install.md](./runbooks/verify-install.md) の手順で追試が要る。
 
-`cmate-task-contract` 0.1.0 と `cmate-verify` 0.1.1 は **まだ Catalog に publish されていない**
+`cmate-task-contract` 0.1.0 と `cmate-verify` 0.1.1 と `cmate-verify-advisor` 0.1.0 は
+**まだ Catalog に publish されていない**
 （[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開する）。
 `skill info` は exit 2 `SKILL_NOT_FOUND` を返す。第 3.2 節ではこの 2 件だけ
 [verify-install.md](./runbooks/verify-install.md) の**手動両置き手順**で配置して測った。

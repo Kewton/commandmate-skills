@@ -23,11 +23,12 @@ skills/<skill-id>/
 | `cmate-repository-analysis` | 0.1.1 | low | リポジトリ構造・規約の分析手順 |
 | `cmate-task-contract` | 0.1.0 | moderate | Issue から実行契約 yaml を起案する手順 |
 | `cmate-verify` | 0.1.1 | high | 検証ゲートの起案と実 exit code 判定（bash script 同梱） |
+| `cmate-verify-advisor` | 0.1.0 | moderate | 検証履歴から verify.yaml の改善案を出す（Node script 同梱） |
 | `cmate-worktree-cleanup` | 0.1.2 | high | worktree の安全な後始末 |
 | `cmate-worktree-setup` | 0.1.2 | moderate | 専用 worktree の作成と baseline 取得 |
 
-`cmate-issue-authoring` と `cmate-task-contract` と `cmate-verify` は
-**まだ Catalog に publish されていない**
+`cmate-issue-authoring` と `cmate-task-contract` と `cmate-verify` と
+`cmate-verify-advisor` は **まだ Catalog に publish されていない**
 （[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開予定）。
 
 この表は目次であって正本ではない。version と risk は各
