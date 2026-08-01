@@ -19,7 +19,7 @@ skills/<skill-id>/
 | `cmate-issue-authoring` | 0.1.0 | moderate | Feature 記述から Issue 群を起案（計画 validator 同梱） |
 | `cmate-issue-refinement` | 0.1.1 | moderate | Issue 精緻化の標準手順 |
 | `cmate-orchestrate` | 0.7.1 | high | 計画・dispatch・PR/merge・UAT（Node runner 同梱） |
-| `cmate-orchestrate-monitor` | 0.3.0 | high | 並列 worker 監視の判定コア（bash script 同梱） |
+| `cmate-orchestrate-monitor` | 0.4.0 | high | 並列 worker 監視の判定コア（bash script 同梱） |
 | `cmate-repository-analysis` | 0.1.1 | low | リポジトリ構造・規約の分析手順 |
 | `cmate-task-contract` | 0.1.0 | moderate | Issue から実行契約 yaml を起案する手順 |
 | `cmate-verify` | 0.1.1 | high | 検証ゲートの起案と実 exit code 判定（bash script 同梱） |

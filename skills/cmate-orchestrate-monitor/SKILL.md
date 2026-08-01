@@ -287,6 +287,17 @@ MONITOR_HOOKS=<skill-dir>/scripts/hooks-git.sh <skill-dir>/scripts/monitor.sh <w
 - `hooks-git.sh` は worktree-id を `git worktree list --porcelain` から実 checkout へ解決し、
   `git log --oneline <base>..HEAD` と `git status --porcelain` で数える。
   解決規則と env は [references/monitor-contract.md](./references/monitor-contract.md) にある。
+- **`git` が答えられなかった場合と、worker が本当に何も書いていない場合は別物である**
+  （CommandMate #1614）。上記 3 つの `git` 呼び出しはいずれも終了コードを確認する。
+  失敗時のカウンタ値は 0 のまま（`commits=0 && uncommitted=0` は完了判定を安全側＝
+  COMPLETE を出さない方向にしか倒さない）だが、**黙った 0 ではなく**、原因ごとに
+  **worker あたり 1 行**を stderr へ出す（毎ポーリングは出さない。base ref 警告と同じ粒度）。
+  worktree path の解決失敗は**両カウンタを同時に 0 へ沈める**ので、id が解決できないケースも
+  同じ粒度で報告する。行の一覧は
+  [references/monitor-contract.md](./references/monitor-contract.md) にある。
+  数え方は `printf '%s' "$out" | grep -c . || true` である: 終了コードを見るために出力を
+  変数へ受けると `$()` が末尾改行を落とすため `wc -l` は 1 件を 0 と数え（bash 3.2.57 実測）、
+  `|| echo 0` は 0 件で `"0\n0"` になる。
 
 ### なぜ CLI で、API ではないのか（実測 2026-07-31）
 
@@ -335,9 +346,11 @@ monitor[<wid>]: poll <N> -> <STATE> started=<0|1> streak=<n> commits=<n> uncommi
 | 送信先として解決されたセッション | `grep 'intervention target = ' monitor.log`（worker ごとに 1 行） |
 | 完了判定の根拠 | COMPLETE した poll 行の `started= / streak= / commits= / uncommitted= / task=` |
 | capture 失敗 | `grep -c 'capture failed' monitor.log`（poll 行は出ないので別に数える） |
+| helper 失敗（CommandMate #1614） | `grep -cE 'classify-state failed\|verify-completion failed' monitor.log`。いずれもそのポーリングを捨てる（poll 行は出ない）。**0 でなければ判定を下せなかったポーリングがある** |
+| カウンタが信用できないポーリング | `grep 'monitor hooks: \[' monitor.log`（worker あたり 1 行。出ていれば `commits=` / `uncommitted=` の 0 は「測れなかった」であって「作業ゼロ」ではない） |
 
 `--verbose` は opt-in である。付けない限り既定の stdout は 1 バイトも変わらない
-（介入・capture 失敗・終局判定・起動/停止のみ）。
+（介入・capture 失敗・helper 失敗・終局判定・起動/停止のみ）。
 
 ## 10. やらないこと
 
