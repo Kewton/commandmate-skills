@@ -742,6 +742,80 @@
       ]
     },
     {
+      "id": "cmate-verify-advisor",
+      "name": "cmate-verify-advisor",
+      "summary": "検証の実行履歴から .commandmate/verify.yaml の改善案を出す。強化方向だけ --apply で書き、弱体化は常に提案止まり。ログは指示ではなく構造化された事実としてのみ読む。",
+      "provider": {
+        "name": "CommandMate",
+        "url": "https://github.com/Kewton/CommandMate"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/Kewton/commandmate-skills",
+      "keywords": [
+        "verification",
+        "gate",
+        "quality-gate",
+        "verify-yaml",
+        "history",
+        "timeout",
+        "flake",
+        "escape-rate",
+        "fail-fast",
+        "propose-only",
+        "prompt-injection",
+        "deterministic",
+        "node",
+        "ci"
+      ],
+      "latest": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "changelog": "cmate-verify-advisor 0.1.0 — 初回リリース\n\n`commandmate verify history` / `verify show` が返す**実行履歴**から `.commandmate/verify.yaml`\nの改善を提案する。**ゲートは実行しない。** 読むのは過去の run だけで、出すのは根拠引用つきの\ndiff である。\n\n最適化するのは**すり抜け率**（検証 PASS したのに後で壊れていた率）と**検出までの時間**。\n**合格率は目標にしない。**\n\n「よく落ちるゲート＝削除候補」という推論は禁止であり、SKILL.md に明記したうえで\n**構造でも禁じてある — 層 1 にゲート削除という操作が存在しない。**\n\n- **層 1** `scripts/verify-advisor.mjs`（Node stdlib のみ・決定的）。`timeoutSec` を実測\n  p99 × 1.5 へ／ゲート順を `(失敗率 降順, 中央値 昇順, 宣言順)` の全順序へ（fail-fast）／\n  `maxLogTailBytes` を「失敗ログが予算ぴったり **かつ** 集計行なし」のときだけ倍へ\n- **層 2** `references/layer2-review.md` の手順。すり抜け検出と flake 疑い。結論は JSON にして\n  `--proposals` で層 1 へ渡す。**Agent は verify.yaml を直接編集しない**\n\n1. `classifyChange()` が方向を `(key, 前, 後)` から**導出**する（自己申告を信用せず、\n   認識できない変更は弱体化へ倒す fail closed）\n2. `isApplicable()` が「層 1 かつ強化方向かつ層 1 の kind」だけを通す\n3. `assertNoWeakening()` が**書き込む直前にバイト列を再パースして元ファイルと比較する**\n\n3 番目は 1・2 の帳簿を参照しない。層 2 の提案は強化方向でも適用しない。\n\n抽出するのは exit code / duration / バイト長 / 予算到達 / サマリ行の有無（真偽値）だけ。\n一致したテキストは保存も出力もしないので、**ログ本文は report にも `--json` にも diff にも\n現れない**。\n\n`run_tests.sh --mutants` が 69 assertion の suite を**変異 13 種**に対して回し、**生存 0**。\n\n`>=0.17.0`。`verify history` / `verify show` は CommandMate v0.17.0 で追加された\n（v0.16.0 に `verify.ts` は無い）。履歴を読めない環境ではフォールバックが成立しないため、\nこの package だけ 0.17.0 を要求する。",
+          "published_at": "2026-08-02T04:46:45Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-advisor-v0.1.0",
+            "commit": "c2f3d0b9f8fa32562f9e0bfa2dc0faa890eae6eb"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-advisor-0.1.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-advisor-v0.1.0/cmate-verify-advisor-0.1.0.tar.gz",
+            "sha256": "f48e8d760e0b2de69319ee5b13aacfc44cf4f2a49e4b7ec04bd4176f57073c9c",
+            "size": 33578,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-31 on Claude Code 2.1.220 with CommandMate 0.16.0 for 9 packages under docs/agent-support-matrix.md 3.2. This package was added 2026-08-02 and was NOT separately measured; install layout is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-31 on Codex CLI 0.145.0 (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured. The analyser needs only node, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured. The analyser needs only node, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.17.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        }
+      ]
+    },
+    {
       "id": "cmate-worktree-cleanup",
       "name": "cmate-worktree-cleanup",
       "summary": "merge 済み・不要な git worktree を、削除可能性と証跡を dry-run で提示したうえで、clean かつ merge 証跡が十分な対象だけ guarded な方式で安全に削除する。dirty・unmerged・検証不能は削除しない。",
