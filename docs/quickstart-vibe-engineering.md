@@ -264,12 +264,19 @@ exit 10 も返らない。人が画面の前にいる前提のモードである
 
 ```
 $ commandmate wait demo-app-feature-greet --verify --timeout 600
+Waiting: demo-app-feature-greet (status=running, running=true, prompt=false)
+Waiting: demo-app-feature-greet (status=running, running=true, prompt=false)
 {"worktreeId":"demo-app-feature-greet","cliToolId":"claude","type":"multiple_choice","question":"… Do you want to create greet.sh?","options":[{"number":1,"label":"Yes","isDefault":true,…}],"status":"pending"}
 $ echo $?
 10
 $ commandmate respond demo-app-feature-greet 2
 Response sent.
 ```
+
+> **exit 10 の stdout は JSON 1 行ではない。** 上のとおり `Waiting:` の進捗行が
+> 先に出て、prompt の JSON は**最後の行**に来る。script から食わせるなら
+> stdout 全体を `json.load` せず、**空でない最終行だけを parse する**こと
+> （実測：全体を parse すると `JSONDecodeError` で落ちる）。
 
 完了まで進むと、検証が走って裁定が出る。
 
@@ -386,6 +393,59 @@ VERIFY:    run 7 passed
   GATE unit passed (exit=0)
 ```
 
+### 4.6 Codex で流す場合
+
+ここまでの例はすべて Claude Code である。**`send` / `wait` / `respond` は
+worktree の primary instance に届く。**何も指定しなければ `claude` に届くので、
+Codex 用に切った worktree であっても**黙って Claude Code が走る**（実測。
+`commandmate task show` の `AGENT:` 欄で送り先が分かる）。
+
+Codex へ届けるには送り先を明示する。**flag 名が command ごとに違う。**
+
+| command | 送り先の指定 | 備考 |
+|---|---|---|
+| `send` | `--agent codex` | `--instance codex` では**届かない**（下記） |
+| `wait` | `--instance codex` | `wait` に `--agent` は無い（`error: unknown option '--agent'`） |
+| `respond` / `capture` | `--agent codex` | `--instance` も受け付ける |
+
+```bash
+commandmate send <worktree-id> --agent codex --contract .commandmate/tasks/<name>.yaml
+commandmate wait <worktree-id> --instance codex --verify --timeout 600
+commandmate respond <worktree-id> --agent codex 1
+```
+
+> **`send --instance codex` は使わない。** roster 上 `codex` instance の `CLI_TOOL` が
+> `codex` であっても、実測では **Claude Code の session が起動した**
+> （tmux session 名 `mcbd-claude-<worktree-id>-codex`、`task show` の `AGENT:` は
+> `claude/codex`）。`send` は `--agent` で指定すること。
+
+**Codex では `wait` の完了判定が先走る。** Codex がまだ作業中でも
+`Completed:` を出して裁定に入るため、1 回目の `wait --verify` が
+「作業証跡ゼロ」の **exit 21** や、途中成果だけを見た **exit 0** を返す。
+Claude Code ではこれは起きなかった。
+
+```
+--- wait iteration 1: exit=21 ---   # Codex はまだ何も書いていない
+--- wait iteration 2: exit=21 ---
+--- wait iteration 3: exit=21 ---
+--- wait iteration 4: exit=0 ---    # work-evidence PASS (commits=0, uncommitted=1)
+--- wait iteration 5: exit=0 ---    # work-evidence PASS (commits=1, uncommitted=0)
+```
+
+したがって Codex では、**exit 21 を「未着手」と断定せず再 poll する**こと
+（4.5 の切り分けはその後で行う）。加えて `--auto-yes` を付けないと、Codex の
+承認プロンプトは exit 10 として上がってこないまま `Completed` になり得る。
+
+```bash
+commandmate send <worktree-id> --agent codex --auto-yes --duration 1h \
+  --contract .commandmate/tasks/<name>.yaml
+```
+
+> **work-evidence は commit を要求しない。** 契約の前文は
+> 「作業完了後は必ず commit すること（未 commit の作業は未完了とみなされる）」と
+> 送るが、work-evidence ゲートは `commits=0, uncommitted=1` でも PASS する（実測）。
+> commit まで到達したかは `RESULT passed` ではなく `commits=` の値で見ること。
+
 ---
 
 ## 5. メトリクスを見る
@@ -436,8 +496,11 @@ Retry loops:  avg 0.0 per failed task
 
 このページの出力は 2026-08-02 に次の環境で実測した。
 
-- CommandMate **0.17.0**（npm、隔離 prefix へ install）
-- macOS（Darwin 25.5.0）、Claude Code、tmux
+- CommandMate **0.17.0**（npm、隔離 prefix へ install）。
+  第 4.6 節と、第 4.2 節の `Waiting:` 行に関する記述だけは
+  **CommandMate 0.18.0** で実測した（同日の再実測。第 1〜4.5 節の出力は 0.18.0 でも
+  同じものが再現している）
+- macOS（Darwin 25.5.0）、Claude Code **2.1.220** / Codex CLI、tmux 3.5a
 - 隔離した `HOME` / 専用ポート / 専用 DB / 専用の demo リポジトリ
   （本番サーバと DB には触れていない。隔離の作法は
   [docs/runbooks/verify-install.md 第 0 節](./runbooks/verify-install.md)）

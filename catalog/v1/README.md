@@ -8,8 +8,8 @@ CommandMate が取得する Catalog。**生成物であり、手で編集しな�
 |---|---|
 | `catalog.json` | `schema_version: 1` の Catalog。全 Skill・全 version の履歴を持つ |
 
-まだ公式 Skill が release されていないため、`catalog.json` は存在しない。
-最初の release で `release.yml` が生成し、`main` へ commit する。
+`catalog.json` は release ごとに `release.yml` が生成し、`main` へ commit する。
+2026-08-02 時点で **11 package / 20 version** が載っている。
 
 ## なぜ手で編集しないのか
 
