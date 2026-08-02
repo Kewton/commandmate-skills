@@ -557,6 +557,73 @@
       ]
     },
     {
+      "id": "cmate-task-contract",
+      "name": "cmate-task-contract",
+      "summary": "GitHub Issue から実行契約 .commandmate/tasks/<name>.yaml v1 を起案し、goal・変更可能 scope・検証ゲートを作業前に宣言して send --contract で送れる状態にする。",
+      "provider": {
+        "name": "CommandMate",
+        "url": "https://github.com/Kewton/CommandMate"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/Kewton/commandmate-skills",
+      "keywords": [
+        "task-contract",
+        "contract",
+        "scope",
+        "verification",
+        "planning",
+        "issue",
+        "yaml"
+      ],
+      "latest": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "changelog": "cmate-task-contract 0.1.0 — 初回リリース\n\nGitHub Issue（または作業内容の記述）から実行契約 `.commandmate/tasks/<name>.yaml` v1 を\n起案し、`commandmate send --contract` で送れる状態にする手順である。\n\n作業を始める**前**に、goal・変更してよい scope・完了を判定する verify ゲートを宣言する。\nこれにより完了判定が「エージェントの自己申告」から `wait --verify` の exit code へ移る。\n\n- 契約 v1 の起案手順（`version` / `title` / `goal` / `scope` / `verify` / `success`）\n- Issue 本文の受入条件を goal へ転記し、影響範囲を `scope.allow` へ落とす手順\n- 完了条件を `verify.yaml` に**実在するゲート**で表現する検査\n- レビュー可能な成果物として契約を残すためのチェックリスト\n\n未知キー・空の `verify.gates`・`success.requireScopeClean` が true なのに `scope.allow` が\n空、はいずれも送信時に契約エラーになる。この手順はそれらを書く前に潰す。\n\n契約機能（`send --contract` / `.commandmate/tasks/`）は **CommandMate v0.16.0 には含まれない**\n（`task.ts` / `verify.ts` は v0.17.0 で追加された）。\n\nこのため本 package は手順の冒頭で `commandmate send --help` の出力に `--contract` が\n現れるかを確認し、**無ければ契約を書かずに明示的に停止する**。契約なしの送信へ黙って\n劣化しない。互換宣言を `>=0.11.0` に据えているのはこの明示停止があるためで、\ninstall は許すが、使えない環境では成果物を作らずに止まる。\n\n`python3 scripts/validate.py` / `scripts/selftest.py` exit 0。\nartifact は `build_release.py` が 2 回ビルドしてバイト一致を確認し、\n`verify_artifact.py` が Catalog → asset → manifest → 各 payload の digest 連鎖を検証済み。",
+          "published_at": "2026-08-02T03:22:17Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-task-contract-v0.1.0",
+            "commit": "d89a3823f3dba983f319eb730d18cf2bda137859"
+          },
+          "artifact": {
+            "asset_name": "cmate-task-contract-0.1.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-task-contract-v0.1.0/cmate-task-contract-0.1.0.tar.gz",
+            "sha256": "9e3a05834d80aa4e3c145b473e33d3116c451fd6942f4746bbfe71b3049d370b",
+            "size": 10188,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        }
+      ]
+    },
+    {
       "id": "cmate-worktree-cleanup",
       "name": "cmate-worktree-cleanup",
       "summary": "merge 済み・不要な git worktree を、削除可能性と証跡を dry-run で提示したうえで、clean かつ merge 証跡が十分な対象だけ guarded な方式で安全に削除する。dirty・unmerged・検証不能は削除しない。",
