@@ -379,7 +379,7 @@
     {
       "id": "cmate-orchestrate-monitor",
       "name": "cmate-orchestrate-monitor",
-      "summary": "並列 worker の capture を状態分類し、健全な worker へ入力を注入しない条件でのみ介入し、実 commit / uncommitted 数に基づく STARTED ガード付きの完了判定を証拠つきで下す監視レシピ。",
+      "summary": "並列 worker の完了判定を CommandMate の実行契約タスク状態（一次）と capture 分類（フォールバック）で下し、健全な worker へ入力を注入しない条件でのみ介入する監視レシピ。",
       "provider": {
         "name": "CommandMate",
         "url": "https://github.com/Kewton/CommandMate"
@@ -398,7 +398,7 @@
         "guard",
         "bash"
       ],
-      "latest": "0.1.0",
+      "latest": "0.4.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -414,6 +414,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-monitor-v0.1.0/cmate-orchestrate-monitor-0.1.0.tar.gz",
             "sha256": "a9c55200372e495362149184bfdb6027c4a545237e0543807aa14236421b691e",
             "size": 31026,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0. An installed skill was discovered from .claude/skills and matched in the slash palette; the installer writes .agents/skills and .claude/skills byte-identically.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0. It reads SKILL.md from .agents/skills (model self-report of the absolute path, not a mechanical trace). This version does not expose skills as slash commands; invoke by name or run the scripts.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; discovery unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. Readable as a procedure; discovery unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.15.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.4.0",
+          "changelog": "cmate-orchestrate-monitor 0.4.0 — 外部コマンドの終了コードを確認する\n\n並列ワーカーの capture 解析・状態判定・完了検証を行う監視ハーネスである。\n\ncapture の文字列解析は推定である。契約付き委任ではタスク状態という**台帳**が引けるので、\nそれを一次ソースにし、capture 解析はフォールバックへ降格した。\n\n台帳を**引けなかった**場合は `unavailable` センチネルを返し、worker ごとに 1 度だけ\n`FALLBACK MODE: completion is inferred from capture, not adjudicated` を宣言する。\n**推定で走っていることをログ上で健全な COMPLETE に見せない**ためである。\n\ntmux セッション名を `cliToolId` から導出し、**配信されたかを検証**して結果をログに書く。\n届かなかった介入は `NOT delivered` と出る。`--session-prefix` は導出できない場合の\nescape hatch であり、混在フリートで渡すと存在しないペインへ撃つことになる。\n\n`git worktree list` / `git log` / `git status` の**終了コードを確認する**ようにした。\n従来は失敗した git の空出力がそのまま「commit 0 件・未コミット 0 件」として流れ、\n**未起動のワーカーが COMPLETE と誤報される**経路があった（対照実験で再現済み）。\n\n`| wc -l` を挟むとパイプラインの終了コードが `wc` のものになるため、数える前に 2 段へ\n分けている。`monitor.sh` 側も `classify-state.sh` / `verify-completion.sh` の終了コードを\n確認するようにした。\n\n`>=0.15.0`。タスク状態が引けない環境では `unavailable` から明示的にフォールバックへ\n降格するため、契約非対応の CommandMate でも動く（ただし裁定は推定になる）。",
+          "published_at": "2026-08-02T04:45:09Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-monitor-v0.4.0",
+            "commit": "c2f3d0b9f8fa32562f9e0bfa2dc0faa890eae6eb"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-monitor-0.4.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-monitor-v0.4.0/cmate-orchestrate-monitor-0.4.0.tar.gz",
+            "sha256": "ebc92e904108956929bf58667c923cf1e5dba7b645659e47141e0cb5003faa9c",
+            "size": 53558,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
