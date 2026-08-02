@@ -85,23 +85,17 @@ package（**`cmate-worktree-cleanup` / `cmate-orchestrate` / `cmate-orchestrate-
 `cmate-verify` の 4 件**）は install に `--yes` と `--ack-risk <skill-id>@<version>` の
 完全一致が要る。
 
-`cmate-issue-authoring` と `cmate-task-contract` と `cmate-verify` と
-`cmate-verify-advisor` は **まだ Catalog に publish されていない**
-（[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開予定）。
-それまでは `commandmate skill install` の経路が無いので、使いたい場合は両 root へ手で置く。
-**片側だけに置くと、Claude か Codex のどちらかから必ず不可視になる。**
+**11 package すべてが Catalog に publish 済みである**
+（[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開）。
+どれも `commandmate skill install` で入るので、手で配置する必要はない。
 
-```bash
-cd <worktree>
-for ROOT in .agents/skills .claude/skills; do
-  mkdir -p "$ROOT"; rm -rf "$ROOT/<skill-id>"
-  cp -R <commandmate-skills>/skills/<skill-id> "$ROOT/<skill-id>"
-done
-diff -r .agents/skills/<skill-id> .claude/skills/<skill-id> && echo "byte-identical"
-```
+install は `.agents/skills/<id>` と `.claude/skills/<id>` の**両方**へ byte-identical に書く。
+**この両置きは load-bearing である** — 2026-08-02 の実測では、`.claude/skills/<id>` だけを
+消すと Claude Code の palette から消え、`.agents/skills/<id>` だけを消すと Codex の
+skill picker から消えた（両方向の対照実験）。
 
-手動配置には install receipt が付かないため、CommandMate からは未 install に見える
-（`skill status` / `skill uninstall` の対象外）。手順の詳細と注意は
+publish 前の package を試すなど、どうしても手で置く必要がある場合の手順と注意
+（receipt が付かないため `skill status` / `skill uninstall` の対象外になる）は
 [docs/runbooks/verify-install.md](./docs/runbooks/verify-install.md) 第 3.1 節にある。
 
 ## 配布の前提

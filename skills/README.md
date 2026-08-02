@@ -27,9 +27,8 @@ skills/<skill-id>/
 | `cmate-worktree-cleanup` | 0.1.2 | high | worktree の安全な後始末 |
 | `cmate-worktree-setup` | 0.1.2 | moderate | 専用 worktree の作成と baseline 取得 |
 
-`cmate-issue-authoring` と `cmate-task-contract` と `cmate-verify` と
-`cmate-verify-advisor` は **まだ Catalog に publish されていない**
-（[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開予定）。
+**上の 11 package すべてが Catalog に publish 済み**であり、`commandmate skill install`
+で入る（[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開）。
 
 この表は目次であって正本ではない。version と risk は各
 `commandmate.skill.yaml` を読むこと。Agent 対応状況は

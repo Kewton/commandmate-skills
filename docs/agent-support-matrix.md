@@ -167,63 +167,102 @@ evidence:
 （2026-07-26 / 2026-07-29 / 2026-07-31 の 3 回とも同じ）。
 Codex では skill 名を自然文で指示するか、同梱 script を直接実行する。
 
+### 3.3 publish 後の追試（2026-08-02、CommandMate#1592）
+
+第 3.2 節が残した宿題 —「手動両置きで測った 2 件」「未 publish で測れなかった 2 件」
+「repo 側だけ先行していた 2 件」— を、**6 package を Catalog へ publish したうえで
+catalog install 経由で測り直した**。
+
+| 項目 | 値 |
+|---|---|
+| CommandMate | **0.17.0**（npm 公開版を専用 prefix へ install） |
+| Claude Code | 2.1.220 |
+| Codex CLI | 0.145.0（0.146.0 への update prompt は caret を "Skip" へ動かしてから確定） |
+| OS | macOS（Darwin 25.5.0） |
+| 隔離 | 専用 HOME（real home 配下）・専用 DB・専用ポート 31592・使い捨て git repo（測定後に破棄） |
+| 対象 | publish した 6 package。**1 件で代表させていない** |
+
+| 項目 | 結果 |
+|---|---|
+| `skill list` | **11 package**（全件 `compatible`）。`SKILL_NOT_FOUND` はゼロ |
+| install | 6 package すべて exit 0（**catalog 経由**） |
+| 配置 | 6 件とも両 root へ `diff -r` 差分なし |
+| receipt | 6 件とも `install_roots` に両 root |
+| manifest digest 照合 | 6 package 計 **74 file、mismatch 0** |
+| high risk gate | **`cmate-verify` 0.1.1** で `--yes` のみ → **exit 12**・書き込みなし |
+| 同梱 script smoke | `verify-completion.sh` → `COMPLETE`（exit 0） |
+
+| Agent | 発見 | slash 呼出 | 証跡の性質 |
+|---|---|---|---|
+| Claude Code 2.1.220 | **YES（6/6・`(project)` scope）** | **YES（6/6）** | 機械的 |
+| Codex CLI 0.145.0 | **YES（6/6）** | **NO**（対照 `/mo` → `/model` は match） | **機械的**（下記） |
+
+**両 root 配置が load-bearing であることを、catalog install 経由で両方向から確定した:**
+
+| 操作 | Agent | 結果 |
+|---|---|---|
+| `.claude/skills/cmate-task-contract` だけ退避 | Claude Code | palette から**消えた**。`cmate-verify-advisor` は残る |
+| `.agents/skills/cmate-task-contract` だけ退避 | Codex CLI | skill picker から**消えた**。他 5 件は残る |
+
+退避したものは戻し、`diff -r` で byte-identical を再確認した。
+
+#### Codex の発見は self-report ではなく機械的証跡だった（第 5 節の訂正）
+
+Codex 0.145.0 は起動時に `Use /skills to list available skills` を出し、
+**`/skills` → List skills（あるいは `@`）で開く picker に、install した skill が
+`Skill` ラベルで列挙される**（`Plugin` と区別されている）。6 package すべてが出た。
+
+したがって「0.145.0 に skill 一覧を機械的に吐かせる口が無い」は**誤り**である。
+slash command として露出しない点は変わらない（`/cmate-` はマッチしない）。
+
+**公開済み package の manifest はこの誤りを含んだまま immutable になっている**
+（`compatibility.agents[].measured.discovery.evidenceKind = self_report`）。
+訂正には version bump と再 publish が要るため、ここでは記録に留める。
+
 ## 4. package 別の宣言
 
 | Skill | version | claude | codex | gemini | opencode | 実測日（package 単位） | 経路 |
 |---|---|---|---|---|---|---|---|
 | `cmate-acceptance-test` | 0.1.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
-| `cmate-issue-authoring` | 0.1.0 | native | native | unknown | unknown | **未実測** | 未 publish |
+| `cmate-issue-authoring` | 0.1.0 | native | native | unknown | unknown | **2026-08-02** | catalog install |
 | `cmate-issue-refinement` | 0.1.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
-| `cmate-orchestrate` | 0.9.0 | native | native | unknown | unknown | 2026-07-31（**0.7.1 で実測**） | catalog install |
-| `cmate-orchestrate-monitor` | 0.4.0 | native | native | unknown | unknown | 2026-07-31（**0.1.0 で実測**） | catalog install |
+| `cmate-orchestrate` | 0.9.0 | native | native | unknown | unknown | **2026-08-02（0.9.0 で実測）** | catalog install |
+| `cmate-orchestrate-monitor` | 0.4.0 | native | native | unknown | unknown | **2026-08-02（0.4.0 で実測）** | catalog install |
 | `cmate-repository-analysis` | 0.1.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
-| `cmate-task-contract` | 0.1.0 | native | native | unknown | unknown | 2026-07-31 | **手動両置き** |
-| `cmate-verify` | 0.1.1 | native | native | unknown | unknown | 2026-07-31（**0.1.0 で実測**） | **手動両置き** |
-| `cmate-verify-advisor` | 0.1.0 | native | native | unknown | unknown | **未実測** | 未 publish |
+| `cmate-task-contract` | 0.1.0 | native | native | unknown | unknown | **2026-08-02** | catalog install |
+| `cmate-verify` | 0.1.1 | native | native | unknown | unknown | **2026-08-02（0.1.1 で実測）** | catalog install |
+| `cmate-verify-advisor` | 0.1.0 | native | native | unknown | unknown | **2026-08-02** | catalog install |
 | `cmate-worktree-cleanup` | 0.1.2 | native | native | unknown | unknown | 2026-07-31 | catalog install |
 | `cmate-worktree-setup` | 0.1.2 | native | native | unknown | unknown | 2026-07-31 | catalog install |
 
-`claude` / `codex` 列は第 3.2 節で **package ごとに**測った結果である
-（それ以前は第 3 節の 1 package の測定を install 経路の共通性から全件に敷衍していた）。
+`claude` / `codex` 列は第 3.2 節（2026-07-31）と第 3.3 節（2026-08-02）で
+**package ごとに**測った結果である（それ以前は第 3 節の 1 package の測定を
+install 経路の共通性から全件に敷衍していた）。両節で重なる 4 件は新しい方で上書きしてある。
+
+**11 package すべてが Catalog に publish 済みであり、全件が catalog install 経由で
+package 単位に測られている。** 第 3.2 節が残していた「手動両置き」「未 publish」
+「repo 側だけ先行」の 3 種類の但し書きは、第 3.3 節の実測ですべて解消した。
+
 `gemini` / `opencode` は依然としてどの package でも測っていない。
-
-**`cmate-issue-authoring` 0.1.0 と `cmate-verify-advisor` 0.1.0 は第 3.2 節の実測
-（9 package）に含まれていない。** それぞれ 2026-08-01 / 2026-08-02 に追加した package であり、
-`claude` / `codex` の `native` は第 3.2 節が示した「install 先が package に依存しない」ことからの
-敷衍である。install 経路も payload の配置規則も他 package と同じなので同じ結果になる見込みだが、
-**見込みは実測ではない。**
-publish 後に [verify-install.md](./runbooks/verify-install.md) の手順で追試が要る。
-
-`cmate-task-contract` 0.1.0 と `cmate-verify` 0.1.1 と `cmate-verify-advisor` 0.1.0 は
-**まだ Catalog に publish されていない**
-（[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開する）。
-`skill info` は exit 2 `SKILL_NOT_FOUND` を返す。第 3.2 節ではこの 2 件だけ
-[verify-install.md](./runbooks/verify-install.md) の**手動両置き手順**で配置して測った。
-**publish 後に catalog 経由での追試が要る。**
-
-`cmate-orchestrate-monitor` は [CommandMate#1589](https://github.com/Kewton/CommandMate/issues/1589)
-で 0.2.0 へ、[CommandMate#1602](https://github.com/Kewton/CommandMate/issues/1602) で 0.3.0 へ、
-[CommandMate#1614](https://github.com/Kewton/CommandMate/issues/1614) で 0.4.0 へ
-bump したが、**第 3.2 節の実測は publish 済みの 0.1.0 に対するものである**
-（0.2.0 / 0.3.0 / 0.4.0 はいずれも Catalog 未公開で、これも #1592 で公開する）。version 列は manifest の
-正本に合わせて 0.4.0 にし、`claude` / `codex` 列と実測日は 0.1.0 の測定値を据え置いてある。
-install 経路も payload の配置規則も変えていないため結果は同じになる見込みだが、
-**見込みは実測ではない。publish 後に 0.4.0 で追試が要る。**
 
 ## 5. 既知の制約
 
-- **Codex の発見は self-report**（model が SKILL.md の絶対 path を答えた）であり、
-  機械的証跡ではない。0.145.0 に skill 一覧を機械的に吐かせる口が無い。
-  第 3.2 節の対照実験で「`.agents/skills` を読んでいる」ことまでは機械的に示せたが、
-  「発見した」こと自体の証跡は self-report のままである。
+- **Codex 0.145.0 の発見は機械的証跡である**（2026-08-02 に訂正）。
+  `/skills` → List skills（あるいは `@`）で開く picker が、install した skill を
+  `Skill` ラベルで列挙する（`Plugin` と区別されている）。
+  以前ここには「self-report であり 0.145.0 に skill 一覧を機械的に吐かせる口が無い」と
+  書いてあったが、**それは誤りだった**。ただし
+  **公開済み package の manifest はこの誤りを含んだまま immutable になっている**
+  （`measured.discovery.evidenceKind = self_report`）。訂正には version bump と
+  再 publish が要る。
 - **Codex 0.145.0 は skill を slash command として露出しない。**
-  **0.146.0 は未計測**（第 3.2 節では update prompt を Skip して 0.145.0 のまま測った）。
+  **0.146.0 は未計測**（第 3.2 / 3.3 節とも update prompt を Skip して 0.145.0 のまま測った）。
 - **high risk package は `cmate-worktree-cleanup` / `cmate-orchestrate` /
   `cmate-orchestrate-monitor` / `cmate-verify` の 4 件**である（`declared_risk` の正本は
   各 package の `commandmate.skill.yaml`）。install には `--yes` に加えて
   `--ack-risk <skill-id>@<version>` の完全一致が必要。ゲートの拒否（exit 12）は
-  2026-07-29 に publish 済み 3 件で、2026-07-31 に `cmate-worktree-cleanup` 0.1.2 で実測した。
-  **`cmate-verify` の承認ゲートは未 publish のため未実測**である。
+  2026-07-29 に publish 済み 3 件で、2026-07-31 に `cmate-worktree-cleanup` 0.1.2 で、
+  2026-08-02 に **`cmate-verify` 0.1.1** で実測した（4 件すべて実測済み）。
 - **Gemini / OpenCode / vibe-local / copilot / antigravity は未計測。**
 - **CommandMate の config dir（`$HOME/.commandmate`）を `/tmp` や `/var` 配下に置くと
   install できない。** snapshot store が system directory を拒否するため、
