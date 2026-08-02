@@ -294,7 +294,7 @@
     {
       "id": "cmate-orchestrate",
       "name": "cmate-orchestrate",
-      "summary": "複数 Issue の並列実行を dry-run で計画し、承認後に public commandmate で Wave barrier・verification gate 付きに dispatch、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT を実行し不合格なら回数上限つき修正ループを回し上限到達時は blocked で停止する。",
+      "summary": "複数 Issue の並列実行を dry-run で計画し、承認後に実行契約付きで dispatch して commandmate の検証 exit code で裁定し、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT を実行し不合格なら回数上限つき修正ループを回し上限到達時は blocked で停止する。",
       "provider": {
         "name": "CommandMate",
         "url": "https://github.com/Kewton/CommandMate"
@@ -310,7 +310,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.7.1",
+      "latest": "0.9.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -414,6 +414,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.7.1/cmate-orchestrate-0.7.1.tar.gz",
             "sha256": "99a6009c9b2c0070b811cb3300e6a86d6f2ba495e7f4bec23d4c8d0728b7edf8",
             "size": 87561,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.9.0",
+          "changelog": "cmate-orchestrate 0.9.0 — dispatch の裁定を実行契約と検証 exit code へ移す\n\n複数 Issue の並列実行を dry-run で計画し、承認後にその計画を監督付きで実行する。\n\nUAT の合否に `cmate-acceptance-test` の意味的受入判定を合成した。コマンドの exit code だけ\nでは「動いたが要求を満たしていない」を捕まえられないため、証跡つきの Go / Conditional Go /\nNo-Go を裁定へ組み込む。\n\nplan から**実行契約 yaml（goal / scope.allow）を決定的に生成**して worktree へ配置し、\n`send --contract`（task id が返る）で送る。裁定の一次ソースは `wait --verify` の exit code:\n\n| exit | 意味 |\n|------|------|\n| 0  | 合格 |\n| 20 | 判定して不合格 → 失敗ゲートを特定して再指示 |\n| 21 | 作業証跡ゼロ |\n| 10 | prompt。**自動応答せず human へ提示** |\n| 99 | 判定に到達せず。**再指示せず human へ** |\n\n**「全部 Pass です」という散文を解析するのをやめる**ための変更である。\n\n`--contract-mode` を追加した。`auto`（既定）は契約が使えれば使い、無ければ**明示メッセージ\nつきで** profile baseline 再実行のフォールバックへ落ち、`contract_unsupported` を\nlimitation に記録する。`require` はフォールバックを拒否して停止、`off` は probe しない。\n\nこのため互換宣言は `>=0.11.0` に据えている。install は許すが、非対応環境では何が起きたかを\n必ず明示する。\n\nworker は各ターン後に idle 化するため、**wait の idle を完了とみなさない**。worktree\nブランチの新規 commit を完了判定として継続 nudge で駆動し、Wave barrier と verification\ngate で監督する。file 衝突の無い Wave plan・risk・権限・実行 command を決定的な artifact\nとして返す。",
+          "published_at": "2026-08-02T04:55:16Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.9.0",
+            "commit": "c2f3d0b9f8fa32562f9e0bfa2dc0faa890eae6eb"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.9.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.9.0/cmate-orchestrate-0.9.0.tar.gz",
+            "sha256": "970ecb4ce47739855159aeb8f1d5f0c22728b301c09d8f48b1f27239e0a2f1a2",
+            "size": 119066,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
