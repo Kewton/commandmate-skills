@@ -93,54 +93,71 @@ $ commandmate skill list
 SKILL_ID                   NAME                       LATEST  RECOMMENDED  COMPATIBILITY
 -------------------------  -------------------------  ------  -----------  -------------
 cmate-acceptance-test      cmate-acceptance-test      0.1.1   0.1.1        compatible
+cmate-issue-authoring      cmate-issue-authoring      0.1.0   0.1.0        compatible
 cmate-issue-refinement     cmate-issue-refinement     0.1.1   0.1.1        compatible
-cmate-orchestrate          cmate-orchestrate          0.7.1   0.7.1        compatible
-cmate-orchestrate-monitor  cmate-orchestrate-monitor  0.1.0   0.1.0        compatible
+cmate-orchestrate          cmate-orchestrate          0.9.0   0.9.0        compatible
+cmate-orchestrate-monitor  cmate-orchestrate-monitor  0.4.0   0.4.0        compatible
 cmate-repository-analysis  cmate-repository-analysis  0.1.1   0.1.1        compatible
+cmate-task-contract        cmate-task-contract        0.1.0   0.1.0        compatible
+cmate-verify               cmate-verify               0.1.1   0.1.1        compatible
+cmate-verify-advisor       cmate-verify-advisor       0.1.0   0.1.0        compatible
 cmate-worktree-cleanup     cmate-worktree-cleanup     0.1.2   0.1.2        compatible
 cmate-worktree-setup       cmate-worktree-setup       0.1.2   0.1.2        compatible
 ```
 
-### 2.1 high risk の 3 件は `--ack-risk` の完全一致が要る
+**手順 3 と手順 4 で使う `cmate-verify` / `cmate-task-contract` は、どちらも
+`skill install` で入る。** 手で配置する経路はもう要らない。
 
-上の一覧のうち **`cmate-orchestrate` / `cmate-orchestrate-monitor` /
-`cmate-worktree-cleanup` の 3 件が high risk** である
-（risk の正本は [README の公式 Skill 表](../README.md#公式-skill)。
-本リポジトリには high risk の package が 4 件あるが、`cmate-verify` は
-まだ Catalog に無いので `skill install` の対象外である）。
+```bash
+# 手順 3 で使う（high risk なので --ack-risk が要る。2.1）
+commandmate skill install cmate-verify \
+  --worktree <worktree-id> --version 0.1.1 \
+  --yes --ack-risk cmate-verify@0.1.1
+
+# 手順 4 で使う（moderate なので --yes だけでよい）
+commandmate skill install cmate-task-contract \
+  --worktree <worktree-id> --version 0.1.0 --yes
+```
+
+install は `.agents/skills/<id>` と `.claude/skills/<id>` の**両方**へ byte-identical に
+書く。**この両置きは load-bearing である** — 実測では `.claude/skills/<id>` だけを消すと
+Claude Code の palette から消え、`.agents/skills/<id>` だけを消すと Codex の skill picker から
+消えた（`docs/runbooks/verify-install.md` 第 5 節の対照実験）。
+
+### 2.1 high risk の 4 件は `--ack-risk` の完全一致が要る
+
+上の一覧のうち **`cmate-verify` / `cmate-orchestrate` / `cmate-orchestrate-monitor` /
+`cmate-worktree-cleanup` の 4 件が high risk** である。
+
+risk の正本は各 package の `commandmate.skill.yaml` の `declared_risk` であり、
+`commandmate skill info <skill-id>` の `RISK` 列でも確認できる。**README の表や本ページの
+列挙を正本にしないこと**（過去に package の追加へ追随できず、この節の件数が古くなった）。
+リポジトリからはこう出す。
+
+```bash
+grep -l '^declared_risk: high' skills/*/commandmate.skill.yaml
+```
 
 high risk の install には `--yes` に加えて
 `--ack-risk <skill-id>@<version>` が要る。**version まで完全一致**でなければ通らない。
 
 ```bash
-commandmate skill install cmate-worktree-cleanup \
-  --worktree <worktree-id> --version 0.1.2 \
-  --yes --ack-risk cmate-worktree-cleanup@0.1.2
+commandmate skill install cmate-verify \
+  --worktree <worktree-id> --version 0.1.1 \
+  --yes --ack-risk cmate-verify@0.1.1
 ```
 
 `--ack-risk` を欠く／version が install 対象とずれていると、**書き込みは行われず exit 12** で止まる。
 
 ```
 Installable:  yes
-High risk:    installing requires --ack-risk cmate-orchestrate-monitor@0.1.0 in addition to --yes
-Error: cmate-orchestrate-monitor 0.1.0 is high risk. Re-run with --ack-risk cmate-orchestrate-monitor@0.1.0 to acknowledge it explicitly.
+High risk:    installing requires --ack-risk cmate-verify@0.1.1 in addition to --yes
+Error: cmate-verify 0.1.1 is high risk. Re-run with --ack-risk cmate-verify@0.1.1 to acknowledge it explicitly.
 ```
 
 **ack する version は「Catalog から install する version」である。** 本リポジトリの
-`skills/<id>/commandmate.skill.yaml` の version は Catalog より先行していることがあり、
-そちらを書くと落ちる（上の実測は repo 側 0.4.0 を ack して Catalog 側 0.1.0 に弾かれた例）。
-
-### 2.2 Catalog にまだ無い 3 件
-
-**`cmate-verify` / `cmate-task-contract` / `cmate-issue-authoring` は
-まだ Catalog に publish されていない**
-（[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開予定）。
-`skill install` の経路が無いので、使うなら `.agents/skills/` と `.claude/skills/` の
-**両方へ手で置く**。手順とスニペットは [README の該当節](../README.md#公式-skill) と
-[docs/runbooks/verify-install.md 第 3.1 節](./runbooks/verify-install.md) にある。
-
-**手順 3 と手順 4 はこの 2 件（`cmate-verify` / `cmate-task-contract`）を使う。**
-先に配置しておくこと。
+`skills/<id>/commandmate.skill.yaml` の version が Catalog より先行している時期に
+そちらを書くと落ちる。`skill list` の `RECOMMENDED` 列に出ている version を使うのが確実である。
 
 > install 後は **Agent のセッションを再起動する。** 各 Agent は起動時に自分の
 > discovery root を読むので、走っているセッションからは新しい Skill が見えない
@@ -406,7 +423,8 @@ Retry loops:  avg 0.0 per failed task
 | 複数 Issue を並列で流す | [`cmate-orchestrate`](../skills/cmate-orchestrate/SKILL.md) | **high risk。** install に `--yes --ack-risk cmate-orchestrate@<version>` が要る（2.1） |
 | 並列 worker を監視する | [`cmate-orchestrate-monitor`](../skills/cmate-orchestrate-monitor/SKILL.md) | **high risk。** 同上 |
 | 受入条件を証跡付きで裁定する | [`cmate-acceptance-test`](../skills/cmate-acceptance-test/SKILL.md) | moderate |
-| Issue を精緻化する / Issue 群を起案する | [`cmate-issue-refinement`](../skills/cmate-issue-refinement/SKILL.md) / [`cmate-issue-authoring`](../skills/cmate-issue-authoring/SKILL.md) | 後者は Catalog 未 publish（2.2） |
+| Issue を精緻化する / Issue 群を起案する | [`cmate-issue-refinement`](../skills/cmate-issue-refinement/SKILL.md) / [`cmate-issue-authoring`](../skills/cmate-issue-authoring/SKILL.md) | どちらも moderate |
+| verify.yaml を実行履歴から改善する | [`cmate-verify-advisor`](../skills/cmate-verify-advisor/SKILL.md) | moderate。**CommandMate 0.17.0 以降が要る**（`verify history` を読むため） |
 
 並列化に進む前に、**この 1 本が exit 0 まで通ることを先に確認すること。**
 契約と verify.yaml が甘いまま並列度だけ上げると、20 と 21 が同時に何本も出て
