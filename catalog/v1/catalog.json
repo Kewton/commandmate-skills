@@ -112,6 +112,76 @@
       ]
     },
     {
+      "id": "cmate-issue-authoring",
+      "name": "cmate-issue-authoring",
+      "summary": "Feature 記述から実装可能な Issue 群を起案する。read-only の分割計画を schema 準拠 artifact で出し、明示承認の下でだけ依存順に GitHub へ一括登録する 2 phase 手順。",
+      "provider": {
+        "name": "CommandMate",
+        "url": "https://github.com/Kewton/CommandMate"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/Kewton/commandmate-skills",
+      "keywords": [
+        "issue",
+        "authoring",
+        "split",
+        "planning",
+        "decomposition",
+        "dependency",
+        "duplicate-detection",
+        "github",
+        "schema",
+        "dry-run"
+      ],
+      "latest": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "changelog": "cmate-issue-authoring 0.1.0 — 初回リリース\n\nFeature の記述から、**実装可能な粒度の Issue 群**を一括で起案する 2 phase の手順である。\n\n1. **分割** — Feature を独立に着手できる単位へ割る。依存を explicit に書き、\n   循環と不完全な override を拒否する\n2. **起案** — 各 Issue に目的・受入条件・影響ファイル・スコープ外を書き、\n   レビュー可能な成果物として出す\n\n- **受入条件は検証できる形で書く。** 「正しく動くこと」ではなく、どのコマンドの\n  どの exit code で判定するかを書く\n- **影響ファイルを宣言する。** 並列実行時の file conflict 分析と、実行契約の\n  `scope.allow` の入力になる\n- **スコープ外を明示する。** 何をやらないかを書かない Issue は、実装者が勝手に広げる\n\n`>=0.11.0`。GitHub Issue の起案のみで、CommandMate の契約・検証機能に依存しない。\n\n`validate.py` / `selftest.py` exit 0。fixture suite exit 0。",
+          "published_at": "2026-08-02T04:51:26Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-authoring-v0.1.0",
+            "commit": "c2f3d0b9f8fa32562f9e0bfa2dc0faa890eae6eb"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-authoring-0.1.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.1.0/cmate-issue-authoring-0.1.0.tar.gz",
+            "sha256": "71b688d8bf1afc62132b5fa565e6d02ca466128d1e0b0d71295bd9e26450137a",
+            "size": 26748,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        }
+      ]
+    },
+    {
       "id": "cmate-issue-refinement",
       "name": "cmate-issue-refinement",
       "summary": "Refines a vague GitHub Issue into an implementable specification, read-only, with evidence, ranked findings, open questions and a versioned result.",
