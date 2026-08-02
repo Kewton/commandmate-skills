@@ -624,6 +624,80 @@
       ]
     },
     {
+      "id": "cmate-verify",
+      "name": "cmate-verify",
+      "summary": "検証ゲートを .commandmate/verify.yaml に宣言し、未着手ガードとプライマリ checkout skip を挟んで worktree で逐次実行し、出力ではなく実 exit code で合否を判定する bash 3.2 互換ランナー。",
+      "provider": {
+        "name": "CommandMate",
+        "url": "https://github.com/Kewton/CommandMate"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/Kewton/commandmate-skills",
+      "keywords": [
+        "verification",
+        "gate",
+        "exit-code",
+        "quality-gate",
+        "ci",
+        "lint",
+        "test",
+        "build",
+        "worktree",
+        "git",
+        "bash",
+        "yaml",
+        "timeout",
+        "work-evidence"
+      ],
+      "latest": "0.1.1",
+      "versions": [
+        {
+          "version": "0.1.1",
+          "changelog": "cmate-verify 0.1.1 — 初回公開（0.1.0 は未公開）\n\nリポジトリの検証ゲートを `.commandmate/verify.yaml` として起案し、実 exit code で実行する\n手順である。裁定は**プロセスの終了コードそのもの**で、散文の報告ではない。\n\n1. **exit code を直接読む。** `cmd | grep` は grep の終了コードを返すので、落ちたゲートが\n   合格に見える。パイプでつながない\n2. **落ちたゲートで打ち切らない。** 全ゲートを実行し、1 回の報告で全問題を並べる\n   （1 往復に 1 個ずつ露出させない）\n\n- `.commandmate/verify.yaml` v1 の起案手順（gates / timeoutSec / options）\n- ゲートを CI の実ジョブと同じコマンドへ揃える手順\n- Phase 0 のシェルランナー `scripts/verify-run.sh`（CommandMate 本体の実装を必要としない）\n- ランナー自身のテスト\n\nCommandMate#1607 の診断可能性修正を同期した（#1611）。失敗ゲートのログ末尾が予算内で\n切れて原因行が読めなくなる問題に対する修正で、ランナー側の挙動を本体と一致させている。\n\n`>=0.11.0`。本 package は CommandMate の `commandmate verify` 実装を必要としない\n（それは代替ではなく併存する経路である）。本体の実装は v0.17.0 から。\n\n`validate.py` / `selftest.py` exit 0。artifact は 2 回ビルドしてバイト一致を確認し、\nCatalog → asset → manifest → payload の digest 連鎖を `verify_artifact.py` で検証済み。",
+          "published_at": "2026-08-02T04:42:21Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-v0.1.1",
+            "commit": "c2f3d0b9f8fa32562f9e0bfa2dc0faa890eae6eb"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-0.1.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.1.1/cmate-verify-0.1.1.tar.gz",
+            "sha256": "5e3e96900079fa55b39a0427b5da3fd4aebe527208c1b725950599f2a390caef",
+            "size": 23769,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        }
+      ]
+    },
+    {
       "id": "cmate-worktree-cleanup",
       "name": "cmate-worktree-cleanup",
       "summary": "merge 済み・不要な git worktree を、削除可能性と証跡を dry-run で提示したうえで、clean かつ merge 証跡が十分な対象だけ guarded な方式で安全に削除する。dirty・unmerged・検証不能は削除しない。",
