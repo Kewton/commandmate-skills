@@ -851,7 +851,7 @@
         "timeout",
         "work-evidence"
       ],
-      "latest": "0.2.0",
+      "latest": "0.3.0",
       "versions": [
         {
           "version": "0.1.1",
@@ -911,6 +911,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.2.0/cmate-verify-0.2.0.tar.gz",
             "sha256": "f4d83e83cc80cbc31b7f1a3fc4b4829ec8741936030d55e3d43e2f8153076fd6",
             "size": 26346,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.3.0",
+          "changelog": "実行契約（.commandmate/tasks/）を work-evidence の両カウンタから除外する。契約ファイルはオーケストレーターの証跡であってエージェントの証跡ではないため、委任直後の worktree（契約が 1 件置かれただけの状態）が「作業済み」に見えて exit 21 が意味を失う経路を塞いだ。commit 側は :(top) + :(exclude,top).commandmate/tasks/ の pathspec（副作用として --allow-empty commit も数えない）、未コミット側は status --porcelain -z --untracked-files=all をエントリ単位で解析し、エントリ内のいずれかのパスが契約でなければ作業として数える（契約を実作業へ rename した場合も拾う）。-z と -uall は必須で、人間向けフォーマットの C クォート・rename の連結・新規ディレクトリの畳み込みがいずれもパスでないものを判定に渡すため。CommandMate 側の conformance テストが持っていた既知の差分 2 件はこれで解消した。",
+          "published_at": "2026-08-03T12:40:13Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-v0.3.0",
+            "commit": "b273a470d96199a3fff7c1b8380844fef0b6b0ac"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-0.3.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.3.0/cmate-verify-0.3.0.tar.gz",
+            "sha256": "bf2e83137aa17d3ba9521f69e08f21e26757360baf629339a009bb4edf02f5ef",
+            "size": 30244,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
