@@ -294,7 +294,7 @@
     {
       "id": "cmate-orchestrate",
       "name": "cmate-orchestrate",
-      "summary": "複数 Issue の並列実行を dry-run で計画し、承認後に実行契約付きで dispatch して commandmate の検証 exit code で裁定し、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT を実行し不合格なら回数上限つき修正ループを回し上限到達時は blocked で停止する。",
+      "summary": "複数 Issue の並列実行を dry-run で計画し、承認後に実行契約付きで dispatch して検証 exit code で裁定し、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT と回数上限つき修正ループを回す。UAT の意味ゲートには cmate-acceptance-test の別途 install が要る。",
       "provider": {
         "name": "CommandMate",
         "url": "https://github.com/Kewton/CommandMate"
@@ -310,7 +310,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.9.0",
+      "latest": "0.10.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -458,6 +458,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.9.0/cmate-orchestrate-0.9.0.tar.gz",
             "sha256": "970ecb4ce47739855159aeb8f1d5f0c22728b301c09d8f48b1f27239e0a2f1a2",
             "size": 119066,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.10.0",
+          "changelog": "既定 profile が別リポジトリの Issue から警告なしの success plan を生成する経路を塞ぐ。cwd の origin remote と profile.repository を照合し、不一致なら warnings + status: partial にする（cwd が非 git / origin 無しは従来どおり）。--repo override 時は baseline 検証が元リポジトリでしか為されていないため verified を降格する。あわせて、UAT の意味ゲートが cmate-acceptance-test の別途 install に依存することを SKILL.md 冒頭と summary に明記し、base が非デフォルトブランチのときは Resolves による Issue 自動クローズが効かない旨を merge report の limitations へ理由コード付きで記録するようにした。",
+          "published_at": "2026-08-03T10:49:37Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.10.0",
+            "commit": "573c013ab9a84a899f7414f50f191670f377c639"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.10.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.10.0/cmate-orchestrate-0.10.0.tar.gz",
+            "sha256": "a4817935fa3d21ed22c0d0221ae2817208bc1e03a5325742a4a3a9794db8538c",
+            "size": 125443,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
