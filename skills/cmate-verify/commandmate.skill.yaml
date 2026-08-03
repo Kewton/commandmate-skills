@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-verify
 name: cmate-verify
-version: 0.1.1
+version: 0.2.0
 summary: 検証ゲートを .commandmate/verify.yaml に宣言し、未着手ガードとプライマリ checkout skip を挟んで worktree で逐次実行し、出力ではなく実 exit code で合否を判定する bash 3.2 互換ランナー。
 description: >-
   「このリポジトリで何が通れば合格か」を `.commandmate/verify.yaml`（形式 v1）に宣言し、
@@ -99,8 +99,8 @@ risk_rationale: >-
   verify.yaml に限られる。credential は読まない。
 files:
   - path: SKILL.md
-    sha256: dcaabf06ac8e9a4d9cd8b89b1164bace76a53a2f0fd7a8c0a4e4f6a0e11b7493
-    size: 11534
+    sha256: 4a1598cdd2bb104f6a1b24b9b314e2e9988e5426a21d7ae23f72e67e34e7873e
+    size: 14088
     kind: skill_md
     executable: false
     script: false
@@ -188,6 +188,12 @@ files:
     kind: asset
     executable: false
     script: false
+  - path: scripts/tests/fixtures/bad-require-commit.yaml
+    sha256: 2262736fa5dfcd4ae37e512c8f9cf5d054b5590a54036ce2c2bd9517c8d69586
+    size: 81
+    kind: asset
+    executable: false
+    script: false
   - path: scripts/tests/fixtures/bad-reserved-id.yaml
     sha256: f8a526bc59f198505c82533c184572b5ac1191f30dad70f3907a703967acb231
     size: 61
@@ -242,6 +248,12 @@ files:
     kind: asset
     executable: false
     script: false
+  - path: scripts/tests/fixtures/require-commit.yaml
+    sha256: a734180dcf4dec0f97549f4e79ecd976b14e0b6a8d8b2bdcf7611412d01b6670
+    size: 383
+    kind: asset
+    executable: false
+    script: false
   - path: scripts/tests/fixtures/side-effect.yaml
     sha256: 1e9b218d5e3cb63f9e09469dd95c4bfd1813aac6911ab62ff40364e4df227b3e
     size: 201
@@ -261,14 +273,14 @@ files:
     executable: false
     script: false
   - path: scripts/tests/run-tests.sh
-    sha256: 98088d3f0fac0b57cd8dde8ded0b397e51c10bef3d7abb82dc6f948cba3a27d7
-    size: 24767
+    sha256: f1046c6f5d3292122d9d27c2b28ef5883c20b7d41b5db25f9ee3d31e6017bc79
+    size: 28982
     kind: script
     executable: true
     script: true
   - path: scripts/verify-run.sh
-    sha256: ac506c17daba1207a109f2716e625ba01a17318630c4670bc7474461f8f9edc4
-    size: 16486
+    sha256: 3e5a7b72eba3e681c5b4f7b967352e273feefe834e18a64cee0694a89a853b89
+    size: 18353
     kind: script
     executable: true
     script: true
