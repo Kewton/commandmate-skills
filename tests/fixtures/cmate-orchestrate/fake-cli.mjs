@@ -403,6 +403,19 @@ function main() {
   if (sub === 'repo') {
     const gh = spec.gh ?? {};
     if (gh.repo_access === false) fail('gh: could not resolve repository');
+    // `gh repo view <repo> --json defaultBranchRef` — merge.mjs's Issue #39
+    // auto-close probe. The default answer is `develop`, which is the base the
+    // node-commandmate profile plans against, so a scenario that says nothing
+    // about it models "base IS the default branch" and records no limitation.
+    // `default_branch` models a 3-branch flow; `default_branch_query` injects a
+    // failed ("fail") or field-less ("absent") answer, both of which the runner
+    // must skip rather than let block the merge flow.
+    const jsonFields = String(optionValue('--json') ?? '').split(',');
+    if (jsonFields.includes('defaultBranchRef')) {
+      if (gh.default_branch_query === 'fail') fail('gh: could not query defaultBranchRef');
+      if (gh.default_branch_query === 'absent') emit({});
+      emit({ defaultBranchRef: { name: gh.default_branch ?? 'develop' } });
+    }
     emit({ nameWithOwner: gh.name ?? 'Kewton/CommandMate' });
   }
 

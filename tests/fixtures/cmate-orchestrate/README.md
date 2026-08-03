@@ -135,6 +135,9 @@ CI が green でないときに `gh pr merge` が呼ばれていないことま�
 | `m10-preflight-gh-unavailable` | gh 不在の preflight で何も試さず failure になるか |
 | `m11-no-eligible` | verification pass が無いとき no-op success（mutation なし）になるか |
 | `m12-single-phase-guard` | `--create-prs` と `--merge-prs` の同時指定を invalid_input で拒否するか |
+| `m13-base-not-default-branch` | base がデフォルトブランチでないとき `Resolves #n` の無効を limitation と PR body に記録するか（#39） |
+| `m14-base-is-default-branch` | base がデフォルトブランチのとき何も記録しないか（#39） |
+| `m15-default-branch-unknown` | `gh repo view` 失敗時に照合をスキップするだけで PR 作成を阻害しないか（#39） |
 
 ## uat case 一覧
 
@@ -176,7 +179,7 @@ Agent を実際に動かした評価は、実施のたびに次の表へ追記�
 | — | 未実施 | — | — | — | — |
 
 **この version（0.10.0）の時点で、実機評価は未実施である。**
-実施済みなのは `run_tests.mjs`（14 plan case + 20 dispatch case + 12 merge case + 17 uat case が緑）だけ
+実施済みなのは `run_tests.mjs`（14 plan case + 20 dispatch case + 15 merge case + 17 uat case が緑）だけ
 である。dispatch の実機確認（2 Issue / 2 並列の dispatch→`send --contract`→`wait --verify`）、PR 作成→
 CI 確認→merge の実機確認（2 Issue）、UAT 不合格→fix worktree→修正→再検証→再merge の実機確認は live
 環境で別途行う。契約 yaml が CommandMate の実パーサ（`src/lib/tasks/contract-parser.ts`）を通ることは

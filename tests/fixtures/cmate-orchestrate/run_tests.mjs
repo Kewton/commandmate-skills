@@ -838,6 +838,32 @@ function runMergeCase(caseId) {
   if (expect.redaction_token) {
     check(!stdout.includes(expect.redaction_token), 'a raw token survived into the merge report');
   }
+
+  // Limitations are the "did not stop the phase, but you need to know" channel
+  // (Issue #39). Both directions are asserted: the code that must be recorded,
+  // and the code that must NOT appear when there is nothing to report or the
+  // probe could not answer.
+  const limitationCodes = (report.limitations ?? []).map((l) => l.code);
+  for (const code of expect.limitation_codes ?? []) {
+    check(limitationCodes.includes(code), `limitation "${code}" not in ${JSON.stringify(limitationCodes)}`);
+  }
+  for (const code of expect.absent_limitation_codes ?? []) {
+    check(!limitationCodes.includes(code), `limitation "${code}" should not have been recorded`);
+  }
+
+  // The PR body artifact is the operator-facing half of the same finding.
+  if (expect.pr_body_contains || expect.pr_body_absent) {
+    const bodyPath = join(mergeOut, 'pr-bodies', `issue-${report.eligible_issues[0]}.md`);
+    if (check(existsSync(bodyPath), `PR body ${bodyPath} was not written`)) {
+      const body = readFileSync(bodyPath, 'utf8');
+      for (const needle of expect.pr_body_contains ?? []) {
+        check(body.includes(needle), `PR body does not mention "${needle}"`);
+      }
+      for (const needle of expect.pr_body_absent ?? []) {
+        check(!body.includes(needle), `PR body should not mention "${needle}"`);
+      }
+    }
+  }
 }
 
 // =============================================================================

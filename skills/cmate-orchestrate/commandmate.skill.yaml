@@ -106,8 +106,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: e88baebee37547909f3f89277287ab1dd1c0d30649c3a2d16f902b4b0137e617
-    size: 48666
+    sha256: 4fecd4cd26cfd987012ff3b7bacc3792ad395e252a5582cdb0a4af6401f55b3d
+    size: 50570
     kind: skill_md
     executable: false
     script: false
@@ -124,8 +124,8 @@ files:
     executable: false
     script: false
   - path: references/merge-contract.md
-    sha256: dd52d89fd61cdd05ad2a89680fdf0ea902f1277dcf537f258b7b830ae79ef3ae
-    size: 8614
+    sha256: dad6c77e9433427ce1d5b63ecca8ee6b2cdc7da32bf19f4caf1b4876ca3db422
+    size: 10159
     kind: instruction
     executable: false
     script: false
@@ -184,8 +184,8 @@ files:
     executable: true
     script: true
   - path: scripts/merge.mjs
-    sha256: 6f01707d32b16ac757e90891d658f635793802837e81e565008c93862564ef9a
-    size: 36852
+    sha256: 8304602531428c843971bf9379966defe9d1427ddef64c371413086aa065a876
+    size: 39494
     kind: script
     executable: true
     script: true

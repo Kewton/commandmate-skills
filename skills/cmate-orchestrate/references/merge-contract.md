@@ -81,6 +81,7 @@ merge runner は次を呼ぶ。各呼び出しは失敗で非0を返し、握り
 | preflight | `gh --version` | exit 0 | gh 到達性 |
 | preflight | `gh repo view <repo> --json nameWithOwner` | `{ "nameWithOwner": "…" }` | repo アクセス |
 | preflight | `git rev-parse --verify <base>` | exit 0 | base 解決 |
+| create_prs | `gh repo view <repo> --json defaultBranchRef` | `{ "defaultBranchRef": { "name": "…" } }` | Issue 自動クローズの到達性（invocation あたり1回） |
 | create_prs | `git push --set-upstream origin <branch>` | exit 0 | verification pass branch を push |
 | create_prs | `gh pr create --repo R --base B --head <branch> --title T --body-file F` | PR URL を stdout | PR 作成 |
 | merge_prs | `gh pr view <branch> --repo R --json number,url,state` | `{ "number", "url", "state" }` | PR 発見 |
@@ -96,6 +97,25 @@ merge runner は次を呼ぶ。各呼び出しは失敗で非0を返し、握り
   （`PENDING`/`QUEUED`/`IN_PROGRESS`/…）・それ以外（failure 扱い）に分け、
   **1件以上 かつ 全て pass** のときだけ green とする。check が0件なら green にしない。
 - branch 名は safe-ref 検査（英数・`._/-` のみ、`..` 無し、先頭 `/`・`-` 不可）を通す。
+
+## 5.1 Issue 自動クローズの到達性（`Resolves #n` の限界）
+
+GitHub が closing keyword で Issue を閉じるのは、その PR が **デフォルトブランチ** に merge
+された時だけである。profile の `base` はデフォルトブランチとは限らず（`feature/* → develop →
+stg → main` の運用では `origin/develop`）、その場合 PR body の `Resolves #n` は **効かない**
+— PR は merge されるのに Issue は open のまま残る（[#39](https://github.com/Kewton/commandmate-skills/issues/39)）。
+
+`create_prs` phase の冒頭で `gh repo view <repo> --json defaultBranchRef` を **1回だけ** 引き、
+PR の base（`baseBranchName(plan.profile.base)`）と比較する。
+
+| 比較結果 | 動作 |
+|---|---|
+| base ≠ デフォルトブランチ | `limitations[]` に `issue_autoclose_not_default_branch` を記録し、各 PR body に注記を1行足す |
+| base = デフォルトブランチ | 何も記録しない |
+| 取得失敗 / `defaultBranchRef` 欠落 | **照合をスキップ**する。limitation も blocking も足さず、PR 作成フローを阻害しない |
+
+記録に留める。`gh issue close` を runner が勝手に実行することはしない（「勝手に閉じない」
+という製品方針より）。**merge 後のクローズは operator の手作業である。**
 
 ## 6. 停止と status / stop_reason / exit
 

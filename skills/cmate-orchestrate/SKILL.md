@@ -480,6 +480,22 @@ dispatch report から eligible 集合を取る。空なら `no_eligible_issues`
 （objective・受入条件・baseline・`Resolves #n`）を `<out>/pr-bodies/issue-<n>.md` に残して
 `gh pr create` する。push または create が失敗したら `pr_failed` で停止する。
 
+**Issue 自動クローズの到達性を1回だけ確認する。** phase の冒頭で read-only の
+`gh repo view <repo> --json defaultBranchRef` を **invocation あたり1回**引き、PR の base
+（`plan.profile.base` から remote 接頭辞を落としたもの）がデフォルトブランチかどうかを見る。
+GitHub が `Resolves #n` で Issue を自動クローズするのは**デフォルトブランチへの merge 時だけ**
+なので、`feature/* → develop → stg → main`（デフォルトは `main`）のような多段運用で `develop`
+宛に PR を出すと、PR を merge しても **Issue は open のまま**残る
+（[#39](https://github.com/Kewton/commandmate-skills/issues/39)）。
+
+- base ≠ デフォルトブランチ → report の `limitations[]` に
+  `issue_autoclose_not_default_branch` を記録し、各 PR body にも同趣旨の注記を1行足す。
+  **merge 後に手動でクローズする必要がある。**
+- base = デフォルトブランチ → 何も記録しない。
+- `gh repo view` が失敗した / `defaultBranchRef` が返らない → **照合をスキップするだけ**で、
+  PR 作成フローは阻害しない（不明を不一致として扱わない）。
+- 記録に留める。`gh issue close` を勝手に実行することはしない。
+
 ### Step M3-b. `--merge-prs`
 
 各 eligible の PR を `gh pr view` で発見し、`gh pr checks` で CI を確認する。CI green かつ
@@ -505,6 +521,15 @@ stdout に、`<out>/merge-report.json` と `<out>/merge-summary.md` を file に
 
 report は5つの completion check（`single_phase`・`approval_enforced`・`verification_gated`・
 `ci_gated`・`failures_not_rounded`）を自己申告する。
+
+`limitations[]` は「停止はしていないが、後から効いてくる制約」を記録する。
+
+| limitation code | 意味 |
+|---|---|
+| `issue_autoclose_not_default_branch` | base がデフォルトブランチでないため `Resolves #n` が効かない。merge 後に手動クローズが要る（Step M3-a） |
+| `no_eligible_issues` | dispatch report に completed かつ verification pass の Issue が無い |
+| `unsafe_branch` | branch 名が safe-ref guard に弾かれた |
+| `completion_check_failed` | completion check のどれかが passed でない |
 
 merge 完了条件:
 
