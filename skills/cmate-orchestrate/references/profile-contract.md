@@ -66,7 +66,36 @@ mutation の無い plan 段階でも一貫させるためである。
 上書きした値は plan の `profile` と `inputs` にそのまま反映され、
 run_id の入力にも含まれる（第 [plan-contract.md](./plan-contract.md) 参照）。
 
-## 5. CommandMate worktree 同期
+**`--repo` は `verified` を降格させる。** `verified: true` は「その profile の
+branch/base/worktree/baseline を **そのリポジトリで** 確認した」という主張であり、
+リポジトリを差し替えた時点で主張の対象が消える。よって `--repo` が profile の
+`repository` と異なる値を指定した場合、planner は `verified` を `false` に落とす。
+結果として `--allow-unverified` が無ければ `unverified_profile` で拒否し、
+付けた場合は risk factor `unverified_profile`（high）と warning
+`profile_repository_override` が載って result は `partial` になる。
+`--base` の上書きは `verified` を変えない（同一リポジトリ内の話だからである）。
+
+## 5. 既定 profile と cwd の照合
+
+profile が **既定値**（`node-commandmate`）に解決された場合、つまり `--profile` も
+`--profile-json` も指定されなかった場合に限り、planner は read-only の
+`git remote get-url origin` を1回実行し、URL を `owner/name` に正規化して
+（`git@host:owner/name.git` / `ssh://…` / `https://…` の各形式）profile の対象
+リポジトリと大文字小文字を無視して照合する。
+
+- 不一致 → warning `profile_repository_mismatch` を積み、result を `partial` にする。
+  planner は停止しない。
+- 一致・cwd が git リポジトリでない・`origin` が無い・`owner/name` に正規化できない
+  → **照合をスキップ**し、従来どおり `success` とする。probe の失敗を不一致に化けさせない。
+- 明示的に profile を指定した場合は照合しない。指定は意図的な選択だからである。
+
+別リポジトリの worktree で profile を指定し忘れると、planner は既定 profile の
+リポジトリから Issue を読み、**中身の違う Issue から一見きれいな plan を返す**。
+この照合はその事故を warning として可視化するためのものである
+（[#36](https://github.com/Kewton/commandmate-skills/issues/36)）。cwd の remote から
+profile を **自動解決** することはしない。plan の入力に cwd 状態を持ち込む挙動変更だからである。
+
+## 6. CommandMate worktree 同期
 
 worktree の CommandMate 側 ID は、将来新設される `commandmate sync` が
 dispatch 時に解決する。現状 CLI に sync は無いため、plan 段階では各 Issue の

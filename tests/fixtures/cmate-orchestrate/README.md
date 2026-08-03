@@ -37,6 +37,14 @@ node tests/fixtures/cmate-orchestrate/run_tests.mjs
 - どの Wave も `max_parallel` を超えず、file 重複 pair を含まないこと
 - **同じ入力から同じ plan が出ること**（2回実行して byte 一致）
 - golden がある case では、plan が checked-in の期待値と byte 一致すること
+- `warning_codes` を宣言した case では、warnings の code 列がその集合と完全一致すること
+  （`plan.warnings` と `result.warnings` の一致も確認する）
+
+case.json に `cwd` があると、harness は使い捨ての working directory を作ってそこで planner を
+起動する（`{"git": true, "origin": "<url>"}` なら `git init` + `remote add origin`、
+`{"git": false}` なら git リポジトリでない素の directory）。既定 profile は cwd の `origin` を
+照合するため、cwd は plan の入力の一部である（Issue #36）。決定性の 2 回目も同じ cwd で回す。
+`cwd` を持たない case は harness 自身の directory で動き、profile を明示するので照合に入らない。
 
 harness 自身の健全性も見る（`validator self-test`）: 壊れた plan を schema validator が
 実際に落とせることを確認する。何でも通す validator は何も検証していないのと同じである。
@@ -54,6 +62,11 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 | `07-unverified-profile` | unverified profile を確認なしで拒否するか |
 | `08-unverified-allowed` | `--allow-unverified` で plan を出し、risk を high にするか |
 | `09-no-infer` | `--no-infer` で推論依存を抑止できるか |
+| `10-default-profile-repo-mismatch` | 既定 profile が cwd の origin と食い違うとき warning + `partial` にするか（#36） |
+| `11-default-profile-repo-match` | origin が一致するとき従来どおり warning 無しの success か（#36） |
+| `12-default-profile-cwd-not-git` | cwd が git リポジトリでないとき照合をスキップして success のままか（#36） |
+| `13-repo-override-unverified` | `--repo` が `verified` を降格させ、確認なしでは拒否するか（#36） |
+| `14-repo-override-allow-unverified` | `--allow-unverified` 時に降格が plan（verified/risk/warning）に見えるか（#36） |
 
 ## dispatch case 一覧
 
@@ -122,6 +135,9 @@ CI が green でないときに `gh pr merge` が呼ばれていないことま�
 | `m10-preflight-gh-unavailable` | gh 不在の preflight で何も試さず failure になるか |
 | `m11-no-eligible` | verification pass が無いとき no-op success（mutation なし）になるか |
 | `m12-single-phase-guard` | `--create-prs` と `--merge-prs` の同時指定を invalid_input で拒否するか |
+| `m13-base-not-default-branch` | base がデフォルトブランチでないとき `Resolves #n` の無効を limitation と PR body に記録するか（#39） |
+| `m14-base-is-default-branch` | base がデフォルトブランチのとき何も記録しないか（#39） |
+| `m15-default-branch-unknown` | `gh repo view` 失敗時に照合をスキップするだけで PR 作成を阻害しないか（#39） |
 
 ## uat case 一覧
 
@@ -162,8 +178,8 @@ Agent を実際に動かした評価は、実施のたびに次の表へ追記�
 |---|---|---|---|---|---|
 | — | 未実施 | — | — | — | — |
 
-**この version（0.9.0）の時点で、実機評価は未実施である。**
-実施済みなのは `run_tests.mjs`（9 plan case + 20 dispatch case + 12 merge case + 17 uat case が緑）だけ
+**この version（0.10.0）の時点で、実機評価は未実施である。**
+実施済みなのは `run_tests.mjs`（14 plan case + 20 dispatch case + 15 merge case + 17 uat case が緑）だけ
 である。dispatch の実機確認（2 Issue / 2 並列の dispatch→`send --contract`→`wait --verify`）、PR 作成→
 CI 確認→merge の実機確認（2 Issue）、UAT 不合格→fix worktree→修正→再検証→再merge の実機確認は live
 環境で別途行う。契約 yaml が CommandMate の実パーサ（`src/lib/tasks/contract-parser.ts`）を通ることは

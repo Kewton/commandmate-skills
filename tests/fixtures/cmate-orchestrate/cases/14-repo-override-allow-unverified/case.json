@@ -1,0 +1,14 @@
+{
+  "description": "Issue #36: with --allow-unverified the --repo override is permitted, but the downgrade is visible — profile.verified is false, risk carries unverified_profile (high), and the result is partial. The cwd origin matches the overridden repository, so no mismatch warning is added on top.",
+  "args": ["100", "--repo", "Kewton/BorderFreeKidsMap", "--allow-unverified"],
+  "cwd": { "git": true, "origin": "git@github.com:Kewton/BorderFreeKidsMap.git" },
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": ["profile_repository_override"],
+    "waves": [[100]],
+    "merge_order": [100],
+    "profile_verified": false,
+    "risk_level": "high"
+  }
+}

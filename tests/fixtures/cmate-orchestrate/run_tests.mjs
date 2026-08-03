@@ -263,14 +263,36 @@ function buildArgs(rawArgs, issuesPath, runsDir) {
   return [...args, '--issue-json', issuesPath, '--runs-dir', runsDir];
 }
 
-function runRunner(args) {
+function runRunner(args, cwd) {
   try {
-    const stdout = execFileSync('node', [RUNNER, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const stdout = execFileSync('node', [RUNNER, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], cwd });
     return { exit: 0, stdout };
   } catch (error) {
     // execFileSync throws on a non-zero exit; the result JSON is still on stdout.
     return { exit: error.status ?? 1, stdout: error.stdout ? error.stdout.toString() : '' };
   }
+}
+
+// The working directory a plan case runs the planner in (Issue #36). The default
+// profile cross-checks `git remote get-url origin` against the repository it
+// targets, so the cwd is a real fixture input: a throwaway repository with an
+// injected origin, or a plain directory that is not a repository at all. A case
+// without `cwd` inherits the harness's own directory and never reaches the probe
+// (every such case names its profile explicitly).
+function setupCaseCwd(spec) {
+  if (!spec.cwd) return undefined;
+  const dir = mkdtempSync(join(tmpdir(), 'cmate-orch-cwd-'));
+  if (spec.cwd.git) {
+    execFileSync('git', ['init', '-q', dir], { stdio: 'ignore' });
+    if (spec.cwd.origin) {
+      execFileSync('git', ['-C', dir, 'remote', 'add', 'origin', spec.cwd.origin], { stdio: 'ignore' });
+    }
+  }
+  return dir;
+}
+
+function warningCodesOf(result) {
+  return (result.warnings ?? []).map((w) => w.code);
 }
 
 function check(condition, message) {
@@ -304,8 +326,9 @@ function runCase(caseId) {
   log(`  ${caseId}: ${spec.description}`);
 
   const runsDir = mkdtempSync(join(tmpdir(), 'cmate-orch-'));
+  const cwd = setupCaseCwd(spec);
   const args = buildArgs(spec.args, issuesPath, runsDir);
-  const { exit, stdout } = runRunner(args);
+  const { exit, stdout } = runRunner(args, cwd);
 
   let result;
   try {
@@ -322,6 +345,16 @@ function runCase(caseId) {
   // The result envelope always conforms to its schema, success or failure.
   const resultErrors = validateAgainst(resultSchema, result, 'result');
   check(resultErrors.length === 0, `result schema: ${resultErrors.slice(0, 3).join('; ')}`);
+
+  // Warning codes are the machine-readable half of a `partial`: an expectation of
+  // exactly this set proves both that a real concern is raised and that a clean
+  // run stays clean (no code is invented out of a skipped probe).
+  if (expect.warning_codes) {
+    check(
+      deepEqual(warningCodesOf(result), expect.warning_codes),
+      `warning codes ${JSON.stringify(warningCodesOf(result))} !== ${JSON.stringify(expect.warning_codes)}`,
+    );
+  }
 
   if (expect.status === 'failure') {
     check(result.plan === null, 'plan should be null on failure');
@@ -367,9 +400,14 @@ function runCase(caseId) {
     }
   }
 
-  // Determinism: a second run into a fresh directory yields the same plan.
+  // The plan carries the same warnings the envelope reports; a reviewer reading
+  // only the plan artifact must not miss a concern the result envelope raised.
+  check(deepEqual(plan.warnings, result.warnings), 'plan.warnings and result.warnings disagree');
+
+  // Determinism: a second run into a fresh directory — from the SAME working
+  // directory, which is part of the input — yields the same plan.
   const runsDir2 = mkdtempSync(join(tmpdir(), 'cmate-orch-'));
-  const second = runRunner(buildArgs(spec.args, issuesPath, runsDir2));
+  const second = runRunner(buildArgs(spec.args, issuesPath, runsDir2), cwd);
   const secondPlan = JSON.parse(second.stdout).plan;
   check(deepEqual(plan, secondPlan), 'plan is not deterministic across two runs');
 
@@ -799,6 +837,32 @@ function runMergeCase(caseId) {
 
   if (expect.redaction_token) {
     check(!stdout.includes(expect.redaction_token), 'a raw token survived into the merge report');
+  }
+
+  // Limitations are the "did not stop the phase, but you need to know" channel
+  // (Issue #39). Both directions are asserted: the code that must be recorded,
+  // and the code that must NOT appear when there is nothing to report or the
+  // probe could not answer.
+  const limitationCodes = (report.limitations ?? []).map((l) => l.code);
+  for (const code of expect.limitation_codes ?? []) {
+    check(limitationCodes.includes(code), `limitation "${code}" not in ${JSON.stringify(limitationCodes)}`);
+  }
+  for (const code of expect.absent_limitation_codes ?? []) {
+    check(!limitationCodes.includes(code), `limitation "${code}" should not have been recorded`);
+  }
+
+  // The PR body artifact is the operator-facing half of the same finding.
+  if (expect.pr_body_contains || expect.pr_body_absent) {
+    const bodyPath = join(mergeOut, 'pr-bodies', `issue-${report.eligible_issues[0]}.md`);
+    if (check(existsSync(bodyPath), `PR body ${bodyPath} was not written`)) {
+      const body = readFileSync(bodyPath, 'utf8');
+      for (const needle of expect.pr_body_contains ?? []) {
+        check(body.includes(needle), `PR body does not mention "${needle}"`);
+      }
+      for (const needle of expect.pr_body_absent ?? []) {
+        check(!body.includes(needle), `PR body should not mention "${needle}"`);
+      }
+    }
   }
 }
 

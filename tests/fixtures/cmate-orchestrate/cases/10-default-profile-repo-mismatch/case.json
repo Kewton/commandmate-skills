@@ -1,0 +1,15 @@
+{
+  "description": "Issue #36: with no --profile, the default node-commandmate profile targets Kewton/CommandMate while the cwd's origin is another repository. The plan is still produced, but it is partial and names the mismatch instead of reading as a clean success.",
+  "args": ["100"],
+  "cwd": { "git": true, "origin": "git@github.com:Kewton/BorderFreeKidsMap.git" },
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": ["profile_repository_mismatch"],
+    "waves": [[100]],
+    "merge_order": [100],
+    "dependencies": [],
+    "profile_verified": true,
+    "risk_level": "low"
+  }
+}

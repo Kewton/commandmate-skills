@@ -1,0 +1,32 @@
+{
+  "description": "Issue #39: the plan's base is `develop` but the repository's default branch is `main`. GitHub only auto-closes on a merge into the default branch, so the `Resolves #n` in each PR body is inert. The phase still succeeds — it records the limitation and notes it in the PR body rather than closing anything itself.",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--approve"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true, "default_branch": "main" },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "create": "ok" },
+      "201": { "create": "ok" }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "pr_created", "200": "pr_created" },
+    "push_calls": 2,
+    "pr_create_calls": 2,
+    "limitation_codes": ["issue_autoclose_not_default_branch"],
+    "pr_body_contains": ["Resolves #201.", "not the default branch"],
+    "completion_passed": true
+  }
+}

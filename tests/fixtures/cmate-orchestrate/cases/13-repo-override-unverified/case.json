@@ -1,0 +1,10 @@
+{
+  "description": "Issue #36: --repo re-points a built-in profile at another repository, which drops the verification its branch/base/worktree/baseline carried. Without --allow-unverified the planner refuses rather than plan on a stale `verified: true`.",
+  "args": ["100", "--repo", "Kewton/BorderFreeKidsMap"],
+  "cwd": { "git": true, "origin": "git@github.com:Kewton/BorderFreeKidsMap.git" },
+  "expect": {
+    "exit": 3,
+    "status": "failure",
+    "error_code": "unverified_profile"
+  }
+}

@@ -36,6 +36,32 @@ CI pass の gate 無しに mutation を行わない。
 同じ入力からは同じ plan が出る（Claude/Codex parity）。base branch・branch 名・
 worktree path・baseline は **profile から解決**し、`develop`/`npm`/`cargo` を hardcode しない。
 
+## 前提条件
+
+**CLI**: `commandmate`（`>=0.11.0 <1.0.0`）・`git`・`gh`・`node >=22`。
+
+**別途導入が必要な Skill: `cmate-acceptance-test`。**
+第4部（UAT）の裁定は機械ゲート（profile baseline）と**意味ゲート**（Issue の受入条件に対する
+Go / Conditional Go / No-Go 判定）の二層で、**意味ゲートの入力は
+[cmate-acceptance-test](../cmate-acceptance-test/) が出す result document
+（`acceptance-result.v1`）である**。この Skill は `cmate-orchestrate` の install には
+**含まれない**ので、意味ゲートを使うなら次で別途導入する。
+
+```bash
+commandmate skill install cmate-acceptance-test
+```
+
+未導入のままでも orchestrate は動くが、**裁定は機械ゲートだけになる**。`--acceptance-dir` を
+渡さなければ uat runner は baseline の結果のみで裁定し、意味ゲートを掛けていないことを
+report の `limitations[]`（`acceptance_not_run`）に記録する（黙って劣化しない。第16節）。
+`--require-acceptance` を渡すと、result の欠落・schema 不適合・対象 Issue 不一致は
+limitation ではなく**不合格**として扱われる。
+
+未導入の環境では、本書中の `../cmate-acceptance-test/...` への相対リンク（第4部・第17節）は
+解決しない。リンク切れ自体が「その Skill をまだ入れていない」ことのサインである。
+
+第1部〜第3部（計画・dispatch・PR/merge）は `cmate-acceptance-test` に依存しない。
+
 ---
 
 # 第1部 計画コア（dry-run）
@@ -57,6 +83,7 @@ worktree path・baseline は **profile から解決**し、`develop`/`npm`/`carg
 | `--profile-json <path>` | 任意 | なし | 独自 profile。[references/profile-contract.md](./references/profile-contract.md) |
 | `--issue-json <path>` | 任意 | なし | Issue fixture。offline・決定的に回すときに使う |
 | `--base <ref>` | 任意 | profile 由来 | base branch の上書き |
+| `--repo <owner/name>` | 任意 | profile 由来 | 対象リポジトリの上書き。**profile の `verified` を降格させる**（第4節 Step 1） |
 | `--max-parallel <1-3>` | 任意 | `3` | 1 Wave の最大幅 |
 | `--depends <a:b>` | 任意 | なし | override: `a` が `b` に依存（繰り返し可） |
 | `--no-infer` | 任意 | off | 推論依存を無効化 |
@@ -101,6 +128,30 @@ Issue 番号が1件以上あること、`--max-parallel` が 1〜3 であるこ�
 `--profile` / `--profile-json` から profile を解決する。unverified profile は、
 `--allow-unverified` が無ければ `unverified_profile` で終了する
 （[references/profile-contract.md](./references/profile-contract.md) 第3節）。
+
+**`--repo` による上書きは `verified` を降格させる。** profile の branch/base/worktree/baseline
+は元のリポジトリに対してのみ検証されており、リポジトリを差し替えた時点でその検証は対象を失う。
+よって `--repo` を渡すと `verified: false` となり、`--allow-unverified` が無ければ
+`unverified_profile` で終了する。`--allow-unverified` を付けた場合は plan の
+`profile.verified` が `false`、risk factor に `unverified_profile`（high）、
+warnings に `profile_repository_override` が載り、result は `partial` になる。
+
+**既定 profile はカレントディレクトリの origin と照合する。** `--profile` も `--profile-json`
+も指定されず profile が既定値（`node-commandmate`）に解決されたときだけ、read-only の
+`git remote get-url origin` を1回実行し、URL を `owner/name` に正規化して（ssh / https
+両形式）profile の対象リポジトリと突き合わせる。**不一致なら warnings に
+`profile_repository_mismatch` を積み、result を `partial` にする**。別リポジトリの worktree
+内で profile を指定し忘れると、planner は既定 profile のリポジトリから Issue を読むため、
+**中身の違う Issue から一見きれいな plan が出てしまう**（[#36](https://github.com/Kewton/commandmate-skills/issues/36)）。
+これを黙って success にしないための照合である。
+
+- cwd が git リポジトリでない・`origin` が無い・URL が `owner/name` に正規化できない場合は
+  **照合をスキップ**する（失敗を不一致として扱わない）。比較は大文字小文字を無視する。
+- 明示的に profile を指定した場合は照合しない。指定は意図的な選択だからである。
+- plan は「入力 + cwd の origin」の純粋関数であり、同一 cwd・同一入力からは同一 plan が出る
+  （Claude/Codex parity は維持される）。`run_id` は cwd に依存しない。
+- 警告のみで、planner は止まらない。`--profile` / `--profile-json` / `--repo` のいずれかを
+  渡せば、そのリポジトリに対する plan になる。
 
 ### Step 2. Issue を取得する
 
@@ -147,6 +198,15 @@ result を返す前に、5つの check を自己申告する
 planner は result envelope（[schemas/orchestrate-result.v1.json](./schemas/orchestrate-result.v1.json)）を
 stdout に、進捗 notice を stderr に出す。`status` は3値（`success`/`partial`/`failure`）。
 plan 本体は [schemas/execution-plan.v1.json](./schemas/execution-plan.v1.json) に適合する。
+
+**warnings が1件でもあれば `status` は `partial` である**（`success` に丸めない）。exit code は
+`partial` でも 0 なので、**成否は exit code ではなく `status` と `warnings` で判断する**。
+
+| warning code | 意味 |
+|---|---|
+| `profile_repository_mismatch` | 既定 profile の対象リポジトリが cwd の `origin` と一致しない（第4節 Step 1） |
+| `profile_repository_override` | `--repo` でリポジトリを差し替えたため profile の検証が対象を失った（同上） |
+| `external_dependency` | Issue が、この plan に含まれない Issue への依存を宣言している |
 
 ## 6. planner の失敗時の動作
 
@@ -420,6 +480,22 @@ dispatch report から eligible 集合を取る。空なら `no_eligible_issues`
 （objective・受入条件・baseline・`Resolves #n`）を `<out>/pr-bodies/issue-<n>.md` に残して
 `gh pr create` する。push または create が失敗したら `pr_failed` で停止する。
 
+**Issue 自動クローズの到達性を1回だけ確認する。** phase の冒頭で read-only の
+`gh repo view <repo> --json defaultBranchRef` を **invocation あたり1回**引き、PR の base
+（`plan.profile.base` から remote 接頭辞を落としたもの）がデフォルトブランチかどうかを見る。
+GitHub が `Resolves #n` で Issue を自動クローズするのは**デフォルトブランチへの merge 時だけ**
+なので、`feature/* → develop → stg → main`（デフォルトは `main`）のような多段運用で `develop`
+宛に PR を出すと、PR を merge しても **Issue は open のまま**残る
+（[#39](https://github.com/Kewton/commandmate-skills/issues/39)）。
+
+- base ≠ デフォルトブランチ → report の `limitations[]` に
+  `issue_autoclose_not_default_branch` を記録し、各 PR body にも同趣旨の注記を1行足す。
+  **merge 後に手動でクローズする必要がある。**
+- base = デフォルトブランチ → 何も記録しない。
+- `gh repo view` が失敗した / `defaultBranchRef` が返らない → **照合をスキップするだけ**で、
+  PR 作成フローは阻害しない（不明を不一致として扱わない）。
+- 記録に留める。`gh issue close` を勝手に実行することはしない。
+
 ### Step M3-b. `--merge-prs`
 
 各 eligible の PR を `gh pr view` で発見し、`gh pr checks` で CI を確認する。CI green かつ
@@ -445,6 +521,15 @@ stdout に、`<out>/merge-report.json` と `<out>/merge-summary.md` を file に
 
 report は5つの completion check（`single_phase`・`approval_enforced`・`verification_gated`・
 `ci_gated`・`failures_not_rounded`）を自己申告する。
+
+`limitations[]` は「停止はしていないが、後から効いてくる制約」を記録する。
+
+| limitation code | 意味 |
+|---|---|
+| `issue_autoclose_not_default_branch` | base がデフォルトブランチでないため `Resolves #n` が効かない。merge 後に手動クローズが要る（Step M3-a） |
+| `no_eligible_issues` | dispatch report に completed かつ verification pass の Issue が無い |
+| `unsafe_branch` | branch 名が safe-ref guard に弾かれた |
+| `completion_check_failed` | completion check のどれかが passed でない |
 
 merge 完了条件:
 

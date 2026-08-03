@@ -1,0 +1,14 @@
+{
+  "description": "Issue #36: the cwd is not a git repository, so `git remote get-url origin` fails. A failed probe is a skip, never a mismatch: the run stays success with no warning.",
+  "args": ["100"],
+  "cwd": { "git": false },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[100]],
+    "merge_order": [100],
+    "profile_verified": true,
+    "risk_level": "low"
+  }
+}

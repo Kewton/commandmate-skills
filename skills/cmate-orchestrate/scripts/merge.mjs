@@ -38,7 +38,7 @@ import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.9.0';
+const SKILL_VERSION = '0.10.0';
 const MERGE_SCHEMA_VERSION = 1;
 const SUPPORTED_PLAN_SCHEMA_VERSION = 1;
 const SUPPORTED_DISPATCH_SCHEMA_VERSION = 1;
@@ -372,8 +372,8 @@ function bullets(items, fallback) {
   return items.map((item) => `- ${redact(String(item))}`).join('\n');
 }
 
-function buildPrBody(plan, issue) {
-  return [
+function buildPrBody(plan, issue, autoCloseNote) {
+  const lines = [
     `## Summary`,
     redact(issue.objective ?? issue.title ?? `Resolve issue #${issue.number}.`),
     '',
@@ -385,7 +385,50 @@ function buildPrBody(plan, issue) {
     bullets(plan.profile.baseline, 'repository baseline'),
     '',
     `Resolves #${issue.number}.`,
-  ].join('\n');
+  ];
+  if (autoCloseNote) lines.push('', autoCloseNote);
+  return lines.join('\n');
+}
+
+// =============================================================================
+// Issue auto-close reachability (Issue #39)
+// =============================================================================
+
+// GitHub only honors a closing keyword (`Resolves #n`) when the PR merges into
+// the repository's DEFAULT branch. A profile base is free to be anything —
+// `origin/develop` in a feature → develop → stg → main flow — and in that case
+// the keyword this runner writes is inert: the PR merges and the issue stays
+// open. That is not a defect this runner can fix (auto-closing an issue on the
+// operator's behalf is out of scope by product policy), so it is recorded.
+const AUTOCLOSE_LIMITATION_CODE = 'issue_autoclose_not_default_branch';
+
+// One read-only `gh repo view` for the repository's default branch. Returns null
+// when the query fails or the field is absent — a null skips the comparison
+// entirely rather than guessing, so a gh outage never blocks the merge flow.
+function defaultBranchOf(inputs, plan) {
+  const result = runCli(inputs.gh, ['repo', 'view', plan.profile.repository, '--json', 'defaultBranchRef']);
+  const parsed = parseCliJson(result);
+  const name = parsed && parsed.defaultBranchRef ? parsed.defaultBranchRef.name : null;
+  return typeof name === 'string' && name !== '' ? name : null;
+}
+
+// Records the limitation when the PR base is not the default branch, and returns
+// the note to append to each PR body (null when nothing is wrong or unknown).
+function checkIssueAutoClose(inputs, plan, report) {
+  const base = baseBranchName(plan.profile.base);
+  const defaultBranch = defaultBranchOf(inputs, plan);
+  if (defaultBranch === null) return null; // unknown: skip the comparison
+  if (defaultBranch === base) return null; // merging into the default branch: the keyword works
+
+  const detail =
+    `PR base is "${base}" but the default branch of ${plan.profile.repository} is "${defaultBranch}"; ` +
+    'GitHub only auto-closes on a merge into the default branch, so `Resolves #n` in these PR bodies ' +
+    'will not close the issues. Close them manually after the merge.';
+  report.limitations.push({ code: AUTOCLOSE_LIMITATION_CODE, detail });
+  return (
+    `> Note: this PR targets \`${base}\`, which is not the default branch (\`${defaultBranch}\`). ` +
+    'GitHub will not auto-close the issue above on merge — close it manually.'
+  );
 }
 
 // =============================================================================
@@ -506,6 +549,9 @@ function runCreatePrs(inputs, plan, eligible, outDir, report) {
   const bodyDir = join(outDir, 'pr-bodies');
   mkdirSync(bodyDir, { recursive: true });
 
+  // Read-only, once per invocation — not once per issue.
+  const autoCloseNote = checkIssueAutoClose(inputs, plan, report);
+
   let stopped = false;
   for (const number of eligible) {
     const issue = issueOf(plan, number);
@@ -528,7 +574,7 @@ function runCreatePrs(inputs, plan, eligible, outDir, report) {
     }
 
     const bodyFile = join(bodyDir, `issue-${number}.md`);
-    writeFileSync(bodyFile, `${buildPrBody(plan, issue)}\n`, 'utf8');
+    writeFileSync(bodyFile, `${buildPrBody(plan, issue, autoCloseNote)}\n`, 'utf8');
 
     if (!inputs.approve) {
       target.outcome = 'previewed';
