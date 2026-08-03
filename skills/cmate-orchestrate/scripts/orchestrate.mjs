@@ -23,7 +23,7 @@ import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.9.0';
+const SKILL_VERSION = '0.10.0';
 const PLAN_SCHEMA_VERSION = 1;
 const RESULT_SCHEMA_VERSION = 1;
 
@@ -277,8 +277,64 @@ function readJson(path, what) {
   }
 }
 
+// The remote URL of the current working directory, normalized to `owner/name`.
+// Both git URL forms the CLI writes are accepted:
+//
+//   git@github.com:Owner/Name.git        ssh://git@github.com/Owner/Name.git
+//   https://github.com/Owner/Name.git    https://user@github.com/Owner/Name
+//
+// Returns null when the cwd is not a git repository, has no `origin`, or the
+// URL does not normalize to exactly two path segments. A null is a *skip*, never
+// a mismatch: the planner must not invent a discrepancy out of a failed probe.
+function cwdOriginRepository() {
+  let url;
+  try {
+    url = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null;
+  }
+  return normalizeRemoteUrl(url);
+}
+
+function normalizeRemoteUrl(url) {
+  if (typeof url !== 'string' || url.trim() === '') return null;
+  let rest = url.trim();
+  const scp = /^[A-Za-z0-9._-]+@([^:/]+):(.+)$/.exec(rest); // scp-like ssh form
+  if (scp) {
+    rest = scp[2];
+  } else {
+    const withScheme = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/(.*)$/.exec(rest);
+    if (!withScheme) return null;
+    const afterHost = withScheme[1].replace(/^[^/]*\//, ''); // drop [user@]host[:port]
+    if (afterHost === withScheme[1]) return null;
+    rest = afterHost;
+  }
+  rest = rest.replace(/\.git$/i, '').replace(/^\/+/, '').replace(/\/+$/, '');
+  const segments = rest.split('/').filter((s) => s !== '');
+  if (segments.length !== 2) return null;
+  if (!/^[A-Za-z0-9._-]+$/.test(segments[0]) || !/^[A-Za-z0-9._-]+$/.test(segments[1])) return null;
+  return `${segments[0]}/${segments[1]}`;
+}
+
+function sameRepository(a, b) {
+  return String(a).toLowerCase() === String(b).toLowerCase();
+}
+
+// Resolves the profile and reports what about that resolution the reviewer has
+// to know before approving the plan. Returns { profile, warnings }: a warning is
+// never fatal, but it does downgrade the run to `partial` so a plan built on a
+// shaky premise cannot read as a clean success.
 function resolveProfile(inputs) {
   let profile;
+  // Whether the profile is the *default* one — nobody named it. That is the case
+  // the repository cross-check below exists for: an explicit --profile is a
+  // deliberate choice, a default is an assumption the runner made for you.
+  const defaultResolved = !inputs.profileJson && !inputs.profileId;
+  const warnings = [];
+
   if (inputs.profileJson) {
     const raw = readJson(inputs.profileJson, 'profile');
     profile = normalizeProfile(raw);
@@ -297,18 +353,56 @@ function resolveProfile(inputs) {
     profile = { ...profile };
   }
 
+  // A repository override moves the profile off the repository its branch/base/
+  // worktree/baseline were verified against, so the verification no longer
+  // covers it. Downgrade rather than carry a stale `verified: true` forward.
+  const repoOverridden = Boolean(inputs.repoOverride) && !sameRepository(inputs.repoOverride, profile.repository);
   if (inputs.repoOverride) profile.repository = inputs.repoOverride;
   if (inputs.baseOverride) profile.base = inputs.baseOverride;
 
+  if (repoOverridden && profile.verified) {
+    profile.verified = false;
+    profile.verified_downgraded = true;
+  }
+
   if (!profile.verified && !inputs.allowUnverified) {
+    const because = profile.verified_downgraded
+      ? `profile "${profile.id}" was verified against a different repository and --repo re-pointed it at ` +
+        `${profile.repository}, which drops that verification; `
+      : `profile "${profile.id}" is not a verified profile; `;
     throw new SkillError(
       'unverified_profile',
-      `profile "${profile.id}" is not a verified profile; ` +
-        're-run with --allow-unverified after confirming branch/base/worktree/baseline are correct',
+      `${because}re-run with --allow-unverified after confirming branch/base/worktree/baseline are correct`,
       3,
     );
   }
-  return profile;
+  if (profile.verified_downgraded) {
+    warnings.push({
+      code: 'profile_repository_override',
+      detail:
+        `--repo re-pointed profile "${profile.id}" at ${profile.repository}; its branch/base/worktree/baseline ` +
+        'were verified against a different repository, so this plan runs on an unverified profile',
+    });
+  }
+  delete profile.verified_downgraded;
+
+  // The #36 cross-check: a default profile plans against *its* repository, not
+  // the one the operator is standing in. Reading another repository's issues
+  // that way produces a plan that looks clean and is about the wrong work.
+  if (defaultResolved) {
+    const origin = cwdOriginRepository();
+    if (origin !== null && !sameRepository(origin, profile.repository)) {
+      warnings.push({
+        code: 'profile_repository_mismatch',
+        detail:
+          `the working directory's origin is ${origin} but the default profile "${profile.id}" targets ` +
+          `${profile.repository}; the issues in this plan were read from ${profile.repository}. ` +
+          'Pass --profile / --profile-json / --repo to plan against this repository.',
+      });
+    }
+  }
+
+  return { profile, warnings };
 }
 
 function normalizeProfile(raw) {
@@ -1228,14 +1322,17 @@ function run(argv) {
   }
 
   const inputs = resolveInputs(parsed);
-  const profile = resolveProfile(inputs);
+  const { profile, warnings: profileWarnings } = resolveProfile(inputs);
   const runId = makeRunId(inputs, profile);
 
   const rawIssues = loadIssues(inputs, profile);
   const binaries = verifyBinaries(profile);
   const analyses = rawIssues.map((issue) => analyzeIssue(issue, profile, binaries));
 
-  const { edges, errors: depErrors, warnings } = buildDependencies(analyses, inputs);
+  const { edges, errors: depErrors, warnings: dependencyWarnings } = buildDependencies(analyses, inputs);
+  // Profile warnings first: a plan built against the wrong repository is the
+  // premise a reviewer has to settle before reading anything downstream of it.
+  const warnings = [...profileWarnings, ...dependencyWarnings];
   if (depErrors.length > 0) {
     const first = depErrors[0];
     throw new SkillError(first.code, first.detail, 5);

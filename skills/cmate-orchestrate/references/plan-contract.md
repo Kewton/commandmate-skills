@@ -27,6 +27,11 @@ run 先の directory（`--runs-dir`）や wall clock は plan に影響しない
 run_id の既定値も上記入力の SHA-256 から導くので、同じ入力なら run_id まで一致する。
 これが Claude で回した結果と Codex で回した結果を突き合わせられる根拠である。
 
+ひとつだけ cwd に依存する項目がある。**profile が既定値に解決された場合のみ**、
+`warnings` に `profile_repository_mismatch` が載るかどうかが cwd の `origin` に依存する
+（[profile-contract.md](./profile-contract.md) 第6節）。plan は「入力 + cwd の origin」の
+純粋関数であり、同一 cwd・同一入力なら byte 単位で一致する。`run_id` は cwd に依存しない。
+
 ## 2. run の隔離
 
 - run artifact は `<runs-dir>/<run_id>/` 配下に書く。
