@@ -807,7 +807,7 @@
         "timeout",
         "work-evidence"
       ],
-      "latest": "0.1.1",
+      "latest": "0.2.0",
       "versions": [
         {
           "version": "0.1.1",
@@ -823,6 +823,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.1.1/cmate-verify-0.1.1.tar.gz",
             "sha256": "5e3e96900079fa55b39a0427b5da3fd4aebe527208c1b725950599f2a390caef",
             "size": 23769,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.2.0",
+          "changelog": "options.requireCommit に対応。true のとき work-evidence は「変更が在る」ではなく「commit が在る」を要求し、commits=0 は RESULT not_started / exit 21 になる。既定は false（このゲート本来の問いは「ここで何か起きたか」であるため）。移植前は awk パーサの options キーが閉じた集合だったため requireCommit を書くと exit 2 の設定エラーになり、宣言したリポジトリでは本ランナーが一切走らなかった。本ランナーは実行契約を読まない（シェルから起動したランはどの委任にも紐付かないため）ので、両方のランナーで効かせたい要求は verify.yaml に書く。CommandMate 側の conformance テストが 7 セルの行列で両実装の一致を固定している。",
+          "published_at": "2026-08-03T10:32:30Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-v0.2.0",
+            "commit": "573c013ab9a84a899f7414f50f191670f377c639"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-0.2.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.2.0/cmate-verify-0.2.0.tar.gz",
+            "sha256": "f4d83e83cc80cbc31b7f1a3fc4b4829ec8741936030d55e3d43e2f8153076fd6",
+            "size": 26346,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
