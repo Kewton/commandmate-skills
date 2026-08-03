@@ -36,6 +36,32 @@ CI pass の gate 無しに mutation を行わない。
 同じ入力からは同じ plan が出る（Claude/Codex parity）。base branch・branch 名・
 worktree path・baseline は **profile から解決**し、`develop`/`npm`/`cargo` を hardcode しない。
 
+## 前提条件
+
+**CLI**: `commandmate`（`>=0.11.0 <1.0.0`）・`git`・`gh`・`node >=22`。
+
+**別途導入が必要な Skill: `cmate-acceptance-test`。**
+第4部（UAT）の裁定は機械ゲート（profile baseline）と**意味ゲート**（Issue の受入条件に対する
+Go / Conditional Go / No-Go 判定）の二層で、**意味ゲートの入力は
+[cmate-acceptance-test](../cmate-acceptance-test/) が出す result document
+（`acceptance-result.v1`）である**。この Skill は `cmate-orchestrate` の install には
+**含まれない**ので、意味ゲートを使うなら次で別途導入する。
+
+```bash
+commandmate skill install cmate-acceptance-test
+```
+
+未導入のままでも orchestrate は動くが、**裁定は機械ゲートだけになる**。`--acceptance-dir` を
+渡さなければ uat runner は baseline の結果のみで裁定し、意味ゲートを掛けていないことを
+report の `limitations[]`（`acceptance_not_run`）に記録する（黙って劣化しない。第16節）。
+`--require-acceptance` を渡すと、result の欠落・schema 不適合・対象 Issue 不一致は
+limitation ではなく**不合格**として扱われる。
+
+未導入の環境では、本書中の `../cmate-acceptance-test/...` への相対リンク（第4部・第17節）は
+解決しない。リンク切れ自体が「その Skill をまだ入れていない」ことのサインである。
+
+第1部〜第3部（計画・dispatch・PR/merge）は `cmate-acceptance-test` に依存しない。
+
 ---
 
 # 第1部 計画コア（dry-run）

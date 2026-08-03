@@ -2,7 +2,7 @@ schema_version: 1
 id: cmate-orchestrate
 name: cmate-orchestrate
 version: 0.10.0
-summary: 複数 Issue の並列実行を dry-run で計画し、承認後に実行契約付きで dispatch して commandmate の検証 exit code で裁定し、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT を実行し不合格なら回数上限つき修正ループを回し上限到達時は blocked で停止する。
+summary: 複数 Issue の並列実行を dry-run で計画し、承認後に実行契約付きで dispatch して検証 exit code で裁定し、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT と回数上限つき修正ループを回す。UAT の意味ゲートには cmate-acceptance-test の別途 install が要る。
 description: >-
   複数 Issue を並列で進めるための、計画（dry-run）・その承認後の監督付き実行・verification pass 後の
   納品（PR 作成・CI 確認・guarded merge）・納品後の受入（UAT と回数上限つき修正ループ）を行う標準
@@ -29,6 +29,9 @@ description: >-
   し、attempt 履歴は既存 run artifact を上書きせず append する。base branch・branch 名・worktree path・
   baseline は profile から解決し hardcode しない。Issue 本文編集・回数無制限ループ・crash 後の resume は
   行わない。planner の default invocation は dry-run である。
+  UAT の意味ゲートは cmate-acceptance-test の result document を入力に取る。この Skill は本 package の
+  install には含まれないため別途 install が要り、未導入なら機械ゲートのみで裁定してその旨を limitations
+  に記録する。
 capabilities:
   - GitHub Issue の objective・受入条件・suspected/reference file・blocking question を分析する
   - explicit（本文由来）と inferred（推論）の依存を区別して解決する
@@ -103,8 +106,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: 8095a55484f42a6f1cba65301a946f67a4f4b6d49f93fce4c0adabd23076af86
-    size: 47120
+    sha256: e88baebee37547909f3f89277287ab1dd1c0d30649c3a2d16f902b4b0137e617
+    size: 48666
     kind: skill_md
     executable: false
     script: false
@@ -139,8 +142,8 @@ files:
     executable: false
     script: false
   - path: references/uat-contract.md
-    sha256: ee4cbe9ed331c6d2110ee0136da9abdafb39ab8915aa1765ae8556944f4c6654
-    size: 19604
+    sha256: 68cf3f347221ce3c33ff68d83d7987d9890a426fbe85fe231554ded53a1dbd12
+    size: 20153
     kind: instruction
     executable: false
     script: false

@@ -75,6 +75,17 @@ eligible が空の場合は `no_eligible_issues`（limitation）を載せて no-
 受入条件を自動解釈したりは **しない**。runner がするのは、document を読み・検証し・照合し・合成する
 ことだけである。
 
+**`cmate-acceptance-test` は別途 install が要る。** `cmate-orchestrate` の install には含まれない。
+
+```bash
+commandmate skill install cmate-acceptance-test
+```
+
+未導入なら `--acceptance-dir` を渡せないので、裁定は機械ゲートだけになる。その場合 runner は
+意味ゲートが参加していないことを `limitations[]` の `acceptance_not_run` に記録する
+（黙って劣化しない）。本書中の `../../cmate-acceptance-test/...` への相対リンクも未導入では
+解決しない。
+
 ### 4.1 意味ゲートの入力
 
 `--acceptance-dir <dir>` の `issue-<n>.json` を読む。document は
