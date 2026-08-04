@@ -133,7 +133,7 @@
         "schema",
         "dry-run"
       ],
-      "latest": "0.1.0",
+      "latest": "0.2.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -149,6 +149,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.1.0/cmate-issue-authoring-0.1.0.tar.gz",
             "sha256": "71b688d8bf1afc62132b5fa565e6d02ca466128d1e0b0d71295bd9e26450137a",
             "size": 26748,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.2.0",
+          "changelog": "validate-plan の FILE_EXT を planner と同期して geojson/topojson/geojsonl を追加し、既知拡張子外の backtick path に warning を追加 (#43)。",
+          "published_at": "2026-08-04T14:15:50Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-authoring-v0.2.0",
+            "commit": "972de83a9dabf4e5cdb34e84cac0ecac8adf9dda"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-authoring-0.2.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.2.0/cmate-issue-authoring-0.2.0.tar.gz",
+            "sha256": "63c161a9601ff261bc7bcd24c20d795eb8be1488ad1a78784acd8bdd3fe1947d",
+            "size": 27562,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
