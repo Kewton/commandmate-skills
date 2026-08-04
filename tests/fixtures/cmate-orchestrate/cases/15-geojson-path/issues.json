@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 411,
+      "title": "feat: ship the demo service-area layer",
+      "body": "Add the demo service-area polygon to `data/demo/service-area.geojson` and render it from `src/map/layers.ts`.\n\n## Acceptance criteria\n- [ ] `data/demo/service-area.geojson` is valid GeoJSON\n- [ ] the demo map renders the layer\n",
+      "labels": ["feature"]
+    }
+  ]
+}

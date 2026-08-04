@@ -2,6 +2,15 @@
 
 ## Changelog
 
+### 0.2.0 — planner mirror の拡張子集合を同期（Issue #43 / CommandMate #1678 B-1）
+
+- planner mirror の `FILE_EXT` に `geojson` / `topojson` / `geojsonl` を追加した。
+  cmate-orchestrate 0.11.0 の planner 本体と同時変更で、集合は byte 単位で同一。
+  一致は test suite（`tests/fixtures/cmate-issue-authoring/run_tests.sh`）が検証する。
+- planner 0.11.0 は、既知拡張子外の backtick path が抽出されなかった場合に plan の
+  `warnings` へ `unrecognized_file_extension` を積むようになった（黙って落とさない）。
+  この挙動を `issue-body-contract.md` の対象ファイル節に追記した。
+
 ### 0.1.0 — initial release
 
 - 公式カタログの Issue 工程の**上流**を埋める最初の package である。既存の

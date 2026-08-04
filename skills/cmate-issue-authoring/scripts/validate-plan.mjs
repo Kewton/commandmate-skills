@@ -188,16 +188,18 @@ function validateAgainstSchema(value, schema, root, pointer, out) {
 // Planner mirror
 // =============================================================================
 //
-// Verbatim behaviour of the extraction in cmate-orchestrate 0.7.1
-// `scripts/orchestrate.mjs` (`analyzeIssue`), measured 2026-08-01. The planner
+// Verbatim behaviour of the extraction in cmate-orchestrate 0.11.0
+// `scripts/orchestrate.mjs` (`analyzeIssue`), measured 2026-08-04. The planner
 // raises exactly two blocking questions — "acceptance criteria are unclear" and
 // "affected files are unclear" — and both are decided by this extraction. Keeping
 // a copy here is what lets a body be checked before the Issue exists; if the
 // planner's extraction changes, this mirror and the version above change with it.
+// The FILE_EXT set below must stay byte-identical to the planner's; the suite in
+// tests/fixtures/cmate-issue-authoring/run_tests.sh asserts the two match.
 
 const ACCEPTANCE_HEADING_RE = /(acceptance|criteria|受入|受け入れ|完了条件|期待結果|受入条件)/i;
 const HEADING_RE = /^#{1,6}\s+/;
-const FILE_EXT = 'rs|md|toml|json|yaml|yml|py|sh|ts|tsx|js|jsx|mjs|cjs|go|rb|java|kt|c|h|cpp|css|html|sql';
+const FILE_EXT = 'rs|md|toml|json|yaml|yml|py|sh|ts|tsx|js|jsx|mjs|cjs|go|rb|java|kt|c|h|cpp|css|html|sql|geojson|topojson|geojsonl';
 const SYSTEM_ROOTS = new Set(['users', 'home', 'root', 'tmp', 'private', 'var', 'etc', 'proc']);
 
 function firstNonEmptyLine(value) {

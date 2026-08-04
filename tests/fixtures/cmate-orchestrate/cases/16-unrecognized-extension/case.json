@@ -1,0 +1,15 @@
+{
+  "description": "Issue #43 essential fix: a backtick path whose extension is outside FILE_EXT no longer vanishes silently — the plan carries an unrecognized_file_extension warning, the run is partial, and the recognised path is still extracted.",
+  "args": ["412", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": ["unrecognized_file_extension"],
+    "waves": [[412]],
+    "merge_order": [412],
+    "dependencies": [],
+    "classifications": { "412": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "412": ["src/tiles/build.ts"] }
+  }
+}

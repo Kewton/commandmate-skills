@@ -23,7 +23,7 @@ import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.10.0';
+const SKILL_VERSION = '0.11.0';
 const PLAN_SCHEMA_VERSION = 1;
 const RESULT_SCHEMA_VERSION = 1;
 
@@ -568,7 +568,9 @@ function cleanCriterion(text) {
 
 // A deliberately broad extension set: a path wrongly kept is a candidate a
 // reviewer can drop, a path missed is context the plan never had.
-const FILE_EXT = 'rs|md|toml|json|yaml|yml|py|sh|ts|tsx|js|jsx|mjs|cjs|go|rb|java|kt|c|h|cpp|css|html|sql';
+// Mirrored verbatim in cmate-issue-authoring scripts/validate-plan.mjs; the
+// issue-authoring test suite asserts the two stay identical.
+const FILE_EXT = 'rs|md|toml|json|yaml|yml|py|sh|ts|tsx|js|jsx|mjs|cjs|go|rb|java|kt|c|h|cpp|css|html|sql|geojson|topojson|geojsonl';
 const SYSTEM_ROOTS = new Set(['users', 'home', 'root', 'tmp', 'private', 'var', 'etc', 'proc']);
 
 function extractFileCandidates(text) {
@@ -603,6 +605,45 @@ function isSafeRepoPath(candidate) {
   if (SYSTEM_ROOTS.has(head)) return false;
   if (head.endsWith(':')) return false; // e.g. "https:" from a URL
   return true;
+}
+
+// The counterpart of FILE_EXT being a closed set (CommandMate #1678 B-1): a
+// backtick path whose extension is outside it used to vanish from the plan
+// silently, and because suspected_files becomes the worker's scope.allow, the
+// scope gate then refused the very file the issue named — unresolvable from
+// inside the worker. Extraction stays conservative; the drop is reported.
+const BACKTICK_PATH_RE = /`([^`\s]*\/[^`\s]*\.[A-Za-z][A-Za-z0-9]*)`/g;
+
+function extractUnrecognizedPaths(text, candidates) {
+  const extracted = new Set(candidates);
+  const seen = new Set();
+  const out = [];
+  for (const match of text.matchAll(BACKTICK_PATH_RE)) {
+    const candidate = match[1].trim();
+    if (extracted.has(candidate) || seen.has(candidate)) continue;
+    if (!isSafeRepoPath(candidate)) continue;
+    seen.add(candidate);
+    out.push(candidate);
+  }
+  return out;
+}
+
+function extractionWarnings(analyses) {
+  const out = [];
+  for (const analysis of analyses) {
+    for (const path of analysis._unrecognizedPaths) {
+      const ext = path.slice(path.lastIndexOf('.') + 1);
+      out.push({
+        code: 'unrecognized_file_extension',
+        detail: redact(
+          `#${analysis.number} writes \`${path}\` in backticks, but ".${ext}" is not a recognised extension, ` +
+            "so the path is not in suspected_files and stays outside the worker's scope; " +
+            "extend the planner's FILE_EXT or state a path with a recognised extension if the worker must touch it",
+        ),
+      });
+    }
+  }
+  return out;
 }
 
 function classifyFileCandidates(candidates) {
@@ -677,7 +718,8 @@ function analyzeIssue(issue, profile, binaries) {
   const text = `${issue.title}\n\n${issue.body}`;
   const objective = redact(firstNonEmptyLine(issue.body) || issue.title);
   const acceptance = extractAcceptanceCriteria(issue.body).map(redact);
-  const { suspected, references } = classifyFileCandidates(extractFileCandidates(text));
+  const candidates = extractFileCandidates(text);
+  const { suspected, references } = classifyFileCandidates(candidates);
   const tests = extractTestExpectations(text, binaries).map(redact);
 
   const questions = [];
@@ -720,6 +762,7 @@ function analyzeIssue(issue, profile, binaries) {
     _consumer: CONSUMER_RE.test(text),
     _topics: topicTokens(issue),
     _rawBody: issue.body,
+    _unrecognizedPaths: extractUnrecognizedPaths(text, candidates),
   };
 }
 
@@ -1332,7 +1375,8 @@ function run(argv) {
   const { edges, errors: depErrors, warnings: dependencyWarnings } = buildDependencies(analyses, inputs);
   // Profile warnings first: a plan built against the wrong repository is the
   // premise a reviewer has to settle before reading anything downstream of it.
-  const warnings = [...profileWarnings, ...dependencyWarnings];
+  // Then per-issue extraction warnings, then cross-issue dependency warnings.
+  const warnings = [...profileWarnings, ...extractionWarnings(analyses), ...dependencyWarnings];
   if (depErrors.length > 0) {
     const first = depErrors[0];
     throw new SkillError(first.code, first.detail, 5);

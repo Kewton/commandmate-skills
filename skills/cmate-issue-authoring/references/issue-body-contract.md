@@ -91,6 +91,13 @@ path をいくつ並べても `suspected_files` が空になり、planner は必
 絶対 path・`..`・drive letter・制御文字を含む候補、および `users` `home` `root` `tmp`
 `private` `var` `etc` `proc` で始まる候補は、安全のため捨てられる。
 
+既知拡張子の集合は planner（cmate-orchestrate 0.11.0）の `FILE_EXT` と同一で、
+`geojson` / `topojson` / `geojsonl` を含む。集合の外の拡張子を backtick path に
+書いた場合（例: `` `data/tiles/demo.mbtiles` ``）、その path は抽出されないが、
+planner は plan の `warnings` に `unrecognized_file_extension` を積んで run を
+partial に落とす（Issue #43 / CommandMate #1678 B-1: 以前は黙って消え、worker が
+scope gate に弾かれて構造的に解決不能だった）。
+
 ### 2.4 依存
 
 `depend` / `dependenc` / `prerequisite` / `requires` / `依存` / `前提` を含む見出しの
