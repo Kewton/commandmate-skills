@@ -1206,6 +1206,7 @@ function buildPlan({ runId, profile, inputs, analyses, edges, waves }) {
       'Dry run: no worktree was created, no worker dispatched, no PR opened or merged.',
       'This plan is executed by the dispatch runner (scripts/dispatch.mjs) once approved; PR, merge and UAT are deferred to CommandMate issues #1455-1456.',
       'worktree_id is null until `commandmate sync` resolves it at dispatch time (optional per ADR #1447).',
+      'Issue input is number, title, body and labels only: comments are never read, so a decision recorded only in an issue comment is invisible to this plan and to the execution contract — fold it into the issue body and re-plan.',
     ],
   };
 }

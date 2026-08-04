@@ -2,6 +2,15 @@
 
 ## Changelog
 
+### 0.1.2 — state that comments are not input (Issue #45 / CommandMate #1678 B-3)
+
+- Step 1 now states explicitly that Issue comments are read neither here nor by
+  the downstream cmate-orchestrate planner (which fetches only number, title,
+  body and labels), so a decision that lives only in a comment never reaches the
+  execution contract a worker receives. Settled decisions must be folded into
+  the Issue **body**; a body left on the old plan is the plan that gets
+  implemented.
+
 ### 0.1.0 — initial release
 
 - First official packaging of the Issue refinement procedure as an Agent Skill.

@@ -106,8 +106,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: b2be5909cc1fd4edec3a8a0d2f4fcf06f212f99289cfd251deec9c24390c63db
-    size: 51697
+    sha256: 921ec34083f15d895a55a8266aab2e64c5975e2feede15953435f28f06d9b328
+    size: 52488
     kind: skill_md
     executable: false
     script: false
@@ -190,8 +190,8 @@ files:
     executable: true
     script: true
   - path: scripts/orchestrate.mjs
-    sha256: 1455c4e57c26fc5e0c2eb4a80952dd5ffd89c5ae899bb547210287083cc1bdfb
-    size: 54871
+    sha256: 22db52a582fe71c23f634941e5d19c2e2dc618f99ec52c6d885dc3a86bd33316
+    size: 55106
     kind: script
     executable: true
     script: true
