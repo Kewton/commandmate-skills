@@ -111,8 +111,8 @@ files:
     executable: false
     script: false
   - path: references/issue-body-contract.md
-    sha256: a067af695b3ff0467a51c6f0e7745305b80ca3c32bb48cd3ea93857d3a9142a9
-    size: 6117
+    sha256: a709976da875c42084efc0a345a929d9140bf22842d784a3ae7c460939f39b73
+    size: 6633
     kind: instruction
     executable: false
     script: false
@@ -129,8 +129,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 29af4423b512170eb7b7b459ce5887154600456da86a5d337cab0abfeaebff4a
-    size: 4346
+    sha256: 9edc26b1a8a891f7de90c239c76e7700653e8056c9787f501e1c0dc489e5922c
+    size: 4712
     kind: instruction
     executable: false
     script: false

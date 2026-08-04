@@ -41,6 +41,7 @@
       "suspected_files": [
         "src/store.ts"
       ],
+      "scope_defaults": [],
       "reference_files": [],
       "test_expectations": [],
       "labels": [
@@ -62,6 +63,7 @@
       "suspected_files": [
         "src/base.ts"
       ],
+      "scope_defaults": [],
       "reference_files": [],
       "test_expectations": [],
       "labels": [

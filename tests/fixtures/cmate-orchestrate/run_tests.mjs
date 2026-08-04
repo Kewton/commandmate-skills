@@ -393,6 +393,17 @@ function runCase(caseId) {
       );
     }
   }
+  // Planner-added lockfile allowances (#44): the plan must SAY which entries the
+  // planner added, so a reviewer can tell them from the issue's own paths.
+  if (expect.scope_defaults) {
+    for (const [number, files] of Object.entries(expect.scope_defaults)) {
+      const issue = plan.issues.find((i) => i.number === Number(number));
+      check(
+        issue !== undefined && deepEqual(issue.scope_defaults, files),
+        `scope_defaults of #${number} ${JSON.stringify(issue?.scope_defaults)} !== ${JSON.stringify(files)}`,
+      );
+    }
+  }
   if (expect.risk_level) check(plan.risk.level === expect.risk_level, `risk ${plan.risk.level} !== ${expect.risk_level}`);
   if (expect.profile_verified !== undefined) check(plan.profile.verified === expect.profile_verified, `profile.verified ${plan.profile.verified} !== ${expect.profile_verified}`);
   if (expect.base) check(plan.profile.base === expect.base, `base ${plan.profile.base} !== ${expect.base}`);
@@ -602,6 +613,20 @@ function runDispatchCase(caseId) {
     for (const [num, count] of Object.entries(expect.send_counts)) {
       const actual = sent.filter((n) => n === Number(num)).length;
       check(actual === count, `#${num} was sent ${actual} time(s) !== ${count}`);
+    }
+  }
+  // Content of a sent message (#44): at least one message sent to the issue's
+  // worker must contain ALL the listed substrings — used to prove the scope-gate
+  // re-instruction transcribes the violating paths and the where-to-fix guidance.
+  if (expect.sent_message_includes) {
+    for (const [num, needles] of Object.entries(expect.sent_message_includes)) {
+      const messages = cliLog
+        .filter((entry) => entry.sub === 'send' && /issue-(\d+)/.exec(entry.args[0] ?? '')?.[1] === String(num))
+        .map((entry) => String(entry.args[1] ?? ''));
+      check(
+        messages.some((message) => needles.every((needle) => message.includes(needle))),
+        `#${num}: no sent message contains all of ${JSON.stringify(needles)}; sent: ${JSON.stringify(messages.map((m) => m.slice(0, 300)))}`,
+      );
     }
   }
   // Per-issue worker_state: a worker that never commits within --max-turns is

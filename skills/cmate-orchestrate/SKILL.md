@@ -163,6 +163,14 @@ warnings に `profile_repository_override` が載り、result は `partial` に�
 Issue ごとに objective・受入条件・suspected/reference files・test 期待・
 blocking question を抽出する。抽出時に token・secret・絶対 path を redaction する。
 受入条件や対象 file が読み取れない Issue には blocking question を立てる。
+既知拡張子外の backtick path が抽出から落ちた場合は `warnings` に
+`unrecognized_file_extension` を積む（黙って落とさない。Issue #43）。
+また、対象 file に依存 manifest（`package.json` / `Cargo.toml` / `go.mod` /
+`pyproject.toml` / `Gemfile`）が含まれる Issue には、同 directory の lockfile
+（node → `package-lock.json` / `pnpm-lock.yaml` / `yarn.lock`、rust → `Cargo.lock` 等）を
+**既定許可**として `suspected_files` に加え、planner が加えた分を issue の
+`scope_defaults` に明示する（CommandMate #1678 B-2: lockfile が scope.allow の外だと
+`npm install` の時点で worker が構造的に scope ゲート不合格になるため）。
 
 ### Step 4. 依存を解決する
 
@@ -284,7 +292,7 @@ Wave の各 Issue について、plan だけから **実行契約 yaml**（Comma
 | `version` | 常に `1` |
 | `title` | `#<n> <Issue title>`（200 文字上限で切り詰め） |
 | `goal` | plan の objective・受入条件・対象 file・rules。CommandMate が前文（許可 path・commit 要求・**verify.yaml から解決した実 command**）を先に付けるので、goal 側で profile baseline を重ねて書かない（judge と違うものを worker に指示しないため） |
-| `scope.allow` | Issue の `suspected_files` を**ソート・重複除去**したもの。絶対 path・`..`・NUL・長すぎる pattern は落とす |
+| `scope.allow` | Issue の `suspected_files` を**ソート・重複除去**したもの（planner が既定許可した lockfile（plan の `scope_defaults`）も含まれる）。絶対 path・`..`・NUL・長すぎる pattern は落とす |
 | `scope.deny` | `[]` |
 | `verify.gates` | `--verify-gates` 指定時のみ。既定は**キーごと省略＝全ゲート**（存在しない gate id は `send --contract` を exit 2 で落とすので発明しない） |
 | `autoYes.mode` | `--auto-yes` 無しなら `"off"`（積極的な禁止）、有りなら `"safe"`。第9.1節 |
@@ -320,7 +328,7 @@ worktree path は path escape 検査を通す。repository-local な worker Skil
 | exit | 意味 | 本 runner の扱い |
 |---|---|---|
 | `0` | 全ゲート pass | 裁定 **pass**。新規 commit あり → `completed`。commit が無ければ「ゲートは通ったが未 commit」なので commit 要求を送り、以降は `--verify` を**付けずに** wait する（pass で task は `succeeded` に遷移済みで、再検証は契約に束ならず exit 99 になる。#1620） |
-| `20` | 判定して不合格 | `commandmate verify <wt> --json` で**失敗ゲートを特定**し、その内訳を引用して**再指示**。`--max-turns` 到達でなお不合格なら、worker は `completed`／verification は `fail` として記録し **success に丸めない** |
+| `20` | 判定して不合格 | `commandmate verify <wt> --json` で**失敗ゲートを特定**し、その内訳を引用して**再指示**。scope ゲート不合格なら、その logTail から**違反 path を転記**し「許可するには Issue の対象ファイルに追加して plan を作り直す。不可避なら停止して報告」というガイダンスを再指示に含める（#1678 B-2。CLI 表示側は CommandMate #1683）。`--max-turns` 到達でなお不合格なら、worker は `completed`／verification は `fail` として記録し **success に丸めない** |
 | `21` | 作業証跡ゼロ（未着手） | pass ではない。継続 nudge を送って再度 `--verify` で待つ。`--max-turns` 到達でなお 21 なら **dispatch 失敗系**として `failed` |
 | `10` | prompt 検出 | `capture` で内容を取得して human へ提示し停止。**自動応答しない**（`--auto-yes` 明示時のみ `respond yes`） |
 | `99` | **判定に到達しなかった**（run が error / cancelled） | pass でも 20 でもない。**再指示ループへ流さない**（判定していないものの修正を worker に求めることになる）。verification は `not_run`、`verification_not_judged` を blocking に載せ `human_required` で停止する |

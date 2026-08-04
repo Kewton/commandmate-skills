@@ -98,6 +98,13 @@ planner は plan の `warnings` に `unrecognized_file_extension` を積んで r
 partial に落とす（Issue #43 / CommandMate #1678 B-1: 以前は黙って消え、worker が
 scope gate に弾かれて構造的に解決不能だった）。
 
+対象ファイルに依存 manifest（`package.json` / `Cargo.toml` / `go.mod` /
+`pyproject.toml` / `Gemfile`）を含めると、planner は同 directory の lockfile
+（`package-lock.json` / `pnpm-lock.yaml` / `yarn.lock` / `Cargo.lock` / `go.sum` /
+`poetry.lock` / `uv.lock` / `Gemfile.lock`）を既定許可として `suspected_files` に
+加え、加えた分を plan の `scope_defaults` に明示する（Issue #44 / CommandMate
+#1678 B-2）。lockfile を Issue 本文に書き並べる必要はない。
+
 ### 2.4 依存
 
 `depend` / `dependenc` / `prerequisite` / `requires` / `依存` / `前提` を含む見出しの

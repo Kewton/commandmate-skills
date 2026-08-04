@@ -1,0 +1,16 @@
+{
+  "description": "Issue #44 (CommandMate #1678 B-2): an issue naming web/package.json gets that directory's lockfiles allowed by default — they join suspected_files (the worker's future scope.allow) and the plan says so in scope_defaults, so `npm install` rewriting the lockfile is no longer a scope violation the worker cannot resolve.",
+  "args": ["413", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[413]],
+    "merge_order": [413],
+    "dependencies": [],
+    "classifications": { "413": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "413": ["web/package.json", "web/main.ts", "web/package-lock.json", "web/pnpm-lock.yaml", "web/yarn.lock"] },
+    "scope_defaults": { "413": ["web/package-lock.json", "web/pnpm-lock.yaml", "web/yarn.lock"] }
+  }
+}
