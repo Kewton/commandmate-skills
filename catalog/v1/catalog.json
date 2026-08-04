@@ -895,7 +895,7 @@
         "timeout",
         "work-evidence"
       ],
-      "latest": "0.3.0",
+      "latest": "0.3.1",
       "versions": [
         {
           "version": "0.1.1",
@@ -999,6 +999,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.3.0/cmate-verify-0.3.0.tar.gz",
             "sha256": "bf2e83137aa17d3ba9521f69e08f21e26757360baf629339a009bb4edf02f5ef",
             "size": 30244,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.3.1",
+          "changelog": "受入条件とゲートの対応付け・ゲートで担保されない受入条件を明示する手順を SKILL.md に追加 (#47)。",
+          "published_at": "2026-08-04T14:14:11Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-v0.3.1",
+            "commit": "972de83a9dabf4e5cdb34e84cac0ecac8adf9dda"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-0.3.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.3.1/cmate-verify-0.3.1.tar.gz",
+            "sha256": "0840140a53a39de4d4021db3b3844e6676acededeff2985d5306b78b825de029",
+            "size": 30651,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
