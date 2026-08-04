@@ -88,7 +88,7 @@ limitation ではなく**不合格**として扱われる。
 | `--depends <a:b>` | 任意 | なし | override: `a` が `b` に依存（繰り返し可） |
 | `--no-infer` | 任意 | off | 推論依存を無効化 |
 | `--order <a,b,...>` | 任意 | なし | Issue 順序の主張。依存に反すれば拒否 |
-| `--run-id <id>` | 任意 | 入力 hash | run_id の明示 |
+| `--run-id <id>` | 任意 | 入力 hash（Issue 内容を含む） | run_id の明示 |
 | `--runs-dir <path>` | 任意 | `.commandmate/orchestrate/runs` | run artifact の出力先 |
 | `--phase <plan>` | 任意 | `plan` | planner は `plan` のみ。mutating phase は拒否（実行は dispatch runner） |
 | `--allow-unverified` | 任意 | off | unverified profile での planning を許可 |
@@ -202,7 +202,10 @@ read-only command・baseline 検証 command（すべて `executed: false`）を�
 
 `<runs-dir>/<run_id>/` に `plan.json`・`result.json`・`manifest.md`・
 `issue-analysis.md`・`dependency-plan.md` を書く。run directory が既にあれば
-上書きせず `run_exists` で終了する。
+上書きせず `run_exists` で終了する。既定の run_id は Issue 内容（title/body/labels）を
+含む入力 hash なので、**Issue 本文を直して再 plan すれば自動的に別 run になる**
+（Issue #46 / CommandMate #1678 B-4）。本文まで同一の再実行だけが `run_exists` になり、
+エラーメッセージが回避例（`--run-id <new-id>` / `--runs-dir <dir>`）を示す。
 
 ### Step 8. completion check を実行する
 

@@ -1349,6 +1349,45 @@ function selfTestValidator() {
   check(Array.isArray(good.issues), 'fixture 01 is malformed'); // sanity anchor
 }
 
+// Re-plan semantics (#46 / CommandMate #1678 B-4): fixing an issue body is the
+// normal answer to a blocking question, so the SAME issue set with a CHANGED
+// body must derive a new run id and succeed into the same runs dir — while a
+// byte-identical re-run is still refused (run_exists) with the workarounds
+// (--run-id / --runs-dir) named in the error detail.
+function rerunSemanticsTest() {
+  log('  re-plan after an issue edit (#46)');
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-orch-rerun-'));
+  const fixtureDir = mkdtempSync(join(tmpdir(), 'cmate-orch-rerun-issues-'));
+  const issuesV1 = JSON.parse(readFileSync(join(CASES_DIR, '01-independent', 'issues.json'), 'utf8'));
+  const v1Path = join(fixtureDir, 'v1.json');
+  writeFileSync(v1Path, JSON.stringify(issuesV1));
+  const argsFor = (issuesPath) => ['100', '--profile', 'node-commandmate', '--issue-json', issuesPath, '--runs-dir', runsDir];
+
+  const first = runRunner(argsFor(v1Path));
+  if (!check(first.exit === 0, `first plan should succeed, exited ${first.exit}`)) return;
+  const firstId = JSON.parse(first.stdout).run_id;
+
+  const second = runRunner(argsFor(v1Path));
+  check(second.exit === 4, `an unchanged re-plan should be refused with exit 4, exited ${second.exit}`);
+  const secondResult = JSON.parse(second.stdout);
+  check(secondResult.errors.some((e) => e.code === 'run_exists'), 'an unchanged re-plan should fail with run_exists');
+  const detail = secondResult.errors.map((e) => e.detail).join(' ');
+  check(detail.includes('--run-id'), `run_exists detail should name the --run-id workaround: ${detail}`);
+  check(detail.includes('--runs-dir'), `run_exists detail should name the --runs-dir workaround: ${detail}`);
+
+  const issuesV2 = JSON.parse(JSON.stringify(issuesV1));
+  issuesV2.issues[0].body += '\n\n## 決定\n- blocking question への回答を本文に追記した。\n';
+  const v2Path = join(fixtureDir, 'v2.json');
+  writeFileSync(v2Path, JSON.stringify(issuesV2));
+  const third = runRunner(argsFor(v2Path));
+  check(third.exit === 0, `a re-plan with an edited body should succeed, exited ${third.exit}`);
+  if (third.exit === 0) {
+    const thirdId = JSON.parse(third.stdout).run_id;
+    check(thirdId !== firstId, `an edited body should derive a new run id (both were ${firstId})`);
+    check(existsSync(join(runsDir, thirdId, 'plan.json')), 'the edited re-plan should land in its own run directory');
+  }
+}
+
 function main() {
   log('cmate-orchestrate fixture tests');
   selfTestValidator();
@@ -1356,6 +1395,7 @@ function main() {
   log('  -- plan cases --');
   const caseIds = readdirSync(CASES_DIR).filter((name) => existsSync(join(CASES_DIR, name, 'case.json'))).sort();
   for (const caseId of caseIds) runCase(caseId);
+  rerunSemanticsTest();
 
   log('  -- dispatch cases --');
   const dispatchIds = existsSync(DISPATCH_CASES_DIR)

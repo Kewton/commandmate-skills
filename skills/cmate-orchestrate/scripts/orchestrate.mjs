@@ -10,11 +10,14 @@
 // dispatch, no PR, no merge, no UAT loop. Those phases (#1454-1456) are refused
 // here on purpose. The default invocation is a dry run and stays a dry run.
 //
-// Determinism: the plan is a pure function of its inputs (issue set, base,
-// profile, max_parallel, dependency overrides, phase). The default run_id is a
-// hash of those inputs, so the same input yields the same plan — the parity a
-// Claude run and a Codex run are checked against — and a distinct input yields a
-// distinct run directory that never overwrites an existing one.
+// Determinism: the plan is a pure function of its inputs (issue set AND issue
+// content — title/body/labels —, base, profile, max_parallel, dependency
+// overrides, phase). The default run_id is a hash of those inputs, so the same
+// input yields the same plan — the parity a Claude run and a Codex run are
+// checked against — and a distinct input yields a distinct run directory that
+// never overwrites an existing one. Because issue content is in the hash, the
+// normal "fix the issue body, re-plan" loop lands in a new run directory
+// instead of being refused (#46 / CommandMate #1678 B-4).
 
 import { parseArgs } from 'node:util';
 import { createHash } from 'node:crypto';
@@ -1109,11 +1112,22 @@ function planCommands(analyses, profile) {
 // Plan / result assembly
 // =============================================================================
 
-function canonicalInputSignature(inputs, profile) {
+function canonicalInputSignature(inputs, profile, issues) {
   // Everything that determines the plan, and nothing that does not (not the
-  // runs directory, not the wall clock). Same signature => same plan.
+  // runs directory, not the wall clock). Same signature => same plan. Issue
+  // content is included (#46 / CommandMate #1678 B-4): fixing an issue body and
+  // re-planning is the normal answer to a blocking question, and it must derive
+  // a NEW run id — while a byte-identical re-run still derives the same id and
+  // is still refused, so the no-overwrite intent stands. Labels are sorted:
+  // their order carries no meaning and must not shift the id.
   return JSON.stringify({
     issues: inputs.issues,
+    issue_content: issues.map((issue) => ({
+      number: issue.number,
+      title: issue.title,
+      body: issue.body,
+      labels: [...issue.labels].sort(),
+    })),
     base: profile.base,
     profile: profile.id,
     repository: profile.repository,
@@ -1125,14 +1139,14 @@ function canonicalInputSignature(inputs, profile) {
   });
 }
 
-function makeRunId(inputs, profile) {
+function makeRunId(inputs, profile, issues) {
   if (inputs.runIdOverride) {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(inputs.runIdOverride)) {
       throw new SkillError('invalid_input', 'run-id must be a short filesystem-safe token', 3);
     }
     return inputs.runIdOverride;
   }
-  const digest = createHash('sha256').update(canonicalInputSignature(inputs, profile)).digest('hex');
+  const digest = createHash('sha256').update(canonicalInputSignature(inputs, profile, issues)).digest('hex');
   return `plan-${digest.slice(0, 12)}`;
 }
 
@@ -1406,9 +1420,10 @@ function run(argv) {
 
   const inputs = resolveInputs(parsed);
   const { profile, warnings: profileWarnings } = resolveProfile(inputs);
-  const runId = makeRunId(inputs, profile);
 
+  // Issues are loaded before the run id exists: their content is part of the id.
   const rawIssues = loadIssues(inputs, profile);
+  const runId = makeRunId(inputs, profile, rawIssues);
   const binaries = verifyBinaries(profile);
   const analyses = rawIssues.map((issue) => analyzeIssue(issue, profile, binaries));
 
@@ -1428,7 +1443,14 @@ function run(argv) {
 
   const runDir = join(inputs.runsDir, runId);
   if (existsSync(runDir)) {
-    throw new SkillError('run_exists', `run directory ${runDir} already exists; refusing to overwrite`, 4);
+    throw new SkillError(
+      'run_exists',
+      `run directory ${runDir} already exists; refusing to overwrite. ` +
+        'The default run id hashes the planner inputs INCLUDING each issue title/body/labels, so this means ' +
+        'nothing changed since that run (an edited issue body derives a new id by itself). ' +
+        'To re-plan anyway: pass --run-id <new-id> (e.g. --run-id plan-retry-1) or --runs-dir <dir> to write elsewhere.',
+      4,
+    );
   }
   mkdirSync(runDir, { recursive: true });
 
