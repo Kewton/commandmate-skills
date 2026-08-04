@@ -1,0 +1,28 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "201": {
+      "state": "completed",
+      "verify_exits": [20, 0],
+      "failed_gates": [
+        {
+          "id": "scope",
+          "exit": 20,
+          "logTail": "2 file(s) changed outside scope.allow:\nweb/package-lock.json\nweb/.cache/tmp.txt"
+        }
+      ]
+    },
+    "200": {
+      "state": "completed",
+      "verify_exits": [0]
+    }
+  }
+}

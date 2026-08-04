@@ -534,10 +534,22 @@ function main() {
     const worktreeId = argv[1];
     const issue = issueFromId(worktreeId);
     const worker = workerSpec(spec, issue);
+    // A failed_gates entry is a gate id string, or an object {id, logTail, exit}
+    // when a scenario needs to control the gate's log — e.g. a scope gate whose
+    // logTail lists the out-of-scope paths (#1678 B-2).
     const failedGates = Array.isArray(worker.failed_gates) ? worker.failed_gates : [];
     const gates = [
       { gateId: 'work-evidence', status: 'passed', exitCode: null, durationMs: 12, logTail: 'commits=1 uncommitted=0' },
-      ...failedGates.map((gateId) => ({ gateId, status: 'failed', exitCode: 1, durationMs: 340, logTail: `${gateId}: 1 problem` })),
+      ...failedGates.map((entry) => {
+        const gate = typeof entry === 'string' ? { id: entry } : entry;
+        return {
+          gateId: gate.id,
+          status: 'failed',
+          exitCode: Number.isInteger(gate.exit) ? gate.exit : 1,
+          durationMs: 340,
+          logTail: gate.logTail ?? `${gate.id}: 1 problem`,
+        };
+      }),
     ];
     if (argv.includes('--json')) {
       process.stdout.write(`${JSON.stringify({

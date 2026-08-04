@@ -661,6 +661,38 @@ function classifyFileCandidates(candidates) {
   return { suspected, references };
 }
 
+// Ecosystem lockfiles that a dependency-manifest edit drags along (CommandMate
+// #1678 B-2): `npm install` rewrites the lockfile next to the package.json it
+// changed, and a lockfile missing from suspected_files — the worker's future
+// scope.allow — fails the scope gate in a way the worker cannot resolve. When an
+// issue names a manifest, its same-directory lockfiles are therefore allowed by
+// default, and reported in the plan's `scope_defaults` so a reviewer sees which
+// entries the planner added on the issue's behalf rather than read in the issue.
+const SCOPE_DEFAULT_COMPANIONS = {
+  'package.json': ['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
+  'Cargo.toml': ['Cargo.lock'],
+  'go.mod': ['go.sum'],
+  'pyproject.toml': ['poetry.lock', 'uv.lock'],
+  'Gemfile': ['Gemfile.lock'],
+};
+
+function scopeDefaultsFor(suspected) {
+  const have = new Set(suspected);
+  const out = [];
+  for (const path of suspected) {
+    const cut = path.lastIndexOf('/');
+    const dir = cut === -1 ? '' : path.slice(0, cut + 1);
+    for (const name of SCOPE_DEFAULT_COMPANIONS[path.slice(cut + 1)] ?? []) {
+      const companion = `${dir}${name}`;
+      if (!have.has(companion)) {
+        have.add(companion);
+        out.push(companion);
+      }
+    }
+  }
+  return out;
+}
+
 // Verification commands the issue text names, recognised by the binaries the
 // profile's baseline uses plus a small generic set. Nothing is hardcoded to one
 // ecosystem: the recognised binaries are derived from the active profile.
@@ -720,6 +752,8 @@ function analyzeIssue(issue, profile, binaries) {
   const acceptance = extractAcceptanceCriteria(issue.body).map(redact);
   const candidates = extractFileCandidates(text);
   const { suspected, references } = classifyFileCandidates(candidates);
+  const scopeDefaults = scopeDefaultsFor(suspected);
+  suspected.push(...scopeDefaults);
   const tests = extractTestExpectations(text, binaries).map(redact);
 
   const questions = [];
@@ -747,6 +781,7 @@ function analyzeIssue(issue, profile, binaries) {
     objective,
     acceptance_criteria: acceptance,
     suspected_files: suspected,
+    scope_defaults: scopeDefaults,
     reference_files: references,
     test_expectations: tests,
     labels: issue.labels,
@@ -1120,6 +1155,7 @@ function issueForPlan(analysis, analyses, edges) {
     objective: analysis.objective,
     acceptance_criteria: analysis.acceptance_criteria,
     suspected_files: analysis.suspected_files,
+    scope_defaults: analysis.scope_defaults,
     reference_files: analysis.reference_files,
     test_expectations: analysis.test_expectations,
     labels: analysis.labels,
@@ -1266,6 +1302,9 @@ function renderIssueAnalysis(plan) {
       '',
       'Suspected files:',
       ...listItems(issue.suspected_files),
+      '',
+      'Scope defaults (planner-added lockfiles, included above):',
+      ...listItems(issue.scope_defaults),
       '',
       'Test expectations:',
       ...listItems(issue.test_expectations),

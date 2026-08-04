@@ -10,6 +10,10 @@
 - planner 0.11.0 は、既知拡張子外の backtick path が抽出されなかった場合に plan の
   `warnings` へ `unrecognized_file_extension` を積むようになった（黙って落とさない）。
   この挙動を `issue-body-contract.md` の対象ファイル節に追記した。
+- planner 0.11.0 は、対象ファイルに依存 manifest（`package.json` 等）を含む Issue に
+  同 directory の lockfile を既定許可として加え `scope_defaults` に明示するように
+  なった（Issue #44 / CommandMate #1678 B-2）。lockfile を本文に書き並べる必要が
+  無いことを `issue-body-contract.md` に追記した。
 
 ### 0.1.0 — initial release
 

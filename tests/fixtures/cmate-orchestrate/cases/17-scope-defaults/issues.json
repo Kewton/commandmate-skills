@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 413,
+      "title": "feat: add the map rendering dependency",
+      "body": "Add the mapping library to `web/package.json` and wire it up in `web/main.ts`.\n\n## Acceptance criteria\n- [ ] `web/main.ts` renders through the new dependency\n- [ ] `npm install` succeeds\n",
+      "labels": ["feature"]
+    }
+  ]
+}

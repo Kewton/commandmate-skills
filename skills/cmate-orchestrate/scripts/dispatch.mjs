@@ -944,7 +944,17 @@ function readTaskId(stdout) {
 // concurrently (#1474). A synchronous execFileSync here would block the event loop
 // for a whole gate run and stall every other worker in the wave.
 async function describeFailingGates(inputs, worktreeId) {
-  const run = parseCliJson(await runCliAsync(inputs.cli, ['verify', worktreeId, '--json']));
+  // `verify` exits with the verdict, so on the very runs this function exists to
+  // read — a failing gate — the exit is 20, not 0. The run document is still on
+  // stdout; parse it regardless of exit status (parseCliJson's ok-check would
+  // discard every failing run and leave the re-instruction with no gate names).
+  const result = await runCliAsync(inputs.cli, ['verify', worktreeId, '--json']);
+  let run = null;
+  try {
+    run = JSON.parse(result.stdout);
+  } catch {
+    run = null;
+  }
   const gates = run && Array.isArray(run.gates) ? run.gates : null;
   if (!gates) {
     return {
@@ -955,12 +965,17 @@ async function describeFailingGates(inputs, worktreeId) {
   }
   const failing = gates
     .filter((gate) => gate && FAILED_GATE_STATUSES.has(gate.status))
-    .map((gate) => ({
-      id: redact(String(gate.gateId ?? 'unknown')),
-      status: String(gate.status),
-      exitCode: Number.isInteger(gate.exitCode) ? gate.exitCode : null,
-      tail: excerpt(gate.logTail ?? '', 200),
-    }));
+    .map((gate) => {
+      const isScope = /scope/i.test(String(gate.gateId ?? ''));
+      return {
+        id: redact(String(gate.gateId ?? 'unknown')),
+        status: String(gate.status),
+        exitCode: Number.isInteger(gate.exitCode) ? gate.exitCode : null,
+        tail: excerpt(gate.logTail ?? '', 200),
+        isScope,
+        violations: isScope ? scopeViolationLines(gate.logTail) : [],
+      };
+    });
   if (failing.length === 0) {
     return {
       failing,
@@ -975,6 +990,23 @@ async function describeFailingGates(inputs, worktreeId) {
   };
 }
 
+// The violating paths of a scope-gate failure, transcribed line by line from
+// that gate's logTail — the scope gate already lists every out-of-scope path
+// there (CommandMate #1678 B-2; CLI display is #1683). Lines are copied rather
+// than parsed for path shapes, so a format change on the CommandMate side
+// degrades to a verbatim quote instead of an empty list.
+const MAX_SCOPE_VIOLATION_LINES = 20;
+
+function scopeViolationLines(logTail) {
+  return String(logTail ?? '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, MAX_SCOPE_VIOLATION_LINES)
+    .map((line) => redact(line));
+}
+
 // The re-instruction sent to a worker whose contract verification failed. It
 // quotes the gates, because "verification failed" alone makes the worker guess.
 function buildVerifyReinstruction(failing) {
@@ -986,6 +1018,22 @@ function buildVerifyReinstruction(failing) {
     const exit = gate.exitCode !== null ? ` (exit ${gate.exitCode})` : '';
     const tail = gate.tail ? ` — ${gate.tail}` : '';
     lines.push(`- ${gate.id}: ${gate.status}${exit}${tail}`);
+  }
+  // A scope failure is the one gate the worker may be structurally unable to fix:
+  // scope.allow comes from the Issue's 対象ファイル via the plan, so when the
+  // violating change is unavoidable the fix lives in the Issue, not the worktree.
+  // Name the paths and say so, instead of asking for a retry that cannot succeed.
+  const scopeGates = failing.filter((gate) => gate.isScope);
+  if (scopeGates.length > 0) {
+    const violations = scopeGates.flatMap((gate) => gate.violations);
+    lines.push('');
+    lines.push('scope ゲートについて: 実行契約 scope.allow の外のファイルが変更されています。違反 path（scope ゲートの記録から転記）:');
+    if (violations.length === 0) {
+      lines.push('- （logTail から違反 path を読み取れませんでした。`commandmate verify <worktree-id>` で確認してください）');
+    }
+    for (const line of violations) lines.push(`- ${line}`);
+    lines.push('scope.allow は Issue の対象ファイルから生成されます。違反 path を許可するには Issue の対象ファイルに追加して plan を作り直す必要があります。');
+    lines.push('この変更が受入条件の達成に不可避なら worker 側では解決できません — 停止してその旨を報告してください。回避できるなら、違反 path への変更を取り消して scope 内で完了してください。');
   }
   lines.push('原因を修正し、すべてのゲートが通る状態にしてから、work ブランチに単一 commit を作成してください。');
   lines.push('判断が要る・直しようがない場合は推測せず停止して質問してください。');
