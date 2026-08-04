@@ -382,6 +382,17 @@ function runCase(caseId) {
   if (expect.classifications) {
     check(deepEqual(classificationsOf(plan), expect.classifications), `classifications ${JSON.stringify(classificationsOf(plan))} !== ${JSON.stringify(expect.classifications)}`);
   }
+  // Exact per-issue extraction: suspected_files IS the scope the worker will be
+  // allowed to touch, so a case that pins it proves a named file is inside it.
+  if (expect.suspected_files) {
+    for (const [number, files] of Object.entries(expect.suspected_files)) {
+      const issue = plan.issues.find((i) => i.number === Number(number));
+      check(
+        issue !== undefined && deepEqual(issue.suspected_files, files),
+        `suspected_files of #${number} ${JSON.stringify(issue?.suspected_files)} !== ${JSON.stringify(files)}`,
+      );
+    }
+  }
   if (expect.risk_level) check(plan.risk.level === expect.risk_level, `risk ${plan.risk.level} !== ${expect.risk_level}`);
   if (expect.profile_verified !== undefined) check(plan.profile.verified === expect.profile_verified, `profile.verified ${plan.profile.verified} !== ${expect.profile_verified}`);
   if (expect.base) check(plan.profile.base === expect.base, `base ${plan.profile.base} !== ${expect.base}`);

@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 412,
+      "title": "feat: bundle the offline tile pack",
+      "body": "Generate the offline tile pack at `data/tiles/demo.mbtiles` from the build entry in `src/tiles/build.ts`.\n\n## Acceptance criteria\n- [ ] `src/tiles/build.ts` writes the pack\n",
+      "labels": ["feature"]
+    }
+  ]
+}

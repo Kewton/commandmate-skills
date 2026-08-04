@@ -224,6 +224,22 @@ else
   pass 'the plan carries no open_questions risk factor'
 fi
 
+# The validator's planner mirror is a verbatim copy of the extraction in
+# cmate-orchestrate. The one constant that silently drifts is the extension set
+# (issue #43: `geojson` was missing from the planner and from this mirror), so
+# the two FILE_EXT definitions are compared byte for byte. sed instead of grep:
+# orchestrate.mjs holds raw control bytes in a regex literal, which makes grep
+# treat the whole file as binary.
+printf '\n== the planner mirror is in sync ==\n'
+planner_ext=$(LC_ALL=C sed -n "s/^const FILE_EXT = '\(.*\)';\$/\1/p" "$ORCHESTRATOR")
+mirror_ext=$(LC_ALL=C sed -n "s/^const FILE_EXT = '\(.*\)';\$/\1/p" "$VALIDATOR")
+if [ -n "$planner_ext" ] && [ "$planner_ext" = "$mirror_ext" ]; then
+  pass 'FILE_EXT is identical in the planner and its mirror'
+else
+  fail 'FILE_EXT is identical in the planner and its mirror' \
+    "planner: ${planner_ext:-<not found>} / mirror: ${mirror_ext:-<not found>}"
+fi
+
 printf '\n%s mutation(s) injected\n' "$mutations"
 printf '%s passed, %s failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ] || exit 1

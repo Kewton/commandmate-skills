@@ -1,0 +1,15 @@
+{
+  "description": "Issue #43 (CommandMate #1678 B-1): a backtick .geojson path lands in suspected_files, so the scope the plan induces contains the file the worker must create — and a recognised extension raises no warning.",
+  "args": ["411", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[411]],
+    "merge_order": [411],
+    "dependencies": [],
+    "classifications": { "411": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "411": ["data/demo/service-area.geojson", "src/map/layers.ts"] }
+  }
+}
