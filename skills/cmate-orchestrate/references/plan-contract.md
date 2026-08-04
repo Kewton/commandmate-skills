@@ -15,7 +15,7 @@ schema にない field を無視せず、契約違反として扱う。
 plan は入力の純粋関数である。同じ入力からは byte 単位で同じ plan が出る。
 plan を決める入力は次だけである。
 
-- Issue 集合（`issues`）
+- Issue 集合（`issues`）と **Issue 内容（title / body / labels。labels は順序を無視）**
 - base branch（profile 由来、`--base` で上書き可）
 - profile（`id` と `repository`）
 - `max_parallel`
@@ -26,6 +26,10 @@ plan を決める入力は次だけである。
 run 先の directory（`--runs-dir`）や wall clock は plan に影響しない。
 run_id の既定値も上記入力の SHA-256 から導くので、同じ入力なら run_id まで一致する。
 これが Claude で回した結果と Codex で回した結果を突き合わせられる根拠である。
+Issue 内容が hash に入っているため（Issue #46 / CommandMate #1678 B-4）、
+「blocking question を解消するために Issue 本文を直して plan を取り直す」正規の手順は
+**自動的に新しい run_id** になり、`run_exists` に阻まれない。逆に本文まで完全に同一の
+再実行は従来どおり同じ run_id に導かれ、上書きは拒否される。
 
 ひとつだけ cwd に依存する項目がある。**profile が既定値に解決された場合のみ**、
 `warnings` に `profile_repository_mismatch` が載るかどうかが cwd の `origin` に依存する
@@ -35,8 +39,9 @@ run_id の既定値も上記入力の SHA-256 から導くので、同じ入力�
 ## 2. run の隔離
 
 - run artifact は `<runs-dir>/<run_id>/` 配下に書く。
-- run_id の既定は入力 hash（`plan-<12hex>`）。`--run-id` で明示上書きできる。
+- run_id の既定は入力 hash（`plan-<12hex>`、Issue 内容を含む）。`--run-id` で明示上書きできる。
 - run directory が既に存在する場合は **上書きせず** `run_exists` で失敗する。
+  エラーメッセージは回避例（`--run-id <new-id>` / `--runs-dir <dir>`）を明示する。
 
 ## 3. dependency
 
