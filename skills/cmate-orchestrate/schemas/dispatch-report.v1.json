@@ -212,7 +212,7 @@
         "verification": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["ran", "report_schema_version", "outcome", "checks"],
+          "required": ["ran", "report_schema_version", "outcome", "gates", "checks"],
           "properties": {
             "ran": { "type": "boolean" },
             "report_schema_version": {
@@ -222,6 +222,19 @@
             "outcome": {
               "enum": ["pass", "fail", "not_run"],
               "description": "pass and fail are verdicts. not_run means NOTHING JUDGED THIS: the worker did not complete, or the verification run itself ended error/cancelled (exit 99) so no gate reached a verdict. not_run is never a pass, and it is deliberately not a fail either — 'we could not judge' must not be re-instructed as 'we judged it and it failed'."
+            },
+            "gates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "verdict"],
+                "properties": {
+                  "id": { "type": "string", "minLength": 1 },
+                  "verdict": { "enum": ["pass", "fail"] }
+                }
+              },
+              "description": "The gates that judged this work, transcribed from `commandmate wait --verify`'s `GATE <id> PASS|FAIL` stdout lines (falling back to the confirming `verify --json` run's failing gates on exit 20). Empty when nothing was judged (not_run), when the CLI printed no GATE lines, or on the fallback baseline path (whose commands are already named in checks). This is what lets the report alone answer WHAT a pass was based on (#1678 B-5)."
             },
             "checks": { "type": "array", "items": { "type": "string", "minLength": 1 } }
           }

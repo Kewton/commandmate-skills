@@ -104,6 +104,7 @@ const WAIT_FAILED = 1;
 
 // verify / wait --verify verdict exit codes (mirror VerifyExitCode + ExitCode).
 const VERIFY_FAILED = 20;
+const VERIFY_NOT_STARTED = 21;
 
 function scenario() {
   const path = process.env.CMATE_FAKE_SCENARIO;
@@ -515,7 +516,27 @@ function main() {
     const marker = respondedMarkerPath(issue);
     if (state === 'prompt' && marker && existsSync(marker)) state = 'completed';
     if (state === 'completed') {
-      process.exit(argv.includes('--verify') ? verifyExitFor(worker, issue) : WAIT_COMPLETED);
+      if (!argv.includes('--verify')) process.exit(WAIT_COMPLETED);
+      // Like the real CLI (verify-runner's reportGates), a judged run prints one
+      // `GATE <id> PASS|FAIL` line per executed gate (#1678 B-5): pass runs list
+      // work-evidence plus the scenario's pass_gates (default ['baseline']),
+      // fail runs list work-evidence plus the failed_gates. Exit 99 judged
+      // nothing, so nothing is printed.
+      const exit = verifyExitFor(worker, issue);
+      const gateLines = [];
+      if (exit === 0) {
+        gateLines.push('GATE work-evidence PASS');
+        for (const id of worker.pass_gates ?? ['baseline']) gateLines.push(`GATE ${id} PASS`);
+      } else if (exit === VERIFY_FAILED) {
+        gateLines.push('GATE work-evidence PASS');
+        for (const entry of worker.failed_gates ?? []) {
+          gateLines.push(`GATE ${typeof entry === 'string' ? entry : entry.id} FAIL`);
+        }
+      } else if (exit === VERIFY_NOT_STARTED) {
+        gateLines.push('GATE work-evidence FAIL');
+      }
+      for (const line of gateLines) process.stdout.write(`${line}\n`);
+      process.exit(exit);
     }
     if (state === 'prompt') {
       process.stdout.write(`${JSON.stringify({ worktreeId, cliToolId: 'claude', type: 'confirm', question: worker.prompt ?? 'Proceed? [y/N]', options: [], status: 'pending' })}\n`);

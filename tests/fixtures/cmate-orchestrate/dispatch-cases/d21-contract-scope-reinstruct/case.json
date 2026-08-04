@@ -26,9 +26,15 @@
     "stop_reason": "completed",
     "human_required": false,
     "waves_count": 2,
-    "advanced": [true, true],
+    "advanced": [
+      true,
+      true
+    ],
     "no_respond": true,
-    "sent": [201, 200],
+    "sent": [
+      201,
+      200
+    ],
     "send_counts": {
       "201": 2,
       "200": 1
@@ -49,6 +55,28 @@
     "verification_outcomes": {
       "201": "pass",
       "200": "pass"
+    },
+    "verification_gates": {
+      "201": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass"
+        },
+        {
+          "id": "baseline",
+          "verdict": "pass"
+        }
+      ],
+      "200": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass"
+        },
+        {
+          "id": "baseline",
+          "verdict": "pass"
+        }
+      ]
     },
     "verify_calls": 1,
     "wait_verify_calls_min": 2

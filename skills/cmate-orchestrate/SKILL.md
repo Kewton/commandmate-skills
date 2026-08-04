@@ -339,7 +339,7 @@ worktree path は path escape 検査を通す。repository-local な worker Skil
 
 | exit | 意味 | 本 runner の扱い |
 |---|---|---|
-| `0` | 全ゲート pass | 裁定 **pass**。新規 commit あり → `completed`。commit が無ければ「ゲートは通ったが未 commit」なので commit 要求を送り、以降は `--verify` を**付けずに** wait する（pass で task は `succeeded` に遷移済みで、再検証は契約に束ならず exit 99 になる。#1620） |
+| `0` | 全ゲート pass | 裁定 **pass**。stdout の `GATE <id> PASS|FAIL` 行を `verification.gates` に転記する（第9節）。新規 commit あり → `completed`。commit が無ければ「ゲートは通ったが未 commit」なので commit 要求を送り、以降は `--verify` を**付けずに** wait する（pass で task は `succeeded` に遷移済みで、再検証は契約に束ならず exit 99 になる。#1620） |
 | `20` | 判定して不合格 | `commandmate verify <wt> --json` で**失敗ゲートを特定**し、その内訳を引用して**再指示**。scope ゲート不合格なら、その logTail から**違反 path を転記**し「許可するには Issue の対象ファイルに追加して plan を作り直す。不可避なら停止して報告」というガイダンスを再指示に含める（#1678 B-2。CLI 表示側は CommandMate #1683）。`--max-turns` 到達でなお不合格なら、worker は `completed`／verification は `fail` として記録し **success に丸めない** |
 | `21` | 作業証跡ゼロ（未着手） | pass ではない。継続 nudge を送って再度 `--verify` で待つ。`--max-turns` 到達でなお 21 なら **dispatch 失敗系**として `failed` |
 | `10` | prompt 検出 | `capture` で内容を取得して human へ提示し停止。**自動応答しない**（`--auto-yes` 明示時のみ `respond yes`） |
@@ -398,9 +398,13 @@ stdout に、`<out>/dispatch-report.json` と `<out>/dispatch-summary.md` を fi
 `drift_reconfirmed`・`parallelism_bounded`・`barrier_enforced`・`no_auto_prompt_response`）を
 自己申告する。token・secret・絶対 path・raw terminal 全量は report に残さない（redaction）。
 
-`dispatch_schema_version` は **1 のまま**である。契約対応で新しい field は増やしていない
-（`task_id` が契約経路では実 task id を運ぶようになり、`verification.outcome` の `not_run` が
-「判定していない」を含むよう記述を明確化しただけ）。merge / uat runner は
+`dispatch_schema_version` は **1 のまま**である。`verification` には `gates`
+（実行されたゲート id と各 verdict の一覧。Issue #47 / CommandMate #1678 B-5）が加わり、
+**report 単体で「何を根拠に pass としたか」が読める**。gates は `wait --verify` の stdout の
+`GATE <id> PASS|FAIL` 行から転記する（pass 後の `commandmate verify` 再実行は #1620 の
+exit 99 を作るので行わない。exit 20 時に stdout から読めなければ、確認用 `verify --json` の
+失敗ゲートで補う）。フォールバック経路（baseline 再実行）はゲートを持たないので `[]` とし、
+実行 command は従来どおり `checks` に載る。merge / uat runner は
 `worker_state === 'completed'` と `verification.outcome === 'pass'` の2つしか読まず、その enum 値と
 意味は変えていないので、**両 runner は無改修で動く**。
 

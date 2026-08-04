@@ -931,6 +931,26 @@ function readTaskId(stdout) {
   return last && TASK_ID_RE.test(last) ? last : null;
 }
 
+// `commandmate wait --verify` prints one `GATE <id> PASS|FAIL` line per executed
+// gate (CommandMate verify-runner's reportGates). Transcribing them into the
+// report is what lets a reviewer read WHAT judged the work — not only that
+// something passed (#47 / CommandMate #1678 B-5: three static-only gate sets
+// passed while the app's core feature was broken, and the report could not show
+// what the pass was based on). Unparseable output degrades to an empty list,
+// never to an invented gate.
+const GATE_LINE_RE = /^GATE\s+(\S+)\s+(PASS|FAIL)\b/;
+const MAX_REPORTED_GATES = 50;
+
+function gatesFromWaitOutput(stdout) {
+  const gates = [];
+  for (const line of String(stdout ?? '').split('\n')) {
+    const match = GATE_LINE_RE.exec(line.trim());
+    if (match) gates.push({ id: redact(match[1]), verdict: match[2] === 'PASS' ? 'pass' : 'fail' });
+    if (gates.length >= MAX_REPORTED_GATES) break;
+  }
+  return gates;
+}
+
 // `commandmate verify <worktree-id> --json` prints the verification run document
 // (CommandMate's VerificationRunView), whose `gates[]` is what turns "verification
 // failed" into something a worker can act on.
@@ -1111,6 +1131,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       verdict = {
         ran: true,
         outcome: 'not_run',
+        gates: [],
         checks: [`commandmate wait --verify → exit ${VERIFY_EXIT_NO_VERDICT} (the verification run ended error/cancelled; no verdict was reached)`],
       };
       const committed = await hasNewCommit(inputs, worktreePath, baseSha);
@@ -1127,6 +1148,10 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
         verdict = {
           ran: true,
           outcome: 'pass',
+          // The GATE lines of THIS passing run are the only safe source of the
+          // gate list: a `commandmate verify` after a pass cannot bind to the
+          // succeeded task and manufactures exit 99 (#1620).
+          gates: gatesFromWaitOutput(waited.stdout),
           checks: [`commandmate wait --verify → exit ${VERIFY_EXIT_PASS} (every declared gate passed)`],
         };
       }
@@ -1151,6 +1176,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       verdict = {
         ran: true,
         outcome: 'fail',
+        gates: gatesFromWaitOutput(waited.stdout),
         checks: [`commandmate wait --verify → exit ${VERIFY_EXIT_NOT_STARTED} (work-evidence found no commit and no uncommitted change)`],
       };
       if (turns >= inputs.maxTurns) {
@@ -1163,8 +1189,16 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
     }
 
     if (code === VERIFY_EXIT_FAILED) {
+      const waitGates = gatesFromWaitOutput(waited.stdout);
       const failing = await describeFailingGates(inputs, worktreeId);
-      verdict = { ran: true, outcome: 'fail', checks: failing.checks };
+      verdict = {
+        ran: true,
+        outcome: 'fail',
+        // The wait's own GATE lines are primary; when a CLI prints none, the
+        // confirming verify run's failing gates still name what was judged.
+        gates: waitGates.length > 0 ? waitGates : failing.failing.map((gate) => ({ id: gate.id, verdict: 'fail' })),
+        checks: failing.checks,
+      };
       const committed = await hasNewCommit(inputs, worktreePath, baseSha);
       if (turns >= inputs.maxTurns) {
         return done(
@@ -1421,7 +1455,7 @@ async function runDispatch(inputs, plan, outDir) {
         // public CLI); this field carries that id, or null when it did not run.
         task_id: null,
         worker_state: 'not_dispatched',
-        verification: { ran: false, report_schema_version: null, outcome: 'not_run', checks: [] },
+        verification: { ran: false, report_schema_version: null, outcome: 'not_run', gates: [], checks: [] },
         prompt: { detected: false, excerpt: null },
         note: '',
       };
@@ -1516,8 +1550,8 @@ async function runDispatch(inputs, plan, outDir) {
           // second opinion from a weaker judge.
           const verdict = contractVerdicts.get(worker.issue);
           worker.verification = verdict
-            ? { ran: verdict.ran, report_schema_version: null, outcome: verdict.outcome, checks: verdict.checks }
-            : { ran: false, report_schema_version: null, outcome: 'not_run', checks: [] };
+            ? { ran: verdict.ran, report_schema_version: null, outcome: verdict.outcome, gates: verdict.gates ?? [], checks: verdict.checks }
+            : { ran: false, report_schema_version: null, outcome: 'not_run', gates: [], checks: [] };
         } else {
           const worktreePath = worktreePaths.get(worker.issue) ?? safeWorktreeTarget(issueOf(plan, worker.issue).worktree ?? '');
           const verification = verifyWorker(inputs, worktreePath, plan.profile.baseline);
@@ -1525,6 +1559,9 @@ async function runDispatch(inputs, plan, outDir) {
             ran: verification.ran,
             report_schema_version: null,
             outcome: verification.outcome,
+            // The fallback judge is the baseline re-run: it has no contract
+            // gates, and the commands it ran are already named in checks.
+            gates: [],
             checks: verification.checks,
           };
           if (verification.note) worker.note = worker.note ? `${worker.note}; ${verification.note}` : verification.note;
