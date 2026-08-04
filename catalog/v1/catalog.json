@@ -1189,7 +1189,7 @@
         "node",
         "ci"
       ],
-      "latest": "0.1.0",
+      "latest": "0.1.1",
       "versions": [
         {
           "version": "0.1.0",
@@ -1205,6 +1205,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-advisor-v0.1.0/cmate-verify-advisor-0.1.0.tar.gz",
             "sha256": "f48e8d760e0b2de69319ee5b13aacfc44cf4f2a49e4b7ec04bd4176f57073c9c",
             "size": 33578,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-31 on Claude Code 2.1.220 with CommandMate 0.16.0 for 9 packages under docs/agent-support-matrix.md 3.2. This package was added 2026-08-02 and was NOT separately measured; install layout is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-31 on Codex CLI 0.145.0 (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured. The analyser needs only node, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured. The analyser needs only node, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.17.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.1.1",
+          "changelog": "受入条件とゲートの対応付け観点を advisor 出力に追加 (#47)。",
+          "published_at": "2026-08-04T14:18:18Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-advisor-v0.1.1",
+            "commit": "972de83a9dabf4e5cdb34e84cac0ecac8adf9dda"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-advisor-0.1.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-advisor-v0.1.1/cmate-verify-advisor-0.1.1.tar.gz",
+            "sha256": "8d1d3622b0ad0dc0b4262f578eed58aad9ea8f72ff22211cd428914b268bed5e",
+            "size": 34552,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
