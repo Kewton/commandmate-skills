@@ -310,7 +310,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.10.0",
+      "latest": "0.11.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -502,6 +502,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.10.0/cmate-orchestrate-0.10.0.tar.gz",
             "sha256": "a4817935fa3d21ed22c0d0221ae2817208bc1e03a5325742a4a3a9794db8538c",
             "size": 125443,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.11.0",
+          "changelog": "CommandMate#1678 B-1〜B-5 対応。planner FILE_EXT に geojson/topojson/geojsonl を追加し既知拡張子外の backtick path に warning (#43)、manifest 由来 lockfile の scope 既定許可と scope 再指示への違反 path 転記 (#44)、契約入力は Issue 本文のみであることを明記 (#45)、run_id 導出に Issue 内容ハッシュを導入し run_exists に回避例を明示 (#46)、dispatch report に実行ゲート一覧と verdict を転記 (#47)。",
+          "published_at": "2026-08-04T14:13:14Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.11.0",
+            "commit": "972de83a9dabf4e5cdb34e84cac0ecac8adf9dda"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.11.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.11.0/cmate-orchestrate-0.11.0.tar.gz",
+            "sha256": "059d07e21d2a2de39270405ca6984ee07d5475c26918dc351a95b8e9eb5a6b15",
+            "size": 130464,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
