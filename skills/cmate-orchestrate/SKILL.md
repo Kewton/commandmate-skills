@@ -109,6 +109,14 @@ planner の手順として **禁止** するもの:
 `--issue-json` を使わない場合、read-only の `gh issue view` で Issue を取得する。
 これは planner 唯一の network access であり、mutation を伴わない。
 
+**契約の入力は Issue の number / title / body / labels のみである。コメントは読まれない**
+（`gh issue view --json number,title,body,labels`。CommandMate #1678 B-3）。
+「本文は変えず、決定はコメントで追記する」運用をしていると、コメントに記録した設計判断は
+plan にも実行契約の `goal` にも載らず、worker は本文に残る古い方針を実装する。
+コメントで決めた内容は、**dispatch 前に Issue 本文へ畳み込んでから** plan を作ること
+（本文の精錬には cmate-issue-refinement が使える）。この入力範囲は plan の `notes` にも
+毎回明記される。
+
 セキュリティ:
 
 - client 入力（Issue 本文由来）の絶対 path・`..`・drive path は採用しない。
@@ -157,6 +165,7 @@ warnings に `profile_repository_override` が載り、result は `partial` に�
 
 `--issue-json` があればそれを、無ければ `gh issue view` で各 Issue を取得する。
 取得できない Issue があれば `load_error` で終了する。
+読むのは number / title / body / labels だけで、**コメントは読まない**（第3節）。
 
 ### Step 3. 各 Issue を分析する
 
