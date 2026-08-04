@@ -243,7 +243,7 @@
         "review",
         "github"
       ],
-      "latest": "0.1.1",
+      "latest": "0.1.2",
       "versions": [
         {
           "version": "0.1.0",
@@ -303,6 +303,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-refinement-v0.1.1/cmate-issue-refinement-0.1.1.tar.gz",
             "sha256": "108ef92574b8d27a083fa71a0176d14dc7055efa56060b15fce17b5752c3d5e4",
             "size": 18970,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. No rubric evaluation recorded yet.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not evaluated",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not evaluated",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.1.2",
+          "changelog": "「契約の入力は Issue 本文のみ（コメントは読まれない）」を SKILL.md に明記 (#45)。",
+          "published_at": "2026-08-04T14:17:11Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-refinement-v0.1.2",
+            "commit": "972de83a9dabf4e5cdb34e84cac0ecac8adf9dda"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-refinement-0.1.2.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-refinement-v0.1.2/cmate-issue-refinement-0.1.2.tar.gz",
+            "sha256": "daffbfdd256ed3da8fd4216f52e0c8026d7f6d91942e3320c6bfe47f4492fd92",
+            "size": 19309,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
