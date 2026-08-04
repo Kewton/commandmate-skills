@@ -45,6 +45,28 @@
       "211": "pass",
       "210": "pass"
     },
+    "verification_gates": {
+      "211": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass"
+        },
+        {
+          "id": "baseline",
+          "verdict": "pass"
+        }
+      ],
+      "210": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass"
+        },
+        {
+          "id": "baseline",
+          "verdict": "pass"
+        }
+      ]
+    },
     "task_ids": {
       "211": "task-issue-211",
       "210": "task-issue-210"

@@ -45,6 +45,18 @@
     "verification_outcomes": {
       "201": "fail"
     },
+    "verification_gates": {
+      "201": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass"
+        },
+        {
+          "id": "lint",
+          "verdict": "fail"
+        }
+      ]
+    },
     "completed_but_unverified": [
       201
     ],

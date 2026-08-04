@@ -716,6 +716,18 @@ function runDispatchCase(caseId) {
       check(worker.verification.outcome === outcome, `#${num} verification.outcome "${worker.verification.outcome}" !== "${outcome}"`);
     }
   }
+  // Per-issue executed gates (#47 / #1678 B-5): the report alone must say WHICH
+  // gates judged the work and each gate's verdict, transcribed from the wait
+  // --verify GATE lines. Asserted exactly, so an invented or dropped gate fails.
+  for (const [num, gates] of Object.entries(expect.verification_gates ?? {})) {
+    const worker = allWorkers(report).find((w) => w.issue === Number(num));
+    if (check(worker !== undefined, `#${num} has no worker record`)) {
+      check(
+        deepEqual(worker.verification.gates, gates),
+        `#${num} verification.gates ${JSON.stringify(worker.verification.gates)} !== ${JSON.stringify(gates)}`,
+      );
+    }
+  }
   for (const [num, taskId] of Object.entries(expect.task_ids ?? {})) {
     const worker = allWorkers(report).find((w) => w.issue === Number(num));
     if (check(worker !== undefined, `#${num} has no worker record`)) {
