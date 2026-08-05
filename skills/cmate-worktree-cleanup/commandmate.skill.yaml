@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-worktree-cleanup
 name: cmate-worktree-cleanup
-version: 0.1.2
+version: 0.1.3
 summary: merge 済み・不要な git worktree を、削除可能性と証跡を dry-run で提示したうえで、clean かつ merge 証跡が十分な対象だけ guarded な方式で安全に削除する。dirty・unmerged・検証不能は削除しない。
 description: >-
   対象 issue または eligible な worktree を検査し、削除可能性と proof を dry-run で
@@ -33,7 +33,7 @@ expected_outcomes:
   - squash/rebase merge 済みの worktree を、tip/tree/reachability の証跡付きで安全に削除できる
   - current/integration worktree が、指定されても削除されない
   - 削除の判断根拠が result schema に proof/evidence として残り、後から検証できる
-  - CommandMate sync が無い環境でも失敗にならず、worktree id 欠落として報告される
+  - CommandMate sync を使えない環境でも失敗にならず、worktree id 欠落として報告される
 provider:
   name: CommandMate
   url: https://github.com/Kewton/CommandMate
@@ -88,38 +88,38 @@ risk_rationale: >-
   含まず、install 時に実行されるものは無い。
 files:
   - path: SKILL.md
-    sha256: '0b1933661e124c60910711779e8c72c810a2ea8b0861eef08c2e5b3541bf4ca4'
-    size: 13004
+    sha256: 7561d1095212199a0334789a02bbf471ee00903e4dee542338c44f0e864b0caf
+    size: 15070
     kind: skill_md
     executable: false
     script: false
   - path: references/agent-compatibility.md
-    sha256: e941ce301364f399c7ebc716e4ac9d8295ffec9c2d7ba3b10a10fd1d1ad4b40a
-    size: 3858
+    sha256: e5728c5f8b2d2d3db3739d51541119b05eb4abcffc54d37cd98559d4ae7bc6bc
+    size: 3890
     kind: instruction
     executable: false
     script: false
   - path: references/proof-algorithm.md
-    sha256: ebae39144b10102c94ad3bed123056bf2ca935adf31ed47d7a48f4869f835997
-    size: 8686
+    sha256: 379bbc74c0faa224bdd6f78c97763ac7c0253464834a7822314245dc85502842
+    size: 8719
     kind: instruction
     executable: false
     script: false
   - path: references/result-contract.md
-    sha256: 8f5d8809084e2d2893249c94713abc510f681951e4b7b4a854474124b792eb85
-    size: 6010
+    sha256: 4747e780ad9c65e7ca8c81be6febc6b059404293d7232ea4c7c722dcb9a24b24
+    size: 6379
     kind: instruction
     executable: false
     script: false
   - path: references/safety.md
-    sha256: c67cbecd2f69a400c8558da582867cca7865586e996b99bc8015f4f3c7edf41b
-    size: 7289
+    sha256: 3337c134217f3de30c865121a7fbbb202631e87903ff17ef54bb43a471b1016f
+    size: 7789
     kind: instruction
     executable: false
     script: false
   - path: schemas/cleanup-plan.v1.json
-    sha256: 30da35eacad85651473cdcdcfd41546612b8beb731e4500ac065fd95495600b5
-    size: 12561
+    sha256: bb342b295156bde2836873ada372092d83c53e2a5c8fdf825da7556f4d96d5d4
+    size: 12731
     kind: asset
     executable: false
     script: false

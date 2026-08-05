@@ -3,9 +3,9 @@
 この Skill は特定の Agent の tool 名・命令形式に依存しない。SKILL.md は「何を検査し、
 何を証明し、何を消すか」だけを規定し、「どの tool でそれを行うか」は各 Agent の裁量に委ねる。
 
-Issue #1449 の受入条件は Claude と Codex 双方での dry-run/confirm 理解と result parity を
-求めている。manifest の `compatibility.agents` では、SKILL.md の discovery 経路が確認できて
-いる Claude と Codex を `native` として宣言する。
+manifest の `compatibility.agents` では、SKILL.md の discovery 経路が確認できている Claude と
+Codex を `native` として宣言する。`native` の条件は、dry-run / confirm の区別を取り違えずに
+実行でき、同じ入力から同じ result 文書を返せることである。
 
 ## 1. 必要な能力
 

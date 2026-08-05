@@ -94,11 +94,11 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 60,
-          "description": "The profile in effect, for example commandmate or commandagent, or a user-supplied name. Nothing about branch, base, path or baseline is hardcoded; every value comes from the resolved profile."
+          "description": "The profile in effect, in the vocabulary cmate-worktree-setup also uses: node (Node/CommandMate), rust (Rust/CommandAgent), unverified, or the name the user gave an unverified profile. The legacy inputs commandmate and commandagent are accepted and recorded here as node and rust. Nothing about branch, base, path or baseline is hardcoded; every value comes from the resolved profile."
         },
         "verified": {
           "type": "boolean",
-          "description": "true only for profiles whose discovery and base resolution were confirmed against a real repository (Node/CommandMate and Rust/CommandAgent). An unverified profile is usable only after the user confirms it for this run."
+          "description": "true only for the node and rust profiles, whose discovery and base resolution were confirmed against a real repository. An unverified profile is usable only after the user confirms it for this run."
         },
         "base": {
           "$ref": "#/$defs/git_ref",

@@ -12,9 +12,9 @@ SKILL.md の Step 4 から参照される。
 | `merged_equivalent` | 祖先ではないが、squash/rebase merge の4条件がすべて成立した | `git worktree remove` + guarded ref delete |
 | `unverifiable` | どちらも証明できなかった | **削除しない** |
 
-`direct` は CommandAgent の既存判定を canonical base として引き継いだものである。
-`merged_equivalent` と guarded ref delete は本 Skill で新設した部分であり、
-既存の CommandMate / CommandAgent 実装には無い。
+`direct` が成立すれば、それだけで結論が出る（第2節）。`merged_equivalent` は squash / rebase merge
+のためだけの判定で、`git branch --merged` や「PR が merged」より厳しい4条件を要求する（第3節）。
+どちらも証明できなければ `unverifiable` であり、削除しない。
 
 ## 0. base と remote freshness
 
@@ -49,7 +49,7 @@ dirty / detached / unmerged / unverifiable はすべて **zero-delete** であ�
 
 tip SHA（`git -C <path> rev-parse HEAD`）を控える。以降の全条件は、この tip に対して測る。
 
-## 2. direct ancestry（canonical base）
+## 2. direct ancestry
 
 ```
 git merge-base --is-ancestor <tip> <base>
@@ -62,7 +62,7 @@ git merge-base --is-ancestor <tip> <base>
 `direct` が成立したら、それ以上の証明は不要である。base に tip が到達している事実が、
 「branch の全 commit が base にある」ことを直接意味する。
 
-## 3. merged-equivalent（squash / rebase、本 Skill の新設判定）
+## 3. merged-equivalent（squash / rebase）
 
 squash や rebase では merge 後に base 側へ **新しい単一 commit**（別 tree・別 SHA）が作られ、
 branch tip は base の祖先にならない。このとき単純な `git branch --merged` や

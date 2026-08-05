@@ -45,7 +45,7 @@ field を省略することと空配列を置くことは意味が違う。前�
 | status | 条件 | 必須 |
 |---|---|---|
 | `success` | 要求された全Issueの worktree を作成し、baseline が pass、6つの check がすべて true | — |
-| `partial` | worktree は作成したが、baseline 失敗・sync 未提供・collision skip・drift・check 失敗のいずれかがある | `limitations` 1件以上 |
+| `partial` | worktree は作成したが、baseline 失敗・sync が使えない・collision skip・drift・check 失敗のいずれかがある | `limitations` 1件以上 |
 | `failure` | worktree を1件も作成していない | `blocking_reasons` 1件以上 |
 
 `phase_reached` は到達した最遠の phase（`inspect` / `plan` / `create` / `baseline` / `sync` / `complete`）。
@@ -82,7 +82,7 @@ field を省略することと空配列を置くことは意味が違う。前�
 - `base_sha` は plan 時点で resolved commit SHA（40 hex）であること。symbolic ref だけを載せない。
 - `directory` は repository 相対の安全な path（絶対path・`..`・backslash・制御文字を含まない）。
 - `blocked_by` は collision の種類。空なら作成可。非空なら Step 4 の規則で扱う。
-- `sync_planned` は CommandMate sync を意図するか。sync 未提供なら false。
+- `sync_planned` は CommandMate sync を意図するか。sync を使えないなら false。
 
 ### 3.5 `worktrees`
 
@@ -103,8 +103,10 @@ field を省略することと空配列を置くことは意味が違う。前�
 
 ### 3.7 `commandmate_sync`
 
-`available` は sync 経路の有無。sync は optional なので、`available=false` は失敗ではない。
-`worktree_id` は sync が返した ID。未提供・未取得なら null。token や絶対path を `detail` に残さない。
+`available` は sync 経路を使えるかどうか。sync は optional なので、`available=false` は失敗ではない。
+`worktree_id` は sync 後に `commandmate ls --json` から解決した ID
+（[profile-conventions.md](./profile-conventions.md) 第5節）。未取得なら null にし、推測で埋めない。
+token や絶対path を `detail` に残さない。
 
 ### 3.8 `collisions`
 
