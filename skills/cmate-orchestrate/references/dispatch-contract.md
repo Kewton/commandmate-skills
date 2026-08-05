@@ -115,6 +115,37 @@ commit を要求する（下流の PR 作成は commit を必要とする）。
 （`gate <id>: <status> (exit N)`）を redaction 済みで載せる。`report_schema_version` は `null`
 （CommandMate の検証 run document は schema version を持たない）。
 
+`gates` には、その run の `GATE <id> PASS|FAIL` 行をそのまま転記する（#47 / CommandMate #1678 B-5:
+**report 単体で「何が pass の根拠か」が読める**ようにするため）。`outcome: pass` なのに `gates` が
+空になった場合は、**拾えなかったこと自体**を limitation `verification_gates_unrecorded` と `checks`
+の1行に記録する。planner の `unrecognized_file_extension` と同型で、空のリストを「何も走らなかった」
+と読ませない。
+
+### 2.1.1 裁定の記録（Issue #83）
+
+**裁定に到達したら、その worker の `verification` に必ず記録する。** 記録は wave の他の worker の
+状態に依存しない。0.15.0 までは転記が「wave の全 worker が completed のとき」の内側にあり、
+1人でも失敗・timeout・prompt・未 dispatch があると、**同じ wave の他の worker**（exit 0 で pass し
+commit も出した worker を含む）が初期値 `{ran: false, outcome: 'not_run', gates: [], checks: []}` の
+まま出力されていた。merge / uat は `worker_state === 'completed' && verification.outcome === 'pass'`
+しか読まないので、検証に通った成果物が **report の書き方だけを理由に** 納品経路から外れ
+（`no_eligible_issues`）、PR 作成・CI ゲート・guarded merge・UAT の二層裁定が**すべて迂回**された。
+barrier（第3節 4・5）は「次 Wave を dispatch してよいか」を決めるものであって、
+**事実を書き残すかどうかを決めるものではない**。
+
+同じ理由で、`not_run` は「worker が完了しなかった」ではなく **「何も判定しなかった」** を意味する。
+exit 21 は work-evidence ゲートが判定して落とした結果なので、worker が `failed` でも `fail` である。
+
+`note` は `verification` と**同じ1箇所**で組み立てる。0.15.0 までは監督ループが
+「verification passed …」という文字列を独立に作っており、上記の記録漏れと組み合わさって
+**note は pass、構造化 field は not_run** という自己矛盾した report が出ていた。読み手は
+どちらを信じるべきか決められず、merge / uat は field を信じる。現在は `verification` から
+文面を生成するので、この矛盾は表現できない。
+
+completed でありながら裁定が1つも記録されなかった場合は、黙って通さず
+limitation `verification_unrecorded` と completion check `verification_recorded` の失敗として報告する。
+これは verification の失敗でも worker の失敗でもなく、**runner が記録に失敗した**という別の事実である。
+
 **(b) フォールバック経路** — plan `profile.baseline` の各 command を **worktree 内で
 `execFile`（cwd=worktree path）** 実行する。全 command が exit 0 なら `outcome: pass`、worktree が
 無い・いずれかが非0なら `fail`。`report_schema_version` は `null`、`checks` は実行した baseline
@@ -256,8 +287,11 @@ pass を得た worker に対して `--verify` を**二度と付けない**。付
 4. **Wave barrier** — Wave の **全 worker が `completed`（commit 検出）** でなければ次へ進まない。
 5. **verification gate** — `completed` の worker それぞれの裁定を集約する。契約経路では監督ループで
    得た exit code 由来の verdict をそのまま使い、**同じ worktree を弱い judge で測り直さない**。
-   フォールバックでは **worktree 内で profile baseline を再実行**する（第2.1節）。pass が揃ってはじめて
+   フォールバックでは **worktree 内で profile baseline を再実行**する（第2.1節。実行するのは
+   `completed` の worker だけ — 失敗した worker には測る成果物が無い）。pass が揃ってはじめて
    次 Wave を dispatch できる。worker completion だけでは gate は開かない。
+   **裁定の記録は wave の成否と独立**である（第2.1.1節）: この gate が閉じても、既に得られている
+   verdict は report に残る。
 
 `advanced` が true になるのは `all_workers_completed` かつ `all_verifications_passed`
 の両方が true のときだけである。停止時の `stop_reason` の優先順位は
@@ -294,7 +328,7 @@ pass を得た worker に対して `--verify` を**二度と付けない**。付
 
 ## 6. completion_check（report）
 
-report は5つの check を自己申告する。
+report は6つの check を自己申告する（0.15.x 以前は `verification_recorded` を除く5件）。
 
 | id | 内容 |
 |---|---|
@@ -303,10 +337,27 @@ report は5つの check を自己申告する。
 | `parallelism_bounded` | どの Wave も max_parallel を超えて dispatch していない |
 | `barrier_enforced` | 次 Wave は「全完了 かつ verification pass」でのみ dispatch した |
 | `no_auto_prompt_response` | prompt を自動応答していない（`--auto-yes` 未使用） |
+| `verification_recorded` | `completed` の worker はすべて、自分を判定した verdict を保持している（第2.1.1節） |
 
-`passed` は5件すべて true、かつ status が `failure` でないときだけ true。
+`passed` は全件 true、かつ status が `failure` でないときだけ true。
 
 ## 7. version 運用
 
-- field の追加・削除・意味の変更、enum への値追加 → `dispatch_schema_version` を上げる。
+判定基準は uat 契約と同じく「**既に世に出た report が、新しい schema でも引き続き適合するか**」である。
+
+- **適合しなくなる変更** → `dispatch_schema_version` を上げる。required field の追加、field の削除、
+  既存 field の**意味の変更**、既存 enum 値の削除・改名、範囲の縮小。
+- **適合し続ける変更（additive）** → `dispatch_schema_version` は据え置き、Skill の `version` を上げ、
+  何を足したかを schema の `description` に書く。optional field の追加、既存 enum への**値の追加**、
+  範囲の緩和（`maxItems` を増やす等）。
 - 文言・見出しの調整のみ → Skill の `version` だけを上げる。
+
+据え置きを選べること自体が重要である: merge runner と uat runner は dispatch report から
+`worker_state === 'completed'` と `verification.outcome === 'pass'` の 2 field しか読まないので、
+version を上げると**その2つが変わっていないのに**両 runner が読めなくなる。
+
+0.16.0（[#83](https://github.com/Kewton/commandmate-skills/issues/83)）はこの additive 側で行った:
+`completion_check.checks` の enum に `verification_recorded` を追加し `maxItems` を 5 → 6 に緩和
+（`minItems` は 5 のまま）、`verification` / `gates` / `outcome` の `description` を実挙動に合わせた。
+0.15.x が書いた report は無改変で v1 に適合し続ける。**新しい runner が書く report を旧 runner の
+schema で検証すると落ちる**（schema は package と一緒に動く）ため、report の読み手は同梱 schema を使うこと。

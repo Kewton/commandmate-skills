@@ -1078,7 +1078,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       return {
         state: committed ? 'completed' : 'failed',
         taskId, verdict, notJudged: true, promptExcerpt: null, nudges: turns - 1, autoResponded,
-        note: 'verification reached no verdict (exit 99: the run ended error/cancelled); escalated to a human rather than re-instructed as a verification failure',
+        note: `escalated to a human rather than re-instructed as a verification failure (exit ${VERIFY_EXIT_NO_VERDICT}: the run ended error/cancelled)`,
       };
     }
 
@@ -1096,13 +1096,20 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
         };
       }
       if (await hasNewCommit(inputs, worktreePath, baseSha)) {
+        // The note states only what THIS loop observed — the turn count and the
+        // commit. It deliberately no longer asserts the verification result
+        // (Issue #83): that sentence was a SECOND, independent claim, and when
+        // the recording of `verdict` was skipped the note went on saying
+        // "verification passed" beside `outcome: not_run`. The verification
+        // clause is appended once, at the recording site, from the very object
+        // the report carries — see `verificationNoteClause`.
         const note = turns > 1
-          ? `completed after ${turns - 1} follow-up message(s); verification passed and a new commit was detected`
-          : 'completed; verification passed and a new commit was detected';
+          ? `completed after ${turns - 1} follow-up message(s); a new commit was detected`
+          : 'completed; a new commit was detected';
         return done('completed', note);
       }
       if (turns >= inputs.maxTurns) {
-        return done('failed', `verification passed but no commit was produced after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap`);
+        return done('failed', `no commit was produced after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap`);
       }
       const asked = await sendAndConfirm(inputs, worktreeId, COMMIT_REQUEST_MESSAGE);
       if (!asked.sent) return done('failed', `commit request failed: ${asked.note}`);
@@ -1141,9 +1148,12 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       };
       const committed = await hasNewCommit(inputs, worktreePath, baseSha);
       if (turns >= inputs.maxTurns) {
+        // As above: the failing gates are named by the verification clause the
+        // recording site appends, out of the same `verdict` the report carries,
+        // so this note states only the cap and the missing commit.
         return done(
           committed ? 'completed' : 'failed',
-          `verification failed (${failing.summary}) and the --max-turns ${inputs.maxTurns} cap was reached${committed ? '' : ' with no commit'}`,
+          `the --max-turns ${inputs.maxTurns} cap was reached${committed ? '' : ' with no commit'}`,
         );
       }
       const resent = await sendAndConfirm(inputs, worktreeId, buildVerifyReinstruction(failing.failing));
@@ -1223,6 +1233,65 @@ async function capturePrompt(inputs, worktreeId) {
   const payload = parseCliJson(result);
   const raw = payload?.promptData?.question ?? payload?.content ?? result.stdout ?? '';
   return excerpt(raw) ?? 'a prompt is awaiting input';
+}
+
+// =============================================================================
+// Recording a verification verdict (Issue #83)
+// =============================================================================
+//
+// ONE function writes a worker's verification, and the same function writes the
+// sentence about it that a human reads in `note`. That is the whole point: #83
+// was two independent claims about the same fact — a note string composed inside
+// the supervision loop ("verification passed and a new commit was detected") and
+// a `verification` object assembled somewhere else — drifting apart, with the
+// note right and the structured field wrong. A reader cannot tell which half to
+// believe, and merge/uat believe the field, so the report's WORDING alone
+// decided whether verified work was delivered. Deriving the wording from the
+// recorded object makes the contradiction unrepresentable rather than merely
+// unlikely.
+
+function appendNote(note, clause) {
+  return note ? `${note}; ${clause}` : clause;
+}
+
+// The human-readable half of `verification`, rendered from `verification`.
+// `source` is how the verdict was reached: `contract` (CommandMate's
+// `wait --verify` exit code) or `baseline` (the profile re-run fallback).
+function verificationNoteClause(verification, source) {
+  const gateIds = verification.gates.map((gate) => gate.id);
+  if (verification.outcome === 'pass') {
+    if (gateIds.length > 0) return `verification passed (${gateIds.join(', ')})`;
+    return source === 'baseline'
+      ? 'verification passed (profile baseline re-run; it declares no gates)'
+      : 'verification passed, but the run named no gate (see checks)';
+  }
+  if (verification.outcome === 'fail') {
+    const failed = verification.gates.filter((gate) => gate.verdict === 'fail').map((gate) => gate.id);
+    return failed.length > 0 ? `verification failed (${failed.join(', ')})` : 'verification failed (see checks)';
+  }
+  return 'verification reached no verdict (not_run)';
+}
+
+// Record a verdict on a worker: the structured field, the note clause derived
+// from it, and — when a pass names no gate — the fact that the gate list could
+// not be read. That last one is the same shape as the planner's
+// `unrecognized_file_extension` (orchestrate.mjs): what the runner FAILED to
+// pick up is recorded, instead of an empty list that reads as "nothing ran".
+// #47 / CommandMate #1678 B-5 exists so a report alone can answer WHAT a pass
+// was based on; a silently empty `gates` returns the report to before that.
+function recordVerification(report, worker, verification, source) {
+  worker.verification = verification;
+  worker.note = appendNote(worker.note, verificationNoteClause(verification, source));
+  if (source === 'contract' && verification.outcome === 'pass' && verification.gates.length === 0) {
+    report.limitations.push({
+      code: 'verification_gates_unrecorded',
+      detail: `#${worker.issue} passed verification, but no \`GATE <id> PASS|FAIL\` line could be read from the \`commandmate wait --verify\` output, so the report cannot name which gates the pass was based on; the verdict is the exit code and stands, but treat the pass as unattributed`,
+    });
+    worker.verification.checks = [
+      ...verification.checks,
+      'gate list unavailable: the wait --verify output carried no parseable `GATE <id> PASS|FAIL` line',
+    ];
+  }
 }
 
 // The FALLBACK verification gate, used when the CLI has no execution contract
@@ -1386,6 +1455,9 @@ async function runDispatch(inputs, plan, outDir) {
   // and merge/uat both refuse any other version, so the fact travels through the
   // blocking reason and the worker note instead of a new field.
   const notJudged = new Set();
+  // Issues that completed with no verification verdict recorded at all (#83).
+  // Feeds the `verification_recorded` completion check below.
+  const verificationUnrecorded = new Set();
 
   for (let waveIndex = 0; waveIndex < plan.waves.length && !stopped; waveIndex += 1) {
     const waveIssues = plan.waves[waveIndex];
@@ -1541,33 +1613,65 @@ async function runDispatch(inputs, plan, outDir) {
     //    SAME worktree path the supervisor drove — the `commandmate ls` path, not
     //    the plan template — so a completed worker is never false-failed on a git
     //    path the send target never used (Issue #1473).
+    //
+    //    Issue #83: this loop used to be wrapped in `if (allCompleted)`, which
+    //    conflated the GATE with the RECORDING. A wave where any one worker
+    //    failed, timed out, raised a prompt or was refused a dispatch skipped the
+    //    body entirely, so every OTHER worker of that wave kept the initialiser
+    //    `{ran: false, outcome: 'not_run', gates: [], checks: []}` — including
+    //    workers whose `wait --verify` had already returned exit 0 and whose note
+    //    said so. merge/uat read exactly `worker_state === 'completed' &&
+    //    verification.outcome === 'pass'`, so verified deliverables silently left
+    //    the delivery path (`no_eligible_issues`) with the PR, CI, guarded-merge
+    //    and UAT gates all bypassed rather than failed. The verdict is now
+    //    recorded for every worker that has one; the barrier below is unchanged,
+    //    because `allVerified` still starts at `allCompleted` and this loop can
+    //    only ever clear it.
     let allVerified = allCompleted;
-    if (allCompleted) {
-      for (const worker of workers) {
-        if (contractMode) {
-          // The verdict already exists: it is the exit code CommandMate returned
-          // while the worker was supervised. Re-running anything here would be a
-          // second opinion from a weaker judge.
-          const verdict = contractVerdicts.get(worker.issue);
-          worker.verification = verdict
-            ? { ran: verdict.ran, report_schema_version: null, outcome: verdict.outcome, gates: verdict.gates ?? [], checks: verdict.checks }
-            : { ran: false, report_schema_version: null, outcome: 'not_run', gates: [], checks: [] };
-        } else {
-          const worktreePath = worktreePaths.get(worker.issue) ?? safeWorktreeTarget(issueOf(plan, worker.issue).worktree ?? '');
-          const verification = verifyWorker(inputs, worktreePath, plan.profile.baseline);
-          worker.verification = {
-            ran: verification.ran,
+    for (const worker of workers) {
+      if (contractMode) {
+        // The verdict already exists: it is the exit code CommandMate returned
+        // while the worker was supervised. Re-running anything here would be a
+        // second opinion from a weaker judge.
+        const verdict = contractVerdicts.get(worker.issue);
+        if (verdict) {
+          recordVerification(report, worker, {
+            ran: verdict.ran,
             report_schema_version: null,
-            outcome: verification.outcome,
-            // The fallback judge is the baseline re-run: it has no contract
-            // gates, and the commands it ran are already named in checks.
-            gates: [],
-            checks: verification.checks,
-          };
-          if (verification.note) worker.note = worker.note ? `${worker.note}; ${verification.note}` : verification.note;
+            outcome: verdict.outcome,
+            gates: verdict.gates ?? [],
+            checks: verdict.checks,
+          }, 'contract');
         }
-        if (worker.verification.outcome !== 'pass') allVerified = false;
+      } else if (worker.worker_state === 'completed') {
+        // The fallback judge is an ACTION, not a stored verdict, so it runs for
+        // the workers it can judge: the ones that completed. A failed or never
+        // dispatched worker has no deliverable to re-run a baseline against.
+        const worktreePath = worktreePaths.get(worker.issue) ?? safeWorktreeTarget(issueOf(plan, worker.issue).worktree ?? '');
+        const verification = verifyWorker(inputs, worktreePath, plan.profile.baseline);
+        recordVerification(report, worker, {
+          ran: verification.ran,
+          report_schema_version: null,
+          outcome: verification.outcome,
+          // The fallback judge is the baseline re-run: it has no contract
+          // gates, and the commands it ran are already named in checks.
+          gates: [],
+          checks: verification.checks,
+        }, 'baseline');
+        if (verification.note) worker.note = worker.note ? `${worker.note}; ${verification.note}` : verification.note;
       }
+      // A completed worker whose verdict was never recorded is the #83 defect
+      // itself. It is reported rather than passed over in silence: the note says
+      // so, a limitation names it, and the completion check below fails.
+      if (worker.worker_state === 'completed' && !worker.verification.ran) {
+        verificationUnrecorded.add(worker.issue);
+        report.limitations.push({
+          code: 'verification_unrecorded',
+          detail: `#${worker.issue} completed but no verification verdict was recorded for it, so its verification.outcome stays not_run and merge/uat will not treat it as eligible; this is a runner defect, not a worker one`,
+        });
+        worker.note = appendNote(worker.note, 'verification was NEVER RECORDED for this completed worker (outcome not_run)');
+      }
+      if (worker.verification.outcome !== 'pass') allVerified = false;
     }
 
     const advanced = allCompleted && allVerified;
@@ -1631,6 +1735,7 @@ async function runDispatch(inputs, plan, outDir) {
     parallelismBounded,
     barrierEnforced,
     noAutoPromptResponse: !autoResponded || inputs.autoYes,
+    verificationRecorded: [...verificationUnrecorded],
     reportStatus: report.status,
   });
   if (!report.completion_check.passed && report.status === 'success') {
@@ -1643,13 +1748,24 @@ async function runDispatch(inputs, plan, outDir) {
   return report;
 }
 
-function buildCompletionCheck({ planApproved, driftReconfirmed, parallelismBounded, barrierEnforced, noAutoPromptResponse, reportStatus }) {
+function buildCompletionCheck({ planApproved, driftReconfirmed, parallelismBounded, barrierEnforced, noAutoPromptResponse, verificationRecorded = [], reportStatus }) {
   const checks = [
     { id: 'plan_approved', passed: planApproved, detail: planApproved ? 'an approved plan was loaded and validated' : 'no valid plan was loaded' },
     { id: 'drift_reconfirmed', passed: driftReconfirmed, detail: driftReconfirmed ? 'drift was re-checked before dispatch' : 'no drift check ran' },
     { id: 'parallelism_bounded', passed: parallelismBounded, detail: parallelismBounded ? 'no wave dispatched more than max_parallel workers' : 'a wave exceeded max_parallel and was truncated' },
     { id: 'barrier_enforced', passed: barrierEnforced, detail: barrierEnforced ? 'the next wave dispatched only after completion AND verification' : 'the wave barrier was not enforced' },
     { id: 'no_auto_prompt_response', passed: noAutoPromptResponse, detail: noAutoPromptResponse ? 'no prompt was answered without explicit --auto-yes' : 'a worker prompt was answered without authorization' },
+    // Issue #83. `completed` with no verdict recorded is not a verification
+    // failure and not a worker failure — it is the RUNNER failing to write down
+    // what it was told. It used to be indistinguishable from "verification did
+    // not run", which merge/uat read as ineligible and no one read as a bug.
+    {
+      id: 'verification_recorded',
+      passed: verificationRecorded.length === 0,
+      detail: verificationRecorded.length === 0
+        ? 'every completed worker carries the verification verdict that judged it'
+        : `no verification verdict was recorded for completed worker(s) ${verificationRecorded.map((n) => `#${n}`).join(', ')}; the report cannot say what judged them`,
+    },
   ];
   // A failure result is a legitimate outcome, but it still must not claim a
   // passed completion check unless every invariant above actually held.

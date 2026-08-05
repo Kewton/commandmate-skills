@@ -1,0 +1,27 @@
+{
+  "description": "Issue #83 の第3点: 契約経路で `wait --verify` が exit 0 を返したのに `GATE <id> PASS|FAIL` 行を1本も出さなかった場合、`gates` は空になる。空の gates は「何も判定していない」と読めてしまい、#47 / CommandMate #1678 B-5 が塞いだ穴（report 単体で pass の根拠が読めない）に戻る。裁定そのものは exit code なので pass のままだが、**拾えなかったこと自体**を planner の `unrecognized_file_extension` と同型に記録する: limitation `verification_gates_unrecorded` と `checks` の1行、そして note が「gate を名指しできていない pass」であることを述べる。空の gates を黙って通さない。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": ["100", "--profile", "node-commandmate", "--max-parallel", "1", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [true],
+    "no_respond": true,
+    "sent": [100],
+    "worker_states": { "100": "completed" },
+    "verification_outcomes": { "100": "pass" },
+    "verification_gates": { "100": [] },
+    "worker_notes_include": {
+      "100": ["verification passed, but the run named no gate"]
+    },
+    "limitation_codes": ["verification_gates_unrecorded"],
+    "wait_verify_calls_min": 1
+  }
+}

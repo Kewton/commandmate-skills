@@ -678,6 +678,26 @@ function runDispatchCase(caseId) {
     }
   }
 
+  // The worker `note` is the half of the record a human actually reads. Pinning
+  // its text is what proves the verification sentence is rendered from the
+  // recorded verdict and not composed independently (Issue #83).
+  if (expect.worker_notes_include) {
+    for (const [num, needles] of Object.entries(expect.worker_notes_include)) {
+      const worker = allWorkers(report).find((w) => w.issue === Number(num));
+      if (check(worker !== undefined, `#${num} has no worker record`)) {
+        for (const needle of needles) {
+          check(String(worker.note ?? '').includes(needle), `#${num} note ${JSON.stringify(worker.note)} does not contain "${needle}"`);
+        }
+      }
+    }
+  }
+  for (const id of expect.completion_checks_failed ?? []) {
+    const entry = report.completion_check.checks.find((c) => c.id === id);
+    if (check(entry !== undefined, `completion_check is missing "${id}"`)) {
+      check(entry.passed === false, `completion check "${id}" passed, but the case expects it to fail`);
+    }
+  }
+
   if (expect.advanced) {
     report.waves.forEach((wave, index) => {
       if (index < expect.advanced.length) {
@@ -759,6 +779,50 @@ function runDispatchCase(caseId) {
       check(report.summary_markdown.includes(needle), `dispatch summary does not contain "${needle}"`);
     }
   }
+
+  // ---- #83 invariants, asserted on EVERY dispatch case ----------------------
+  //
+  // A case-by-case expectation would not have caught #83: every fixture that
+  // named a verification outcome was a fixture whose wave completed, which is
+  // exactly the shape where the bug does not appear. These two run unconditionally
+  // instead, so any case whose report contradicts itself fails without anyone
+  // having to have predicted it.
+  //
+  //  1. The note never claims a verification result the structured field does not.
+  //     #83 shipped reports whose note said "verification passed" beside
+  //     `"outcome": "not_run"`, and merge/uat believe the field — so the report's
+  //     wording alone decided whether verified work was delivered.
+  //  2. A completed worker always carries the verdict that judged it. `ran: false`
+  //     on a completed worker is the runner losing the verdict, and it must fail
+  //     the `verification_recorded` completion check rather than pass quietly.
+  for (const worker of allWorkers(report)) {
+    const note = String(worker.note ?? '');
+    if (/verification passed/.test(note)) {
+      check(
+        worker.verification.outcome === 'pass',
+        `#${worker.issue}: note claims "verification passed" but verification.outcome is "${worker.verification.outcome}" (note: ${JSON.stringify(note)})`,
+      );
+    }
+    if (/verification failed/.test(note)) {
+      check(
+        worker.verification.outcome === 'fail',
+        `#${worker.issue}: note claims "verification failed" but verification.outcome is "${worker.verification.outcome}" (note: ${JSON.stringify(note)})`,
+      );
+    }
+    if (worker.worker_state === 'completed' && worker.verification.ran === false) {
+      const gate = report.completion_check.checks.find((entry) => entry.id === 'verification_recorded');
+      check(
+        gate !== undefined && gate.passed === false,
+        `#${worker.issue}: completed with verification.ran false, but the verification_recorded completion check did not fail`,
+      );
+    }
+  }
+  // The completion check itself is part of the report contract, not an optional
+  // extra: a run that drops it can no longer report the defect above at all.
+  check(
+    report.completion_check.checks.some((entry) => entry.id === 'verification_recorded'),
+    'completion_check is missing verification_recorded',
+  );
 
   // Contract adjudication (#1588). The per-issue verification outcome is asserted
   // separately from worker_state so a case cannot pass with the two conflated —

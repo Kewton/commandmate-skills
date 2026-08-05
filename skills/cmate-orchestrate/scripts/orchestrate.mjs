@@ -555,7 +555,23 @@ function cleanCriterion(text) {
 // reviewer can drop, a path missed is context the plan never had.
 // Mirrored verbatim in cmate-issue-authoring scripts/validate-plan.mjs; the
 // issue-authoring test suite asserts the two stay identical.
-const FILE_EXT = 'rs|md|toml|json|yaml|yml|py|sh|ts|tsx|js|jsx|mjs|cjs|go|rb|java|kt|c|h|cpp|css|html|sql|geojson|topojson|geojsonl';
+//
+// `jsonc` (Issue #56) is here for the same reason `geojson` is (#43), with one
+// difference that removes the usual escape hatch: the affected files carry
+// FRAMEWORK-FIXED names. `wrangler.jsonc` is what Cloudflare Workers reads and
+// `deno.jsonc` is what Deno reads, so "name it .json instead" is not advice an
+// issue author can take. Worse than the geojson case, the drop was completely
+// silent for a repository-root file: `extractUnrecognizedPaths` only looks at
+// backtick paths containing a "/", so `wrangler.jsonc` produced no
+// `unrecognized_file_extension` warning either — it simply was not in
+// suspected_files, hence not in the contract's scope.allow, and the worker was
+// failed by the scope gate the moment it edited the file it was told to edit.
+// `json5` is deliberately NOT added: no widely deployed tool requires a file
+// literally named `*.json5` (the JSON5 readers all accept another extension or
+// are configured by file name), so it would widen every worker's scope.allow for
+// a demand nobody has reported. Same for `jsonl`. Add them when an issue shows
+// a fixed name that forces them.
+const FILE_EXT = 'rs|md|toml|json|jsonc|yaml|yml|py|sh|ts|tsx|js|jsx|mjs|cjs|go|rb|java|kt|c|h|cpp|css|html|sql|geojson|topojson|geojsonl';
 const SYSTEM_ROOTS = new Set(['users', 'home', 'root', 'tmp', 'private', 'var', 'etc', 'proc']);
 
 // A candidate must begin where a path can begin (Issue #49). `\b` does not: it
