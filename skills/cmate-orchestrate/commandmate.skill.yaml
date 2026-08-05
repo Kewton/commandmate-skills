@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-orchestrate
 name: cmate-orchestrate
-version: 0.16.0
+version: 0.17.0
 summary: 複数 Issue の並列実行を dry-run で計画し、承認後に実行契約付きで dispatch して検証 exit code で裁定し、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT と回数上限つき修正ループを回す。UAT の意味ゲートには cmate-acceptance-test の別途 install が要る。
 description: >-
   複数 Issue を並列で進めるための、計画（dry-run）・その承認後の監督付き実行・verification pass 後の
@@ -106,8 +106,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: 6e7d2c397988e7d9ec607670d87a22098c82a351a6b128f37017e3fdd5d73590
-    size: 23213
+    sha256: 9314c6ebc799f1412f7b7a8ed74be8bd3e664cd09b31543922133442cb52de6e
+    size: 24155
     kind: skill_md
     executable: false
     script: false
@@ -118,8 +118,8 @@ files:
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: a6be679d1471e01261f38baddecfa9d92fa8ac5622d81d8e9a37bfa24fadfae4
-    size: 30763
+    sha256: 7c4f79019bffe9768046e4a6ddfac1a6f2a1ec967021dc4a95de82f3e30f9427
+    size: 32362
     kind: instruction
     executable: false
     script: false
@@ -148,8 +148,8 @@ files:
     executable: false
     script: false
   - path: references/uat-contract.md
-    sha256: 68cf3f347221ce3c33ff68d83d7987d9890a426fbe85fe231554ded53a1dbd12
-    size: 20153
+    sha256: 276bbf91b395c8045c3b887d5ddb194e318cbcc3b58d45de31b17b033384e136
+    size: 20238
     kind: instruction
     executable: false
     script: false
@@ -184,14 +184,14 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: f2b0fdd47e1b3a9d7d395ff5621516e09fca2e98481b68bcd836300f4eb9e72b
-    size: 102269
+    sha256: fe70e5759eac5471c92dcdccc968b902ce70d39506980f0be85b95a472fca7fc
+    size: 103576
     kind: script
     executable: true
     script: true
   - path: scripts/lib.mjs
-    sha256: aaa9f0195aa1c12c0daab6c57e61c56d6dc17fbc6ba492890756fa9320cdd35d
-    size: 9609
+    sha256: 0d72b41aa87b8ad4e2aa1391813fdd0124fefaa428d101f16d91476137407980
+    size: 13117
     kind: script
     executable: false
     script: true
@@ -208,8 +208,8 @@ files:
     executable: true
     script: true
   - path: scripts/uat.mjs
-    sha256: f83f702ea3cd047760a79ef2e05d9d870268b769dbf03285aae873034a9870f1
-    size: 70547
+    sha256: 485a0676668025357b75aa1ca118b484adc40fd62f93753b1b1ab32951020914
+    size: 71512
     kind: script
     executable: true
     script: true

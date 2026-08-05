@@ -117,6 +117,31 @@ const MUTATIONS = {
     describes: 'the slowest observed run stops being a floor under a shortened timeout',
     edits: [['    target = Math.max(target, Math.ceil(stat.maxMs / 1000));', '    // max floor removed by mutation']],
   },
+  // Launcher resolution (Issue #37). Each of the three mutations below restores
+  // one piece of the behaviour that made this tool unusable without a global
+  // install, so the launcher suite is shown to be load-bearing rather than
+  // green-by-construction.
+  'ignore-cm-env': {
+    describes: '$CM stops being consulted, so only --cli and the bare default remain',
+    edits: [[
+      "  const fromEnv = typeof env.CM === 'string' && env.CM.trim() !== '' ? env.CM : undefined;",
+      '  const fromEnv = undefined;',
+    ]],
+  },
+  'no-launcher-split': {
+    describes: 'the launcher stops being split on whitespace — the pre-#37 ENOENT on any multi-token launcher',
+    edits: [[
+      "  const argv = raw.trim().split(/\\s+/).filter((token) => token !== '');",
+      '  const argv = [raw];',
+    ]],
+  },
+  'accept-shell-syntax': {
+    describes: 'a launcher carrying shell syntax is accepted and handed to spawn as literal argv',
+    edits: [[
+      "  if (LAUNCHER_SHELL_CHARS.test(raw)) reject('contains shell syntax, which nothing here interprets');",
+      '  // shell-syntax guard removed by mutation',
+    ]],
+  },
 };
 
 const [, , source, name] = process.argv;

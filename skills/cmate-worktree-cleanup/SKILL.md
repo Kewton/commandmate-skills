@@ -5,6 +5,12 @@ description: merge 済み・不要になった git worktree を、削除可能�
 
 # cmate-worktree-cleanup
 
+> **ランチャー表記** — 本文中の `commandmate …` は**読み替え可能**である。グローバル導入をしない
+> npx 運用では `npx commandmate@latest …` と読む。呼び出し頻度が高い経路では npx の起動コスト
+> （1 回あたり 0.5〜0.9 秒）を避けるため、`~/.local/bin/commandmate` に
+> `exec npx --yes commandmate@latest "$@"` の薄いラッパを置く導入形態を推奨する（README の
+> 「CommandMate CLI の導入形態」）。
+
 対象 issue または eligible な worktree を検査し、**削除可能性と証跡 (proof) を dry-run で
 preview** したあと、**clean かつ merge 証跡が十分な worktree だけ** を安全に削除する手順である。
 

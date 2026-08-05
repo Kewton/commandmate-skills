@@ -83,6 +83,16 @@ function readPlan(planPath) {
   return JSON.parse(readFileSync(planPath, 'utf8'));
 }
 
+// The environment every spawned runner starts from. `CM` is the launcher
+// variable the runners now read (Issue #37), so an operator who exports it in
+// their own shell would otherwise silently change what these tests exercise.
+// Cases that care about `CM` set it explicitly.
+function baseEnv() {
+  const env = { ...process.env };
+  delete env.CM;
+  return env;
+}
+
 // Mirror CommandMate's generateWorktreeId(branch, repoName): lowercase, non
 // [a-z0-9-] -> '-', collapse/trim hyphens, joined as `<repo>-<branch>`.
 function sanitizeSlug(value) {
@@ -137,19 +147,28 @@ function workerVerifyPasses(scenario, number) {
 
 // Run dispatch.mjs against the fake CLI with a fully set-up worktree world.
 // Returns { exit, stdout }; the dispatch-report.json lands in outDir.
-function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, logPath) {
+//
+// `opts` exists for the launcher-resolution suite only (Issue #37):
+//   opts.launcher  string  -> passed as --cli instead of FAKE_CLI
+//                  null    -> --cli is omitted entirely, so resolution falls
+//                             through to $CM and then to the bare default
+//   opts.env       extra environment entries (e.g. CM)
+// Every other caller gets the previous behaviour unchanged.
+function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, logPath, opts = {}) {
   const plan = readPlan(planPath);
   const pathOverrides = scenarioObject.worktree_paths ?? {};
   const scenario = { ...scenarioObject, worktrees: planToWorktrees(plan, pathOverrides) };
   const integration = setupWorktrees(plan, work, (n) => workerVerifyPasses(scenario, n), pathOverrides);
   const scenarioPath = join(work, 'dispatch-scenario.json');
   writeFileSync(scenarioPath, `${JSON.stringify(scenario, null, 2)}\n`);
-  const env = { ...process.env, CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_STATE: work };
+  const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_STATE: work, ...(opts.env ?? {}) };
   if (logPath) env.CMATE_FAKE_LOG = logPath;
+  const launcher = 'launcher' in opts ? opts.launcher : FAKE_CLI;
   const args = [
     DISPATCH_RUNNER,
     '--plan', planPath,
-    '--cli', FAKE_CLI, '--git', FAKE_CLI, '--gh', FAKE_CLI,
+    ...(launcher === null ? [] : ['--cli', launcher]),
+    '--git', FAKE_CLI, '--gh', FAKE_CLI,
     '--out', outDir,
     ...extraArgs,
   ];
@@ -263,9 +282,9 @@ function buildArgs(rawArgs, issuesPath, runsDir) {
   return [...args, '--issue-json', issuesPath, '--runs-dir', runsDir];
 }
 
-function runRunner(args, cwd) {
+function runRunner(args, cwd, env = baseEnv()) {
   try {
-    const stdout = execFileSync('node', [RUNNER, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], cwd });
+    const stdout = execFileSync('node', [RUNNER, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], cwd, env });
     return { exit: 0, stdout };
   } catch (error) {
     // execFileSync throws on a non-zero exit; the result JSON is still on stdout.
@@ -949,7 +968,7 @@ function runMergeCase(caseId) {
   const mergeOut = join(work, 'merge'); // must not pre-exist; merge creates it
   const logPath = join(work, 'gh.log');
   const scenarioPath = writeScenario(work, 'merge-scenario.json', spec.merge_scenario ?? {});
-  const env = { ...process.env, CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath };
+  const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath };
 
   const phaseFlag = spec.phase === 'merge-prs' ? '--merge-prs' : '--create-prs';
   const { exit, stdout } = runMerge(planPath, dispatchPath, mergeOut, phaseFlag, spec.merge_args ?? [], env);
@@ -1121,13 +1140,16 @@ function checkAcceptanceNeverRounded(report) {
   }
 }
 
-function runUatRunner(planPath, dispatchPath, outDir, phaseFlag, extraArgs, env, cwd) {
+// `opts` mirrors runDispatchRunner's, and exists for the same suite (Issue #37).
+function runUatRunner(planPath, dispatchPath, outDir, phaseFlag, extraArgs, env, cwd, opts = {}) {
+  const launcher = 'launcher' in opts ? opts.launcher : FAKE_CLI;
   const args = [
     UAT_RUNNER,
     '--plan', planPath,
     '--dispatch', dispatchPath,
     phaseFlag,
-    '--cli', FAKE_CLI, '--git', FAKE_CLI, '--gh', FAKE_CLI,
+    ...(launcher === null ? [] : ['--cli', launcher]),
+    '--git', FAKE_CLI, '--gh', FAKE_CLI,
     '--out', outDir,
     ...extraArgs,
   ];
@@ -1164,7 +1186,7 @@ function runUatCase(caseId) {
   const uatOut = join(workUat, 'uat'); // must not pre-exist; uat.mjs creates it
   const logPath = join(workUat, 'uat-cli.log');
   const scenarioPath = writeScenario(workUat, 'uat-scenario.json', { ...uatScenario, worktrees: planToWorktrees(plan) });
-  const env = { ...process.env, CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath, CMATE_FAKE_STATE: workUat };
+  const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath, CMATE_FAKE_STATE: workUat };
 
   const acceptanceDir = setupAcceptanceDir(spec, workUat);
   const uatArgs = [...(spec.uat_args ?? []), ...(acceptanceDir ? ['--acceptance-dir', acceptanceDir] : [])];
@@ -1467,6 +1489,166 @@ function parityTest() {
 }
 
 // =============================================================================
+// Launcher resolution (Issue #37)
+// =============================================================================
+//
+// Removing the global install takes the bare `commandmate` off PATH, so the
+// orchestrator-side runners have to reach the CLI the way monitor.sh does. Three
+// claims are proved here, against the real dispatch and uat runners:
+//
+//   1. a MULTI-TOKEN launcher runs. `npx commandmate@latest` is a program plus an
+//      argument, and execFileSync takes no shell, so before this it died with
+//      ENOENT on a program name containing a space. The stand-in here is
+//      `node <fake-cli>` — same shape, no network.
+//   2. `CM` alone is enough. The acceptance criterion is "no global install, only
+//      CM set", so the run must succeed with --cli omitted entirely.
+//   3. a launcher nothing can execute is refused WITH ADVICE, not with ENOENT
+//      from somewhere deep in the run — and --cli still beats CM.
+//
+// And the property the resolution must not cost: the plan is unchanged by it.
+
+const LAUNCHER_SCENARIO = {
+  cli_available: true,
+  git: { branch: 'feature/integration', dirty: false },
+  gh: { repo_access: true },
+  workers: {
+    201: { state: 'completed', verify: 'pass' },
+    200: { state: 'completed', verify: 'pass' },
+  },
+};
+
+// A dispatch run that must reach the workers, driven through `launcher`.
+function dispatchWithLauncher(planPath, opts) {
+  const work = mkdtempSync(join(tmpdir(), 'cmate-launcher-'));
+  return runDispatchRunner(planPath, LAUNCHER_SCENARIO, work, join(work, 'dispatch'), [], null, opts);
+}
+
+function launcherReport(result) {
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    return null;
+  }
+}
+
+function launcherTest() {
+  log('  launcher resolution (#37)');
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-launcher-plan-'));
+  const spec = { plan: { issues_fixture: 'cases/02-explicit-dependency/issues.json', orchestrate_args: ['200', '201', '--max-parallel', '3', '--run-id', 'plan'] } };
+  const planPath = generatePlan(spec, runsDir);
+  if (!check(existsSync(planPath), 'launcher: plan.json was not generated')) return;
+
+  // --- 1. a multi-token --cli is split into argv and executed ----------------
+  const split = dispatchWithLauncher(planPath, { launcher: `node ${FAKE_CLI}` });
+  const splitReport = launcherReport(split);
+  check(split.exit === 0, `a multi-token --cli should dispatch, exited ${split.exit}: ${split.stdout.slice(0, 300)}`);
+  check(splitReport?.status === 'success', `a multi-token --cli should reach the workers, got status ${splitReport?.status}`);
+
+  // --- 2. CM alone, with no --cli at all -------------------------------------
+  const viaEnv = dispatchWithLauncher(planPath, { launcher: null, env: { CM: `node ${FAKE_CLI}` } });
+  const envReport = launcherReport(viaEnv);
+  check(viaEnv.exit === 0, `CM alone should dispatch, exited ${viaEnv.exit}: ${viaEnv.stdout.slice(0, 300)}`);
+  check(envReport?.status === 'success', `CM alone should reach the workers, got status ${envReport?.status}`);
+
+  // A CM that names nothing executable stops the run at the drift re-check with
+  // cli_available NG — proving CM is what was spawned rather than being quietly
+  // ignored in favour of a `commandmate` that happens to be on this PATH.
+  const badEnv = dispatchWithLauncher(planPath, { launcher: null, env: { CM: 'commandmate-does-not-exist' } });
+  const badEnvReport = launcherReport(badEnv);
+  check(badEnvReport?.stop_reason === 'drift', `an unrunnable CM should stop the run on drift, got stop_reason ${badEnvReport?.stop_reason}`);
+  check(
+    (badEnvReport?.drift_checks ?? []).some((c) => c.code === 'cli_available' && c.ok === false),
+    `an unrunnable CM should fail the cli_available drift check, got ${JSON.stringify(badEnvReport?.drift_checks)}`,
+  );
+
+  // --- 3. --cli wins over CM -------------------------------------------------
+  const precedence = dispatchWithLauncher(planPath, { launcher: FAKE_CLI, env: { CM: 'commandmate-does-not-exist' } });
+  check(launcherReport(precedence)?.status === 'success', '--cli should override CM, but the run did not succeed');
+
+  // --- 4. an unexecutable launcher is refused with advice --------------------
+  // The refused launchers are built from the fake CLI on purpose. The shape
+  // an operator actually types is `npx commandmate@latest | tee …`, but if the
+  // guard is ever removed the tokens have to reach a program this suite owns —
+  // a suite that fetches from the npm registry to prove a guard works is a suite
+  // that hangs on the first machine without network.
+  const refusals = [
+    ['shell syntax in --cli', { launcher: `${FAKE_CLI} | tee /tmp/x` }, 'contains shell syntax'],
+    ['a quoted --cli', { launcher: `node "${FAKE_CLI}"` }, 'contains shell syntax'],
+    ['an empty --cli', { launcher: '   ' }, 'is empty'],
+    // A leading dash can only arrive via CM: node:util's parseArgs refuses
+    // `--cli --verbose` before this runner ever sees it.
+    ['a CM that is a flag', { launcher: null, env: { CM: '-verbose' } }, 'would be read as a flag'],
+    ['shell syntax in CM', { launcher: null, env: { CM: `${FAKE_CLI} && echo hi` } }, 'contains shell syntax'],
+  ];
+  const blockingText = (report) => (report?.blocking_reasons ?? []).map((e) => `${e.code} ${e.detail}`).join(' ');
+  for (const [label, opts, needle] of refusals) {
+    const refused = dispatchWithLauncher(planPath, opts);
+    const detail = blockingText(launcherReport(refused));
+    check(refused.exit === 3, `${label}: expected exit 3, got ${refused.exit}`);
+    check(detail.includes('invalid_input'), `${label}: expected an invalid_input error, got: ${detail.slice(0, 200)}`);
+    check(detail.includes(needle), `${label}: the error should say "${needle}", got: ${detail.slice(0, 300)}`);
+    // The advice is the whole point of the improved error: it has to name the way out.
+    check(detail.includes('npx --yes commandmate@latest'), `${label}: the error should name the wrapper recipe, got: ${detail.slice(0, 300)}`);
+    check(detail.includes('WITHOUT a shell'), `${label}: the error should say no shell is involved, got: ${detail.slice(0, 300)}`);
+  }
+  // Naming which source produced the bad value, so an inherited CM is not
+  // mistaken for a typo on the command line.
+  const fromEnv = dispatchWithLauncher(planPath, { launcher: null, env: { CM: `${FAKE_CLI} | cat` } });
+  check(
+    (launcherReport(fromEnv)?.blocking_reasons ?? []).some((e) => e.detail.startsWith('CM ')),
+    `a bad CM should be attributed to CM rather than to --cli, got: ${blockingText(launcherReport(fromEnv)).slice(0, 200)}`,
+  );
+
+  // --- 5. uat.mjs resolves identically ---------------------------------------
+  // The third file Issue #37's table omits. It gets the same launcher, so the
+  // same two claims are made against it: multi-token runs, shell syntax refused.
+  const uatWork = mkdtempSync(join(tmpdir(), 'cmate-launcher-uat-'));
+  const dispatchPath = generateDispatchReport(planPath, DEFAULT_DISPATCH_SCENARIO, uatWork);
+  const uatScenarioPath = writeScenario(uatWork, 'uat-scenario.json', {
+    ...LAUNCHER_SCENARIO,
+    worktrees: planToWorktrees(readPlan(planPath)),
+  });
+  const uatEnv = { ...baseEnv(), CMATE_FAKE_SCENARIO: uatScenarioPath, CMATE_FAKE_STATE: uatWork };
+  setupWorktrees(readPlan(planPath), uatWork, () => true, {});
+
+  // The UAT verdict itself is irrelevant here; what matters is that the launcher
+  // ran at all, i.e. cli_available passed instead of failing on a program name
+  // with a space in it.
+  const uatSplit = runUatRunner(planPath, dispatchPath, join(uatWork, 'uat-split'), '--write-uat', [], uatEnv, uatWork, { launcher: `node ${FAKE_CLI}` });
+  const uatSplitReport = launcherReport(uatSplit);
+  check(
+    (uatSplitReport?.preflight ?? []).some((c) => c.code === 'cli_available' && c.ok === true),
+    `uat with a multi-token --cli should find the CLI runnable, got ${JSON.stringify(uatSplitReport?.preflight)}`,
+  );
+
+  const uatRefused = runUatRunner(planPath, dispatchPath, join(uatWork, 'uat-refused'), '--write-uat', [], uatEnv, uatWork, { launcher: `${FAKE_CLI} | tee /tmp/x` });
+  check(uatRefused.exit === 3, `uat should refuse an unexecutable --cli with exit 3, got ${uatRefused.exit}`);
+  const uatDetail = blockingText(launcherReport(uatRefused));
+  check(uatDetail.includes('contains shell syntax'), `uat's refusal should say why, got: ${uatDetail.slice(0, 300)}`);
+  check(uatDetail.includes('npx --yes commandmate@latest'), `uat's refusal should name the wrapper recipe, got: ${uatDetail.slice(0, 300)}`);
+
+  // --- 6. the plan is untouched by any of it ---------------------------------
+  // Launcher resolution is a RUNTIME concern. If it ever leaks into plan.json the
+  // plan stops being a pure function of its inputs, and two operators with
+  // different shells stop agreeing on what was planned.
+  const planUnderCm = mkdtempSync(join(tmpdir(), 'cmate-launcher-plan-cm-'));
+  const issuesPath = join(HERE, spec.plan.issues_fixture);
+  const argv = [
+    '200', '201', '--max-parallel', '3', '--run-id', 'plan',
+    '--profile-json', NODE_FAKE_PROFILE, '--issue-json', issuesPath, '--runs-dir', planUnderCm,
+  ];
+  const planned = runRunner(argv, undefined, { ...baseEnv(), CM: 'npx commandmate@latest' });
+  check(planned.exit === 0, `planning under CM should succeed, exited ${planned.exit}: ${planned.stdout.slice(0, 300)}`);
+  const withCm = join(planUnderCm, 'plan', 'plan.json');
+  if (check(existsSync(withCm), 'planning under CM produced no plan.json')) {
+    check(
+      readFileSync(withCm, 'utf8') === readFileSync(planPath, 'utf8'),
+      'CM changed plan.json — launcher resolution leaked into the plan',
+    );
+  }
+}
+
+// =============================================================================
 // Self-test of the validator: it must reject a broken plan, not wave it through.
 // =============================================================================
 
@@ -1548,12 +1730,15 @@ function main() {
   log('  -- contract parity --');
   parityTest();
 
+  log('  -- launcher resolution --');
+  launcherTest();
+
   log('');
   if (failures > 0) {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, contract parity`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, contract parity, launcher resolution`);
 }
 
 main();

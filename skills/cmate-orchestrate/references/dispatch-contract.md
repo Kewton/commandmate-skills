@@ -30,7 +30,7 @@ CommandMate の exit code へ移しただけで、report 上の表現（field �
 |---|---|---|---|
 | `--plan <path>` | 必須 | なし | 承認済み `plan.json`（plan-core の出力） |
 | `--out <dir>` | 任意 | `<plan-dir>/dispatch` | dispatch artifact の出力先。既存なら `out_exists` で拒否 |
-| `--cli <path>` | 任意 | `commandmate` | 実行する public CommandMate CLI |
+| `--cli <launcher>` | 任意 | `$CM` → `commandmate` | 実行する public CommandMate ランチャー（第 2.8 節） |
 | `--git <path>` | 任意 | `git` | drift 確認に使う git |
 | `--gh <path>` | 任意 | `gh` | repo 到達性確認に使う gh |
 | `--auto-yes` | 任意 | off | worker prompt を自動応答する。既定 off（prompt で停止し human へ提示） |
@@ -244,6 +244,30 @@ pass を得た worker に対して `--verify` を**二度と付けない**。付
 | `off` | probe せずフォールバック。`limitations` に `contract_disabled` | 同左 |
 
 どのモードでも `summary_markdown` の冒頭に「どちらの裁定機構で判定したか」を書く。
+
+### 2.8 ランチャー解決（Issue #37）
+
+`--cli` が受け取るのは実行ファイル名ではなく**ランチャー**である。解決順は 1つだけ:
+
+```
+--cli <launcher>  →  $CM  →  "commandmate"
+```
+
+`$CM` は `cmate-orchestrate-monitor` の `monitor.sh` / `hooks-task.sh` が使うのと**同じ変数・
+同じ意味**である。グローバル導入を持たない npx 運用では、利用者は `CM` を 1 つ設定すれば
+dispatch / uat / monitor / verify-advisor のすべてが同じ launcher を使う。
+
+- **受理する**: 空白区切りの 1 個以上のトークン。先頭が program、残りは固定の先行引数。
+  `commandmate` / `/usr/local/bin/commandmate` / `npx commandmate@latest` / `node /path/cli.mjs`。
+- **拒否する**（`invalid_input`、exit 3）: 空値、先頭が `-` で始まる値、制御文字、および
+  シェル構文（パイプ・`&`・`;`・リダイレクト・小括弧・`$`・バッククォート・バックスラッシュ・
+  引用符）。runner は `execFileSync` を使い**シェルを経由しない**ため、
+  これらは黙って literal な引数として渡り誤動作する。エラーは拒否理由と、
+  `~/.local/bin/commandmate` に `exec npx --yes commandmate@latest "$@"` のラッパを置く回避策を
+  名指しする。
+
+**ランチャー解決は実行時の話である。** plan.json は入力の純粋関数であり、`$CM` を変えても
+plan の byte 列は変わらない。dispatch report にも解決結果は載せない。
 
 ## 3. 監督ループと gate
 

@@ -52,6 +52,35 @@ install / `commandmate init` / `commandmate start` は CommandMate 本体の公�
 - [CLI セットアップガイド](https://github.com/Kewton/CommandMate/blob/main/docs/user-guide/cli-setup-guide.md)
 - [クイックスタートガイド（CommandMate 本体）](https://github.com/Kewton/CommandMate/blob/main/docs/user-guide/quick-start.md)
 
+### 1.0 導入形態を先に決める（このページは裸の `commandmate` を前提に書く）
+
+以降のコマンドはすべて `commandmate …` と書く。**このページはグローバル導入（裸の
+`commandmate` が PATH に居る状態）を前提にする。**
+
+npx 単独で回す場合、`npx commandmate@latest` は `node_modules/.bin` を実行中の子プロセスの
+PATH にしか足さないので、**利用者自身のターミナル・エージェントセッション・cron からは裸名が
+引けない**（worker 側はサーバプロセスの PATH を継承するので問題にならない）。さらに npx は
+1 呼び出しあたり **0.5〜0.9 秒**の起動コストがあり、手順 4.2 の `wait` や orchestrate の監視の
+ように高頻度で叩く経路ではそれがそのまま効く。
+
+**npx 運用なら、先に薄いラッパを置く**（公式の推奨手順）。
+
+```bash
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/commandmate <<'EOF'
+#!/usr/bin/env bash
+exec npx --yes commandmate@latest "$@"
+EOF
+chmod +x ~/.local/bin/commandmate
+export PATH="$HOME/.local/bin:$PATH"   # お使いの shell の rc にも書く
+
+commandmate --version   # 以降このページのコマンドがそのまま通る
+```
+
+ラッパを置かない場合は、Skill 同梱スクリプトへ `CM` 環境変数でランチャーを渡す
+（`export CM="npx commandmate@latest"`）。解決順・受理する形・拒否する形は
+[README の「CommandMate CLI の導入形態」](../README.md#commandmate-cli-の導入形態)。
+
 ここで満たすべき条件は 1 つだけである。**対象リポジトリの worktree が
 `commandmate ls` に出ていること。**
 

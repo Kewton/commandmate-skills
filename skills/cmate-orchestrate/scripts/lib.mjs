@@ -14,6 +14,10 @@
 //   with different bodies are not "reconciled" into one — reconciling them picks
 //   one runner's behavior and silently imposes it on the others.
 //
+// resolveLauncher() is the one entry that was never a copy: it was written here
+// FIRST, precisely so dispatch and uat cannot drift on how a launcher is read
+// (Issue #37). Divergence there is the bug it exists to prevent.
+//
 // Deliberately NOT hoisted, with the difference that keeps each one local:
 //
 //   parseCli / renderSummary  four different implementations (different flags,
@@ -171,6 +175,61 @@ export function parseCliJson(result) {
   } catch {
     return null;
   }
+}
+
+// =============================================================================
+// Launcher resolution (Issue #37)
+// =============================================================================
+
+// Every runner that drives the CommandMate CLI resolves its launcher the same
+// way `cmate-orchestrate-monitor/scripts/monitor.sh:108` does, so one operator
+// setting covers the whole toolchain instead of one convention per Skill:
+//
+//   --cli <launcher>   explicit, wins
+//   $CM                monitor.sh's variable, same name and same meaning
+//   "commandmate"      the default
+//
+// The value is a LAUNCHER, not merely an executable. It is split on whitespace
+// and spawned WITHOUT a shell, which is what makes `npx commandmate@latest`
+// usable: before this, execFileSync took the whole string as one program name
+// and died with ENOENT on the space. The default stays the bare name so that an
+// npx-only operator sets exactly one thing — `CM` — as the acceptance criteria
+// ask, and nobody who already has the binary starts paying npx startup per call.
+//
+// This is RUNTIME resolution only. No runner writes the resolved launcher into
+// plan.json: the plan stays a pure function of its inputs.
+export const DEFAULT_LAUNCHER = 'commandmate';
+
+// Shell syntax we would never interpret. Nothing here goes through a shell, so a
+// pipe, a redirect, a substitution or a quote would be handed to the program as
+// a literal argument and silently misbehave — a wrapper script is the answer,
+// and the error says so. Whitespace is the separator, so tab and space are fine;
+// every other control character is not.
+const LAUNCHER_SHELL_CHARS = /[|&;<>()$`\\"']/;
+// eslint-disable-next-line no-control-regex
+const LAUNCHER_CONTROL_CHARS = /[\x00-\x08\x0a-\x1f\x7f]/;
+
+export const LAUNCHER_ADVICE =
+  'a launcher is an executable plus fixed leading arguments, split on whitespace and run WITHOUT a shell ' +
+  '(accepted: "commandmate", "/usr/local/bin/commandmate", "npx commandmate@latest", "node /path/to/cli.mjs"). ' +
+  'For anything a shell would have to read — a pipe, a redirect, a substitution, a quote — put a wrapper on PATH ' +
+  '(~/.local/bin/commandmate containing: exec npx --yes commandmate@latest "$@") and pass its path.';
+
+// Returns the argv prefix: [program, ...fixed args]. Never empty.
+export function resolveLauncher(cliFlag, env = process.env) {
+  const fromEnv = typeof env.CM === 'string' && env.CM.trim() !== '' ? env.CM : undefined;
+  const source = cliFlag !== undefined && cliFlag !== null ? '--cli' : (fromEnv !== undefined ? 'CM' : 'default');
+  const raw = cliFlag ?? fromEnv ?? DEFAULT_LAUNCHER;
+  const reject = (why) => {
+    throw new SkillError('invalid_input', `${source} ${redact(String(raw))}: ${why}; ${LAUNCHER_ADVICE}`, 3);
+  };
+  if (typeof raw !== 'string') reject('must be a string');
+  if (LAUNCHER_CONTROL_CHARS.test(raw)) reject('contains a control character');
+  if (LAUNCHER_SHELL_CHARS.test(raw)) reject('contains shell syntax, which nothing here interprets');
+  const argv = raw.trim().split(/\s+/).filter((token) => token !== '');
+  if (argv.length === 0) reject('is empty');
+  if (argv[0].startsWith('-')) reject('starts with "-", so it would be read as a flag rather than a program');
+  return argv;
 }
 
 // =============================================================================

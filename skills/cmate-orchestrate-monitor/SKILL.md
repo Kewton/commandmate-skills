@@ -5,6 +5,13 @@ description: 並列 worker（tmux 上の coding CLI）を capture --json のポ�
 
 # cmate-orchestrate-monitor（worker 監視の判定コア）
 
+> **ランチャー表記** — 本文中の `commandmate …` は**読み替え可能**である。グローバル導入をしない
+> npx 運用では `npx commandmate@latest …` と読む。同梱スクリプトは環境変数 `CM` で解決し、その
+> 既定は `npx commandmate@latest`（`monitor.sh:108`）— install 済みなら `CM=commandmate` を渡す。
+> 監視は capture / wait を高頻度で叩くため npx の起動コスト（1 回あたり 0.5〜0.9 秒）が効く。
+> `~/.local/bin/commandmate` に `exec npx --yes commandmate@latest "$@"` の薄いラッパを置き
+> `CM=commandmate` で回す導入形態を推奨する（README の「CommandMate CLI の導入形態」）。
+
 `commandmate` が管理する worktree セッション上で走る coding CLI を監督するための**監視レシピ**を、
 bash 3.2 互換の実行可能スクリプトとして資産化したものである。生成中判定・prompt 分類・介入条件・
 完了検証は、プロンプトから再発明するのではなくこの中核を呼び出して使う。

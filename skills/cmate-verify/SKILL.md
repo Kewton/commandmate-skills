@@ -6,6 +6,12 @@ allowed-tools: Bash(.claude/skills/cmate-verify/scripts/*), Bash(.agents/skills/
 
 # cmate-verify
 
+> **ランチャー表記** — 本文中の `commandmate …` は**読み替え可能**である。グローバル導入をしない
+> npx 運用では `npx commandmate@latest …` と読む。呼び出し頻度が高い経路では npx の起動コスト
+> （1 回あたり 0.5〜0.9 秒）を避けるため、`~/.local/bin/commandmate` に
+> `exec npx --yes commandmate@latest "$@"` の薄いラッパを置く導入形態を推奨する（README の
+> 「CommandMate CLI の導入形態」）。
+
 「このリポジトリで何が通れば合格か」を `.commandmate/verify.yaml` に宣言し、
 **実 exit code で** 判定するランナー。CommandMate 本体の検証ゲート
 （`commandmate verify <worktree-id>` / `commandmate wait <worktree-id> --verify`）の
