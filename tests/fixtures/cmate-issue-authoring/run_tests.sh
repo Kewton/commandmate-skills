@@ -3,7 +3,7 @@
 #
 #   bash tests/fixtures/cmate-issue-authoring/run_tests.sh
 #
-# Three things are proved here, in this order:
+# Four things are proved here, in this order:
 #
 #  1. **The validator is not a rubber stamp.** Every rule it claims to enforce is
 #     exercised by injecting one mutation into a conforming plan and requiring
@@ -16,6 +16,10 @@
 #  3. **The output reaches the target quality.** The conforming plan is rendered
 #     the way Phase 2 renders it and fed to the real cmate-orchestrate planner,
 #     which must produce a plan with zero blocking questions.
+#  4. **The planner mirror has not drifted.** `mirror-conformance.mjs` compares
+#     the mirrored extraction constants byte for byte and runs both copies over a
+#     corpus, so the validator cannot go on telling an author their body is ready
+#     while the planner reads it differently.
 #
 # Requires bash, node and the standard POSIX tools. No network: the planner runs
 # from a fixture, and the `gh` on PATH is a shim that only writes a log.
@@ -266,49 +270,29 @@ else
 fi
 
 # The validator's planner mirror is a verbatim copy of the extraction in
-# cmate-orchestrate. The one constant that silently drifts is the extension set
-# (issue #43: `geojson` was missing from the planner and from this mirror), so
-# the two FILE_EXT definitions are compared byte for byte. sed instead of grep:
-# orchestrate.mjs holds raw control bytes in a regex literal, which makes grep
-# treat the whole file as binary.
+# cmate-orchestrate, and nothing but review used to keep the two identical. The
+# conformance test compares the mirrored constants byte for byte AND runs both
+# copies over a corpus that exercises each of them, so a divergence in the code
+# around an unchanged constant is caught too. It deliberately compares only the
+# mirrored region — never a digest of the whole planner, which would fail on any
+# unrelated planner change.
+#
+# It exits 0 in sync, 1 drifted, 2 the comparison itself could not be made (a
+# region marker moved, a constant was renamed); 2 is reported here as a failure
+# distinct from drift, because "I could not look" must not read as "in sync".
 printf '\n== the planner mirror is in sync ==\n'
-planner_ext=$(LC_ALL=C sed -n "s/^const FILE_EXT = '\(.*\)';\$/\1/p" "$ORCHESTRATOR")
-mirror_ext=$(LC_ALL=C sed -n "s/^const FILE_EXT = '\(.*\)';\$/\1/p" "$VALIDATOR")
-if [ -n "$planner_ext" ] && [ "$planner_ext" = "$mirror_ext" ]; then
-  pass 'FILE_EXT is identical in the planner and its mirror'
+if node "$SUITE_DIR/mirror-conformance.mjs" > "$WORK/mirror.txt" 2>&1; then
+  sed 's/^/     /' "$WORK/mirror.txt"
+  pass 'the planner mirror matches cmate-orchestrate'
 else
-  fail 'FILE_EXT is identical in the planner and its mirror' \
-    "planner: ${planner_ext:-<not found>} / mirror: ${mirror_ext:-<not found>}"
-fi
-
-# FILE_EXT was never the only thing that could drift (Issue #49): the extraction
-# PATTERNS themselves decide which paths become suspected_files, and a mirror
-# that still matched from the middle of a path would keep telling an author the
-# Issue is ready while the planner extracted something else entirely. The four
-# pattern constants and the two heading sets that decide whether a path is the
-# Issue's product (#50) or something it merely cites (#54) are therefore
-# compared as one block, in declaration order, the same way FILE_EXT is.
-# `sed -E` rather than grep: orchestrate.mjs holds raw control bytes in a regex
-# literal, which makes grep treat the whole file as binary.
-mirror_consts() {
-  LC_ALL=C sed -E -n \
-    's/^const (PATH_START|CANDIDATE_BACKTICK|CANDIDATE_KNOWN_ROOT|CANDIDATE_WITH_EXT|DELIVERABLE_HEADING_RE|CONTEXT_HEADING_RE) = (.*)$/\1 = \2/p' \
-    "$1"
-}
-planner_pat=$(mirror_consts "$ORCHESTRATOR")
-mirror_pat=$(mirror_consts "$VALIDATOR")
-planner_pat_count=$(printf '%s\n' "$planner_pat" | grep -c '=' || true)
-if [ "$planner_pat_count" -ne 6 ]; then
-  fail 'the extraction patterns are identical in the planner and its mirror' \
-    "expected 6 pattern constants in the planner, found $planner_pat_count"
-elif [ "$planner_pat" = "$mirror_pat" ]; then
-  pass 'the extraction patterns are identical in the planner and its mirror'
-else
-  fail 'the extraction patterns are identical in the planner and its mirror' \
-    "planner:
-$planner_pat
-mirror:
-${mirror_pat:-<not found>}"
+  status=$?
+  sed 's/^/     /' "$WORK/mirror.txt"
+  if [ "$status" -eq 2 ]; then
+    fail 'the planner mirror matches cmate-orchestrate' \
+      'the conformance test could not run; fix its region markers before trusting any of this'
+  else
+    fail 'the planner mirror matches cmate-orchestrate' 'the mirror has drifted; see above'
+  fi
 fi
 
 printf '\n%s mutation(s) injected\n' "$mutations"

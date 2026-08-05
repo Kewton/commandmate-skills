@@ -19,9 +19,9 @@ Phase 1 で実行してよい command は次だけである。
 `git push` / `git commit`。
 
 同梱の `scripts/validate-plan.mjs` は `gh` も `git` も呼ばない。file を 2 つ読み、
-findings を出力するだけである。`tests/fixtures/cmate-issue-authoring/run_tests.sh` は、
-呼び出しを記録する `gh` を PATH に置いて validator を走らせ、記録が空であることを
-毎回確かめている。
+findings を出力するだけである。これは主張ではなく、**リポジトリの CI が毎回機械で
+確かめている**: 呼び出しを記録する `gh` を PATH の先頭に置いて validator を走らせ、
+記録が空であることを確認している。install 先で走らせる test は同梱していない。
 
 計画 artifact の書き込み先は `.commandmate/issue-authoring/<plan_id>/` 配下に限る。
 対象リポジトリの実装 file には触れない。
