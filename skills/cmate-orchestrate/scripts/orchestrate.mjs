@@ -25,8 +25,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.13.0';
+import { REDACTIONS, SKILL_ID, SKILL_VERSION, SkillError } from './lib.mjs';
+
 const PLAN_SCHEMA_VERSION = 1;
 const RESULT_SCHEMA_VERSION = 1;
 
@@ -85,38 +85,20 @@ const PROFILE_FIELDS = [
   'verified',
 ];
 
-// A skill error carries a machine code so the result envelope, the exit status
-// and the audit line all agree on what went wrong.
-class SkillError extends Error {
-  constructor(code, detail, exitCode) {
-    super(detail);
-    this.code = code;
-    this.detail = detail;
-    this.exitCode = exitCode;
-  }
-}
-
 // =============================================================================
 // Redaction
 // =============================================================================
 
 // Applied to every free-text field lifted out of an issue before it is stored.
 // A token or an absolute host path in an issue body must not survive into a
-// plan, a result or an audit artifact. Patterns are shapes, never example
-// secrets, so this file itself trips no credential scanner.
-const REDACTIONS = [
-  [/gh[pousr]_[A-Za-z0-9]{20,}/g, '[REDACTED-TOKEN]'],
-  [/github_pat_[A-Za-z0-9_]{40,}/g, '[REDACTED-TOKEN]'],
-  [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, '[REDACTED-TOKEN]'],
-  [/\bsk-[A-Za-z0-9]{20,}\b/g, '[REDACTED-TOKEN]'],
-  [/xox[baprs]-[A-Za-z0-9-]{10,}/g, '[REDACTED-TOKEN]'],
-  [/\bAIza[0-9A-Za-z_-]{35}\b/g, '[REDACTED-TOKEN]'],
-  [/\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}\b/g, '[REDACTED-TOKEN]'],
-  [/\b[Bb]earer\s+[A-Za-z0-9._-]{10,}/g, 'Bearer [REDACTED-TOKEN]'],
-  [/(?:\/Users\/|\/home\/|\/root\/|\/var\/|\/private\/|\/tmp\/)[^\s"'`)\]]*/g, '[REDACTED-PATH]'],
-  [/\b[A-Za-z]:\\[^\s"'`)\]]*/g, '[REDACTED-PATH]'],
-];
-
+// plan, a result or an audit artifact. The pattern list is shared with the three
+// mutating runners (lib.mjs REDACTIONS) because a shape added to one runner and
+// missed in another leaks from the one that missed it.
+//
+// This copy of redact() is deliberately NOT the shared one: the three mutating
+// runners tally what they removed so their reports can carry a `redactions[]`
+// field, and the plan result envelope has no such field. Hoisting the tallying
+// version here would be a behavior change, so the difference stays local.
 function redact(value) {
   let text = String(value);
   for (const [pattern, replacement] of REDACTIONS) {

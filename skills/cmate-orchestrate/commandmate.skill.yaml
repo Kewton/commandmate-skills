@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-orchestrate
 name: cmate-orchestrate
-version: 0.13.1
+version: 0.14.0
 summary: 複数 Issue の並列実行を dry-run で計画し、承認後に実行契約付きで dispatch して検証 exit code で裁定し、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT と回数上限つき修正ループを回す。UAT の意味ゲートには cmate-acceptance-test の別途 install が要る。
 description: >-
   複数 Issue を並列で進めるための、計画（dry-run）・その承認後の監督付き実行・verification pass 後の
@@ -106,8 +106,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: fb40da4b9fb9c666cd7270d3037e12f972d4e060dce25fe33ce22be212cbc11d
-    size: 58171
+    sha256: 1fe5d98b545fa7bc48d3f9c5d1b7679f3b20914252ba87e94e11a8f7d6c66e0c
+    size: 21770
     kind: skill_md
     executable: false
     script: false
@@ -138,6 +138,12 @@ files:
   - path: references/profile-contract.md
     sha256: c724b1bc4d2bc5e944d77391c6e011f19386daee02344840a33fb92ae973b110
     size: 5684
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/release-notes.md
+    sha256: 1175c343ecfb491ce0a787aa0a63e0ee5299a07e11f210d599eb5b6bdc2e6c36
+    size: 18798
     kind: instruction
     executable: false
     script: false
@@ -178,26 +184,32 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: 70a2f3edacbf909d929b73869029758cf6c5537b33ab29dc331d5889d104cb3a
-    size: 97765
+    sha256: 2fd643a839fa4f95d464212748a6df08690360446e0049fcf4d94a3b7a3e4bee
+    size: 95207
     kind: script
     executable: true
     script: true
+  - path: scripts/lib.mjs
+    sha256: aaa9f0195aa1c12c0daab6c57e61c56d6dc17fbc6ba492890756fa9320cdd35d
+    size: 9609
+    kind: script
+    executable: false
+    script: true
   - path: scripts/merge.mjs
-    sha256: 8b2dc5299fd3992bfe65049966a36be5ff04a1b4be38e930300c53ef0b77b23f
-    size: 39494
+    sha256: 808ffee8a3adde606ce0cd4607ffcdf544185cead1ebf72527868f0c671e5656
+    size: 36523
     kind: script
     executable: true
     script: true
   - path: scripts/orchestrate.mjs
-    sha256: 8ce58ff995e687604a10cd4a4bdbec28047bdded6248670c406b32cd25dcf840
-    size: 70623
+    sha256: 9cf9f8525f7caa9e334f05b73d16a938312e36677f64da076002dbcf3239cd98
+    size: 70047
     kind: script
     executable: true
     script: true
   - path: scripts/uat.mjs
-    sha256: 87a105545a4452fe6490809f37248164c05c1884156282efd2d9f8684c962287
-    size: 74650
+    sha256: f83f702ea3cd047760a79ef2e05d9d870268b769dbf03285aae873034a9870f1
+    size: 70547
     kind: script
     executable: true
     script: true
