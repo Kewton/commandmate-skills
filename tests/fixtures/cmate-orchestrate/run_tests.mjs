@@ -744,6 +744,21 @@ function runDispatchCase(caseId) {
   for (const code of expect.absent_blocking_codes ?? []) {
     check(!report.blocking_reasons.some((entry) => entry.code === code), `blocking reason "${code}" should be absent but was recorded`);
   }
+  // A blocking reason's DETAIL is what an operator acts on: a refusal that names
+  // only a code cannot tell them what to write in the issue (Issue #52).
+  if (expect.blocking_details_include) {
+    const details = report.blocking_reasons.map((entry) => entry.detail);
+    for (const needle of expect.blocking_details_include) {
+      check(details.some((detail) => detail.includes(needle)), `no blocking detail contains "${needle}"; details: ${JSON.stringify(details)}`);
+    }
+  }
+  // The human-facing half of the same finding. `summary_markdown` is what a
+  // reviewer reads first, so a fact that only exists in the JSON is not reported.
+  if (expect.summary_includes) {
+    for (const needle of expect.summary_includes) {
+      check(report.summary_markdown.includes(needle), `dispatch summary does not contain "${needle}"`);
+    }
+  }
 
   // Contract adjudication (#1588). The per-issue verification outcome is asserted
   // separately from worker_state so a case cannot pass with the two conflated —

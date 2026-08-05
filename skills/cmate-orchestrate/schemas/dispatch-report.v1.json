@@ -43,11 +43,11 @@
         "drift",
         "dispatch_error"
       ],
-      "description": "Why the loop stopped. completed: all waves finished and passed. human_required: a worker raised a prompt and the loop halted without auto-responding. dispatch_error also covers the two version-gate/verdict stops: contract_unsupported (the CLI has no execution contract and --contract-mode require refused to fall back) and verification_not_judged (verification exited 99, meaning the run ended error/cancelled and no gate judged the work). The rest name the first blocking condition."
+      "description": "Why the loop stopped. completed: all waves finished and passed. human_required: a worker raised a prompt and the loop halted without auto-responding. dispatch_error also covers the pre-dispatch and version-gate/verdict stops: open_questions (an issue in the plan still carries an unanswered planner question and --allow-questions was not set, so nothing was dispatched), contract_unsupported (the CLI has no execution contract and --contract-mode require refused to fall back) and verification_not_judged (verification exited 99, meaning the run ended error/cancelled and no gate judged the work). The rest name the first blocking condition."
     },
     "human_required": {
       "type": "boolean",
-      "description": "True when the loop halted for a human: a worker raised a prompt, or verification returned no verdict at all (exit 99), which no re-dispatch can resolve. When true, no prompt was auto-answered unless auto_yes was set."
+      "description": "True when the loop halted for a human: a worker raised a prompt, verification returned no verdict at all (exit 99), or the plan carried an unanswered planner question that only an edit to the issue body can resolve. None of the three is resolvable by re-dispatching. When true, no prompt was auto-answered unless auto_yes was set."
     },
     "plan_run_id": { "$ref": "#/$defs/run_id" },
     "out_dir": {

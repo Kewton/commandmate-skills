@@ -226,6 +226,11 @@ Options:
   --gh <path>            The gh CLI used for the repo-access check (default "gh").
   --auto-yes             Answer worker prompts automatically. OFF by default; a
                          prompt otherwise halts the loop for a human.
+  --allow-questions      Dispatch a plan whose issues still carry unanswered
+                         open questions. OFF by default: an issue the planner
+                         could not read acceptance criteria or affected files
+                         out of halts the run before anything is dispatched.
+                         Setting this records that an operator took the risk.
   --contract-mode <m>    auto (default) | require | off. auto dispatches under an
                          execution contract when the CLI supports one and falls
                          back to the profile baseline with an explicit limitation
@@ -259,6 +264,7 @@ function parseCli(argv) {
         git: { type: 'string' },
         gh: { type: 'string' },
         'auto-yes': { type: 'boolean' },
+        'allow-questions': { type: 'boolean' },
         'contract-mode': { type: 'string' },
         'verify-gates': { type: 'string' },
         'expect-branch': { type: 'string' },
@@ -330,6 +336,7 @@ function resolveInputs(parsed) {
     git: values.git ?? 'git',
     gh: values.gh ?? 'gh',
     autoYes: Boolean(values['auto-yes']),
+    allowQuestions: Boolean(values['allow-questions']),
     contractMode: resolveContractMode(values['contract-mode']),
     verifyGates: resolveVerifyGates(values['verify-gates']),
     expectBranch: values['expect-branch'] ?? null,
@@ -1320,6 +1327,31 @@ async function respondWorker(inputs, worktreeId) {
 }
 
 // =============================================================================
+// The open-questions gate (Issue #52)
+// =============================================================================
+
+// Every issue in the plan that still carries a planner question, in plan order.
+// A plan written by an older runner may have no `questions` field at all; a
+// missing field is "nothing to report", not a reason to refuse the plan.
+function collectOpenQuestions(plan) {
+  const out = [];
+  for (const issue of plan.issues ?? []) {
+    const questions = Array.isArray(issue.questions) ? issue.questions.filter((q) => typeof q === 'string' && q !== '') : [];
+    if (questions.length > 0) out.push({ issue: issue.number, questions });
+  }
+  return out;
+}
+
+// The question TEXT, not just a count — an operator cannot act on "3 open
+// questions", only on what they say. Bounded so a long question cannot flood the
+// blocking reason, and redacted like every other field lifted out of an issue.
+function formatOpenQuestions(entries) {
+  return entries
+    .map((entry) => `#${entry.issue}: ${entry.questions.map((q) => excerpt(redact(q), 200)).join(' / ')}`)
+    .join('; ');
+}
+
+// =============================================================================
 // The supervision loop
 // =============================================================================
 
@@ -1366,13 +1398,39 @@ async function runDispatch(inputs, plan, outDir) {
     stopped = true;
   };
 
+  // The open-questions gate (Issue #52). The planner writes a question for every
+  // issue it could not read acceptance criteria or affected files out of. Nothing
+  // downstream used to read that field, so an issue with no stated definition of
+  // done reached a real worker with exit 0. It is checked FIRST — before the
+  // contract probe and before any drift check — because the answer never depends
+  // on the state of the world, only on the plan.
+  const openQuestions = collectOpenQuestions(plan);
+  if (openQuestions.length > 0) {
+    const detail = `${openQuestions.length} issue(s) carry an unanswered planner question: ${formatOpenQuestions(openQuestions)}`;
+    if (inputs.allowQuestions) {
+      report.limitations.push({
+        code: 'open_questions_accepted',
+        detail: `--allow-questions was set, so dispatch proceeded with the questions unanswered. ${detail}`,
+      });
+    } else {
+      report.human_required = true;
+      halt('failure', 'dispatch_error', 'open_questions',
+        `${detail} Nothing was dispatched: answer them in the issue body and re-plan, ` +
+          'or re-run with --allow-questions to take the risk explicitly.');
+    }
+  }
+
   // The version gate (#1588). Decided ONCE, before the first wave, and always
   // stated: `auto` falls back with an explicit limitation, `require` refuses to
   // fall back at all, `off` never probes. What is not allowed is degrading in
   // silence — the fallback reports the same `verification.outcome: pass` from a
   // materially weaker check.
+  // Skipped once the open-questions gate has already stopped the run: probing a
+  // CLI whose answer can no longer change anything is a side effect for nothing.
   let contractMode = false;
-  if (inputs.contractMode === 'off') {
+  if (stopped) {
+    // nothing to decide; no wave will be dispatched
+  } else if (inputs.contractMode === 'off') {
     report.limitations.push({
       code: 'contract_disabled',
       detail: '--contract-mode off: dispatched without an execution contract; verification is the profile baseline re-run inside the worktree',
@@ -1651,7 +1709,7 @@ async function runDispatch(inputs, plan, outDir) {
   }
 
   report.redactions = redactionsList();
-  report.summary_markdown = renderSummary(report, contractMode);
+  report.summary_markdown = renderSummary(report, contractMode, openQuestions);
   return report;
 }
 
@@ -1673,8 +1731,9 @@ function buildCompletionCheck({ planApproved, driftReconfirmed, parallelismBound
 // Summary
 // =============================================================================
 
-function renderSummary(report, contractMode = false) {
+function renderSummary(report, contractMode = false, openQuestions = []) {
   const lines = [];
+  const haltedOnQuestions = report.blocking_reasons.some((reason) => reason.code === 'open_questions');
   lines.push('## 対象と結論');
   const verb = report.status === 'success' ? '完了' : report.status === 'partial' ? '途中停止' : '未実行';
   lines.push(`plan ${report.plan_run_id} を ${report.profile.repository} に dispatch: ${report.status}（${verb}, stop=${report.stop_reason}）。`);
@@ -1682,9 +1741,27 @@ function renderSummary(report, contractMode = false) {
     ? '裁定: 実行契約（`commandmate send --contract` / `wait --verify` の exit code）を一次ソースにした。'
     : '裁定: 実行契約は使わず、profile baseline を worktree 内で再実行するフォールバックで判定した。');
   const notJudged = report.blocking_reasons.find((reason) => reason.code === 'verification_not_judged');
-  if (notJudged) lines.push('検証が判定に到達しなかった（exit 99）ため、不合格として再指示せず human 提示で停止した。');
+  if (haltedOnQuestions) lines.push('plan の Issue に未回答の open question が残っていたため、worker を 1 人も dispatch せずに停止した。');
+  else if (notJudged) lines.push('検証が判定に到達しなかった（exit 99）ため、不合格として再指示せず human 提示で停止した。');
   else if (report.human_required) lines.push('worker が prompt を出したため、自動応答せず human 提示で停止した。');
   lines.push('');
+
+  // The questions themselves, verbatim. A code alone ("open_questions") tells an
+  // operator that something is missing but not what to write in the issue, so the
+  // text is reproduced here whether the gate stopped the run or was waived
+  // (Issue #52).
+  if (openQuestions.length > 0) {
+    lines.push('## open question');
+    lines.push(haltedOnQuestions
+      ? '- 次の question に Issue 本文で答えて re-plan する（引き受けて進めるなら `--allow-questions`）。'
+      : '- `--allow-questions` により、次の question を未回答のまま dispatch した。');
+    for (const entry of openQuestions) {
+      for (const question of entry.questions) {
+        lines.push(`- #${entry.issue}: ${excerpt(redact(question), 200)}`);
+      }
+    }
+    lines.push('');
+  }
   lines.push('## Wave');
   if (report.waves.length === 0) {
     lines.push('- dispatch 前に停止（wave なし）。');
@@ -1722,7 +1799,10 @@ function renderSummary(report, contractMode = false) {
   } else {
     for (const reason of report.blocking_reasons) lines.push(`- blocking: ${reason.code} — ${reason.detail}`);
     for (const limitation of report.limitations) lines.push(`- limitation: ${limitation.code} — ${limitation.detail}`);
-    if (report.human_required && !report.blocking_reasons.some((reason) => reason.code === 'verification_not_judged')) {
+    if (haltedOnQuestions) {
+      lines.push('- next: 上記 open question を Issue 本文に反映して plan を作り直す。回答せずに進めると判断したなら `--allow-questions` を明示して再実行する（owner: human）。');
+    }
+    if (report.human_required && !haltedOnQuestions && !report.blocking_reasons.some((reason) => reason.code === 'verification_not_judged')) {
       lines.push('- next: 提示した prompt を human が確認し、承認のうえ再開する（owner: human）。');
     }
     if (report.blocking_reasons.some((reason) => reason.code === 'verification_not_judged')) {

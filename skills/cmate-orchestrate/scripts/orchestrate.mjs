@@ -739,6 +739,28 @@ function extractionWarnings(analyses) {
   return out;
 }
 
+// An open question is a thing the planner could NOT read out of the issue, so it
+// belongs in `warnings` — the channel that drops `status` to `partial` — and not
+// only in `issues[].questions`, which nothing downstream was obliged to look at
+// (Issue #52). Before this, an issue with no acceptance criteria at all planned
+// as a clean `success` with exit 0 and flowed straight into dispatch.
+function openQuestionWarnings(analyses) {
+  const out = [];
+  for (const analysis of analyses) {
+    for (const question of analysis._openQuestions) {
+      out.push({
+        code: question.code,
+        detail: redact(
+          `#${analysis.number}: ${question.text} ` +
+            'The dispatch runner refuses an issue with an unanswered question; ' +
+            'edit the issue body and re-plan, or accept the risk explicitly with --allow-questions.',
+        ),
+      });
+    }
+  }
+  return out;
+}
+
 // The extension alone cannot decide whether a path is context or product
 // (Issue #50). A documentation path is USUALLY context to read — but an issue
 // whose deliverable IS a Markdown document (a design note, an ADR, a runbook)
@@ -856,13 +878,24 @@ function analyzeIssue(issue, profile, binaries) {
   suspected.push(...scopeDefaults);
   const tests = extractTestExpectations(text, binaries).map(redact);
 
-  const questions = [];
+  // Open questions are built with their warning code attached, so the question a
+  // reviewer reads and the warning that drops the run to `partial` can never
+  // disagree about what is missing (Issue #52). `questions` stays a string list —
+  // that is the plan schema — and the codes stay private to the planner.
+  const openQuestions = [];
   if (acceptance.length === 0) {
-    questions.push('Acceptance criteria are unclear; add 1-3 concrete completion checks.');
+    openQuestions.push({
+      code: 'no_acceptance_criteria',
+      text: 'Acceptance criteria are unclear; add 1-3 concrete completion checks.',
+    });
   }
   if (suspected.length === 0) {
-    questions.push('Affected files are unclear; add likely modules or paths.');
+    openQuestions.push({
+      code: 'no_suspected_files',
+      text: 'Affected files are unclear; add likely modules or paths.',
+    });
   }
+  const questions = openQuestions.map((question) => question.text);
 
   const slug = slugify(issue.title);
   const repoName = profile.repository.split('/').pop() || 'repo';
@@ -892,6 +925,7 @@ function analyzeIssue(issue, profile, binaries) {
     // than failing the plan.
     worktree_id: null,
     questions,
+    _openQuestions: openQuestions,
     // Producer/consumer signals feed the inferred-dependency rule below.
     _producer: PRODUCER_RE.test(text),
     _consumer: CONSUMER_RE.test(text),
@@ -1602,8 +1636,14 @@ function run(argv) {
   const { edges, errors: depErrors, warnings: dependencyWarnings } = buildDependencies(analyses, inputs);
   // Profile warnings first: a plan built against the wrong repository is the
   // premise a reviewer has to settle before reading anything downstream of it.
-  // Then per-issue extraction warnings, then cross-issue dependency warnings.
-  const warnings = [...profileWarnings, ...extractionWarnings(analyses), ...dependencyWarnings];
+  // Then per-issue extraction warnings, the unanswered questions those issues
+  // still carry, then cross-issue dependency warnings.
+  const warnings = [
+    ...profileWarnings,
+    ...extractionWarnings(analyses),
+    ...openQuestionWarnings(analyses),
+    ...dependencyWarnings,
+  ];
   if (depErrors.length > 0) {
     const first = depErrors[0];
     throw new SkillError(first.code, first.detail, 5);

@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 220,
+      "title": "feat: tighten the session store",
+      "body": "Tighten the session store in `src/store.ts`.\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 221,
+      "title": "feat: add base configuration loader",
+      "body": "Add the base configuration loader in `src/base.ts`.\n\n## Acceptance criteria\n- [ ] `src/base.ts` reads config from disk\n",
+      "labels": ["feature"]
+    }
+  ]
+}
