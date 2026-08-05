@@ -20,9 +20,12 @@ description: GitHub Issue（または作業内容の記述）から実行契約 
 
 ## 0. 最低対応 CommandMate バージョン（先に確認する。飛ばさない）
 
-契約機能（`send --contract` / `.commandmate/tasks/`）は **`v0.16.0` には含まれていない**。
-対応するのは **契約機能を含む最初のリリース以降** である。本 Skill の作成時点で
-その version 番号は未確定なので、**番号ではなく機能の有無で判定する**。
+契約機能（`send --contract` / `wait --verify` / `.commandmate/tasks/`）は
+**`v0.17.0` で導入された**。`v0.16.0` には含まれていない。したがって
+**最低対応バージョンは `v0.17.0`** である。
+
+ただし判定は **番号ではなく機能の有無で行う**（利用者が build や fork を使っている
+場合、番号は当てにならない）。
 
 ```bash
 commandmate --version
@@ -247,6 +250,9 @@ autoYes:
 success:
   requireWorkEvidence: true
   requireScopeClean: true
+  # 未 commit の作業を証跡として認めない（CommandMate v0.20.0 以降）。
+  # requireWorkEvidence: false との併用は契約エラー。§4.5
+  requireCommit: true
   autoVerifyOnStop: false
 ```
 
@@ -255,8 +261,14 @@ success:
 ## 4. フィールド仕様
 
 正本は CommandMate の
-[docs/design/task-contract.md](https://github.com/Kewton/CommandMate/blob/develop/docs/design/task-contract.md)。
+[docs/design/task-contract.md](https://github.com/Kewton/CommandMate/blob/v0.21.1/docs/design/task-contract.md)
+（`v0.21.1` に pin。新しいリリースを使っているなら、そのタグの同 path を読む）。
 以下はそれを起案の観点でまとめたもので、値はパーサの実測に基づく。
+
+> **この表は正本の写しであって、正本ではない。** v1 が閉じた集合であることと、
+> 「この表に無いキーは存在しない」ことは別である。本体が v1 にキーを足せば、
+> この表は古くなる。**表に無いキーを見つけても、それだけを根拠に契約エラーと
+> 判定して削除しないこと。** 正本を読んで、そこにも無いことを確かめる。
 
 ### 4.1 トップレベル
 
@@ -355,6 +367,7 @@ rename は移動元・移動先の **両方** が判定される。許可され�
 |---|---|---|---|
 | `requireWorkEvidence` | boolean | `true` | commit も差分も無い「作業ゼロ」を不合格にする |
 | `requireScopeClean` | boolean | `true` | `scope` 外の変更を不合格にする（組み込み `scope` ゲート） |
+| `requireCommit` | boolean | `false` | `work-evidence` に「変更が在る」ではなく **「commit が在る」** を要求する（CommandMate `v0.20.0` 以降） |
 | `autoVerifyOnStop` | boolean | `false` | エージェント停止イベントで検証ランを自動起動する |
 
 `requireScopeClean` が true（既定）のまま `scope.allow` が空だと **契約エラー**である。
@@ -364,13 +377,36 @@ rename は移動元・移動先の **両方** が判定される。許可され�
 `requireScopeClean: false` は「この作業では変更範囲を宣言しない」という宣言であり、
 scope ゲートは `skipped` になる。**scope の洗い出しを省くために false にしないこと。**
 
+#### `requireCommit`
+
+既定（`false`）では `work-evidence` は「commit された差分」と「未 commit の変更」の
+どちらでも合格する。`requireCommit: true` にすると **commit だけ**が証跡として数えられ、
+`commits=0 uncommitted=1`（作業はしたが commit していない）は不合格になる。
+ワーカーへの委任のように「PR に載る形まで持っていく」ことを完了条件にしたい契約で使う。
+
+**`requireCommit: true` かつ `requireWorkEvidence: false` は契約エラー**である。
+commit の要求を裁定するのは `work-evidence` ゲートであり、`requireWorkEvidence: false` は
+そのゲートを契約のゲート集合から外す。両方を書くと、前文に「必ず commit」と宣言しながら
+それを見る機械が 1 つも無い契約になる。実測される出力:
+
+```
+  - success.requireCommit: requires success.requireWorkEvidence to be true
+    (the commit requirement is judged by the work-evidence gate, which
+    requireWorkEvidence: false switches off)
+```
+
+同じ要求はリポジトリ側の `.commandmate/verify.yaml` の `options.requireCommit` にもある。
+**合成は OR** で、契約は締める方向にしか効かない。リポジトリが `true` で要求しているものを
+契約の `requireCommit: false` で緩めることはできない（既定のままなら何も起きないので、
+「緩めるつもりで false を明示する」ことに意味は無い）。
+
 ---
 
 ## 5. よくある契約エラーと直し方
 
 | 出力 | 原因 | 直し方 |
 |---|---|---|
-| `top level: unknown key "..." (v1 is a closed set)` | キーの綴り違い / v1 に無いキー | §4.1 の表と照合する。独自キーは足せない |
+| `top level: unknown key "..." (v1 is a closed set)` | キーの綴り違い / v1 に無いキー | §4.1 の表、次に正本 spec と照合する。独自キーは足せない（が、表に無い = v1 に無い、ではない） |
 | `autoYes: unknown key "allowPromtTypes"` | 綴り違い | `allowPromptTypes` |
 | `title: required, must be a non-empty string (got nothing)` | `title` 忘れ | 200 文字以内で 1 行書く |
 | `scope.allow: at least one pattern is required while success.requireScopeClean is true` | scope 未宣言 | Step 3 に戻って洗い出す |
@@ -406,6 +442,9 @@ scope ゲートは `skipped` になる。**scope の洗い出しを省くため�
 5. `verify.gates` を書いたなら、その id が `.commandmate/verify.yaml` に実在するか。
    絞ったなら理由をコメントに残したか。
 6. 既定値のままのキー（`autoYes`・`success`）を無駄に書いていないか。
-7. §4.1 の表に無いキーが 1 つも無いか（綴りを 1 語ずつ照合したか）。
+7. 綴りを 1 語ずつ照合したか。§4 の表に無いキーがある場合、**表だけを根拠に消さず**、
+   正本 spec（[docs/design/task-contract.md](https://github.com/Kewton/CommandMate/blob/v0.21.1/docs/design/task-contract.md)、
+   使っているリリースのタグ）に照らして、v1 に実在しないことを確認したか。
+   実在するなら残す — 表が古いだけである。
 
 いずれかが no のまま送信しないこと。
