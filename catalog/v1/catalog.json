@@ -1365,7 +1365,7 @@
         "node",
         "ci"
       ],
-      "latest": "0.1.1",
+      "latest": "0.1.4",
       "versions": [
         {
           "version": "0.1.0",
@@ -1425,6 +1425,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-advisor-v0.1.1/cmate-verify-advisor-0.1.1.tar.gz",
             "sha256": "8d1d3622b0ad0dc0b4262f578eed58aad9ea8f72ff22211cd428914b268bed5e",
             "size": 34552,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-31 on Claude Code 2.1.220 with CommandMate 0.16.0 for 9 packages under docs/agent-support-matrix.md 3.2. This package was added 2026-08-02 and was NOT separately measured; install layout is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-31 on Codex CLI 0.145.0 (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured. The analyser needs only node, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured. The analyser needs only node, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.17.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.1.4",
+          "changelog": "options.requireCommit を受理し、外す変更を弱体化として扱う (#57)。cmate-verify の awk パーサとの parity テストを追加。SKILL.md の4重記述を references へ一本化 (#68)。",
+          "published_at": "2026-08-05T14:28:38Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-advisor-v0.1.4",
+            "commit": "d718b51b71141c50645b70a73d16063d78a84e6c"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-advisor-0.1.4.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-advisor-v0.1.4/cmate-verify-advisor-0.1.4.tar.gz",
+            "sha256": "05096317747eb09f531d06b15a15a78857cacd771ea6b8e98ccd606661d78a62",
+            "size": 35936,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
