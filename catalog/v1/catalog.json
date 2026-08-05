@@ -662,7 +662,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.16.0",
+      "latest": "0.17.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -1074,6 +1074,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.16.0/cmate-orchestrate-0.16.0.tar.gz",
             "sha256": "39c496063cbc960eb5b25ab601c08cb2351326e6fd43242b95e4e7b7d5c24c02",
             "size": 143266,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.17.0",
+          "changelog": "ランチャー解決を統一し npx 運用を正式サポート (#37)。--cli は argv 分割で受理し $CM をフォールバックに、シェル構文は助言つきで拒否。SKILL.md 冒頭に読み替え宣言。 dispatch.mjs / uat.mjs のランチャー既定を resolveLauncher へ集約。",
+          "published_at": "2026-08-05T16:41:31Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.17.0",
+            "commit": "d01ed9f6e370b2936cfe713a3f5dbe442678dfe4"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.17.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.17.0/cmate-orchestrate-0.17.0.tar.gz",
+            "sha256": "7bdbd7cbb7d9fb51c60e918f24e0f210a067d3d0ec4f87e5fd852cf9b866ebd8",
+            "size": 146874,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
