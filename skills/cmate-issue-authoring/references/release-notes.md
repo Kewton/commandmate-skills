@@ -2,6 +2,21 @@
 
 ## Changelog
 
+### 0.3.0 — planner mirror の path 抽出を token 先頭に固定（Issue #49）
+
+- planner mirror の抽出 pattern を **token 先頭からしか一致しない**形に変えた。
+  `web/src/lib/filter.ts` から `src/lib/filter.ts` を、
+  `` `.claude/skills/x/scripts/a.sh` `` から `scripts/a.sh` を切り出していた挙動が
+  止まる。抽出結果は `suspected_files` を経て worker の `scope.allow` になるため、
+  途中一致は**実在しない path への書き込み権限**を配ることと同義だった。
+  cmate-orchestrate 0.12.0 の planner 本体と同時変更で、pattern は byte 単位で同一。
+  一致は test suite（`tests/fixtures/cmate-issue-authoring/run_tests.sh`）が検証する。
+- 他の候補の path 境界つき suffix になっている候補は捨て、`shadowed_file_candidate`
+  として `warnings` に積む（黙って落とさない）。
+- 成果物の見出し配下に書かれた path が拡張子を問わず `suspected_files` に入る
+  ようになった（Issue #50 / cmate-orchestrate 0.12.0）。この振り分け規則を
+  `issue-body-contract.md` の対象ファイル節に反映した。
+
 ### 0.2.0 — planner mirror の拡張子集合を同期（Issue #43 / CommandMate #1678 B-1）
 
 - planner mirror の `FILE_EXT` に `geojson` / `topojson` / `geojsonl` を追加した。
