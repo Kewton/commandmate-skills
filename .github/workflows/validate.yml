@@ -82,7 +82,7 @@ jobs:
   # and merging two independently-green branches broke 7 assertions). A gate that
   # only exists on a maintainer's laptop is not a gate.
   runner-suites:
-    name: planner and issue-authoring runner suites
+    name: runner and fixture suites
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -111,5 +111,10 @@ jobs:
         run: bash tests/fixtures/cmate-orchestrate-monitor/run_tests.sh
 
       - name: Run the cmate-verify selftest
-        run: bash skills/cmate-verify/scripts/tests/run-tests.sh
-          echo "artifact reproduced byte-for-byte across two independent builds"
+        run: bash tests/fixtures/cmate-verify/run-tests.sh
+
+      # #57 added this parity check — the awk parser in cmate-verify and the JS
+      # parser in cmate-verify-advisor must accept the same options keys — and
+      # nothing ever ran it. Wired here and in .commandmate/verify.yaml (#69).
+      - name: Run the cmate-verify-advisor suite
+        run: bash tests/fixtures/cmate-verify-advisor/run_tests.sh

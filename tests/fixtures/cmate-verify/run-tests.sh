@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # cmate-verify — fixture-based test suite for verify-run.sh.
 #
-# Self-contained on purpose: the skill is distributed to repositories that have
-# no vitest (and no Node), so the suite must run with nothing but bash + git.
-# `tests/unit/skills/cmate-verify/verify-run.test.ts` is a thin wrapper that runs
-# this file so the same assertions also gate `npm run test:unit`.
+# Lives in the repository, not in the package (Issue #69): the distributed
+# artifact is `skills/cmate-verify/` only, and this suite is run by CI — the
+# `verify-selftest` gate in `.commandmate/verify.yaml` and the `runner-suites`
+# job in `.github/workflows/validate.yml`.
+#
+# Still bash + git only, with no vitest and no Node: the runner under test has
+# exactly those dependencies, so its suite must not add more.
 #
 # Output is TAP-ish (`ok - ...` / `not ok - ...`) plus a final
 # `# tests: N passed, M failed`. Exit 0 only when M is 0 and enough assertions ran.
@@ -13,7 +16,10 @@
 set -u
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-RUNNER="$SCRIPT_DIR/../verify-run.sh"
+REPO_ROOT=$(cd "$SCRIPT_DIR/../../.." && pwd)
+# The runner under test is the packaged one, read from its place in the
+# repository. Overridable so the same suite can be pointed at an installed copy.
+RUNNER=${VERIFY_RUN:-$REPO_ROOT/skills/cmate-verify/scripts/verify-run.sh}
 FIXTURES="$SCRIPT_DIR/fixtures"
 BASE_BRANCH="cmate-verify-base"
 

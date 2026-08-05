@@ -7,44 +7,27 @@ allowed-tools: Bash(.claude/skills/cmate-verify/scripts/*), Bash(.agents/skills/
 # cmate-verify
 
 「このリポジトリで何が通れば合格か」を `.commandmate/verify.yaml` に宣言し、
-**実 exit code で** 判定するランナー。
+**実 exit code で** 判定するランナー。CommandMate 本体の検証ゲート
+（`commandmate verify <worktree-id>` / `commandmate wait <worktree-id> --verify`）の
+代替ではなく、次の 2 つの役割を持つ。
 
-検証ゲートは CommandMate 本体にも実装がある（`commandmate verify <worktree-id>` /
-`commandmate wait <worktree-id> --verify`）。この Skill はその代替ではなく、
-次の 2 つの役割を持つ。
-
-1. **verify.yaml の起案** — verify.yaml がまだ無いリポジトリで、CI 定義や
-   package manifest からゲート候補をブートストラップし、ユーザーの確認を得てから
-   書き出す（手順 1）。本体のローダも同じ v1 形式を読むので、ここで起案した
-   verify.yaml はそのまま引き継げる。
-2. **スタンドアロンランナー** — CommandMate が入っていない環境や、検証ゲートを
-   まだ持たない version の CommandMate でも、**bash と git だけで**同じ verify.yaml を
-   読んで同じゲートを走らせ、実 exit code で判定する（手順 2）。
-
-設定形式 v1 の正準仕様は CommandMate リポジトリの
-[`docs/design/verification-config.md`](https://github.com/Kewton/CommandMate/blob/develop/docs/design/verification-config.md)
-である。
+1. **verify.yaml の起案**（手順 1）— CI 定義や package manifest からゲート候補を起案する。
+   本体のローダも同じ v1 形式を読むので、起案した verify.yaml はそのまま引き継げる。
+2. **スタンドアロンランナー**（手順 2）— CommandMate が無い環境や、検証ゲートをまだ
+   持たない version の CommandMate でも、**bash と git だけで**同じ判定を出す。
 
 > **なぜ exit code か**: `cmd | grep ...` は `$?` を grep に渡して非ゼロ終了を隠す。vitest は
 > 全テスト緑でも Unhandled Rejection で exit 1 を出しうるので、出力を grep した要約は
 > それを PASS と報告してしまう。ゲートは必ず `sh -c "$cmd" > log 2>&1` で走らせ `$?` を直接読む。
 
+設定形式 v1 の正準仕様は CommandMate リポジトリの
+[`docs/design/verification-config.md`](https://github.com/Kewton/CommandMate/blob/develop/docs/design/verification-config.md)。
+
 ## 構成
 
-```
-cmate-verify/
-├── SKILL.md
-├── commandmate.skill.yaml   # 配布 metadata（Agent は読まない）
-└── scripts/
-    ├── verify-run.sh        # ゲート実行ランナー（bash 3.2 互換）
-    └── tests/
-        ├── run-tests.sh     # fixture ベーステスト（bash + git だけで動く）
-        └── fixtures/*.yaml
-```
-
-`scripts/tests/run-tests.sh` は vitest に依存しない。Node の無い導入先でも
-`bash scripts/tests/run-tests.sh` だけで検証できる（CommandMate 本体では
-`tests/unit/skills/cmate-verify/` の薄いラッパが `npm run test:unit` から同じ suite を回す）。
+同梱するのは `SKILL.md` / `commandmate.skill.yaml`（配布 metadata。Agent は読まない）と
+`scripts/verify-run.sh`（ランナー本体。bash 3.2 互換）だけである。
+**テストは package に同梱しない**（Issue #69。後述「テスト」）。
 
 install 先は `.claude/skills/cmate-verify/` と `.agents/skills/cmate-verify/` の両方で、
 中身は byte-identical である（Claude は前者、Codex は後者を読む）。以下のコマンド例は
@@ -53,48 +36,34 @@ install 先は `.claude/skills/cmate-verify/` と `.agents/skills/cmate-verify/`
 ## 手順 1: init（`.commandmate/verify.yaml` が無い場合）
 
 **コードを書かず、リポジトリをスキャンしてゲートを起案し、ユーザーの確認を得てから書き出す。**
-検出優先順位は次のとおり。上位が見つかったら下位は補助として扱う。
-
-1. **`.github/workflows/*.yml` の CI ジョブ** — そのリポジトリにおける「何が通れば合格か」の
-   既存の定義。`run:` の各ステップが第一候補。
-2. **`package.json` の `scripts`** — `lint` / `test` / `test:unit` / `typecheck` / `build` 系。
-3. **`Makefile` のターゲット** — `make lint` / `make test` 等。
-4. **言語マニフェスト** — `Cargo.toml`（`cargo clippy` / `cargo test`）、`pyproject.toml`
-   （`ruff` / `pytest` / `mypy`）、`go.mod`（`go vet` / `go test ./...`）等。
-
-起案時の注意:
+検出優先順位は **CI ジョブ（`.github/workflows/*.yml` の `run:`）> `package.json` の
+`scripts` > `Makefile` のターゲット > 言語マニフェスト（`Cargo.toml` / `pyproject.toml` /
+`go.mod` 等）** で、上位が見つかったら下位は補助として扱う。CI 定義はそのリポジトリにおける
+「何が通れば合格か」の既存の定義なので第一候補である。
 
 - 実行時間の長いゲートには `timeoutSec` を明示する（既定は 600 秒）。
-- ゲートの並び順がそのまま実行順になる。速いゲートを先に置くと失敗が早く読める
-  （途中で失敗しても残りは実行されるので、順序は打ち切りではなく可読性のための選択）。
-- **デプロイ・publish・リリース・外形変更を伴うコマンドはゲートにしない。** ゲートは
-  何度でも安全に再実行できるものに限る。
+- 並び順がそのまま実行順になる。速いゲートを先に置くと失敗が早く読める（途中で失敗しても
+  残りは実行されるので、順序は打ち切りではなく可読性のための選択）。
+- **デプロイ・publish・リリース・外形変更を伴うコマンドはゲートにしない。** 何度でも
+  安全に再実行できるものに限る。
 - 起案結果は「どこから拾ったか」（CI ジョブ名 / npm script 名）とセットで提示し、
-  **ユーザーの確認を得てから** `.commandmate/verify.yaml` を書き出す。
+  **ユーザーの確認を得てから**書き出す。書き出したら 1 回実行して `RESULT passed` まで確認する。
 
 ### 受入条件との対応付け（ゲートで担保されないものを明示する）
 
-起案したゲート集合を提示するとき、対象タスクの**受入条件それぞれについて
-「どのゲートが担保するか」を対応付け**、どのゲートにも担保されない受入条件を
-明示的に列挙する（Issue #47 / CommandMate #1678 B-5: lint / typecheck / build の
-静的検査だけのゲート集合が PASS を返し、アプリの中心機能が動かない状態が 3 件
-すり抜けた。PASS は「宣言したゲートが通った」以上のことを意味しない）。
-
-- 受入条件を担保するゲートを追加できるなら追加を起案する（例: 中心機能の
-  smoke テスト・起動確認を test ゲートに含める）。
-- ゲート化できない受入条件（実機確認・e2e・目視・外部サービス連携等）は、
-  消さずに **「ゲート外」として明示**し、UAT / 人間の確認に残ることをユーザーに
-  伝える。担保されない条件を黙って落とすことが、すり抜けの正体である。
-
-書き出したら、その場で 1 回実行して `RESULT passed` になることまで確認する。
+起案したゲート集合を提示するとき、**受入条件それぞれについて「どのゲートが担保するか」を
+対応付け**、どのゲートにも担保されない受入条件を明示的に列挙する（Issue #47 /
+CommandMate #1678 B-5: 静的検査だけのゲート集合が PASS を返し、アプリの中心機能が動かない
+状態が 3 件すり抜けた。**PASS は「宣言したゲートが通った」以上のことを意味しない**）。
+担保するゲートを追加できるなら追加を起案し（例: 中心機能の smoke テスト）、ゲート化できない
+条件（実機確認・e2e・目視・外部サービス連携等）は消さずに **「ゲート外」として明示**して
+UAT / 人間の確認に残す。担保されない条件を黙って落とすことが、すり抜けの正体である。
 
 ## 手順 2: run（verify.yaml がある場合）
 
 ```bash
 .claude/skills/cmate-verify/scripts/verify-run.sh --cwd <worktree-path>
 ```
-
-主なオプション:
 
 | オプション | 意味 |
 |---|---|
@@ -113,14 +82,6 @@ GATE unit FAIL exit=1 duration=45s
 RESULT failed
 ```
 
-失敗ゲートのログ末尾は **stderr** に出る（stdout をパース可能に保つため）。
-FAIL / TIMEOUT では**必ず理由行が出る**。ゲートが 1 バイトも出力しなかった場合は
-`no output captured`、`maxLogTailBytes: 0` なら `log tail disabled` と明示する
-（無言で終わると「不合格」しか残らず原因を追えない。Issue #1607）。
-出力ゼロで exit 126/127 のときは「コマンドが起動できていない可能性」を追加で出す
-（**断定ではなく調査の手がかり**。exec/spawn の失敗は背景ジョブの `wait` 越しには
-非 0 としてしか見えない）。
-
 | RESULT | exit code | 意味 |
 |---|---|---|
 | `passed` | 0 | 実行した全ゲートが PASS |
@@ -131,6 +92,11 @@ FAIL / TIMEOUT では**必ず理由行が出る**。ゲートが 1 バイトも�
 
 **`skipped` を `passed` と読まないこと。** 何も検証していない状態であり、緑ではない。
 
+失敗ゲートのログ末尾は **stderr** に出る（stdout をパース可能に保つため）。FAIL / TIMEOUT では
+**必ず理由行が出る** — 出力が 1 バイトも無ければ `no output captured`、`maxLogTailBytes: 0` なら
+`log tail disabled`、出力ゼロで exit 126/127 なら「コマンドが起動できていない可能性」を
+**断定ではなく手がかりとして**添える（無言で終わると「不合格」しか残らない。Issue #1607）。
+
 ## verify.yaml の書き方
 
 ```yaml
@@ -140,8 +106,6 @@ gates:
   - id: lint
     command: "npm run lint"
     timeoutSec: 600
-  - id: typecheck
-    command: "npx tsc --noEmit"
   - id: unit
     command: "npm run test:unit"
     timeoutSec: 1800
@@ -160,78 +124,41 @@ options:
 - 行内コメントは無し。`#` で始まる行のみコメント
 - `key:` の**最初のコロン**で分割するので、値の中のコロンはそのまま書ける
 
-**制約に反する verify.yaml は「best-effort で解釈」せず exit 2 で拒否する。**
-黙って一部を読み飛ばすと「設定したつもりのゲートが走っていないのに passed」になるため。
-CommandMate 本体のローダは一般的な YAML パーサを使うが、この形式で書いておけば両方で読める。
-
-各フィールドの型・既定値・範囲は
-[`docs/design/verification-config.md`](https://github.com/Kewton/CommandMate/blob/develop/docs/design/verification-config.md)
-の仕様表が正準。
-
-### `options.requireCommit`（既定 false）
-
-`true` にすると、work-evidence は「変更が在る」ではなく **「commit が在る」** を要求する。
-`commits=0 uncommitted=1` は PASS ではなく FAIL（`RESULT not_started` / exit 21）になり、
-ゲート行に `requireCommit=true` が付く。
-
-```
-GATE work-evidence FAIL commits=0 uncommitted=3 requireCommit=true
-RESULT not_started
-```
-
-理由は stderr に出る（`commits=0 uncommitted=3` は「作業が在る」ようにも読めるため、
-FAIL の理由が行から読み取れない唯一のケースである）。
-
-`commits=0 uncommitted=1` は「ここで何か起きたか」への答えとしては正しく、
-「これは完了したか」への答えとしては誤りである。後者を訊きたいリポジトリだけが
-opt-in する。**既定を false にしているのは、このゲート本来の問いが前者だから。**
-
-**このランナーは実行契約を読まない。** CommandMate の実行契約
-（`.commandmate/tasks/*.yaml`）にも `success.requireCommit` があり、CommandMate 本体の
-実装は両者を **OR** で合成するが、本ランナーが見るのは `options.requireCommit` だけである
-— シェルから起動したランは、どの委任にも紐付いていないため。**両方のランナーで効かせたい
-要求は verify.yaml に書く**。それが 2 実装が共に読む唯一のファイルである。
-
-本体実装（`src/lib/verification/gate-runner.ts`）との一致は CommandMate 側の
-[conformance テスト](https://github.com/Kewton/CommandMate/blob/develop/tests/unit/skills/cmate-verify/require-commit-conformance.test.ts)
-が同一の git サンドボックスに両実装を当てて固定している。**既知の差分は 2 件とも解消済み**
-— 契約ファイルの除外（本ランナーが緩い向きだった）と、未追跡ディレクトリの数え方
-（`-uall` の有無で数字だけが違った）。同テストは verdict だけでなく
-`commits=N uncommitted=N` を**数値として**突き合わせる（両方 > 0 のままズレる差分は
-verdict の比較では見えないため）。
+**制約に反する verify.yaml は「best-effort で解釈」せず exit 2 で拒否する。** 黙って一部を
+読み飛ばすと「設定したつもりのゲートが走っていないのに passed」になるため。本体のローダは
+一般的な YAML パーサを使うが、この形式で書いておけば両方で読める。各フィールドの型・既定値・
+範囲は上記の仕様表が正準。
 
 ## 組み込みゲート work-evidence
 
 コマンド系ゲートより先に、**そもそも作業が行われたか**を判定する。
+`merge-base(baseRef, HEAD)..HEAD` のコミット数と未コミットのエントリ数のどちらかが > 0 なら
+PASS、**両方 0 なら `RESULT not_started` (exit 21)** でコマンド系ゲートを 1 つも実行しない。
+未起動のセッションを「全ゲート PASS」と誤報告しないためのガードである（変更ゼロの
+リポジトリでは lint も typecheck も当然通る）。
 
-- PASS 条件: `merge-base(baseRef, HEAD)..HEAD` のコミット数 > 0 **または**
-  `git status --porcelain -z -uall` の非契約エントリ数 > 0
-- 両方 0 なら `RESULT not_started` (exit 21)。コマンド系ゲートは 1 つも実行しない
+**`.commandmate/tasks/` 配下の実行契約は作業証跡に数えない。** 実行契約はオーケストレーターの
+証跡であってエージェントの証跡ではなく、委任した直後の worktree（契約ファイルが 1 件置かれた
+だけの状態）が「作業済み」に見えると exit 21 が意味を失う。両方のカウンタから除外し、契約を
+実作業へ rename した場合は作業として数える。除外が効いて両カウンタが 0 になったときは、その旨を
+stderr に 1 行出す（`FAIL commits=0 uncommitted=0` を「ゲートのバグ」と読ませないため）。
 
-未起動のセッションを「全ゲート PASS」と誤報告しないためのガードである
-（変更ゼロのリポジトリでは lint も typecheck も当然通る）。
+### `options.requireCommit`（既定 false）
 
-### 実行契約は作業証跡ではない
+`true` にすると、work-evidence は「変更が在る」ではなく **「commit が在る」** を要求する。
+`commits=0 uncommitted=1` は FAIL（`RESULT not_started` / exit 21）になり、ゲート行に
+`requireCommit=true` が付く。理由は stderr に出る（`commits=0 uncommitted=3` は「作業が在る」
+とも読めるため、FAIL の理由が行から読み取れない唯一のケースである）。
 
-`.commandmate/tasks/` 配下は CommandMate の実行契約で、**オーケストレーターの証跡で
-あってエージェントの証跡ではない**。委任した直後の worktree（契約ファイルが 1 件置かれた
-だけの状態）が「作業済み」に見えると exit 21 が意味を失うため、**両方のカウンタから除外する**。
+`commits=0 uncommitted=1` は「ここで何か起きたか」への答えとしては正しく、「これは完了したか」
+への答えとしては誤りである。後者を訊きたいリポジトリだけが opt-in する。**既定を false に
+しているのは、このゲート本来の問いが前者だから。**
 
-- コミット側: `git rev-list --count <base>..HEAD -- ':(top)' ':(exclude,top).commandmate/tasks/'`
-  — 契約だけを載せた setup commit は 1 コミット分の作業として数えない。
-  副作用として**ファイルを 1 つも変更しない commit（`--allow-empty`）も数えない**
-  （pathspec 指定時の履歴単純化。CommandMate 本体の実装も同じ）
-- 未コミット側: `git status --porcelain -z --untracked-files=all` を**エントリ単位**で解析し、
-  **エントリ内のいずれかのパスが契約ファイルでなければ**作業として数える
-  （契約を実作業へ rename した場合も拾う）
-
-`-z` と `-uall` は必須である。人間向けフォーマットは空白を含むパスを C クォートし、
-rename を ` -> ` で連結し、既定の untracked モードは新規の `.commandmate/tasks/` を
-`?? .commandmate/` の 1 エントリに畳む — いずれもパスでないものを判定に渡す。
-このランナーは契約ファイルを**開かない**（パス名だけを見る）。
-
-両カウンタが 0 かつ変更自体は存在する場合、除外が効いたことを stderr に 1 行出す
-（`FAIL commits=0 uncommitted=0` を「ゲートのバグ」と読ませないため）。
+**このランナーは実行契約を読まない。** `.commandmate/tasks/*.yaml` にも
+`success.requireCommit` があり、本体の実装は両者を **OR** で合成するが、本ランナーが見るのは
+`options.requireCommit` だけである（シェルから起動したランは、どの委任にも紐付いていない）。
+**両方のランナーで効かせたい要求は verify.yaml に書く**。それが 2 実装が共に読む唯一の
+ファイルである。
 
 ## メイン checkout での skip
 
@@ -239,46 +166,12 @@ rename を ` -> ` で連結し、既定の untracked モードは新規の `.com
 コマンド系ゲートを実行しない**。プライマリ checkout は稼働中サーバの cwd になっている
 ことがあり、その足元で build / test を回すと動いている画面を壊す。判定は
 `git rev-parse --git-dir` と `--git-common-dir` が同じ実パスを指すかで行う。
-
 検証は linked worktree で回すこと。
 
 ## テスト
 
-```bash
-bash .claude/skills/cmate-verify/scripts/tests/run-tests.sh
-# ... ok - / not ok - の行が並び、最後に
-# tests: 123 passed, 0 failed
-```
-
-fixture は `scripts/tests/fixtures/*.yaml`。カバーしているのは
-全 PASS / 1 ゲート FAIL / timeout / work-evidence の not_started / 設定ファイル無し
-の 5 ケースに加えて、対になる反証ケース（同じ設定が linked worktree では実行される、
-`--skip-work-evidence` を付ければ同じ clean repo でも実行される）と、19 種の設定エラー、
-出力ゼロで落ちるゲート・`maxLogTailBytes: 0` の診断可能性（Issue #1607）、
-`options.requireCommit`（未 commit のみ → 21 / 同じ変更を commit → 0 / 既定では同じ dirty tree が
-PASS / 作業ゼロは commit 規則のせいにしない / `--skip-work-evidence` は要求ごと飛ばす）、
-契約ファイルの除外（契約だけの untracked → 21 / 契約だけの setup commit → 21 /
-同じツリーに実作業を足すと 0 / 契約を実作業へ rename・その逆向きも作業として数える /
-空白を含む契約パスも非契約パスも誤判定しない / 新規ディレクトリはファイル単位で数える）、
-アサーションヘルパ自身の自己検査。
-
-失敗ログの追跡可能性も固定してある。ランナーの stdout / stderr は分離したまま
-（それが契約）だが、`run_verify` は **exit code ≠ 0 のときだけ** stderr を `out.N` に
-追記し、失敗した assert は `out.N` の path と中身の両方を出す。CI に残るのは suite の
-標準出力だけなので、`err.N` は sandbox の EXIT trap で消えてしまい後から読めない。
-`assert_stdout_contract` は stdout が `GATE ...` / `RESULT ...` の 2 形式だけであることを
-確認する（out.N が stderr を運んでも stdout 契約は壊れていない、という反証側）。
-
-判定が空振りしていないことは変異注入で確認してある（`set -m` の除去 → orphan 検出が赤 /
-失敗時の打ち切り → 継続実行の assert が赤 / work-evidence の OR を AND に → 33 件赤 /
-全 skip を passed と報告 → skip 判定が赤 / プライマリ判定の無効化 → 6 件赤 /
-`out.N` への stderr 追記の停止 → 診断系 7 件だけ赤 / 空 log・tail 無効の fallback 除去 →
-5 件だけ赤 / spawn ヒントの除去 → 2 件だけ赤 / ログ末尾を stdout に流す → 3 件赤
-（うち 1 件が `assert_stdout_contract`））。
-`requireCommit` も同様（判定分岐の除去 → 5 件赤 / awk が再びキーを拒否 → 15 件赤 /
-`requireCommit=true` を無条件に出力 → 1 件赤）。
-契約ファイルの除外も同様（commit 側の pathspec 除去 → 6 件赤＋conformance 3 件赤 /
-未コミット側の除外除去 → 9 件赤＋conformance 2 件赤 / `-uall` 除去 → 10 件赤 /
-rename の 2 パス目を見ない → 1 件赤 / `-z` をやめて人間向けフォーマットを行単位で読む
-→ 21 件赤）。
-`MIN_ASSERTIONS` はケースが黙って落ちたときに 0 failed で緑にならないための下限である。
+回帰 suite は package ではなく **commandmate-skills リポジトリ**に在り、CI が回す
+（`.commandmate/verify.yaml` の `verify-selftest` ゲートと `.github/workflows/validate.yml` の
+`runner-suites` job）。install 先には存在しないので、利用者がこれを実行する手順は無い。
+カバレッジ・変異注入の結果・本体実装との conformance の正本は
+[`tests/fixtures/cmate-verify/README.md`](https://github.com/Kewton/commandmate-skills/blob/main/tests/fixtures/cmate-verify/README.md)。

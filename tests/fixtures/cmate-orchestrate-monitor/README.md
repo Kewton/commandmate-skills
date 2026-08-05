@@ -20,8 +20,9 @@ bash tests/fixtures/cmate-orchestrate-monitor/run_tests.sh
 （出力を grep して合否を決めない。これはこの Skill 自身が `quality-gate.sh` で
 禁じている失敗モードである）。
 
-`.github/workflows/validate.yml` は package の schema・digest・再現性を見るもので、
-この harness は含まれない。script を変更したときは手で回す。
+CI では 2 経路から回る: `.commandmate/verify.yaml` の `monitor-fixtures` ゲートと、
+`.github/workflows/validate.yml` の `runner-suites` job。`validate` job のほうは package の
+schema・digest・再現性だけを見るもので、この harness は含まれない。
 
 ## なぜ fixture が生 payload なのか
 
