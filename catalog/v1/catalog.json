@@ -177,7 +177,7 @@
         "schema",
         "dry-run"
       ],
-      "latest": "0.4.0",
+      "latest": "0.5.1",
       "versions": [
         {
           "version": "0.1.0",
@@ -325,6 +325,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.4.0/cmate-issue-authoring-0.4.0.tar.gz",
             "sha256": "f50cd18d425d2c310767f748dd15874e3da7cd7b275e008d6359909d72bf3763",
             "size": 30142,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.5.1",
+          "changelog": "planner mirror の同期を conformance テストで機械保証し、割れていたバージョン表記を統一 (#62)。refinement との境界と語彙対応を明記 (#65)。SKILL.md 脱重複 (#68)。",
+          "published_at": "2026-08-05T14:35:11Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-authoring-v0.5.1",
+            "commit": "d718b51b71141c50645b70a73d16063d78a84e6c"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-authoring-0.5.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.5.1/cmate-issue-authoring-0.5.1.tar.gz",
+            "sha256": "02c93110c2703aa84503ccd3cddaee831c15b45267fd25fccc509155762200df",
+            "size": 33700,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
