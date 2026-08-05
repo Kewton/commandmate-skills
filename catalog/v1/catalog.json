@@ -133,7 +133,7 @@
         "schema",
         "dry-run"
       ],
-      "latest": "0.3.0",
+      "latest": "0.4.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -237,6 +237,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.3.0/cmate-issue-authoring-0.3.0.tar.gz",
             "sha256": "ba401d45581a86d103b92ef365a2fb156381c25237c507374328ecd6d65dd7a5",
             "size": 29073,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.4.0",
+          "changelog": "planner mirror に CONTEXT_HEADING_RE を同期した。根拠 / 出典 / 参考 / 参照 / 背景 / 関連 / References / Context / Background の見出し配下にしか現れない path は suspected_files に入らない（cmate-orchestrate 0.13.0 の planner 本体と byte 単位で同一。一致は test suite が検証し、比較対象の定数を 5 から 6 に広げた）。判定は出現ごとではなく path 単位で、散文でも名指しされている path は対象のまま残る。再現手順 / 現状 / 調査 は対象外の見出しに含めていない。対象外の宣言方法を issue-body-contract.md の対象ファイル節に追記した (#54)。",
+          "published_at": "2026-08-05T06:30:10Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-authoring-v0.4.0",
+            "commit": "17002e3f6e1e7f2c3794206d8b01ca5cc7bb24f8"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-authoring-0.4.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.4.0/cmate-issue-authoring-0.4.0.tar.gz",
+            "sha256": "f50cd18d425d2c310767f748dd15874e3da7cd7b275e008d6359909d72bf3763",
+            "size": 30142,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
