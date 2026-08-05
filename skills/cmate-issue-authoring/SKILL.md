@@ -1,6 +1,6 @@
 ---
 name: cmate-issue-authoring
-description: Feature 記述・仕様断片・epic Issue から、実装可能な Issue 群を起案する。Phase 1 は read-only で、リポジトリ実査で主張を裏取りし、既存 Issue と着地済み PR を検索して重複を警告し、分割計画を versioned schema 準拠の artifact として出す（GitHub には一切書かない）。Phase 2 は明示承認の下でだけ gh issue create を依存順に実行し、相互リンクとラベルを付け、途中失敗を skipped として報告し、同じ計画の二度目を拒否する。まだ Issue が無い段階、Feature をどう割るか決まっていない段階で使う。既存 Issue の精錬は cmate-issue-refinement の領分。
+description: まだ Issue が無い段階で、Feature 記述・仕様断片・epic から実装可能な Issue 群を起案する。Phase 1 は read-only で分割計画を artifact として出し、Phase 2 は明示承認の下だけで依存順に登録する。既存 Issue の精錬と split の勧告は cmate-issue-refinement。
 ---
 
 # cmate-issue-authoring（Feature → Issue 群の起案）
@@ -16,6 +16,10 @@ blocking question を立てられない品質**であることが目標関数で
 - **Phase 1（既定・read-only）** — 分割計画を立てる。GitHub には一切書かない。
 - **Phase 2（`--register`・明示承認必須）** — 承認された計画どおりに Issue を登録する。
 
+本体 CommandMate の command との対応: **`/issue-create` と、`/issue-split` のうち
+「登録を伴う分割」がこの Skill である**。`/issue-enhance` と `/issue-split` の
+「勧告まで」は `cmate-issue-refinement` が担う。
+
 ## いつ使うか
 
 次のいずれかが当てはまるとき。
@@ -23,13 +27,27 @@ blocking question を立てられない品質**であることが目標関数で
 - Feature や Epic の記述はあるが、着手できる Issue がまだ 1 件も無い。
 - Issue に割る境界（どこで切るか、どれを先にやるか）が決まっていない。
 - 既存 Issue や着地済み PR と重複していないかを、作る前に確かめたい。
+- `cmate-issue-refinement` が **split を勧告した**（`decomposition.recommendation`
+  が `split`）Issue について、勧告された child slices を実際に登録したい。
 
 次のときは使わない。
 
 - **既に存在する Issue を精錬したい** → `cmate-issue-refinement`。
+- **大きすぎる既存 Issue を「どう割るべきか」まで知りたい** → `cmate-issue-refinement`。
+  **split の勧告までが refinement、登録を伴う分割がこの Skill** である。境界は
+  「GitHub に Issue を作るか否か」1 点で引く。両方が同じ Issue を割り直さない。
 - **登録済み Issue の実行順序を決めたい** → `cmate-orchestrate` の planner。
 - **Issue から実行契約を起案したい** → `cmate-task-contract`。
 - Issue 本文の自動編集・クローズ・ラベルの張り替え。この Skill は既存 Issue を変更しない。
+
+### cmate-issue-refinement からの受け渡し
+
+refinement の結果 document が `decomposition.recommendation: split` を返しているとき、
+その `decomposition.children`（title / scope / size / depends_on /
+acceptance_criterion）を **Feature 入力としてそのまま受け取れる**。受け取る側の対応は
+[`references/plan-contract.md`](./references/plan-contract.md) 第 7 節にある。
+親 Issue の番号は `source` に記録し、勧告を再検討しない（割り直しは refinement の仕事で
+あり、こちらの仕事は登録である）。
 
 ## 入力
 
@@ -115,6 +133,11 @@ Issue を 1 件も作らないことより悪い。
 各 Issue に `size`（xs/s/m/l）と `parallel_safe`（yes/no/unknown）を付ける。
 共有する書き込み先が見つからなかっただけのときは `unknown` である。**証拠が無いことは
 `yes` ではない。**
+
+帯の意味は `cmate-issue-refinement` と同一である。ここに `xl` が無いのは、`xl` が
+「これ以上見積もらず割れ」を意味する帯だからで、**`xl` の slice を出した時点でこの
+Step が終わっていない**。値の対応表は
+[`references/plan-contract.md`](./references/plan-contract.md) 第 7 節にある。
 
 ### Step 5 — 本文を書く
 

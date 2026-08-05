@@ -50,9 +50,13 @@ indistinguishable from a crash, and the caller has to be able to tell.
 - `assumptions[].verdict` is `confirmed`, `refuted`, `partially_confirmed` or
   `unverifiable`. `refuted` requires `correction`.
 - `decomposition.recommendation` is `keep_single` or `split`. `split` requires a
-  non-empty `children`.
+  non-empty `children`, and `children` is a *proposal*: registering those Issues
+  is `cmate-issue-authoring`'s step, not this one.
 - `dependencies.parallel_safe` is `true`, `false` or `unknown` — the string
-  `"unknown"`, not a missing field.
+  `"unknown"`, not a missing field. Crossing into `cmate-issue-authoring` means
+  converting through the vocabulary table in
+  [`analysis-contract.md`](./analysis-contract.md) (`true`=`yes`, `false`=`no`),
+  never inventing a conversion at the boundary.
 - `proposed_issue_body` is a proposal. Its presence is never permission to apply
   it.
 - `redactions` carries kind and count only, never the value.

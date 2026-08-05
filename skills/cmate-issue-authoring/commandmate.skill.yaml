@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-issue-authoring
 name: cmate-issue-authoring
-version: 0.4.0
+version: 0.5.0
 summary: Feature 記述から実装可能な Issue 群を起案する。read-only の分割計画を schema 準拠 artifact で出し、明示承認の下でだけ依存順に GitHub へ一括登録する 2 phase 手順。
 description: >-
   Feature 記述・仕様断片・epic Issue を入力に、着手できる Issue 群を起案する手順である。
@@ -20,6 +20,9 @@ description: >-
   dry-run に mutating command が無いこと、本文が planner の抽出条件を満たすこと）も
   同じ run で判定する。exit は 0 合格 / 1 計画が invalid / 2 run 自体の失敗の 3 値である。
   既存 Issue の編集・クローズ、実行順序の運用、登録後の精錬はスコープ外である。
+  cmate-issue-refinement との境界は「GitHub に Issue を作るか否か」1 点である。
+  split の勧告までが refinement、登録を伴う分割がこちらであり、refinement が返した
+  child slices をそのまま入力として受け取れる。
 capabilities:
   - Feature 記述・仕様断片・epic Issue から、実装可能な Issue 群への分割を起案する
   - 本文の主張をリポジトリ実査で裏取りし、トレースできない主張を open question へ落とす
@@ -93,8 +96,8 @@ risk_rationale: >-
   既存 Issue の本文編集・クローズ・ラベル張り替えは手順として禁止している。
 files:
   - path: SKILL.md
-    sha256: d83a6a06c2768724708de1a0b35bd6c0acaa5c82017665e644c3641fb9fec01f
-    size: 12735
+    sha256: 6f2b58a579f1fd7d80df0f336c3585d10744b866f737dc6c484d25efaa9a8826
+    size: 14058
     kind: skill_md
     executable: false
     script: false
@@ -111,14 +114,14 @@ files:
     executable: false
     script: false
   - path: references/issue-body-contract.md
-    sha256: 00311caefdb142d83f97046411d5369ba5c9d65bd5759d1f72ae276eb9dd0643
-    size: 9232
+    sha256: e114433b1750717260f4263cf7d4a039736eed051de40e454c2e4dd0e461f252
+    size: 9922
     kind: instruction
     executable: false
     script: false
   - path: references/plan-contract.md
-    sha256: ef5fd5a6c142c9c2ec55bb01c79c8e743566fa70836203e048756185c63ad288
-    size: 5491
+    sha256: fc4c8122fc66626fbabe15fcb2ed749d2d3906cc4c823993faf0a2c16a4f78ec
+    size: 8557
     kind: instruction
     executable: false
     script: false
@@ -129,26 +132,26 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: ea0ae1eb08e5341d0340c2f5ba269b94068a4e0b0ec2ca029c3b7e42760d229a
-    size: 7003
+    sha256: dce879ce407d4da08e958993701ff0ae318110c12c7c49e57ecd4c0073bc1c98
+    size: 9986
     kind: instruction
     executable: false
     script: false
   - path: references/safety.md
-    sha256: 95c4b244e4be79d13647af4e76768744ef2a2b2af3a54e95985aaad434b41100
-    size: 3411
+    sha256: 6a35d96d4263777c658c1e716682c9890fae0f45014e81c3822702c55eca31d0
+    size: 3509
     kind: instruction
     executable: false
     script: false
   - path: schemas/issue-split-plan.v1.json
-    sha256: 3fd436c846291492d78f23291d8588e435b78ba6bc923d899434c2a634480dba
-    size: 10070
+    sha256: 2bc0dd438e7af1868bb480d13a3d74445ccb6ebc0f32d520e0ee1eff0b543a84
+    size: 10898
     kind: asset
     executable: false
     script: false
   - path: scripts/validate-plan.mjs
-    sha256: 8adfceaa9417bb6f5c67840214748eed003cd4a11ed4c5516e073d4edb272f29
-    size: 26528
+    sha256: 528231c1473c6c5b0b675c01df81b36f32c82b1ecceaff158a31d69c2e38b419
+    size: 26789
     kind: script
     executable: false
     script: true

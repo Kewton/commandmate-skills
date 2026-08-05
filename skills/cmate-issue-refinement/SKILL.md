@@ -1,6 +1,6 @@
 ---
 name: cmate-issue-refinement
-description: Refine a vague or thin GitHub Issue into an implementable specification. Reads the Issue and repository evidence read-only, produces a sectioned Issue body, a severity-ranked finding list, open questions it refuses to decide for the user, a dependency and size assessment, and a versioned result document. Use it before design or implementation starts, when an Issue is title-only, contradicts the code, overlaps another Issue, or has no checkable acceptance criteria.
+description: 既にある Issue が薄い・曖昧・未検証のとき、read-only で実装可能な仕様へ精錬する。節・根拠・重大度つき findings・未解決の問い・分割の勧告を返し、Issue 自体は書き換えない。新規 Issue の起案と、勧告した分割の登録は cmate-issue-authoring。
 ---
 
 # cmate-issue-refinement
@@ -12,6 +12,11 @@ it. Everything you assert must trace to the Issue body or to a file you actually
 read in this repository. Everything you cannot trace becomes an open question for
 the user, never an assumption you quietly adopt.
 
+Against CommandMate's own commands: **this Skill is `/issue-enhance`, plus the
+recommendation half of `/issue-split`.** `/issue-create`, and the half of
+`/issue-split` that actually registers the child Issues, are
+`cmate-issue-authoring`.
+
 ## When to use this Skill
 
 Use it when at least one of these is true:
@@ -21,10 +26,24 @@ Use it when at least one of these is true:
 - the Issue may duplicate or overlap work already tracked elsewhere;
 - the Issue is large enough that its size, dependencies or parallel-safety are
   unclear;
+- an existing Issue is too big and you need to know **how it should be split** —
+  the recommendation and the child slices are produced here;
 - the Issue touches credentials, permissions, user data or an external boundary
   and has no security section.
 
 Do not use it to *close* an Issue, to write code, or to open pull requests.
+
+Use `cmate-issue-authoring` instead when:
+
+- **there is no Issue yet** — a Feature description, a spec fragment or an epic
+  has to become a set of Issues. This Skill refines what exists; it does not
+  write one from nothing;
+- **a split has to be registered** — the child slices recommended here become
+  real GitHub Issues there, in dependency order, under explicit approval.
+
+The boundary between the two packages is a single line: **recommending a split
+is this Skill, registering one is `cmate-issue-authoring`.** Neither re-cuts what
+the other decided. The handoff is [Step 6](#step-6--assess-decomposition-dependencies-and-size).
 
 ## Inputs
 
@@ -155,6 +174,16 @@ Produce, each with a stated rationale:
 `parallel_safe` is `true` only when you found no shared write target. Absence of
 evidence is `unknown`, not `true`.
 
+**Recommend the split; do not register it.** When `recommendation` is `split`,
+`decomposition.children` is the handoff artifact: each child carries a title, a
+one-line scope, a band, its dependencies and the acceptance criterion that proves
+it landed. Hand those children to `cmate-issue-authoring`, which turns them into
+real Issues in dependency order under explicit approval. This Skill opens no
+Issue, and `cmate-issue-authoring` does not re-cut the slices. The vocabulary the
+two packages share — size bands, `parallel_safe`, and the relation values — is
+mapped field by field in
+[`references/analysis-contract.md`](./references/analysis-contract.md).
+
 ### Step 7 — Generate the missing sections
 
 Write only the sections marked `insufficient` or `missing`, in the contract's
@@ -164,7 +193,11 @@ a compatibility promise, a security posture — write the question, not an answe
 
 Security and UX sections are mandatory for `feature` and `bug`; if you have no
 evidence for them, say what would have to be checked rather than writing
-reassurance.
+reassurance. So is **Impact / affected files**, and its heading and rows follow
+the extraction rules in
+[Making the refined body planner-ready](./references/section-contract.md#making-the-refined-body-planner-ready).
+A `success` whose body would still be blocked with "Affected files are unclear"
+is a refinement the next step cannot use.
 
 ### Step 8 — Rank findings and collect open questions
 
@@ -227,7 +260,9 @@ explicitly:
 
 1. `issue_type` is assigned, or `unknown` with an open question attached.
 2. Every required section for that type has a state, and every generated section
-   has at least one evidence ref.
+   has at least one evidence ref. For `feature` and `bug` that set includes
+   **Impact / affected files**, whose test is what keeps the refined body from
+   being blocked downstream by "Affected files are unclear".
 3. Every Issue-stated assumption about the code has a verification verdict.
 4. Every finding has a severity and a locator or evidence ref.
 5. Every open question states why it blocks and is unanswered by you.

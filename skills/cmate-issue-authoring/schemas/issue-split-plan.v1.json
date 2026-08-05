@@ -160,10 +160,13 @@
           "items": { "$ref": "#/$defs/issue_key" }
         },
         "labels": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-        "size": { "enum": ["xs", "s", "m", "l"] },
+        "size": {
+          "enum": ["xs", "s", "m", "l"],
+          "description": "The same bands cmate-issue-refinement uses. Its 'xl' ('do not estimate further, enumerate the slices') and its 'unknown' are deliberately absent: this plan describes slices that have already been cut, so either value would mean the split is unfinished. See references/plan-contract.md section 7."
+        },
         "parallel_safe": {
           "enum": ["yes", "no", "unknown"],
-          "description": "'unknown' when no shared write target was found and no evidence rules one out. Absence of evidence is not 'yes'."
+          "description": "'unknown' when no shared write target was found and no evidence rules one out. Absence of evidence is not 'yes'. Maps one-to-one onto cmate-issue-refinement's dependencies.parallel_safe: yes=true, no=false, unknown='unknown'. See references/plan-contract.md section 7."
         },
         "evidence": {
           "type": "array",
@@ -200,7 +203,10 @@
           "minLength": 1,
           "description": "What actually overlaps, cited. A similar title is not an overlap."
         },
-        "verdict": { "enum": ["duplicate", "overlapping", "unrelated"] }
+        "verdict": {
+          "enum": ["duplicate", "overlapping", "unrelated"],
+          "description": "A duplicate verdict only. cmate-issue-refinement's related_issues[].relation carries these three plus 'depends_on' and 'blocks', which are dependency directions rather than duplicate verdicts: those become edges in issues[].depends_on here. See references/plan-contract.md section 7."
+        }
       }
     },
     "open_question": {

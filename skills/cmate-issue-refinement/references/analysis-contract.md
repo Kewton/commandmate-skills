@@ -36,6 +36,13 @@ dependencies, and the acceptance criterion that proves it landed.
 When *not* splitting, say why the Issue stays one unit. "Small enough" is
 acceptable only with the band and the file count that support it.
 
+**The recommendation is where this Skill stops.** `decomposition.children` is a
+proposal, not a registration: this Skill never opens an Issue. Handing those
+children to `cmate-issue-authoring` is what turns them into real Issues, in
+dependency order, under explicit approval. That package does not re-cut the
+slices, and this one does not register them — the boundary is exactly whether a
+GitHub Issue gets created.
+
 ## Dependencies
 
 Record two directions separately:
@@ -81,3 +88,35 @@ Never report `true` because nothing came up. Absence of evidence is `unknown`.
 When more than one Issue is in play, state a recommended order and the single
 reason for it — usually the interface that has to exist first. Keep the reason
 to one sentence. A long ordering argument usually means the split is wrong.
+
+## Vocabulary shared with cmate-issue-authoring
+
+The two packages describe the same three concepts with different value sets.
+They have **not** been collapsed onto one set: both result contracts are
+published as v1, and changing a value domain retroactively invalidates documents
+already emitted under it. The mapping below is the normative one. Convert with
+it; do not invent a conversion at the point of handoff.
+
+| Concept | Here | cmate-issue-authoring | Mapping |
+|---|---|---|---|
+| Size | `decomposition.size`, `decomposition.children[].size`: `xs` / `s` / `m` / `l` / `xl` / `unknown` | `issues[].size`: `xs` / `s` / `m` / `l` | Same bands, same meanings. `xl` and `unknown` have no counterpart (below). |
+| Parallel safety | `dependencies.parallel_safe`: `true` / `false` / `"unknown"` | `issues[].parallel_safe`: `yes` / `no` / `unknown` | `true` ≡ `yes`, `false` ≡ `no`, `"unknown"` ≡ `unknown`. One-to-one. |
+| Relation to another Issue | `related_issues[].relation`: `duplicate` / `overlapping` / `depends_on` / `blocks` / `unrelated` | `duplicate_suspicions[].verdict`: `duplicate` / `overlapping` / `unrelated` | The three shared values are the same judgement. `depends_on` and `blocks` are not duplicate verdicts; they become edges in that package's `issues[].depends_on`. |
+
+Notes.
+
+- **`xl` and `unknown` are ours alone.** `xl` means "do not estimate further,
+  enumerate the slices" and `unknown` means "the evidence would not settle the
+  band" — both are assessments of an Issue that already exists. The other package
+  emits slices it has just cut, so either value there would only say the split is
+  unfinished. The narrower domain is a constraint, not an omission.
+- **`parallel_safe` is a mixed-type enum here** (two booleans and one string)
+  and a three-value string enum there. The uniform string enum is the better
+  contract; this one is published and stays as it is. Convert explicitly at the
+  boundary, and keep `unknown` meaning what it means in both: absence of evidence
+  is never `true`.
+- **`relation` is wider than a duplicate verdict.** Three of its five values
+  answer "is this the same work?"; the other two answer "which one goes first?".
+  A candidate marked `depends_on` or `blocks` must be handed over as a
+  dependency, never as a duplicate suspicion — the receiving package's
+  `verdict` has no room for a direction, on purpose.

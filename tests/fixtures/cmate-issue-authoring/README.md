@@ -53,6 +53,35 @@ planner の抽出が変われば、ここが落ちる。落ちたら
 `skills/cmate-issue-authoring/references/issue-body-contract.md` と validator の
 `planner_ready` rule を実測に合わせて直すこと（**この suite を緩めない**）。
 
+### 4. planner mirror が乖離していないこと
+
+`scripts/validate-plan.mjs` の抽出は cmate-orchestrate planner の**逐語の写し**である。
+写しである以上、放っておけば必ず乖離する。`mirror-conformance.mjs` が 2 層で確かめる。
+
+1. **定数が byte 単位で同一**であること（`ACCEPTANCE_HEADING_RE` / `HEADING_RE` /
+   `FILE_EXT` / `SYSTEM_ROOTS` / `PATH_START` / `CANDIDATE_*` /
+   `DELIVERABLE_HEADING_RE` / `CONTEXT_HEADING_RE`）。
+2. **関数の挙動が同一**であること。両者のミラー領域をそれぞれ module として読み込み、
+   各定数を突く corpus を流して、抽出結果（objective・受入条件・候補 path・成果物・
+   引用のみ・suspected）が全 field 一致することを確認する。定数が同じままコードだけ
+   ずれる乖離は、1 だけでは捕まらない。
+
+**比較するのはミラー領域だけである。orchestrate.mjs 全体の digest は取らない。**
+全体ハッシュはミラーと無関係な planner の変更で落ちるので、「落ちても気にしない test」
+になるためである。読む範囲は marker で決めており（`firstNonEmptyLine` から
+`isSafeRepoPath` の直前まで、＋ `classifyFileCandidates` 1 関数）、marker が動いたら
+**exit 2** で「比較できなかった」と言って止まる。0（一致）と 1（乖離）と 2 を分けてある。
+
+`isSafeRepoPath` はミラー領域の外にあるので比較しない。代わりに**同一の述語を両側へ
+注入**する。そこの差分がミラーの乖離を隠したり、逆に無いものを作ったりしないためである
+（`SYSTEM_ROOTS` は各 file 自身のものを読むので、この集合の乖離は捕まる）。
+
+単体でも実行できる。
+
+```bash
+node tests/fixtures/cmate-issue-authoring/mirror-conformance.mjs
+```
+
 ## file
 
 | File | 役割 |
@@ -63,3 +92,4 @@ planner の抽出が変われば、ここが落ちる。落ちたら
 | `mutate.mjs` | JSON Pointer で 1 箇所だけ変異させる |
 | `to-issue-json.mjs` | 計画 → cmate-orchestrate の `--issue-json` fixture |
 | `assert-planner-clean.mjs` | execution plan に対する assertion |
+| `mirror-conformance.mjs` | planner mirror の定数一致と挙動一致（単体実行可） |
