@@ -111,8 +111,8 @@ files:
     executable: false
     script: false
   - path: references/issue-body-contract.md
-    sha256: a709976da875c42084efc0a345a929d9140bf22842d784a3ae7c460939f39b73
-    size: 6633
+    sha256: 004d183a6d47cdd7a41bb1d65863a9d7e9aa9180a63bb67ec0ff761f9f5eac55
+    size: 7290
     kind: instruction
     executable: false
     script: false
@@ -147,8 +147,8 @@ files:
     executable: false
     script: false
   - path: scripts/validate-plan.mjs
-    sha256: b843b26778f0b743f4fcbf577f274a4942b262bdafdc45d10b59e70e0ac50c1f
-    size: 22836
+    sha256: d78dfbf54e0292faee410f1ab4d868b9c0ce30c5b566d8d051ad7b4858b9a171
+    size: 23778
     kind: script
     executable: false
     script: true

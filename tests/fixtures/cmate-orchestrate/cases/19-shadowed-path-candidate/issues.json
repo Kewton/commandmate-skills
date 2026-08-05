@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 415,
+      "title": "fix: フィルタ条件を web 側の実装に揃える",
+      "body": "web/src/lib/filter.ts の絞り込み条件が古い。旧実装は src/lib/filter.ts にあったが、そちらは削除済み。\n\n## Acceptance criteria\n- [ ] `web/src/lib/filter.ts` が新しい条件で絞り込む\n",
+      "labels": ["bug"]
+    }
+  ]
+}

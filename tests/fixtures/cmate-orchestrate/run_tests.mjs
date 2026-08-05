@@ -404,6 +404,18 @@ function runCase(caseId) {
       );
     }
   }
+  // The other side of the same decision (#50): what the planner classified as
+  // context to READ rather than a file to write. A case that pins both proves
+  // the split, not just that something landed somewhere.
+  if (expect.reference_files) {
+    for (const [number, files] of Object.entries(expect.reference_files)) {
+      const issue = plan.issues.find((i) => i.number === Number(number));
+      check(
+        issue !== undefined && deepEqual(issue.reference_files, files),
+        `reference_files of #${number} ${JSON.stringify(issue?.reference_files)} !== ${JSON.stringify(files)}`,
+      );
+    }
+  }
   if (expect.risk_level) check(plan.risk.level === expect.risk_level, `risk ${plan.risk.level} !== ${expect.risk_level}`);
   if (expect.profile_verified !== undefined) check(plan.profile.verified === expect.profile_verified, `profile.verified ${plan.profile.verified} !== ${expect.profile_verified}`);
   if (expect.base) check(plan.profile.base === expect.base, `base ${plan.profile.base} !== ${expect.base}`);

@@ -1,0 +1,16 @@
+{
+  "description": "Issue #49, second half: the issue itself writes both \"web/src/lib/filter.ts\" and the shorter \"src/lib/filter.ts\". At most one is the file it means, and the shorter is a path-boundary suffix of the longer, so it is dropped from suspected_files (= the worker's scope.allow) rather than widening it by a directory the issue never named — and the drop is reported as a shadowed_file_candidate warning, which makes the run partial, instead of being discarded silently.",
+  "args": ["415", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": ["shadowed_file_candidate"],
+    "waves": [[415]],
+    "merge_order": [415],
+    "dependencies": [],
+    "classifications": { "415": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "415": ["web/src/lib/filter.ts"] },
+    "reference_files": { "415": [] }
+  }
+}
