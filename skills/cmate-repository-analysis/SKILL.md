@@ -1,13 +1,14 @@
 ---
 name: cmate-repository-analysis
-description: リポジトリを read-only で走査し、構造・規約・既存実装・再利用候補・変更risk・推奨verificationを、file/line evidence 付きの検証可能な構造化結果として返す。変更に着手する前の現状把握、影響範囲の見積り、実装方針の裏取りに使う。
+description: リポジトリを read-only で走査し、構造・規約・既存実装・再利用候補・変更risk・推奨verificationを、file/line evidence 付きの検証可能な要約として返す。変更に着手する前の現状把握、影響範囲の見積り、実装方針の裏取りに使う。
 ---
 
 # cmate-repository-analysis
 
 変更に着手する **前** に、対象リポジトリの現状を read-only で把握し、
-後続の判断（実装方針・影響範囲・検証手段）を file/line evidence に結び付けた
-構造化結果として返すための手順である。
+後続の判断（実装方針・影響範囲・検証手段）を file/line evidence に結び付けて
+報告するための手順である。主成果物は人が読む `summary_markdown` であり、
+構造化した result JSON は任意の副産物である。
 
 この Skill は書き込みも command 実行も network access も行わない。
 読み取りと報告だけを行う。
@@ -110,26 +111,37 @@ Step 2–6 で書き出す主張には、例外なく file/line evidence を付�
 [references/scan-policy.md](./references/scan-policy.md) §3 に従い、
 `sensitive_locations` へ位置と分類だけを記録する。
 
-### Step 7. result を組み立てる
+### Step 7. summary を書く
 
-[references/result-contract.md](./references/result-contract.md) と
+主成果物は `summary_markdown` である。
+[references/result-contract.md](./references/result-contract.md) 第4節の
+見出し構成で、人が読む要約を書く。
+
+構造化した result JSON は **任意の副産物** である。受け手が機械処理を求めた
+ときにだけ作り、
 [schemas/repository-analysis.result.v1.json](./schemas/repository-analysis.result.v1.json)
-に従って result object を作る。あわせて `summary_markdown` に
-人が読む要約を、同 reference 第4節の見出し構成で書く。
+を参考にする。この schema は advisory であり、適合しないことは契約違反ではない
+（理由は [references/result-contract.md](./references/result-contract.md) 第5節）。
+ただし evidence と `sensitive_locations` の2つの形だけは緩めていない。
+そこへ field を足すことが、値を持ち出す経路そのものだからである。
 
-### Step 8. completion check を実行する
+### Step 8. evidence 規律を自己点検する
 
-result を返す前に、`completion_check` の 5 件を自分で実行して結果を記録する。
+報告を返す前に、5件の check を自分で実行して結果を申告する。
 5 件の id と、それぞれが何を確かめるかは
 [references/result-contract.md](./references/result-contract.md) §3.9 が正本である。
-いずれかが false なら status は `success` にならない。
+result JSON を出す場合は `completion_check` へ、出さない場合は summary の
+「未解決と走査範囲」へ書く。いずれかが false なら status は `success` にならない。
 
 ## 5. 出力
 
-result object 1件を返す。契約は
-[references/result-contract.md](./references/result-contract.md) にある。
+`summary_markdown` を返す。見出し構成と規則は
+[references/result-contract.md](./references/result-contract.md) 第4節にある。
+result JSON を添えるかどうかは任意で、添える場合の形は同 reference が述べる。
+
 status は `success` / `partial` / `failure` の3値で、どの条件でどれになるか、
 `unresolved` を何件書く必要があるかは同 reference 第2節が正本である。
+JSON を出さない場合も、status と未解決点は summary に書く。
 
 `partial` を `success` に見せかけないこと。この Skill の価値は、
 「どこまで確かめたか」が後から検証できることにある。
@@ -155,16 +167,21 @@ status は `success` / `partial` / `failure` の3値で、どの条件でどれ�
 
 ## 7. 完了条件
 
-この Skill の実行が完了なのは、result object が
-[references/result-contract.md](./references/result-contract.md) の契約
-（status と `unresolved` の規則、field ごとの evidence 要件、`summary_markdown` の
-見出し構成）と
-[schemas/repository-analysis.result.v1.json](./schemas/repository-analysis.result.v1.json)
-に適合し、`completion_check` の 5 件を実行して結果を申告したときだけである。
+この Skill の実行が完了なのは、次の4つを満たしたときである。
+**JSON schema への適合は完了条件ではない。**
+
+1. `summary_markdown` が第4節の見出し構成で書かれ、`objective` に答えている。
+2. 主張に file/line evidence が付いており、その path と行が実在する。
+   引用は行わない（[references/scan-policy.md](./references/scan-policy.md) 第4節）。
+3. secret の値・断片・長さが、summary にも result にも一切現れていない。
+4. 走査の打ち切りと除外と未解決点が申告されており、status がそれと矛盾しない。
+
+規則の正本は [references/result-contract.md](./references/result-contract.md) である。
+result JSON を添えた場合も、判定されるのはこの4つであって schema 適合ではない。
 
 ## 8. 参照
 
 - [references/scan-policy.md](./references/scan-policy.md) — 除外規則、走査上限、secret 分類
-- [references/result-contract.md](./references/result-contract.md) — status、result の各 field、completion check、summary の構成
+- [references/result-contract.md](./references/result-contract.md) — status、summary の構成、任意 result の各 field、completion check
 - [references/agent-compatibility.md](./references/agent-compatibility.md) — Agent 差異と fallback
-- [schemas/repository-analysis.result.v1.json](./schemas/repository-analysis.result.v1.json) — 機械検証用 schema
+- [schemas/repository-analysis.result.v1.json](./schemas/repository-analysis.result.v1.json) — 任意 result JSON の advisory schema

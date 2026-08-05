@@ -1,13 +1,16 @@
 # result contract v1
 
-`cmate-repository-analysis` が返す result object の定義である。
-機械検証用の正本は
-[../schemas/repository-analysis.result.v1.json](../schemas/repository-analysis.result.v1.json)
-であり、この文書はその読み方と、schema では表現できない規則を述べる。
+`cmate-repository-analysis` の完了条件と、任意で添える result object の定義である。
 
-`result_schema_version` は 1 である。field の追加・削除・意味の変更は
-version を上げて行う。**未知の field を足さないこと。** 受け手は
-schema にない field を無視せず、契約違反として扱う。
+**完了条件は `summary_markdown`（第4節）と evidence 規律（第6節）である。**
+[../schemas/repository-analysis.result.v1.json](../schemas/repository-analysis.result.v1.json)
+は 0.2.0 で advisory へ格下げした。schema 適合は完了条件ではない。
+なぜそうしたかは第5節に書いた。
+
+`result_schema_version` は 1 である。未知の field を足してよく、受け手はそれを
+無視してよい。ただし evidence（§3.10）と `sensitive_locations`（§3.7）の
+2つの形だけは閉じたままである。そこへ field を足すことが、
+値を持ち出す経路そのものだからである。
 
 ## 1. 全体の形
 
@@ -42,9 +45,16 @@ schema にない field を無視せず、契約違反として扱う。
 }
 ```
 
-すべての top-level field は必須である。該当が無い場合は空配列を置く。
-field を省略することと空配列を置くことは意味が違う。前者は「答えていない」、
-後者は「探した上で無かった」である。
+result JSON を出すかどうかは任意である。出す場合に必須なのは
+`result_schema_version` / `skill_id` / `skill_version` / `status` / `scope` /
+`summary_markdown` の6つだけで、残りは任意である。この6つは、
+どの Skill の何 version が出したかという identity と、格下げにあたって
+残すと決めた2つの規律 —— 走査の打ち切りの申告（`scope`）と、
+人が読む主成果物（`summary_markdown`）—— にあたる。
+
+任意の field を出すときは、空配列を置くことと省略することの意味が違う。
+前者は「探した上で無かった」、後者は「答えていない」である。
+該当が無いことを伝えたいなら空配列を置く。
 
 ## 2. status
 
@@ -133,6 +143,12 @@ summary や後続の手順が `id` だけで項目を指せない。
 [scan-policy.md](./scan-policy.md) の表に従う。
 値・値の一部・伏字化した値・長さのいずれも含めない。
 
+**この object は閉じている。** schema を advisory へ緩めた後も、
+ここと evidence（§3.10）だけは未知 field を許さない。
+「位置と分類だけを渡す」という宣言は、値を書ける field が1つも無いことで
+初めて成立するからである。`classification` を自由文にしないのも同じ理由で、
+自由文の分類欄は値そのものを書ける場所になる。
+
 ### 3.8 `unresolved`
 
 `reason_code` は次のいずれか。
@@ -162,6 +178,14 @@ result を返す前に5件すべてを自分で実行し、結果をここに記
 false の check には、何が足りなかったかを `detail` に書く。
 1件でも false なら status を `success` にしてはならない（第2節）。
 
+**「schema に適合したか」はこの5件に無い。** 0.2.0 より前も無かったが、
+SKILL.md 第7節の完了条件が schema 適合を要求していたため、
+実質6件目として機能していた。その要求は外した。
+5件はいずれも evidence 規律であり、それがこの Skill の完了条件である（第6節）。
+
+result JSON を出さない場合は、この5件の結果を summary の
+「未解決と走査範囲」に書く。自己申告そのものを省略してよいわけではない。
+
 ### 3.10 `evidence`
 
 ```json
@@ -173,6 +197,8 @@ false の check には、何が足りなかったかを `detail` に書く。
 指せる result は、それだけで read-only の宣言と矛盾するからである。
 `line_end` は `line_start` 以上。**本文の引用 field は存在しない**
 （理由は [scan-policy.md](./scan-policy.md) の第4節）。
+この object も §3.7 と同じく閉じている。`snippet` や `excerpt` を足せてしまえば、
+引用 field が無いという設計はその瞬間に無効になる。
 
 ## 4. `summary_markdown`
 
@@ -195,9 +221,58 @@ false の check には、何が足りなかったかを `detail` に書く。
 - 走査を打ち切った場合、「未解決と走査範囲」に必ずその事実を書く
 - status が `partial` / `failure` のとき、「結論」の先頭でそれを明示する
 
-## 5. version 運用
+## 5. なぜ schema が advisory なのか
 
-- field の追加・削除・意味の変更 → `result_schema_version` を上げる
-- enum への値の追加 → `result_schema_version` を上げる（受け手は
-  未知の enum 値を受け付けない）
+0.2.0 でこの schema を closed（`additionalProperties: false`、
+「未知 field は契約違反」）から advisory へ格下げした。理由は1つで、
+**この result を機械消費する受け手が存在しないから** である。
+カタログ内の他の Skill も、CI も、runner も、`repository-analysis` の result を
+field 単位で読んでいない。受け手のいない厳格 JSON 適合は、
+産出コストだけを払う偶発的複雑さである。
+
+対照として `cmate-acceptance-test` の `acceptance-result.v1` には
+`cmate-orchestrate` の uat runner という実在する消費者があり、field 単位で
+整合が取れている。厳格な closed schema は「受け手がいる契約」でだけ正当化される。
+
+何を緩め、何を残したか。
+
+| 対象 | 0.2.0 | 判断根拠 |
+|---|---|---|
+| `additionalProperties: false`（15箇所中13箇所） | 緩めた | 未知 field を落とす受け手がいない |
+| evidence と `sensitive_locations` の閉じた形（残り2箇所） | 残した | field を足すことが値を持ち出す経路そのもの |
+| top-level `required`（15 → 6） | 緩めた | result JSON 自体が任意の副産物になったため |
+| `category` / `reuse_mode` / `severity` / `confidence` | 緩めた | 人が読む分類・程度で、token を突き合わせる者がいない |
+| `status` | 残した | `partial` を `success` に見せない規律の中心。採点器が分岐する |
+| `unresolved[].reason_code` | 残した | 採点器が token を比較する。「探して無かった」と「探せていない」の区別が消える |
+| `scope.excluded[].rule` | 残した | 同上。語彙が開くと除外件数を run 間で比較できない |
+| `completion_check.checks[].id` | 残した | 5件がちょうど1回ずつ、が規律そのもの |
+| `sensitive_locations[].classification` | 残した | 自由文の分類欄は値そのものを書ける場所になる |
+
+`skill_id` と `result_schema_version` の `const`、`repo_path` の pattern、
+`item_id` の pattern も残した。前2つは identity、`repo_path` は
+分析対象の外を指せないための制約であり、いずれも分類の緩さとは別の話である。
+
+version 運用:
+
+- この文書が述べる規律が変わった → `result_schema_version` を上げる
+- enum への値の追加 → 上げない。受け手は未知の値を無視してよい
 - 文言・見出しの調整のみ → Skill の `version` だけを上げる
+
+## 6. 完了条件
+
+schema 適合ではなく、次の4つである。SKILL.md 第7節はこの節を参照している。
+
+1. **summary** — `summary_markdown` が第4節の6見出しをこの順序でちょうど1回ずつ
+   持ち、「結論」が `objective` への直接の答えになっている。
+2. **evidence の実在** — 主張に付いた evidence の `path` が分析対象の中の実在する
+   file を指し、行番号がその file の行数の内側にある。引用は持たない。
+3. **secret 非混入** — 値・値の一部・伏字化した値・長さのいずれも、
+   summary にも result にも現れない。
+4. **走査範囲の申告** — 打ち切り・除外・未解決点が申告されており、
+   status がそれと矛盾しない。
+
+1〜4 は機械で確かめられる。配布元リポジトリの
+`tests/fixtures/cmate-repository-analysis/check_result.py` がそれを行い、
+schema 違反は助言として印字するだけで合否を変えない。
+この採点器は `.commandmate/verify.yaml` の `repository-analysis-fixtures` ゲートと
+`.github/workflows/validate.yml` から実行される。
