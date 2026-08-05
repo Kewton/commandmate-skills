@@ -1943,7 +1943,7 @@
         "isolation",
         "onboarding"
       ],
-      "latest": "0.1.2",
+      "latest": "0.1.4",
       "versions": [
         {
           "version": "0.1.0",
@@ -2003,6 +2003,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worktree-setup-v0.1.2/cmate-worktree-setup-0.1.2.tar.gz",
             "sha256": "fbf6427024d7a6802e5a132189cf8781925d4ba14ec36d8ff2723588da882aae",
             "size": 18640,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Discovery path not verified for this version",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Discovery path not verified for this version",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.1.4",
+          "changelog": "commandmate sync が >=0.21 で実在する前提へ修正、profile 語彙を node/rust/unverified へ統一、本体経路との境界を新設 (#64)。SKILL.md 脱重複 (#68)。",
+          "published_at": "2026-08-05T14:37:16Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-worktree-setup-v0.1.4",
+            "commit": "d718b51b71141c50645b70a73d16063d78a84e6c"
+          },
+          "artifact": {
+            "asset_name": "cmate-worktree-setup-0.1.4.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worktree-setup-v0.1.4/cmate-worktree-setup-0.1.4.tar.gz",
+            "sha256": "add7465ccb57b672ce599a31750b9ac60ccc2a4ad42f6658d39a2633b3ababd7",
+            "size": 19667,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
