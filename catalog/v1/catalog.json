@@ -133,7 +133,7 @@
         "schema",
         "dry-run"
       ],
-      "latest": "0.2.0",
+      "latest": "0.3.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -193,6 +193,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.2.0/cmate-issue-authoring-0.2.0.tar.gz",
             "sha256": "63c161a9601ff261bc7bcd24c20d795eb8be1488ad1a78784acd8bdd3fe1947d",
             "size": 27562,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.3.0",
+          "changelog": "validate-plan の path 抽出を planner と同期して token 先頭一致に固定し、web/src/lib/filter.ts から src/lib/filter.ts のような部分パスが生まれるのを止めた。抽出は suspected_files を経て worker の scope.allow になるため、途中一致は実在しない path への書き込み権限の付与と同義だった。他候補の path 境界つき suffix になる候補は shadowed_file_candidate として報告する (#49)。成果物見出し配下の path が拡張子によらず対象になる振り分け規則を issue-body-contract.md に反映した (#50)。",
+          "published_at": "2026-08-05T06:05:22Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-authoring-v0.3.0",
+            "commit": "d4940861dc5c7293f5da6042c38e4900f23d7abe"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-authoring-0.3.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.3.0/cmate-issue-authoring-0.3.0.tar.gz",
+            "sha256": "ba401d45581a86d103b92ef365a2fb156381c25237c507374328ecd6d65dd7a5",
+            "size": 29073,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
