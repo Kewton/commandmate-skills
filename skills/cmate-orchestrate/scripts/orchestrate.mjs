@@ -717,7 +717,7 @@ function dropShadowedCandidates(paths) {
 function isSafeRepoPath(candidate) {
   if (!candidate || candidate.startsWith('/') || candidate.includes('..')) return false;
   if (candidate.includes('\\')) return false;
-  if (/[ -]/.test(candidate)) return false;
+  if (/[\x00-\x1f\x7f]/.test(candidate)) return false;
   if (/^[A-Za-z]:/.test(candidate)) return false;
   const head = candidate.split('/', 1)[0].toLowerCase();
   if (SYSTEM_ROOTS.has(head)) return false;
