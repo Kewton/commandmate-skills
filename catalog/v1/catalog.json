@@ -177,7 +177,7 @@
         "schema",
         "dry-run"
       ],
-      "latest": "0.5.1",
+      "latest": "0.6.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -369,6 +369,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.5.1/cmate-issue-authoring-0.5.1.tar.gz",
             "sha256": "02c93110c2703aa84503ccd3cddaee831c15b45267fd25fccc509155762200df",
             "size": 33700,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.6.0",
+          "changelog": "planner mirror の FILE_EXT に jsonc を追加 (#56)。orchestrate 側と lockstep で変更し conformance テストで担保。",
+          "published_at": "2026-08-05T15:39:23Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-authoring-v0.6.0",
+            "commit": "ae90ec35c66847dc87079e00adce276acb8df173"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-authoring-0.6.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.6.0/cmate-issue-authoring-0.6.0.tar.gz",
+            "sha256": "2488f29b057b040f7b537b76907a0e5ff020515bf70a7007a8179355530f0a06",
+            "size": 34250,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
