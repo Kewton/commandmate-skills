@@ -128,6 +128,16 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 `--contract-mode require` なら停止する。**どちらの裁定機構で判定したかは常に report と summary に
 明示される**（黙って劣化しない）。
 
+**監視の一次はこの `wait` ループである**（[cmate-orchestrate-monitor](../cmate-orchestrate-monitor/)
+との境界）。契約付き dispatch の裁定と nudge はこの runner が行う: ブロッキングな
+`wait --on-prompt agent --verify` の **exit code 分岐**（0 / 10 / 20 / 21 / 99 / 124）で判定し、
+`send` / `respond` でサーバ経由で促す。**マージ可否の裁定もここである。** monitor は別機構
+（`capture --json` のポーリング分類 + tmux 直接介入）の**サイドカー**で、`wait` に見えない事象
+——rate limit / credits バナーからの復帰、リトライ枯渇死の再送、製品の prompt 検出に載らない
+プロンプト、契約なし委任や他所から投げた worker、`wait` がブロックしている間の可観測性——の
+回収に使う。**統合も廃止もしない。** 併用するなら monitor 側に `--no-auto-approve` を付ける
+（prompt に答えてよいかを決めるのは契約の autoYes ポリシーであって監視ループではない）。
+
 ### 3.3 merge（PR 作成 / guarded merge）
 
 ```
