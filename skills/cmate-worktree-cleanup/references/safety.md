@@ -95,14 +95,19 @@ worktree は既に外れているので、`git worktree prune` の対象にな�
 削除と prune のあと、削除済み worktree を CommandMate の一覧から除外するために sync する。
 経路は public の `commandmate` CLI であり、`commandmatedev` は使わない。
 
-`commandmate sync` は将来新設される CLI を前提とする。現状の CLI に sync が無い環境では
-**optional として扱う**。
+CommandMate `>=0.21` の CLI には `commandmate sync`（server 側の repository 再走査。`--json` で
+API 応答をそのまま得られる）がある。sync は **起動中の CommandMate server** へ接続するため、
+server 未起動、または sync を持たない旧 version の CLI では使えない。この場合だけ
+**optional fallback として扱う**。
 
-- CLI に sync 相当が無い / 失敗した → `commandmate_sync.outcome` を `unavailable` / `failed` とし、
+- sync が使えない / 失敗した → `commandmate_sync.outcome` を `unavailable` / `failed` とし、
   `worktree_ids` は解決できなかった分を欠落（null）として返す。**run 全体を failure にしない。**
+- `worktree_ids` は sync の応答からは得られない（応答は再走査の結果である）。id は
+  `commandmate ls --json` の `worktrees[].id` から解決し、削除前に控えておく。
 - 欠落した worktree id を推測で埋めない。sync できなかった事実を `next_actions`（reason `sync`）に残す。
 
-port 決め打ちの `curl .../api/repositories/sync` は使わない（別 server を叩きうる）。
+port 決め打ちの `curl .../api/repositories/sync` は使わない（別 server を叩きうるうえ、
+`commandmate sync` がその経路を置き換えている）。
 
 ## 6. 診断のみ（自動停止・削除しない）
 

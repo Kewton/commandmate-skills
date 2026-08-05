@@ -19,6 +19,11 @@ core に `develop`、`feature/{N}-worktree`、`feature/issue-{N}-{slug}`、npm�
 signal は「存在」で見る。中身の推測で profile を決めない。両方が存在する monorepo では、
 Issue の対象 path に近い方を選び、選んだ理由を `limitations` に残す。
 
+`node` / `rust` / `unverified` は `cmate-worktree-cleanup` と共通の語彙である。この Skill の
+result の `profile.selected` を、そのまま cleanup の `profile` 入力へ渡せる。cleanup は旧称
+`commandmate`（= `node`）と `commandagent`（= `rust`）も入力として受け付け、canonical 名へ
+写して記録する。setup 側から渡すときは canonical 名（`node` / `rust` / `unverified`）を使う。
+
 ## 2. profile から解決する値
 
 各 field は profile が定めるが、**具体値は repository の実体から確定** する。
@@ -72,15 +77,20 @@ profile 別に、変更前の worktree が健全であることを確かめる *
 
 ## 5. CommandMate worktree sync（optional）
 
-CommandMate の worktree sync は **将来新設の `commandmate sync` CLI を前提** とする。
-現状 CLI に sync は無いため、この Skill では sync を **optional** として扱う。
+`git worktree add` で作った worktree は、CommandMate server 側の一覧には自動で載らない。
+これを解消するのが CLI の sync である。
 
-- sync 経路が存在しない環境では、`commandmate_sync.available=false`、`worktree_id=null` として記録し、
-  worktree 作成の成否には影響させない。**未提供を失敗にしない。**
-- 利用可能なら実行し、返った worktree ID を `commandmate_sync.worktree_id` に記録する。
+- CommandMate `>=0.21` の CLI には `commandmate sync` があり、server 側の repository 再走査
+  （GUI の sync 相当）を起動する。`--json` を付けると API 応答をそのまま出力する。
+- sync は **起動中の CommandMate server** へ接続する。server 未起動、または sync を持たない
+  旧 version の CLI では使えない。その場合だけ optional fallback として扱い、
+  `commandmate_sync.available=false`、`worktree_id=null` を記録する。**使えないことを失敗にしない。**
+- sync の応答は再走査の結果（件数と警告）であって worktree ID ではない。ID が要るときは sync 後に
+  `commandmate ls --json` の `worktrees[].id` から解決する。解決できなければ null にし、推測で埋めない。
 - 公式経路は public `commandmate` を使う。`commandmatedev` は repository 開発用 adapter に限定し、
-  公式経路には使わない。
-- 経路・認証の詳細は Harness Pack ADR（#1447）に従う。token や絶対path を result に残さない。
+  公式経路には使わない。port 決め打ちの `curl .../api/repositories/sync` は使わない
+  （別 server を叩きうるうえ、`commandmate sync` がその経路を置き換えている）。
+- 認証が要る場合も token は CLI 側の設定に委ね、token・絶対path を result や audit に残さない。
 
 ## 6. この Skill が profile から解決しないもの（scope 外）
 

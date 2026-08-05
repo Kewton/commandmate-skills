@@ -154,13 +154,13 @@
       "properties": {
         "available": {
           "type": "boolean",
-          "description": "Whether a CommandMate worktree-sync path exists in this environment. Absence is not a failure: sync is optional."
+          "description": "Whether the CommandMate worktree-sync path is usable here: a CLI that has `commandmate sync` and a server it can reach. False is not a failure: sync is optional."
         },
         "attempted": { "type": "boolean" },
         "worktree_id": {
           "type": ["string", "null"],
           "maxLength": 200,
-          "description": "The CommandMate worktree id when sync ran and returned one. null when sync was unavailable or did not return an id."
+          "description": "The CommandMate worktree id, resolved from `commandmate ls --json` after the sync. Sync itself reports a re-scan, not an id. null when sync was unusable or the id could not be resolved; never a guess."
         },
         "detail": { "type": "string", "minLength": 1, "maxLength": 300 }
       }

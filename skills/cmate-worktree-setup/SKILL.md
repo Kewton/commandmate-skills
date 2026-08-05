@@ -1,6 +1,6 @@
 ---
 name: cmate-worktree-setup
-description: 1つ以上のIssueについて、対象repositoryを検証し、既存branch/directory/worktreeを暗黙上書きせず、repository profile（Node/CommandMate・Rust/CommandAgent）から解決したbranch・directory・base commit・proportional baselineで衝突しない専用worktreeを作成し、証跡付きの versioned result を返す。base SHA を明示し、dependency install は明示承認時のみ、CommandMate sync は利用可能なら worktree ID を返す（optional）。実装や orchestrate を始める前の準備段階で使う。
+description: 1つ以上のIssueについて、profile から解決した branch・directory・base SHA で衝突しない専用 worktree を作成し、baseline 結果を証跡付きで返す。実装や orchestrate を始める前に、既存の branch/directory/worktree を壊さず作業場所を用意したいときに使う。
 ---
 
 # cmate-worktree-setup
@@ -58,6 +58,10 @@ CommandMate（Node）と CommandAgent（Rust）双方の実績あるworktree作�
 - token・secret・環境変数・絶対path を result / audit へ残すこと
 - CommandMate server の起動停止、GitHub Project 更新、PR / Issue への write
 - 既存worktree の強制削除、cleanup、並列 dispatch
+
+これらの一部（server の起動停止、Issue 専用 DB / port の設定、GitHub Project status 更新）は
+CommandMate 本体の `/worktree-setup` slash command や GUI / API 経由の worktree 作成に含まれるが、
+本 Skill の scope 外である。棲み分けは [references/safety.md](./references/safety.md) 第0節にある。
 
 `network_access` は **dependency install を明示承認したときだけ** 使う。その host は
 target repository の package manager 設定に依存するため、install 前に plan で列挙する（[references/safety.md](./references/safety.md)）。
@@ -132,13 +136,18 @@ profile 別の **proportional baseline** を、作成した worktree 内で実�
 
 ### Step 6. CommandMate sync を行う（optional）
 
-CommandMate の worktree sync が利用可能なら実行し、返った worktree ID を
+`git worktree add` で作った worktree は、CommandMate server 側の一覧には自動で載らない。
+CLI から server 側の再走査を起動し、登録された worktree ID を
 `commandmate_sync.worktree_id` に記録する。
 
-- **sync が無い環境では失敗にしない。** `available=false`、`worktree_id=null` として記録し、
+- CommandMate `>=0.21` の CLI には `commandmate sync` があり、これを使う（`--json` で API 応答を
+  そのまま得られる）。起動中の server へ接続するため、server 未起動や `<0.21` の CLI では使えない。
+- **sync を使えない環境では失敗にしない。** `available=false`、`worktree_id=null` として記録し、
   worktree 作成自体の成否には影響させない（sync は optional）。
-- 経路・認証は Harness Pack ADR に従う。公式経路は public `commandmate` を使い、
-  `commandmatedev` は公式経路に使わない。詳細は [references/profile-conventions.md](./references/profile-conventions.md)。
+- sync の応答は再走査の結果であって worktree ID ではない。ID は sync 後に `commandmate ls --json` の
+  `worktrees[].id` から解決する。解決できなければ null にし、**推測 id を書かない。**
+- 公式経路は public `commandmate` を使い、`commandmatedev` は公式経路に使わない。port 決め打ちの
+  curl sync は使わない。詳細は [references/profile-conventions.md](./references/profile-conventions.md)。
 
 ### Step 7. result を組み立てる
 
@@ -167,7 +176,7 @@ result object 1件を返す。契約は [references/result-contract.md](./refere
 status は次の3値である。
 
 - `success` — 要求された全Issueの worktree を作成し、baseline が pass、6つの check がすべて通った
-- `partial` — worktree は作成したが、baseline 失敗・sync 未提供・collision による skip・drift など、
+- `partial` — worktree は作成したが、baseline 失敗・sync が使えない・collision による skip・drift など、
   check の失敗が1つ以上ある。作成済みworktreeは保持する。`limitations` を必ず1件以上書く
 - `failure` — worktree を1件も作成していない。`blocking_reasons` を必ず1件以上書く
 
@@ -185,7 +194,7 @@ status は次の3値である。
 | collision（reuse 明示なし） | `partial`/`failure` | 当該Issueを作成せず `collisions` に記録 |
 | plan 後に base が drift | 続行 | 当該entryを作成せず `limitations` に drift を記録 |
 | baseline が失敗 | `partial` | worktree を保持し `baseline[].outcome=fail` |
-| CommandMate sync が無い | 続行 | `available=false`、失敗にしない（optional） |
+| CommandMate sync が使えない（CLI が古い / server 未起動） | 続行 | `available=false`、失敗にしない（optional） |
 | dependency install 未承認 | 続行 | install せず `limitations` に記録 |
 
 推測で作成しないこと。確信が持てない target は作らず、plan と未解決点だけを返す。

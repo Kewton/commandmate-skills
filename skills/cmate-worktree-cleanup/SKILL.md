@@ -35,9 +35,22 @@ preview** したあと、**clean かつ merge 証跡が十分な worktree だけ
 | 名前 | 必須 | 内容 | 欠けたときの動作 |
 |---|---|---|---|
 | `selection` | 必須 | `issues`（issue 番号の配列）または `all_eligible` | `status: failure` を出力して停止 |
-| `profile` | 必須 | branch/base/path/baseline を解決する profile（`commandmate` / `commandagent` / 利用者指定） | 未指定なら利用者へ確認。応答が無ければ停止 |
+| `profile` | 任意 | branch/base/path/baseline を解決する profile（`node` / `rust` / `unverified`） | repository signal から自動検出し、plan で提示して確認を取る |
 | `mode` | 任意 | `dry_run`（既定） / `apply` | `dry_run` |
 | `confirmed_targets` | 任意 | apply 時に利用者が承認した worktree の集合 | 空。apply では確認を取る |
+
+### 1.1 profile 語彙（`cmate-worktree-setup` と共通）
+
+| profile | 対象 | 検出 signal（root 相対） | 入力として受け付ける別名 |
+|---|---|---|---|
+| `node` | Node / CommandMate | `package.json` | `commandmate` |
+| `rust` | Rust / CommandAgent | `Cargo.toml` | `commandagent` |
+| `unverified` | どちらの signal にも一致しない | — | 利用者が付けた任意の profile 名 |
+
+`cmate-worktree-setup` の result の `profile.selected` を、そのまま `profile` として渡せる。
+別名で受け取った場合は canonical 名へ写して `profile.name` に記録し、写したことを `limitations` に
+残す。利用者が独自の profile 名を与えた場合は `unverified` として扱い、`profile.name` にはその名前を
+記録してよい。`profile.verified` を true にできるのは `node` / `rust` だけである。
 
 入力に関する強い制約:
 
@@ -45,8 +58,8 @@ preview** したあと、**clean かつ merge 証跡が十分な worktree だけ
    `git worktree list --porcelain` から発見する。**利用者が渡した path を直接 remove しない。**
    絶対 path・`..`・symlink・worktree 外 escape は拒否する（[references/safety.md](./references/safety.md) §4）。
 2. **branch/base/path/baseline を hardcode しない。** `develop` / `feature/...` / npm / Cargo を
-   決め打ちせず、`profile` から解決する。検証済み profile は Node/CommandMate と
-   Rust/CommandAgent の2つ。未知 repository は unverified 扱いで、実行前に利用者確認を取ってから使う。
+   決め打ちせず、`profile` から解決する。検証済み profile は `node`（Node/CommandMate）と
+   `rust`（Rust/CommandAgent）の2つ。`unverified` は実行前に利用者確認を取ってから使う。
 3. Issue 本文や PR の取得は読み取りのみ。`gh pr edit` などで書き換えない。
 
 ## 2. 権限
@@ -72,16 +85,21 @@ preview** したあと、**clean かつ merge 証跡が十分な worktree だけ
   `diff`、`cherry`、`show`、および削除の `worktree remove`（非 force）/ `branch -d` /
   `update-ref -d <ref> <old-oid>` / `worktree prune`。
 - `gh` — `pr list --state merged --head <branch> --base <base> --json ...`（読み取りのみ）。
-- `commandmate` — public CLI の sync のみ（§5）。`commandmatedev` は使わない。
+- `commandmate` — public CLI の `sync` と、worktree id 解決のための読み取り `ls --json`（§5）。
+  `commandmatedev` は使わない。
 
 ## 4. 手順
 
 ### Step 0 — 前提と profile の確認
 
-1. `selection` と `profile` が揃っているかを確認する。欠ければ §7 で停止する。
-2. `profile` を解決し、`base`（例 `origin/main`）・`remote`・`baseline`・integration worktree・
-   path/branch のヒントを得る。未知 profile は unverified として利用者確認を取る。
-3. `git rev-parse --show-toplevel` で現在の worktree を特定する（§5 で必ず除外する）。
+1. `selection` があるかを確認する。欠ければ §7 で停止する。
+2. `profile` を解決する。明示指定があれば §1.1 の canonical 名へ写して使う。無ければ repository の
+   signal（`package.json` → `node`、`Cargo.toml` → `rust`）で **自動検出** する。どちらの signal にも
+   一致しない、または両方あって決めきれない場合は `unverified` とする。
+3. 解決した profile から `base`（例 `origin/main`）・`remote`・`baseline`・integration worktree・
+   path/branch のヒントを得る。この Skill は破壊的なので、**自動検出した profile も plan に載せて
+   利用者へ提示し、確認の対象に含める**（Step 5）。`unverified` は確認が取れなければ候補にしない。
+4. `git rev-parse --show-toplevel` で現在の worktree を特定する（Step 1 で必ず除外する）。
 
 ### Step 1 — 発見と除外
 
@@ -122,7 +140,8 @@ clean な候補ごとに proof を求める（詳細は
 ### Step 5 — plan の提示と確認（apply の前提）
 
 1. plan（[references/result-contract.md](./references/result-contract.md) §1）を dry-run で提示する。
-   removed と skipped を混ぜず、target ごとに proof / skip 理由を示す。
+   removed と skipped を混ぜず、target ごとに proof / skip 理由を示す。**使った profile
+   （名前・`verified`・`base`・`remote`）も併せて提示する。** 自動検出した場合はその旨を明示する。
 2. `mode: apply` に進むには、利用者の **明示確認** が要る。承認された worktree を
    `confirmed_targets` として受け取る。確認できない（非対話含む）場合は `dry_run` に留める。
    **確認なしに削除しない。**
@@ -143,7 +162,7 @@ clean な候補ごとに proof を求める（詳細は
 
 ### Step 7 — sync と診断
 
-1. `commandmate` public CLI で sync する（§5）。無い/失敗は `unavailable`/`failed` とし、
+1. `commandmate` public CLI で sync する（§5）。使えない/失敗は `unavailable`/`failed` とし、
    worktree id を欠落として返す。**run を failure にしない。**
 2. server / process / tmux / DB / log は §6 に従い診断表示のみ。`next_actions` に回す。
 
@@ -156,9 +175,13 @@ removed / skipped / proof / evidence を残し、token/secret/絶対path/raw Git
 ## 5. CommandMate sync（optional）
 
 削除・prune のあと、削除済み worktree を CommandMate 一覧から外すため public `commandmate` CLI で
-sync する。sync は将来新設の `commandmate sync` を前提とし、**未提供環境では optional** として扱う。
-CLI に sync が無い/失敗した場合は `commandmate_sync.outcome` を `unavailable`/`failed`、
-`worktree_ids` を欠落 (null) にして返し、run を失敗にしない。port 決め打ちの curl sync は使わない。
+sync する。CommandMate `>=0.21` の CLI には `commandmate sync`（server 側の repository 再走査。
+`--json` で API 応答をそのまま得られる）があり、これを使う。sync は起動中の server へ接続するため、
+server 未起動、または sync を持たない旧 version の CLI では使えない。その場合は
+`commandmate_sync.outcome` を `unavailable`/`failed`、`worktree_ids` を欠落 (null) にして返し、
+**run を失敗にしない**（sync は optional）。`worktree_ids` は sync の応答ではなく
+`commandmate ls --json` の `worktrees[].id` から解決する（削除前に控える）。推測 id を書かない。
+port 決め打ちの curl sync は使わない。
 
 ## 6. 診断のみ（自動停止・削除しない）
 
@@ -170,8 +193,9 @@ worktree 周辺の server / process / tmux / DB / log は **表示だけ** す�
 
 | 状況 | 動作 |
 |---|---|
-| `selection` / `profile` が欠ける | 推測で補わない。`status: failure`、`blocking_reasons` に記録 |
-| profile が未知 | unverified。利用者確認が取れなければ候補にしない |
+| `selection` が欠ける | 推測で補わない。`status: failure`、`blocking_reasons` に記録 |
+| `profile` が未指定 | signal から自動検出し、plan で提示して確認を取る（§4 Step 0） |
+| profile が未知・曖昧 | `unverified`。利用者確認が取れなければ候補にしない |
 | 利用者 path が絶対/`..`/symlink/worktree外 | 拒否。`blocking_reasons` に記録し候補にしない |
 | fetch 失敗 | 停止しない。remote を要する候補を `unverifiable`、`limitations` に記録 |
 | gh 不可/未認証 | `merged_equivalent` 候補を `github_data_missing` = `unverifiable`。`direct` は継続 |

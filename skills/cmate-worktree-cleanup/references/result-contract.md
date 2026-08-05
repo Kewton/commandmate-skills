@@ -17,6 +17,8 @@ plan は必ず dry-run で作る。`mode` は `dry_run` 固定。deletion は含
   各要素は `state`（clean/dirty/detached/locked/missing）、`proof`、`decision`、
   `delete_method`、`skip_reason`、`diagnostics` を持つ。
 - `excluded` — current / integration / 対象外。`reason` を必ず付ける。指定されても消せない。
+- `profile` — 使った profile の `name`（`node` / `rust` / `unverified`）・`verified` / `base` /
+  `remote` / `baseline`。自動検出した場合もここに載せ、確認の対象にする（[SKILL.md](../SKILL.md) §1.1）。
 - `fetch` — `attempted` / `succeeded` / `remote` / `base`。`succeeded` が false のとき、
   remote を要する候補はすべて `unverifiable` になっていること。
 - `decision: delete` は `state: clean` かつ `proof.type ∈ {direct, merged_equivalent}` の
@@ -60,6 +62,7 @@ run の失敗ではない。sync の `unavailable` / `failed` も `failure` に�
 
 `outcome` は `synced` / `unavailable` / `failed` / `skipped`。`unavailable` / `failed` の
 とき `worktree_ids` の該当分を null（欠落）にする。**推測 id を書かない。**
+`worktree_ids` は sync の応答ではなく `commandmate ls --json` から解決する（[safety.md](./safety.md) 第5節）。
 
 ### 2.5 next_actions
 
