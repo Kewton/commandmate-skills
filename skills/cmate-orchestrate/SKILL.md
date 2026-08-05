@@ -259,6 +259,8 @@ mutating runner は `<out>/` にも report と summary markdown を書く。
 | `auto_yes_used` | dispatch | `--auto-yes` で prompt を自動応答した |
 | `parallelism_truncated` | dispatch | wave が `max_parallel` より広かったので上限で切った |
 | `unsafe_worktree_target` | dispatch | worktree path が path-escape guard に弾かれた |
+| `verification_unrecorded` | dispatch | completed した worker に裁定が1つも記録されなかった（runner 側の欠陥。`verification_recorded` completion check も落ちる） |
+| `verification_gates_unrecorded` | dispatch | verification は pass だが `GATE` 行を読めず、pass の根拠となった gate を report が名指しできない |
 | `drift_<check>` | dispatch | 非 blocking な drift（`integration_clean` / `worktrees_present`）を記録して続行した |
 | `issue_autoclose_not_default_branch` | merge | base がデフォルトブランチでないため `Resolves #n` が効かない。**merge 後に手動クローズが要る** |
 | `unsafe_branch` | merge | branch 名が safe-ref guard に弾かれた |
@@ -272,7 +274,7 @@ limitation ではなく **stop_reason / blocking reason** である。**停止�
 
 ### completion check
 
-各 runner は report に completion check を自己申告する（plan 5件 / dispatch 5件 / merge 5件 /
+各 runner は report に completion check を自己申告する（plan 5件 / dispatch 6件 / merge 5件 /
 uat 6件）。**いずれかが false なら `status` は `success` にならない。** 項目は各正本の
 「completion_check」節にある。token・secret・絶対 path・raw terminal は
 report/artifact に残さない（redaction）。

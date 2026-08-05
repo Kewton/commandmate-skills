@@ -1,0 +1,14 @@
+{
+  "description": "Issue #56: backtick の `wrangler.jsonc` が suspected_files に入る。#43 の geojson と同型だが、逃げ道が1つ少ない — wrangler.jsonc は Cloudflare の規約ファイル名なので「認識される拡張子に改名する」という回避が取れない。さらに repository 直下のファイルなので `extractUnrecognizedPaths`（backtick かつスラッシュを含む path のみ見る）にも掛からず、unrecognized_file_extension の警告すら出ない完全な silent drop だった。suspected_files はそのまま実行契約の scope.allow になり、requireScopeClean が掛かるので、worker は指示どおり編集した瞬間に scope ゲートで不合格になる。認識される拡張子なので警告は出ない。",
+  "args": ["421", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[421]],
+    "merge_order": [421],
+    "dependencies": [],
+    "classifications": { "421": "independent" },
+    "suspected_files": { "421": ["wrangler.jsonc", "src/worker/batch.ts"] }
+  }
+}

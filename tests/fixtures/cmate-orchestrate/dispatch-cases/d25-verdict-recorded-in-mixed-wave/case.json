@@ -1,0 +1,37 @@
+{
+  "description": "Issue #83 の再現ケース: 1つの wave に「exit 0 で verification を通し commit も出した worker (#101)」と「失敗した worker (#100)」が同居する。#101 の裁定（`wait --verify` exit 0）は監督中に既に確定しているので、wave が全完了しなかったことを理由に**記録**まで落としてはならない。修正前は verification の転記が `if (allCompleted)` の内側にあり、この wave の全 worker が初期値 `{ran:false, outcome:'not_run', gates:[], checks:[]}` のまま出力されていた — note は「verification passed」と言っているのに構造化フィールドは not_run、という自己矛盾した report になり、merge/uat が読む `worker_state === 'completed' && verification.outcome === 'pass'` を満たさないので検証済みの成果物が黙って納品経路から外れる（no_eligible_issues）。ここでは #101 の outcome が pass、gates が非空、note の検証文が記録内容と一致することを固定する。barrier 自体は不変（#100 が失敗しているので wave は advance しない）。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": ["100", "101", "--profile", "node-commandmate", "--max-parallel", "2", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration"],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "max_dispatched_per_wave": 2,
+    "no_respond": true,
+    "sent": [100, 101],
+    "worker_states": { "101": "completed", "100": "failed" },
+    "wave0_all_workers_completed": false,
+    "wave0_all_verifications_passed": false,
+    "wave0_advanced": false,
+    "verification_outcomes": { "101": "pass", "100": "not_run" },
+    "verification_gates": {
+      "101": [
+        { "id": "work-evidence", "verdict": "pass" },
+        { "id": "baseline", "verdict": "pass" }
+      ],
+      "100": []
+    },
+    "worker_notes_include": {
+      "101": ["a new commit was detected", "verification passed (work-evidence, baseline)"]
+    },
+    "wait_verify_calls_min": 1,
+    "absent_limitation_codes": ["verification_unrecorded", "verification_gates_unrecorded"],
+    "blocking_codes": ["worker_failed"]
+  }
+}

@@ -96,6 +96,22 @@ worker 側にどうしようもない失敗である。
 → 同 directory の lockfile を**既定許可**として `suspected_files` に加え、planner が加えた分を
 issue の `scope_defaults` に明示する（黙って足さない）。
 
+### #56 — `wrangler.jsonc` が抽出されず、worker は指示どおり編集した瞬間に不合格になった
+
+`FILE_EXT` に `jsonc` が無いので `wrangler.jsonc` は `suspected_files` に入らず、
+そのまま実行契約の `scope.allow` から外れる。`requireScopeClean: true` が掛かるため、
+**worker が Issue に書いてあるとおり編集した瞬間に scope ゲートで不合格**になり、
+worker 側では解決できない。#43（geojson）と同型だが逃げ道が2つ少ない:
+(a) `wrangler.jsonc` / `deno.jsonc` は framework が決めたファイル名なので改名で回避できない、
+(b) repository 直下なのでスラッシュを含まず、`extractUnrecognizedPaths` にも掛からないため
+`unrecognized_file_extension` の警告すら出ない**完全な silent drop** だった。
+
+→ `FILE_EXT` に `jsonc` を追加し、cmate-issue-authoring 側のミラーも同 commit で byte 一致させた。
+`json5` / `jsonl` は**足していない**: `*.json5` や `*.jsonl` という**名前でなければ動かない**
+広く使われたツールが無く、`suspected_files` は worker の `scope.allow` そのものなので、
+報告されていない需要のために全 worker の書き込み許可を広げることになるからである。
+固定ファイル名を示す Issue が出たときに足す。
+
 ### CommandMate #1678 B-3 — コメントに書いた決定が plan に載らなかった
 
 契約の入力は Issue の number / title / body / labels だけで、**コメントは読まれない**
@@ -186,6 +202,41 @@ Issue は `allow: []` の契約になり、**そこだけ scope ゲートが無�
 `worker_state === 'completed'` と `verification.outcome === 'pass'` の2つしか読まず、その enum 値と
 意味は変えていないので、**両 runner は無改修で動く**。フォールバック経路（baseline 再実行）は
 ゲートを持たないので `[]` とし、実行 command は従来どおり `checks` に載る。
+
+### #83 — note は「verification passed」、構造化 field は `not_run` だった
+
+report が自分と矛盾していた。同じ worker について `note` が
+「completed after 1 follow-up message(s); verification passed and a new commit was detected」
+と述べる一方で、`verification` は `{ran: false, outcome: 'not_run', gates: [], checks: []}` だった。
+当該 worktree で `verify-run.sh` を回すと全ゲート PASS なので、**note の方が正しかった**。
+報告者のリポジトリでは #28 / #29 / #49 の3件連続で発生した。
+
+原因は2つで、いずれも Issue 本文の推測（「`wait --verify` の stdout から拾えていない」）とは
+別であった。実測は次のとおり:
+
+1. **記録が barrier の内側にあった。** `scripts/dispatch.mjs` の verification 転記ループが
+   `if (allCompleted)` に包まれていたので、**wave に1人でも** 失敗・timeout・prompt・未 dispatch の
+   worker がいると、**同じ wave の他の worker**（exit 0 で pass し commit も出した worker を含む）が
+   worker record の初期値のまま出力された。`gates: []` が常に空だったのも同じ経路である
+   （verdict 自体は `contractVerdicts` に入っており、gate 行の parse も正しく動いていた）。
+2. **note が verification の第2の主張だった。** 監督ループが「verification passed …」という
+   文字列を独立に組み立てていたので、1 と組み合わさって自己矛盾が表に出た。
+
+merge / uat の eligible 判定は `worker_state === 'completed' && verification.outcome === 'pass'` の
+2つしか見ないため、**検証に通った成果物が report の書き方だけを理由に納品経路から外れ**
+（`no_eligible_issues`）、PR 作成・CI ゲート・guarded merge・UAT の二層裁定がすべて迂回された。
+不合格になったのではなく、**判定される前に消えていた**。
+
+→ (a) 裁定に到達した worker には wave の成否と無関係に必ず記録する（barrier は「次 Wave を
+dispatch してよいか」だけを決める）。(b) `note` の検証文は記録した `verification` から生成する
+1箇所に集約し、矛盾を表現できなくした。(c) `completed` なのに裁定が無い経路が残った場合は
+completion check `verification_recorded` の失敗と limitation `verification_unrecorded` として
+**黙って通さず報告する**。(d) `outcome: pass` で `gates` が空なら、拾えなかったこと自体を
+`verification_gates_unrecorded` に記録する（planner の `unrecognized_file_extension` と同型）。
+副次的に、exit 21（work-evidence が判定して不合格）は worker が `failed` でも `fail` として
+記録されるようになった — `not_run` は「**何も判定しなかった**」のために取ってある。
+`dispatch_schema_version` は **1 のまま**（additive: completion check 1件の追加。正本
+[dispatch-contract.md](./dispatch-contract.md) 第7節）。
 
 ### CommandMate #1678 B-2 / #1683 — scope ゲート不合格の再指示に、違反 path が載っていなかった
 

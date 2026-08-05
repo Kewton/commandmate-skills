@@ -189,7 +189,15 @@ const CORPUS = [
       'pkg/o.go pkg/p.rb pkg/q.java pkg/r.kt pkg/s.c pkg/t.h pkg/u.cpp',
       'pkg/v.css pkg/w.html pkg/x.sql',
       '`data/tiles/demo.geojson` `data/tiles/demo.topojson` `data/tiles/demo.geojsonl`',
+      // Issue #56. Two shapes, because `jsonc` is the one extension in the set
+      // whose real-world files sit at the repository ROOT under a framework-fixed
+      // name: `wrangler.jsonc` has no "/" for CANDIDATE_WITH_EXT to anchor on and
+      // reaches the set only through CANDIDATE_BACKTICK. It is also the alternative
+      // that `json` is a prefix of, so a mirror that dropped it would still match
+      // `pkg/d.json` and look healthy.
+      '`wrangler.jsonc` `config/deno.jsonc`',
       '`data/tiles/demo.mbtiles` is outside the set and must not be extracted',
+      '`config/legacy.json5` is outside the set too and must not be extracted',
     ].join('\n'),
   },
   {
@@ -334,6 +342,16 @@ const LIVENESS = [
     name: 'the corpus reaches the geojson extensions',
     holds: (results) =>
       results.some((entry) => entry.planner.paths.includes('data/tiles/demo.geojson')),
+  },
+  {
+    name: 'the corpus reaches the jsonc extension and stops at json5',
+    holds: (results) =>
+      results.some(
+        (entry) =>
+          entry.planner.paths.includes('wrangler.jsonc') &&
+          entry.planner.paths.includes('config/deno.jsonc') &&
+          !entry.planner.paths.includes('config/legacy.json5'),
+      ),
   },
   {
     name: 'the corpus reaches the shadow drop',

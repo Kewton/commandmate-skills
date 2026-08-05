@@ -1,5 +1,5 @@
 {
-  "description": "exit 21（作業証跡ゼロ）の分岐: work-evidence が commit も未 commit 変更も見つけない間は nudge して再度 `wait --verify` する。--max-turns 3 到達でなお 21 なら worker は failed（dispatch 失敗系）であり、pass にも 20 にも丸めない。`commandmate verify` は呼ばず、次 Wave も dispatch しない。 worker は 2 ターン目から commit を出すが、21 の間は runner が HEAD を見に行かない（判定が「作業ゼロ」なので完了確認に進まない）ことも固定する。",
+  "description": "exit 21（作業証跡ゼロ）の分岐: work-evidence が commit も未 commit 変更も見つけない間は nudge して再度 `wait --verify` する。--max-turns 3 到達でなお 21 なら worker は failed（dispatch 失敗系）であり、pass にも 20 にも丸めない。`commandmate verify` は呼ばず、次 Wave も dispatch しない。 worker は 2 ターン目から commit を出すが、21 の間は runner が HEAD を見に行かない（判定が「作業ゼロ」なので完了確認に進まない）ことも固定する。verification は `fail`（work-evidence ゲートが判定して不合格）である。0.15.0 まではここが `not_run` に見えていたが、それは Issue #83 の記録漏れの副作用であって裁定ではない — 21 は「誰も判定しなかった」ではなく「work-evidence が判定して落とした」であり、`not_run` は exit 99 や prompt・未 dispatch のように**本当に何も判定しなかった**場合のために取ってある。",
   "plan": {
     "issues_fixture": "cases/02-explicit-dependency/issues.json",
     "orchestrate_args": [
@@ -43,7 +43,18 @@
       "201": "failed"
     },
     "verification_outcomes": {
-      "201": "not_run"
+      "201": "fail"
+    },
+    "verification_gates": {
+      "201": [
+        {
+          "id": "work-evidence",
+          "verdict": "fail"
+        }
+      ]
+    },
+    "worker_notes_include": {
+      "201": ["verification failed (work-evidence)"]
     },
     "contract_issues": [
       201

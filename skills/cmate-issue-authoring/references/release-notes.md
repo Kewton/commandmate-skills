@@ -19,6 +19,20 @@ install 先で走らせるよう案内している箇所は無い。
 
 ## Changelog
 
+### 0.6.0 — planner mirror の `FILE_EXT` に `jsonc` を同期（Issue #56）
+
+- planner 本体（cmate-orchestrate 0.16.0）が `FILE_EXT` に `jsonc` を足したのに合わせ、
+  mirror も**同じ commit で** byte 一致させた。`wrangler.jsonc` / `deno.jsonc` は framework が
+  決めたファイル名なので「認識される拡張子に改名する」回避が取れず、`suspected_files` から
+  外れると実行契約の `scope.allow` からも外れて、worker が指示どおり編集した瞬間に scope ゲートで
+  不合格になっていた。repository 直下のファイルは `unrecognized_file_extension` の警告経路にも
+  乗らないため、完全な silent drop だった。
+- `json5` / `jsonl` は同期していない（planner が足していない）。`*.json5` / `*.jsonl` という
+  名前でなければ動かない広く使われたツールが無く、`suspected_files` は worker の `scope.allow`
+  そのものなので、報告されていない需要のために許可を広げないという判断である。
+- validator の rule・schema・計画 artifact の互換性に変更は無い。`planner_ready` の判定は、
+  これまで silent drop していた `.jsonc` path を持つ Issue で **通るようになる**（緩和方向）。
+
 ### 0.5.1 — SKILL.md の規則再掲を references / schema へ一本化する（Issue #68）
 
 - SKILL.md を「いつ使うか / 呼び方・入力 / 出力の読み方 / 停止条件と人間の動き」の 4 つに

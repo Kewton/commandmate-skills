@@ -123,11 +123,17 @@ scope ゲートに落ちるという構造的な行き止まりだった）。
 `private` `var` `etc` `proc` で始まる候補は、安全のため捨てられる。
 
 既知拡張子の集合は planner の `FILE_EXT` と byte 単位で同一であり（第 2 節冒頭の
-不変条件）、`geojson` / `topojson` / `geojsonl` を含む。集合の外の拡張子を backtick path に
+不変条件）、`geojson` / `topojson` / `geojsonl` / `jsonc` を含む。集合の外の拡張子を backtick path に
 書いた場合（例: `` `data/tiles/demo.mbtiles` ``）、その path は抽出されないが、
 planner は plan の `warnings` に `unrecognized_file_extension` を積んで run を
 partial に落とす（Issue #43 / CommandMate #1678 B-1: 以前は黙って消え、worker が
 scope gate に弾かれて構造的に解決不能だった）。
+
+ただしこの warning は **スラッシュを含む backtick path にしか出ない**。repository 直下の
+ファイル（`` `wrangler.jsonc` `` など）が集合の外にあると、抽出もされず warning も出ない
+**完全な silent drop** になる。`jsonc` を集合に入れたのはこのためである（Issue #56。
+`wrangler.jsonc` / `deno.jsonc` は framework が決めた名前なので改名では回避できない）。
+`json5` / `jsonl` は入っていない。
 
 対象ファイルに依存 manifest（`package.json` / `Cargo.toml` / `go.mod` /
 `pyproject.toml` / `Gemfile`）を含めると、planner は同 directory の lockfile

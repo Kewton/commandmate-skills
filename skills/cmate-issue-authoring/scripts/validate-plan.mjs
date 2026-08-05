@@ -204,7 +204,7 @@ function validateAgainstSchema(value, schema, root, pointer, out) {
 
 const ACCEPTANCE_HEADING_RE = /(acceptance|criteria|受入|受け入れ|完了条件|期待結果|受入条件)/i;
 const HEADING_RE = /^#{1,6}\s+/;
-const FILE_EXT = 'rs|md|toml|json|yaml|yml|py|sh|ts|tsx|js|jsx|mjs|cjs|go|rb|java|kt|c|h|cpp|css|html|sql|geojson|topojson|geojsonl';
+const FILE_EXT = 'rs|md|toml|json|jsonc|yaml|yml|py|sh|ts|tsx|js|jsx|mjs|cjs|go|rb|java|kt|c|h|cpp|css|html|sql|geojson|topojson|geojsonl';
 const SYSTEM_ROOTS = new Set(['users', 'home', 'root', 'tmp', 'private', 'var', 'etc', 'proc']);
 
 function firstNonEmptyLine(value) {

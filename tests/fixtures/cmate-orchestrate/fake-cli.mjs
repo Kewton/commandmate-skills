@@ -535,6 +535,12 @@ function main() {
       } else if (exit === VERIFY_NOT_STARTED) {
         gateLines.push('GATE work-evidence FAIL');
       }
+      // `gate_lines: false` models a CLI whose verdict is an exit code alone —
+      // an older build, or one whose gate reporting the runner cannot parse. The
+      // verdict still stands; what the report loses is the ability to say WHAT
+      // the pass was based on, which the runner must record rather than leave as
+      // an empty list (Issue #83).
+      if (worker.gate_lines === false) gateLines.length = 0;
       for (const line of gateLines) process.stdout.write(`${line}\n`);
       process.exit(exit);
     }

@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 421,
+      "title": "fix: raise the Workers CPU limit",
+      "body": "Cloudflare Workers の CPU 上限が既定値のままなので、バッチ処理が中断する。\n\n## 対象ファイル\n\n- `wrangler.jsonc`\n- `src/worker/batch.ts`\n\n## 受入条件\n- [ ] `wrangler.jsonc` の limits.cpu_ms が引き上げられている\n- [ ] バッチ処理が上限に当たらない\n",
+      "labels": ["bug"]
+    }
+  ]
+}
