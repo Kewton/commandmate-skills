@@ -1849,7 +1849,7 @@
         "node",
         "ci"
       ],
-      "latest": "0.1.4",
+      "latest": "0.2.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -1953,6 +1953,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-advisor-v0.1.4/cmate-verify-advisor-0.1.4.tar.gz",
             "sha256": "05096317747eb09f531d06b15a15a78857cacd771ea6b8e98ccd606661d78a62",
             "size": 35936,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-31 on Claude Code 2.1.220 with CommandMate 0.16.0 for 9 packages under docs/agent-support-matrix.md 3.2. This package was added 2026-08-02 and was NOT separately measured; install layout is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-31 on Codex CLI 0.145.0 (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured. The analyser needs only node, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured. The analyser needs only node, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.17.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.2.0",
+          "changelog": "ランチャー解決を統一し npx 運用を正式サポート (#37)。--cli は argv 分割で受理し $CM をフォールバックに、シェル構文は助言つきで拒否。SKILL.md 冒頭に読み替え宣言。 allowed-tools に npx 形を並記。",
+          "published_at": "2026-08-05T16:42:31Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-advisor-v0.2.0",
+            "commit": "d01ed9f6e370b2936cfe713a3f5dbe442678dfe4"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-advisor-0.2.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-advisor-v0.2.0/cmate-verify-advisor-0.2.0.tar.gz",
+            "sha256": "c7f848593251440de0eac56bacf86ad01b481b298697f49ee4b7b60348d3e8e5",
+            "size": 37720,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
