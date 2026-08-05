@@ -86,14 +86,20 @@ path は次の 3 通りで拾われる。
 
 | 行き先 | 条件 |
 |---|---|
-| `reference_files` | `docs/` で始まる、または `.md` / `.rst` / `.txt` で終わる |
+| `suspected_files` | 「成果物」「対象ファイル」「変更対象」「Deliverables」等の**見出し配下**にある（拡張子を問わない） |
+| `reference_files` | それ以外で、`docs/` で始まる、または `.md` / `.rst` / `.txt` で終わる |
 | `suspected_files` | それ以外すべて |
 
-**これが最も踏みやすい罠である。** documentation だけを対象にした Issue は、
-path をいくつ並べても `suspected_files` が空になり、planner は必ず
-「Affected files are unclear」を立てる。documentation 専用の Issue は、この planner の
-前では blocking question ゼロにできない。計画にその Issue を含めるなら、
-`warnings` に `docs_only_issue` を積んで人間に判断を返すこと（黙って通さない）。
+**見出しがこの振り分けを決める。** 成果物が Markdown の Issue（設計文書・ADR・手順書）は、
+その path を成果物の見出しの下に書けば `suspected_files` に入り、そのまま worker の
+`scope.allow` になる（Issue #50。以前は拡張子だけで判定していたため、この種の Issue は
+path をいくつ並べても `suspected_files` が空になり、指示どおり md を書いた worker が
+scope ゲートに落ちるという構造的な行き止まりだった）。
+逆に、参照するだけの文書は成果物の見出しの外に書くこと。見出しの外の
+`docs/` / `.md` / `.rst` / `.txt` は従来どおり reference であり、**それしか無い Issue は**
+`suspected_files` が空になって planner が「Affected files are unclear」を立てる。
+その状態の Issue を計画に含めるなら、`warnings` に `docs_only_issue` を積んで人間に
+判断を返すこと（黙って通さない）。
 
 絶対 path・`..`・drive letter・制御文字を含む候補、および `users` `home` `root` `tmp`
 `private` `var` `etc` `proc` で始まる候補は、安全のため捨てられる。

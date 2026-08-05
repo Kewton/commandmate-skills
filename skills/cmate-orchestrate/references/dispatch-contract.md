@@ -160,8 +160,17 @@ runner は承認済み plan **だけ**から契約を組み立てる。時刻・
 - `verify.gates` は `--verify-gates` を指定したときだけ書く。runner は対象リポジトリの
   `verify.yaml` を知らず、**存在しない gate id は `send --contract` を exit 2 で落とす**。キーの
   省略は「全ゲートを走らせる」であり、緩い側ではなく厳しい側の既定である。
-- plan が対象 file を1つも挙げていない Issue は、scope を捏造せず `allow: []` +
-  `requireScopeClean: false` とし、`contract_scope_unknown` を limitation に記録する。
+- `success.requireScopeClean` は**常に `true`** である。以前は `<allow が非空か>` で決めており、
+  対象 file を1つも挙げていない Issue だけ scope ゲートが丸ごと無効化されていた。scope 判定が
+  無い契約は「worktree 内の何を書いても clean」と同義なので、これは過剰拒否の裏返しの
+  **無制限**であり、Issue の書き方ひとつで両極が入れ替わっていた（Issue #50）。
+- plan が対象 file を1つも挙げていない Issue は、scope を捏造せず、また緩い契約も作らず、
+  **dispatch しない**。runner は send も contract 配置も行わず `contract_scope_unknown` を
+  limitation に記録し、その worker を `not_dispatched` のまま残す（wave は advance しない）。
+  対象 file は plan 側で名指すしかないので、これは worker からは解決不能な欠落である。
+- dispatch を拒否された worker がいる wave の停止理由は `not_dispatched` であり、
+  `verification_failed` ではない。走っていない worker を「検証に落ちた」と報告すると、
+  plan の欠落を worktree の不具合として調査させることになる。
 
 ### 2.5 pass は再検証しない
 

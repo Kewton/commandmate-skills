@@ -183,6 +183,12 @@ path 候補は必ず **token 先頭**から取る。`\b` 起点だと path の�
 **path 境界つき suffix** になっている候補（`web/src/lib/filter.ts` に対する
 `src/lib/filter.ts`）は落とし、落とした分を `warnings` の `shadowed_file_candidate` に
 出す（`unrecognized_file_extension` と同型で、黙っては捨てない）。
+
+`docs/` prefix と `.md` / `.rst` / `.txt` は原則 `reference_files` だが、
+**「成果物」「対象ファイル」「変更対象」「Deliverables」等の見出し配下**に書かれた path は
+拡張子を問わず `suspected_files` に入れる。成果物が Markdown の Issue（設計文書・ADR・手順書）は
+以前 `suspected_files` が必ず空になり、worker は指示どおり md を書いて scope ゲートに
+落とされていた（Issue #50）。見出しの外に書かれた md は従来どおり reference のままである。
 また、対象 file に依存 manifest（`package.json` / `Cargo.toml` / `go.mod` /
 `pyproject.toml` / `Gemfile`）が含まれる Issue には、同 directory の lockfile
 （node → `package-lock.json` / `pnpm-lock.yaml` / `yarn.lock`、rust → `Cargo.lock` 等）を
@@ -317,11 +323,15 @@ Wave の各 Issue について、plan だけから **実行契約 yaml**（Comma
 | `scope.deny` | `[]` |
 | `verify.gates` | `--verify-gates` 指定時のみ。既定は**キーごと省略＝全ゲート**（存在しない gate id は `send --contract` を exit 2 で落とすので発明しない） |
 | `autoYes.mode` | `--auto-yes` 無しなら `"off"`（積極的な禁止）、有りなら `"safe"`。第9.1節 |
-| `success` | `requireWorkEvidence: true` / `requireScopeClean: <allow が非空か>` / `autoVerifyOnStop: false` |
+| `success` | `requireWorkEvidence: true` / `requireScopeClean: true`（常に真）/ `autoVerifyOnStop: false` |
 
 **同一 plan → byte-identical な契約**である（時刻・乱数・環境を読まない）。plan が対象 file を1つも
-挙げていない Issue は、scope を捏造せず `allow: []` + `requireScopeClean: false` とし
-`contract_scope_unknown` を limitation に記録する。契約は `<out>/contracts/issue-<n>.yaml` にも
+挙げていない Issue は **dispatch しない**。契約を作れば `allow: []` になり、`requireScopeClean` を
+`<allow が非空か>` にしていた頃はそこだけ scope ゲートが無効化されて worker が何でも書ける状態に
+なっていた（対象 file を誰も名指せなかった Issue が最も広い権限を得るという反転。Issue #50）。
+runner は send せず `contract_scope_unknown` を limitation に記録し、その wave を advance させない。
+`requireScopeClean` は常に真なので、万一 allow が空の契約が作られても緩む側ではなく閉じる側に倒れる。
+契約は `<out>/contracts/issue-<n>.yaml` にも
 残す（worktree の写しは worker が書き換えうるため）。worktree-id は plan の `worktree_id`（あれば）→
 なければ `commandmate ls --json` を branch で突き合わせて解決する（`commandmate sync` は無い）。
 worktree path は path escape 検査を通す。repository-local な worker Skill を必須依存にしない。

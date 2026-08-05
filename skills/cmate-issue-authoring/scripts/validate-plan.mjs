@@ -251,18 +251,43 @@ const CANDIDATE_BACKTICK = '`([^`\\s]+\\.(?:' + FILE_EXT + '))`';
 const CANDIDATE_KNOWN_ROOT = PATH_START + '((?:src|tests|test|scripts|docs|lib|app|pkg|internal|cmd|\\.github)/[A-Za-z0-9_./-]+)\\b';
 const CANDIDATE_WITH_EXT = PATH_START + '([A-Za-z0-9_.-]+/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\\.(?:' + FILE_EXT + '))\\b';
 
+// Headings under which a path is the Issue's product, not its context
+// (planner Issue #50). Byte-identical to the planner's.
+const DELIVERABLE_HEADING_RE = /(deliverable|成果物|対象ファイル|変更対象|変更ファイル|作成ファイル|編集対象|出力ファイル|生成ファイル|affected files|target files|output files|files to (?:change|edit|create|write|add))/i;
+
+function plannerDeliverableSpans(text) {
+  const spans = [];
+  let offset = 0;
+  let open = null;
+  for (const line of text.split('\n')) {
+    if (HEADING_RE.test(line.trim())) {
+      if (open !== null) {
+        spans.push([open, offset]);
+        open = null;
+      }
+      if (DELIVERABLE_HEADING_RE.test(line.trim())) open = offset + line.length + 1;
+    }
+    offset += line.length + 1;
+  }
+  if (open !== null) spans.push([open, offset]);
+  return spans;
+}
+
 function plannerFileCandidates(text) {
   const patterns = [
     new RegExp(CANDIDATE_BACKTICK, 'g'),
     new RegExp(CANDIDATE_KNOWN_ROOT, 'g'),
     new RegExp(CANDIDATE_WITH_EXT, 'g'),
   ];
+  const spans = plannerDeliverableSpans(text);
   const seen = new Set();
+  const deliverable = new Set();
   const found = [];
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
       const candidate = match[1].trim();
       if (!plannerIsSafeRepoPath(candidate)) continue;
+      if (spans.some(([start, end]) => match.index >= start && match.index < end)) deliverable.add(candidate);
       if (!seen.has(candidate)) {
         seen.add(candidate);
         found.push(candidate);
@@ -271,16 +296,20 @@ function plannerFileCandidates(text) {
   }
   // A candidate that is a path-boundary suffix of another is a partial of it and
   // never reaches suspected_files (planner Issue #49).
-  return found.filter((candidate) => !found.some((other) => other !== candidate && other.endsWith(`/${candidate}`)));
+  const paths = found.filter((candidate) => !found.some((other) => other !== candidate && other.endsWith(`/${candidate}`)));
+  return { paths, deliverable };
 }
 
 // A documentation path is context to read, not a file the Issue is expected to
 // change — so an Issue whose only paths are docs leaves `suspected_files` empty
 // and the planner asks "affected files are unclear" no matter how many paths it
-// listed. This is the asymmetry the planner-readiness rule exists to catch.
+// listed. This is the asymmetry the planner-readiness rule exists to catch. The
+// one exception is an Issue that says a document IS its deliverable, by writing
+// the path under a 成果物 / 対象ファイル / Deliverables heading (Issue #50).
 function plannerSuspectedFiles(text) {
-  return plannerFileCandidates(text).filter(
-    (candidate) => !/^docs\//.test(candidate) && !/\.(md|rst|txt)$/i.test(candidate),
+  const { paths, deliverable } = plannerFileCandidates(text);
+  return paths.filter(
+    (candidate) => deliverable.has(candidate) || (!/^docs\//.test(candidate) && !/\.(md|rst|txt)$/i.test(candidate)),
   );
 }
 

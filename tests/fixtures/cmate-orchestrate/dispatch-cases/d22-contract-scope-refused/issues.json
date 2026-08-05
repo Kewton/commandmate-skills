@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 220,
+      "title": "chore: レスポンスのゆらぎを直す",
+      "body": "たまに応答が安定しない。気づいたところを直してほしい。\n\n## Acceptance criteria\n- [ ] 応答が安定する\n",
+      "labels": ["chore"]
+    }
+  ]
+}

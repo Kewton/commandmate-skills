@@ -100,6 +100,36 @@ mutant() {
   esac
 }
 
+# expect_no_rule <name> <rule> <base> <op> <pointer> [value]
+#
+# The mirror image of `mutant`: inject the mutation and require the named rule
+# NOT to appear. The exit status is deliberately not asserted — an unrelated rule
+# may well fire on the mutated plan; what is being pinned is that THIS rule does
+# not. Used for the cases a fix made legal, where "the suite is still green" is
+# not evidence, because a rule that never fires is also never seen to stop.
+expect_no_rule() {
+  local name="$1" rule="$2" base="$3" op="$4" pointer="$5" value="${6:-}"
+  local plan="$WORK/no-rule-$mutations.json"
+  mutations=$((mutations + 1))
+
+  if [ -n "$value" ]; then
+    node "$SUITE_DIR/mutate.mjs" "$base" "$op" "$pointer" "$value" > "$plan" 2>"$WORK/mutate.err"
+  else
+    node "$SUITE_DIR/mutate.mjs" "$base" "$op" "$pointer" > "$plan" 2>"$WORK/mutate.err"
+  fi
+  if [ $? -ne 0 ]; then
+    fail "$name" "the mutation itself failed: $(cat "$WORK/mutate.err")"
+    return
+  fi
+
+  local out
+  out=$(node "$VALIDATOR" "$plan" 2>&1)
+  case "$out" in
+    *"FAIL $rule "*) fail "$name" "rule $rule fired but should not have; findings were: $out" ;;
+    *) pass "$name" ;;
+  esac
+}
+
 printf '== conforming plans ==\n'
 expect_valid 'valid-full is accepted' "$FULL"
 expect_valid 'valid-minimal is accepted' "$MINIMAL"
@@ -149,10 +179,21 @@ mutant dependency_link_in_body "$FULL" set /issues/2/body '"再利用された r
 # The two blocking questions the cmate-orchestrate planner can raise, injected
 # one at a time. The second one is the asymmetry that is easy to get wrong: a
 # plan may name plenty of paths and still leave `suspected_files` empty, because
-# every docs/ path and every .md/.rst/.txt file is classified as a reference.
+# outside a deliverable heading every docs/ path and every .md/.rst/.txt file is
+# classified as a reference. The heading is what decides it (Issue #50), so the
+# body below lists its documents under 参考資料 — under 成果物 or 対象ファイル the
+# very same paths ARE the deliverable, which the case after these two proves.
 printf '\n== planner readiness ==\n'
 mutant planner_ready "$MINIMAL" set /issues/0/body '"profile lookup の read 経路に read-through cache を挟み、同一 profile の連続参照を 1 回の DB 読み取りに落とす。\n\n## 対象ファイル\n\n- `src/cache/profile.ts`\n\n## やること\n\n- 実装する\n"'
-mutant planner_ready "$MINIMAL" set /issues/0/body '"profile lookup の read 経路に read-through cache を挟み、同一 profile の連続参照を 1 回の DB 読み取りに落とす。\n\n## 対象ファイル\n\n- `docs/cache/profile.md`\n- `README.md`\n\n## 受入条件\n\n- [ ] 手順どおりに cache が効く\n"'
+mutant planner_ready "$MINIMAL" set /issues/0/body '"profile lookup の read 経路に read-through cache を挟み、同一 profile の連続参照を 1 回の DB 読み取りに落とす。\n\n## 参考資料\n\n- `docs/cache/profile.md`\n- `README.md`\n\n## 受入条件\n\n- [ ] 手順どおりに cache が効く\n"'
+
+# Issue #50, from the authoring side: an Issue whose deliverable IS a document
+# must not be told it is unready. The same docs/*.md path that reads as a
+# reference under 参考資料 above is a suspected file under 成果物, so the planner
+# raises no "Affected files are unclear" — which is what makes the Issue
+# dispatchable with a scope at all.
+expect_no_rule 'a document named under 成果物 is planner-ready' planner_ready "$MINIMAL" \
+  set /issues/0/body '"profile cache の設計判断を ADR として残す。\n\n## 成果物\n\n- `docs/adr/0002-profile-cache.md`\n\n## 受入条件\n\n- [ ] ADR が採用案と却下案を述べている\n"'
 
 printf '\n== the run itself failing is not the plan failing ==\n'
 expect_exit 'no argument is a usage error' 2
@@ -244,20 +285,21 @@ fi
 # PATTERNS themselves decide which paths become suspected_files, and a mirror
 # that still matched from the middle of a path would keep telling an author the
 # Issue is ready while the planner extracted something else entirely. The four
-# pattern constants are therefore compared as one block, in declaration order,
-# the same way FILE_EXT is. `sed -E` rather than grep: orchestrate.mjs holds raw
-# control bytes in a regex literal, which makes grep treat the file as binary.
+# pattern constants and the deliverable-heading set (Issue #50) are therefore
+# compared as one block, in declaration order, the same way FILE_EXT is.
+# `sed -E` rather than grep: orchestrate.mjs holds raw control bytes in a regex
+# literal, which makes grep treat the whole file as binary.
 mirror_consts() {
   LC_ALL=C sed -E -n \
-    's/^const (PATH_START|CANDIDATE_BACKTICK|CANDIDATE_KNOWN_ROOT|CANDIDATE_WITH_EXT) = (.*)$/\1 = \2/p' \
+    's/^const (PATH_START|CANDIDATE_BACKTICK|CANDIDATE_KNOWN_ROOT|CANDIDATE_WITH_EXT|DELIVERABLE_HEADING_RE) = (.*)$/\1 = \2/p' \
     "$1"
 }
 planner_pat=$(mirror_consts "$ORCHESTRATOR")
 mirror_pat=$(mirror_consts "$VALIDATOR")
 planner_pat_count=$(printf '%s\n' "$planner_pat" | grep -c '=' || true)
-if [ "$planner_pat_count" -ne 4 ]; then
+if [ "$planner_pat_count" -ne 5 ]; then
   fail 'the extraction patterns are identical in the planner and its mirror' \
-    "expected 4 pattern constants in the planner, found $planner_pat_count"
+    "expected 5 pattern constants in the planner, found $planner_pat_count"
 elif [ "$planner_pat" = "$mirror_pat" ]; then
   pass 'the extraction patterns are identical in the planner and its mirror'
 else
