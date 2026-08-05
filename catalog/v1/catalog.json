@@ -1129,7 +1129,7 @@
         "issue",
         "yaml"
       ],
-      "latest": "0.1.0",
+      "latest": "0.2.1",
       "versions": [
         {
           "version": "0.1.0",
@@ -1172,6 +1172,50 @@
               }
             ],
             "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.2.1",
+          "changelog": "リリース済みの success.requireCommit を契約エラー扱いする誤指導を除去 (#58)。完了チェックを正本 spec 照合へ変更。対応版を >=0.17.0 に修正。§4 を起案上の罠に絞る (#68)。",
+          "published_at": "2026-08-05T14:31:28Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-task-contract-v0.2.1",
+            "commit": "d718b51b71141c50645b70a73d16063d78a84e6c"
+          },
+          "artifact": {
+            "asset_name": "cmate-task-contract-0.2.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-task-contract-v0.2.1/cmate-task-contract-0.2.1.tar.gz",
+            "sha256": "db74ec2d16d9f97141bbd3f9e8e18aca675f79d9696b3d11495ecc7337851a77",
+            "size": 10827,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.17.0 <1.0.0"
           },
           "declared_risk": "moderate"
         }
