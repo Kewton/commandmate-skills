@@ -618,7 +618,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.15.0",
+      "latest": "0.16.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -986,6 +986,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.15.0/cmate-orchestrate-0.15.0.tar.gz",
             "sha256": "397afa5a5a4f2349bc8cc68e274bb0072a834eec590e4d0495b3a8ce88a924a8",
             "size": 136961,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.16.0",
+          "changelog": "Wave 内に失敗 worker がいると合格した worker の verdict が記録されず、merge.mjs/uat.mjs の eligible から外れる問題を修正 (#83)。転記ループの allCompleted ガードを撤去し note を構造化フィールドから導出。FILE_EXT に jsonc を追加 (#56)。",
+          "published_at": "2026-08-05T15:38:36Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.16.0",
+            "commit": "ae90ec35c66847dc87079e00adce276acb8df173"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.16.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.16.0/cmate-orchestrate-0.16.0.tar.gz",
+            "sha256": "39c496063cbc960eb5b25ab601c08cb2351326e6fd43242b95e4e7b7d5c24c02",
+            "size": 143266,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
