@@ -1,0 +1,23 @@
+{
+  "description": "Forward readings are unchanged by the direction rule: an inline 'Blocked by', an inline '依存', and a bare '#N' under a '前提' heading all make the WRITING issue depend on the reference (Issue #51 regression pin).",
+  "args": ["310", "311", "312", "313", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "fixture", "--no-infer"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[313], [310, 311, 312]],
+    "merge_order": [313, 310, 311, 312],
+    "dependencies": [
+      { "issue": 310, "depends_on": 313, "kind": "explicit" },
+      { "issue": 311, "depends_on": 313, "kind": "explicit" },
+      { "issue": 312, "depends_on": 313, "kind": "explicit" }
+    ],
+    "dependency_reasons_include": {
+      "310:313": ["#310 states a dependency on #313", "direction word \"Blocked by\"", "- Blocked by #313"],
+      "311:313": ["#311 states a dependency on #313", "direction word \"依存\"", "この実装は #313 に依存する。"],
+      "312:313": ["#312 states a dependency on #313", "no direction word", "dependency-section default", "- #313"]
+    },
+    "classifications": { "310": "dependent", "311": "dependent", "312": "dependent", "313": "independent" },
+    "risk_level": "moderate"
+  }
+}

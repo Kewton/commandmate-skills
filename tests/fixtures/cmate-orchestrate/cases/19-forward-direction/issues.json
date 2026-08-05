@@ -1,0 +1,28 @@
+{
+  "issues": [
+    {
+      "number": 310,
+      "title": "feat: add the report renderer",
+      "body": "Add the report renderer in `src/report/render.ts`.\n\n## Acceptance criteria\n- [ ] `src/report/render.ts` renders a report\n\n## Dependencies\n- Blocked by #313\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 311,
+      "title": "feat: add the report exporter",
+      "body": "Add the report exporter in `src/report/export.ts`.\n\n## Acceptance criteria\n- [ ] `src/report/export.ts` writes a report file\n\nこの実装は #313 に依存する。\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 312,
+      "title": "feat: add the report summary",
+      "body": "Add the report summary in `src/report/summary.ts`.\n\n## Acceptance criteria\n- [ ] `src/report/summary.ts` summarises a report\n\n## 前提\n- #313\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 313,
+      "title": "feat: add the report model",
+      "body": "Add the report model in `src/report/model.ts`.\n\n## Acceptance criteria\n- [ ] `src/report/model.ts` defines a report record\n",
+      "labels": ["feature"]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "issues": [
+    {
+      "number": 40,
+      "title": "feat: add the queue writer",
+      "body": "Add the queue writer in `src/queue/write.ts`.\n\n## Acceptance criteria\n- [ ] `src/queue/write.ts` enqueues a job\n\n## 依存\n- blocks #41 but also requires its schema\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 41,
+      "title": "feat: add the queue reader",
+      "body": "Add the queue reader in `src/queue/read.ts`.\n\n## Acceptance criteria\n- [ ] `src/queue/read.ts` dequeues a job\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 42,
+      "title": "feat: add the queue metrics",
+      "body": "Add the queue metrics in `src/queue/metrics.ts`.\n\n## Acceptance criteria\n- [ ] `src/queue/metrics.ts` counts queued jobs\n\n## 依存\n- blocks #43, which is not planned here\n",
+      "labels": ["feature"]
+    }
+  ]
+}

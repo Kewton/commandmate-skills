@@ -203,6 +203,14 @@ explicit（本文由来）・inferred（推論）・override（`--depends`）を
 cycle・不完全 override・順序違反（`--order`）はここで **拒否** する。
 集合外を指す explicit 依存は warning に落とし、`status` を `partial` にする。
 
+explicit の**方向は行ごとに**判定する（Issue #51）。`blocks` / `blocking` /
+`ブロックする` は「書いた側が先」（逆向き）、`depends on` / `blocked by` /
+`requires` / `依存` / `前提` は「書いた側が後」（順方向）である。`## 依存` のような
+節見出しは、方向語を持たない行の既定値（順方向）を与えるだけで、行の内容を
+上書きしない。1行に両方向がある場合は黙って選ばず `ambiguous_dependency_direction`
+を warning に積む。各 edge の `reason` には、**どの方向語をどの行から読んだか**を
+残すので、`dependency-plan.md` だけで edge を再導出できる。
+
 ### Step 5. Wave を組む
 
 依存を満たし、file 衝突を同一 Wave に入れず、各 Wave を `max_parallel` 以下にする
@@ -241,7 +249,8 @@ plan 本体は [schemas/execution-plan.v1.json](./schemas/execution-plan.v1.json
 |---|---|
 | `profile_repository_mismatch` | 既定 profile の対象リポジトリが cwd の `origin` と一致しない（第4節 Step 1） |
 | `profile_repository_override` | `--repo` でリポジトリを差し替えたため profile の検証が対象を失った（同上） |
-| `external_dependency` | Issue が、この plan に含まれない Issue への依存を宣言している |
+| `external_dependency` | Issue が、この plan に含まれない Issue への依存を宣言している（読み取った方向のまま述べる） |
+| `ambiguous_dependency_direction` | 1行に順方向と逆方向の方向語が同居していて、依存の向きを一意に読めない（第4節 Step 4） |
 
 ## 6. planner の失敗時の動作
 

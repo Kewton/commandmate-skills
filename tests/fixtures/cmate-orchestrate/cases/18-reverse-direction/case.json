@@ -1,0 +1,23 @@
+{
+  "description": "Reverse direction words inside a dependency section place the WRITING issue first: 'blocks' / 'blocking' / 'ブロックする' each point away from the writer, not at it (Issue #51).",
+  "args": ["28", "29", "30", "31", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "fixture", "--no-infer"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[28], [29], [30], [31]],
+    "merge_order": [28, 29, 30, 31],
+    "dependencies": [
+      { "issue": 29, "depends_on": 28, "kind": "explicit" },
+      { "issue": 30, "depends_on": 29, "kind": "explicit" },
+      { "issue": 31, "depends_on": 30, "kind": "explicit" }
+    ],
+    "dependency_reasons_include": {
+      "29:28": ["#28 states it blocks #29", "direction word \"blocks\"", "- blocks #29"],
+      "30:29": ["#29 states it blocks #30", "direction word \"blocking\"", "- blocking #30"],
+      "31:30": ["#30 states it blocks #31", "direction word \"ブロックする\"", "- #31 をブロックする"]
+    },
+    "classifications": { "28": "independent", "29": "dependent", "30": "dependent", "31": "dependent" },
+    "risk_level": "moderate"
+  }
+}
