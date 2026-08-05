@@ -34,14 +34,24 @@
 
 import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
-const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.13.0';
+import {
+  SKILL_ID,
+  SKILL_VERSION,
+  SkillError,
+  issueOf,
+  loadJson,
+  parseCliJson,
+  redact,
+  redactionsList,
+  safeBranch,
+  validateDispatch,
+} from './lib.mjs';
+
 const MERGE_SCHEMA_VERSION = 1;
 const SUPPORTED_PLAN_SCHEMA_VERSION = 1;
-const SUPPORTED_DISPATCH_SCHEMA_VERSION = 1;
 
 const MERGE_METHODS = new Set(['merge', 'squash', 'rebase']);
 const DEFAULT_MERGE_METHOD = 'squash';
@@ -52,65 +62,18 @@ const DEFAULT_MERGE_METHOD = 'squash';
 const CI_PASS_STATES = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 const CI_PENDING_STATES = new Set(['PENDING', 'QUEUED', 'IN_PROGRESS', 'WAITING', 'REQUESTED', 'EXPECTED']);
 
-class SkillError extends Error {
-  constructor(code, detail, exitCode) {
-    super(detail);
-    this.code = code;
-    this.detail = detail;
-    this.exitCode = exitCode;
-  }
-}
-
 // =============================================================================
-// Redaction (mirrors the plan-core and dispatch runners; shapes only)
+// Redaction (SkillError, the pattern list and redact/redactionsList are shared
+// with the dispatch and uat runners in lib.mjs)
 // =============================================================================
-
-const REDACTIONS = [
-  [/gh[pousr]_[A-Za-z0-9]{20,}/g, '[REDACTED-TOKEN]'],
-  [/github_pat_[A-Za-z0-9_]{40,}/g, '[REDACTED-TOKEN]'],
-  [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, '[REDACTED-TOKEN]'],
-  [/\bsk-[A-Za-z0-9]{20,}\b/g, '[REDACTED-TOKEN]'],
-  [/xox[baprs]-[A-Za-z0-9-]{10,}/g, '[REDACTED-TOKEN]'],
-  [/\bAIza[0-9A-Za-z_-]{35}\b/g, '[REDACTED-TOKEN]'],
-  [/\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}\b/g, '[REDACTED-TOKEN]'],
-  [/\b[Bb]earer\s+[A-Za-z0-9._-]{10,}/g, 'Bearer [REDACTED-TOKEN]'],
-  [/(?:\/Users\/|\/home\/|\/root\/|\/var\/|\/private\/|\/tmp\/)[^\s"'`)\]]*/g, '[REDACTED-PATH]'],
-  [/\b[A-Za-z]:\\[^\s"'`)\]]*/g, '[REDACTED-PATH]'],
-];
-
-const REDACTION_KIND = [
-  [/\[REDACTED-TOKEN\]/g, 'token'],
-  [/Bearer \[REDACTED-TOKEN\]/g, 'bearer_token'],
-  [/\[REDACTED-PATH\]/g, 'absolute_path'],
-];
-
-const redactionTally = new Map();
-
-function redact(value) {
-  let text = String(value);
-  for (const [pattern, replacement] of REDACTIONS) {
-    text = text.replace(pattern, replacement);
-  }
-  for (const [pattern, kind] of REDACTION_KIND) {
-    const hits = text.match(pattern);
-    if (hits) redactionTally.set(kind, (redactionTally.get(kind) ?? 0) + hits.length);
-  }
-  return text;
-}
 
 // A short, redacted excerpt of terminal-ish output. The raw stream is never
-// stored: a bounded tail is enough for a human to act on a failure.
+// stored: a bounded tail is enough for a human to act on a failure. NOT shared
+// with dispatch: an empty excerpt is `''` here and `null` there.
 function excerpt(value, limit = 280) {
   const text = redact(value).replace(/\s+/g, ' ').trim();
   if (text.length <= limit) return text || '';
   return `…${text.slice(text.length - limit)}`;
-}
-
-function redactionsList() {
-  return [...redactionTally.entries()]
-    .filter(([, count]) => count > 0)
-    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-    .map(([kind, count]) => ({ kind, count }));
 }
 
 // =============================================================================
@@ -205,25 +168,13 @@ function resolveInputs(parsed) {
 }
 
 // =============================================================================
-// Plan / dispatch-report loading
+// Plan / dispatch-report loading (loadJson and validateDispatch are shared with
+// the uat runner in lib.mjs)
 // =============================================================================
 
-function loadJson(path, what) {
-  let text;
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch (error) {
-    throw new SkillError('load_error', `cannot read ${what} at ${path}: ${redact(error.message)}`, 6);
-  }
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    throw new SkillError('load_error', `${what} at ${path} is not valid JSON: ${redact(error.message)}`, 6);
-  }
-}
-
 // Only the fields this runner reads are asserted; a wrong or tampered file is
-// refused rather than half-executed.
+// refused rather than half-executed. NOT shared with dispatch, which additionally
+// enforces max_parallel and the per-wave width bound before it dispatches.
 function validatePlan(plan) {
   if (plan === null || typeof plan !== 'object' || Array.isArray(plan)) {
     throw new SkillError('plan_invalid', 'plan must be a JSON object', 3);
@@ -245,22 +196,6 @@ function validatePlan(plan) {
     throw new SkillError('plan_invalid', 'plan.issues is missing', 3);
   }
   return plan;
-}
-
-function validateDispatch(report) {
-  if (report === null || typeof report !== 'object' || Array.isArray(report)) {
-    throw new SkillError('dispatch_invalid', 'dispatch report must be a JSON object', 3);
-  }
-  if (report.dispatch_schema_version !== SUPPORTED_DISPATCH_SCHEMA_VERSION) {
-    throw new SkillError('dispatch_invalid', `unsupported dispatch_schema_version ${report.dispatch_schema_version}; this runner understands ${SUPPORTED_DISPATCH_SCHEMA_VERSION}`, 3);
-  }
-  if (report.skill_id !== SKILL_ID) {
-    throw new SkillError('dispatch_invalid', `dispatch report skill_id "${report.skill_id}" is not ${SKILL_ID}`, 3);
-  }
-  if (!Array.isArray(report.waves)) {
-    throw new SkillError('dispatch_invalid', 'dispatch report has no waves', 3);
-  }
-  return report;
 }
 
 // The eligible set is the whole point of the verification gate reaching this
@@ -286,23 +221,8 @@ function eligibleIssues(plan, dispatch) {
 }
 
 // =============================================================================
-// Safety
+// Safety (issueOf and safeBranch are shared in lib.mjs)
 // =============================================================================
-
-function issueOf(plan, number) {
-  return plan.issues.find((issue) => issue.number === number) ?? { number };
-}
-
-// A branch name headed into `git push` / `gh pr create --head` must be a plain
-// ref: no whitespace, no shell metacharacters, no path escape. A profile
-// template produces exactly this shape; anything else is refused, not quoted.
-function safeBranch(value) {
-  if (typeof value !== 'string' || value.length === 0) return null;
-  if (!/^[A-Za-z0-9._\/-]+$/.test(value)) return null;
-  if (value.includes('..')) return null;
-  if (value.startsWith('/') || value.startsWith('-')) return null;
-  return value;
-}
 
 // gh pr create --base wants a branch name, while a profile base is a tracking
 // ref like "origin/develop". Strip a single leading remote segment.
@@ -316,6 +236,8 @@ function baseBranchName(base) {
 
 // One structured call to an external CLI. Never throws: a non-zero exit or a
 // missing binary comes back as { ok: false } so the caller decides what it means.
+// NOT shared with dispatch/uat: those take an extra options bag (cwd, env) that
+// this runner never needs, and spread it into execFileSync.
 function runCli(bin, args) {
   try {
     const stdout = execFileSync(bin, args, {
@@ -331,15 +253,6 @@ function runCli(bin, args) {
       stderr: error.stderr ? error.stderr.toString() : redact(error.message ?? ''),
       status: error.status ?? null,
     };
-  }
-}
-
-function parseCliJson(result) {
-  if (!result.ok) return null;
-  try {
-    return JSON.parse(result.stdout);
-  } catch {
-    return null;
   }
 }
 

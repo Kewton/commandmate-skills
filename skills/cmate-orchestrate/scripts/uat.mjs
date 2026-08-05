@@ -73,11 +73,22 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, existsSync, writeFileSync, appendFileSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
-const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.13.0';
+import {
+  SKILL_ID,
+  SKILL_VERSION,
+  SkillError,
+  issueOf,
+  loadJson,
+  parseCliJson,
+  redact,
+  redactionsList,
+  safeBranch,
+  safeWorktreeTarget,
+  validateDispatch,
+} from './lib.mjs';
+
 const UAT_SCHEMA_VERSION = 1;
 const SUPPORTED_PLAN_SCHEMA_VERSION = 1;
-const SUPPORTED_DISPATCH_SCHEMA_VERSION = 1;
 
 // The semantic gate's input contract: cmate-acceptance-test's result document
 // (skills/cmate-acceptance-test/schemas/acceptance-result.v1.json).
@@ -110,54 +121,14 @@ const DEFAULT_POLL_LIMIT = 120;
 // nudges); reaching the cap with no commit is a non-completion, not a false pass.
 const DEFAULT_MAX_TURNS = 8;
 
-class SkillError extends Error {
-  constructor(code, detail, exitCode) {
-    super(detail);
-    this.code = code;
-    this.detail = detail;
-    this.exitCode = exitCode;
-  }
-}
-
 // =============================================================================
-// Redaction (mirrors the plan-core, dispatch and merge runners; shapes only)
+// Redaction (SkillError, the pattern list and redact/redactionsList are shared
+// with the dispatch and merge runners in lib.mjs)
 // =============================================================================
-
-const REDACTIONS = [
-  [/gh[pousr]_[A-Za-z0-9]{20,}/g, '[REDACTED-TOKEN]'],
-  [/github_pat_[A-Za-z0-9_]{40,}/g, '[REDACTED-TOKEN]'],
-  [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, '[REDACTED-TOKEN]'],
-  [/\bsk-[A-Za-z0-9]{20,}\b/g, '[REDACTED-TOKEN]'],
-  [/xox[baprs]-[A-Za-z0-9-]{10,}/g, '[REDACTED-TOKEN]'],
-  [/\bAIza[0-9A-Za-z_-]{35}\b/g, '[REDACTED-TOKEN]'],
-  [/\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}\b/g, '[REDACTED-TOKEN]'],
-  [/\b[Bb]earer\s+[A-Za-z0-9._-]{10,}/g, 'Bearer [REDACTED-TOKEN]'],
-  [/(?:\/Users\/|\/home\/|\/root\/|\/var\/|\/private\/|\/tmp\/)[^\s"'`)\]]*/g, '[REDACTED-PATH]'],
-  [/\b[A-Za-z]:\\[^\s"'`)\]]*/g, '[REDACTED-PATH]'],
-];
-
-const REDACTION_KIND = [
-  [/\[REDACTED-TOKEN\]/g, 'token'],
-  [/Bearer \[REDACTED-TOKEN\]/g, 'bearer_token'],
-  [/\[REDACTED-PATH\]/g, 'absolute_path'],
-];
-
-const redactionTally = new Map();
-
-function redact(value) {
-  let text = String(value);
-  for (const [pattern, replacement] of REDACTIONS) {
-    text = text.replace(pattern, replacement);
-  }
-  for (const [pattern, kind] of REDACTION_KIND) {
-    const hits = text.match(pattern);
-    if (hits) redactionTally.set(kind, (redactionTally.get(kind) ?? 0) + hits.length);
-  }
-  return text;
-}
 
 // A short, redacted excerpt of terminal-ish output. The raw stream is never
-// stored: a bounded tail is enough for a human to act on a failure.
+// stored: a bounded tail is enough for a human to act on a failure. NOT shared
+// with dispatch: an empty excerpt is `''` here and `null` there.
 function excerpt(value, limit = 280) {
   const text = redact(value).replace(/\s+/g, ' ').trim();
   if (text.length <= limit) return text || '';
@@ -172,13 +143,6 @@ function clip(value, limit = 300) {
   const text = redact(String(value)).replace(/\s+/g, ' ').trim();
   if (text.length <= limit) return text;
   return `${text.slice(0, limit)}…`;
-}
-
-function redactionsList() {
-  return [...redactionTally.entries()]
-    .filter(([, count]) => count > 0)
-    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-    .map(([kind, count]) => ({ kind, count }));
 }
 
 // =============================================================================
@@ -312,23 +276,12 @@ function resolveInputs(parsed) {
 }
 
 // =============================================================================
-// Plan / dispatch-report loading (mirrors merge.mjs)
+// Plan / dispatch-report loading (loadJson and validateDispatch are shared with
+// the merge runner in lib.mjs)
 // =============================================================================
 
-function loadJson(path, what) {
-  let text;
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch (error) {
-    throw new SkillError('load_error', `cannot read ${what} at ${path}: ${redact(error.message)}`, 6);
-  }
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    throw new SkillError('load_error', `${what} at ${path} is not valid JSON: ${redact(error.message)}`, 6);
-  }
-}
-
+// NOT shared with dispatch, which additionally enforces max_parallel and the
+// per-wave width bound before it dispatches.
 function validatePlan(plan) {
   if (plan === null || typeof plan !== 'object' || Array.isArray(plan)) {
     throw new SkillError('plan_invalid', 'plan must be a JSON object', 3);
@@ -352,22 +305,6 @@ function validatePlan(plan) {
   return plan;
 }
 
-function validateDispatch(report) {
-  if (report === null || typeof report !== 'object' || Array.isArray(report)) {
-    throw new SkillError('dispatch_invalid', 'dispatch report must be a JSON object', 3);
-  }
-  if (report.dispatch_schema_version !== SUPPORTED_DISPATCH_SCHEMA_VERSION) {
-    throw new SkillError('dispatch_invalid', `unsupported dispatch_schema_version ${report.dispatch_schema_version}; this runner understands ${SUPPORTED_DISPATCH_SCHEMA_VERSION}`, 3);
-  }
-  if (report.skill_id !== SKILL_ID) {
-    throw new SkillError('dispatch_invalid', `dispatch report skill_id "${report.skill_id}" is not ${SKILL_ID}`, 3);
-  }
-  if (!Array.isArray(report.waves)) {
-    throw new SkillError('dispatch_invalid', 'dispatch report has no waves', 3);
-  }
-  return report;
-}
-
 // The eligible set — the same verification gate the merge runner inherits: an
 // issue is subjected to UAT (and repaired) ONLY when its worker completed AND its
 // verification passed. Processed in the plan's merge order.
@@ -389,42 +326,7 @@ function eligibleIssues(plan, dispatch) {
 }
 
 // =============================================================================
-// Safety (branch and worktree targets; mirrors merge.mjs / dispatch.mjs)
-// =============================================================================
-
-function issueOf(plan, number) {
-  return plan.issues.find((issue) => issue.number === number) ?? { number };
-}
-
-// A branch headed into `git worktree add -b` must be a plain ref: no whitespace,
-// no shell metacharacter, no path escape.
-function safeBranch(value) {
-  if (typeof value !== 'string' || value.length === 0) return null;
-  if (!/^[A-Za-z0-9._\/-]+$/.test(value)) return null;
-  if (value.includes('..')) return null;
-  if (value.startsWith('/') || value.startsWith('-')) return null;
-  return value;
-}
-
-// The worktree path comes from a verified profile template (e.g. "../repo-…"), so
-// a single leading "../" to a sibling directory is legitimate. Anything that
-// could escape further — an absolute path, a drive path, a backslash, a control
-// character, or a "../" that is not the single leading segment — is refused.
-function safeWorktreeTarget(pathValue) {
-  if (typeof pathValue !== 'string' || pathValue.length === 0) return null;
-  if (pathValue.startsWith('/')) return null;
-  if (/^[A-Za-z]:/.test(pathValue)) return null;
-  if (pathValue.includes('\\')) return null;
-  // eslint-disable-next-line no-control-regex
-  if (/[\x00-\x1f\x7f]/.test(pathValue)) return null;
-  let rest = pathValue;
-  if (rest.startsWith('../')) rest = rest.slice(3);
-  if (rest.split('/').some((segment) => segment === '..')) return null;
-  return pathValue;
-}
-
-// =============================================================================
-// CLI invocation (mirrors merge.mjs / dispatch.mjs)
+// CLI invocation (identical to dispatch.mjs; merge.mjs takes no options bag)
 // =============================================================================
 
 function runCli(bin, args, extra = {}) {
@@ -443,15 +345,6 @@ function runCli(bin, args, extra = {}) {
       stderr: error.stderr ? error.stderr.toString() : redact(error.message ?? ''),
       status: error.status ?? null,
     };
-  }
-}
-
-function parseCliJson(result) {
-  if (!result.ok) return null;
-  try {
-    return JSON.parse(result.stdout);
-  } catch {
-    return null;
   }
 }
 
