@@ -1,0 +1,20 @@
+{
+  "description": "Issue #52: an unanswered planner question is a warning, not just a note. #320 states no acceptance criteria and #321 names no file, so the run is partial rather than a clean success — the plan no longer reports 'nothing to see here' about an issue with no stated definition of done.",
+  "args": ["320", "321", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "fixture", "--no-infer"],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": ["no_acceptance_criteria", "no_suspected_files"],
+    "warning_details_include": [
+      "#320: Acceptance criteria are unclear; add 1-3 concrete completion checks.",
+      "#321: Affected files are unclear; add likely modules or paths.",
+      "The dispatch runner refuses an issue with an unanswered question"
+    ],
+    "waves": [[320, 321]],
+    "merge_order": [320, 321],
+    "dependencies": [],
+    "suspected_files": { "320": ["src/upload.ts"], "321": [] },
+    "classifications": { "320": "independent", "321": "independent" },
+    "risk_level": "moderate"
+  }
+}

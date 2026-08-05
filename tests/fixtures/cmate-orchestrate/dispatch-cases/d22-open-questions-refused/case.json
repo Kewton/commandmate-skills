@@ -1,0 +1,30 @@
+{
+  "description": "Issue #52: an issue the planner could read no acceptance criteria out of carries an open question, and by default the dispatch runner refuses the whole plan before anything is sent. The workers would all have succeeded — the refusal comes from the plan, not from the world. The blocking reason and the summary both quote the question text, not just a code.",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-open-questions.json",
+    "orchestrate_args": ["220", "221", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration"],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": true,
+    "waves_count": 0,
+    "never_sent": [220, 221],
+    "no_respond": true,
+    "no_contract_calls": true,
+    "blocking_codes": ["open_questions"],
+    "blocking_details_include": [
+      "#220: Acceptance criteria are unclear; add 1-3 concrete completion checks.",
+      "Nothing was dispatched",
+      "--allow-questions"
+    ],
+    "summary_includes": [
+      "## open question",
+      "- #220: Acceptance criteria are unclear; add 1-3 concrete completion checks.",
+      "worker を 1 人も dispatch せずに停止した"
+    ]
+  }
+}

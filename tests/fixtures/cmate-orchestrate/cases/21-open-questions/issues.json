@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 320,
+      "title": "feat: improve the uploader",
+      "body": "Make the uploader in `src/upload.ts` better.\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 321,
+      "title": "feat: speed up startup",
+      "body": "Startup takes too long.\n\n## Acceptance criteria\n- [ ] the CLI starts in under a second\n",
+      "labels": ["feature"]
+    }
+  ]
+}

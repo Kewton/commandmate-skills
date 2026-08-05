@@ -172,6 +172,10 @@ warnings に `profile_repository_override` が載り、result は `partial` に�
 Issue ごとに objective・受入条件・suspected/reference files・test 期待・
 blocking question を抽出する。抽出時に token・secret・絶対 path を redaction する。
 受入条件や対象 file が読み取れない Issue には blocking question を立てる。
+**question は `warnings` にも積む**（`no_acceptance_criteria` /
+`no_suspected_files`）ので、その plan の `status` は必ず `partial` になる。
+受入条件ゼロの Issue が `success` として dispatch まで素通りしないための止め具である
+（Issue #52。第8節 Step D-1 の dispatch 側ゲートと対になる）。
 既知拡張子外の backtick path が抽出から落ちた場合は `warnings` に
 `unrecognized_file_extension` を積む（黙って落とさない。Issue #43）。
 
@@ -251,6 +255,8 @@ plan 本体は [schemas/execution-plan.v1.json](./schemas/execution-plan.v1.json
 | `profile_repository_override` | `--repo` でリポジトリを差し替えたため profile の検証が対象を失った（同上） |
 | `external_dependency` | Issue が、この plan に含まれない Issue への依存を宣言している（読み取った方向のまま述べる） |
 | `ambiguous_dependency_direction` | 1行に順方向と逆方向の方向語が同居していて、依存の向きを一意に読めない（第4節 Step 4） |
+| `no_acceptance_criteria` | Issue から受入条件を1件も読み取れない。何をもって完了かが宣言されていない（第4節 Step 3） |
+| `no_suspected_files` | Issue から対象 file を1件も読み取れない。worker に与える scope が空になる（同上） |
 
 ## 6. planner の失敗時の動作
 
@@ -289,6 +295,7 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 | `--git <path>` | 任意 | `git` | drift 確認に使う git |
 | `--gh <path>` | 任意 | `gh` | repo 到達性確認に使う gh |
 | `--auto-yes` | 任意 | **off** | worker prompt を自動応答する。既定 off（prompt で停止し human へ提示） |
+| `--allow-questions` | 任意 | **off** | 未回答の open question を持つ Issue を含む plan を dispatch する。既定 off（1件も dispatch せず停止）。第8節 Step D-1 |
 | `--contract-mode <m>` | 任意 | `auto` | `auto`（契約が使えれば使い、無ければ明示メッセージつきでフォールバック）/ `require`（フォールバックを拒否して停止）/ `off`（probe せず従来の baseline 裁定）。第8.1節 |
 | `--verify-gates <ids>` | 任意 | なし（＝全ゲート） | 契約の `verify.gates` に載せる `verify.yaml` の gate id（comma 区切り）。**存在しない id を発明しない**ため既定は省略＝全ゲート |
 | `--expect-branch <name>` | 任意 | なし | plan 承認時の統合 branch。不一致なら drift |
@@ -300,6 +307,23 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 [#1447](https://github.com/Kewton/CommandMate/issues/1447)）。
 
 ## 8. dispatch の手順
+
+### Step D-1. open question ゲート（Issue #52）
+
+Wave に入る前に、plan の Issue が未回答の planner question を持っていないかを見る。
+1件でもあれば **1人も dispatch せずに停止する**（`status: failure` /
+`stop_reason: dispatch_error` / `blocking_reasons` に `open_questions` /
+`human_required: true` / exit 1）。受入条件が読み取れない Issue は「何をもって完了か」が
+無いまま worker に渡ることになるので、これは実行前に決まる話であり、drift 確認や
+契約 probe よりも**先**に判定する（世界の状態に依存しない）。
+
+blocking reason と `summary_markdown` には **question の本文**を出す。code だけでは
+運用者は Issue 本文に何を書けばよいか分からない。
+
+`--allow-questions` を明示した場合のみ続行し、その事実を
+`limitations` の `open_questions_accepted` として記録する（黙って引き受けない）。
+既定の直し方は「Issue 本文に回答を書いて re-plan する」であり、plan の run_id は
+Issue 本文を含む hash なので編集すれば自動的に別 run になる（第4節 Step 7）。
 
 Wave を plan の順に処理する。各 Wave について:
 

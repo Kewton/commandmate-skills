@@ -1,0 +1,26 @@
+{
+  "description": "Issue #52: --allow-questions lets an operator take the risk of an unanswered planner question explicitly. The same plan that d22 refuses now dispatches and succeeds, but the waiver is on the record: open_questions_accepted is a limitation and the summary still quotes the question text.",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-open-questions.json",
+    "orchestrate_args": ["220", "221", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration", "--allow-questions"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [true],
+    "sent": [220, 221],
+    "no_respond": true,
+    "limitation_codes": ["open_questions_accepted"],
+    "absent_blocking_codes": ["open_questions"],
+    "summary_includes": [
+      "## open question",
+      "- #220: Acceptance criteria are unclear; add 1-3 concrete completion checks.",
+      "`--allow-questions` により、次の question を未回答のまま dispatch した。"
+    ]
+  }
+}
