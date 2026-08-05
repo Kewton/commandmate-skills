@@ -355,6 +355,18 @@ function runCase(caseId) {
       `warning codes ${JSON.stringify(warningCodesOf(result))} !== ${JSON.stringify(expect.warning_codes)}`,
     );
   }
+  // A warning's DETAIL is what a reviewer acts on, and a detail that names the
+  // wrong direction is worse than no warning at all (Issue #51). Each listed
+  // substring must appear in some warning's detail.
+  if (expect.warning_details_include) {
+    const details = (result.warnings ?? []).map((w) => w.detail);
+    for (const needle of expect.warning_details_include) {
+      check(
+        details.some((detail) => detail.includes(needle)),
+        `no warning detail contains "${needle}"; details: ${JSON.stringify(details)}`,
+      );
+    }
+  }
 
   if (expect.status === 'failure') {
     check(result.plan === null, 'plan should be null on failure');
@@ -381,6 +393,21 @@ function runCase(caseId) {
   }
   if (expect.classifications) {
     check(deepEqual(classificationsOf(plan), expect.classifications), `classifications ${JSON.stringify(classificationsOf(plan))} !== ${JSON.stringify(expect.classifications)}`);
+  }
+  // An edge's `reason` is the only place dependency-plan.md explains WHY the
+  // planner read a body line the way it did. Keyed "<issue>:<depends_on>", each
+  // listed substring must appear in that edge's reason, so a direction decided
+  // from a body line can be re-derived from the artifact alone (Issue #51).
+  if (expect.dependency_reasons_include) {
+    for (const [key, needles] of Object.entries(expect.dependency_reasons_include)) {
+      const [issue, dependsOn] = key.split(':').map(Number);
+      const edge = plan.dependencies.find((d) => d.issue === issue && d.depends_on === dependsOn);
+      if (check(edge !== undefined, `no dependency edge ${key} in ${JSON.stringify(plan.dependencies)}`)) {
+        for (const needle of needles) {
+          check(edge.reason.includes(needle), `edge ${key} reason "${edge.reason}" does not contain "${needle}"`);
+        }
+      }
+    }
   }
   // Exact per-issue extraction: suspected_files IS the scope the worker will be
   // allowed to touch, so a case that pins it proves a named file is inside it.

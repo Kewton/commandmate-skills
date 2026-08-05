@@ -1,0 +1,22 @@
+{
+  "description": "A line carrying both a reverse and a forward direction word is reported rather than resolved in silence, and a reverse reference outside the plan states the direction it actually read (Issue #51).",
+  "args": ["40", "41", "42", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "fixture", "--no-infer"],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": ["ambiguous_dependency_direction", "external_dependency"],
+    "warning_details_include": [
+      "#40 states both a forward and a reverse direction about #41 on one line",
+      "the planner read it as \"#40 depends on #41\"",
+      "#42 blocks #43, which is not in this plan (#43 would depend on #42)"
+    ],
+    "waves": [[41, 42], [40]],
+    "merge_order": [41, 42, 40],
+    "dependencies": [{ "issue": 40, "depends_on": 41, "kind": "explicit" }],
+    "dependency_reasons_include": {
+      "40:41": ["#40 states a dependency on #41", "both a forward and a reverse direction word", "read as forward"]
+    },
+    "classifications": { "40": "dependent", "41": "independent", "42": "independent" },
+    "risk_level": "moderate"
+  }
+}

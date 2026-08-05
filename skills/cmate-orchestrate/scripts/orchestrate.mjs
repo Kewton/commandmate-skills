@@ -909,10 +909,37 @@ function analyzeIssue(issue, profile, binaries) {
 // =============================================================================
 
 const EXPLICIT_HEADING_RE = /(depend|dependenc|prerequisite|requires|依存|前提)/i;
-const EXPLICIT_INLINE_RE = /(depends?\s+on|blocked\s+by|requires?|needs?|prerequisite|依存|前提)/i;
+// Forward: the issue that WRITES the line comes after the issue it references.
+const EXPLICIT_FORWARD_RE = /(depends?\s+on|blocked\s+by|requires?|needs?|prerequisite|依存|前提)/i;
+// Reverse: the issue that WRITES the line comes BEFORE the one it references.
+// `\bblocks\b` / `\bblocking\b` deliberately do not match "blocked by", which is
+// forward — the word boundary is what keeps the two readings apart.
+const EXPLICIT_REVERSE_RE = /(\bblocks\b|\bblocking\b|ブロックする)/i;
 
+const MAX_REASON_LINE = 100;
+
+// The body line an edge was read from, redacted and bounded, so a reviewer can
+// re-derive the edge from `dependency-plan.md` without opening the issue.
+function quoteBodyLine(line) {
+  const text = redact(line);
+  return `"${text.length > MAX_REASON_LINE ? `${text.slice(0, MAX_REASON_LINE - 1)}…` : text}"`;
+}
+
+// A dependency reference carries a DIRECTION, and the direction is a property of
+// the line, not of the section the line sits in. "## 依存" says the section is
+// about dependencies; it does not say which way "- blocks #29" points. Reading a
+// whole section as "everything here is a prerequisite" silently inverted every
+// reverse statement (Issue #51), so the section now only supplies the DEFAULT for
+// a line that names no direction of its own.
+//
+// Returns an ordered list of {ref, direction, cue, ambiguous, line}; `direction`
+// is 'depends_on' (this issue is after `ref`) or 'blocks' (this issue is before
+// it). Deduplication is per (ref, direction): a body that states both directions
+// about the same issue contradicts itself, and the contradiction must surface as
+// a cycle rather than be resolved by whichever line came first.
 function extractExplicitRefs(body) {
-  const refs = new Set();
+  const refs = [];
+  const seen = new Set();
   let inSection = false;
   for (const line of body.split(/\r?\n/)) {
     const stripped = line.trim();
@@ -920,13 +947,41 @@ function extractExplicitRefs(body) {
       inSection = EXPLICIT_HEADING_RE.test(stripped);
       continue;
     }
-    if (inSection || EXPLICIT_INLINE_RE.test(stripped)) {
-      for (const match of stripped.matchAll(/#(\d+)/g)) {
-        refs.add(Number.parseInt(match[1], 10));
-      }
+    const forward = EXPLICIT_FORWARD_RE.exec(stripped);
+    const reverse = EXPLICIT_REVERSE_RE.exec(stripped);
+    if (!forward && !reverse && !inSection) continue;
+    // Both readings on one line is a statement this planner cannot resolve. It
+    // keeps the forward (section-default) reading and says so in a warning,
+    // rather than picking one of the two in silence.
+    const ambiguous = Boolean(forward && reverse);
+    const direction = reverse && !forward ? 'blocks' : 'depends_on';
+    const cue = ambiguous ? null : (reverse ?? forward)?.[0] ?? null;
+    for (const match of stripped.matchAll(/#(\d+)/g)) {
+      const ref = Number.parseInt(match[1], 10);
+      const key = `${ref}:${direction}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      refs.push({ ref, direction, cue, ambiguous, line: stripped });
     }
   }
   return refs;
+}
+
+// How the direction was decided — the evidence half of an explicit edge's reason.
+function directionEvidence(ref) {
+  if (ref.ambiguous) {
+    return `both a forward and a reverse direction word in ${quoteBodyLine(ref.line)}, read as forward`;
+  }
+  if (ref.cue) return `direction word "${ref.cue}" in ${quoteBodyLine(ref.line)}`;
+  return `no direction word in ${quoteBodyLine(ref.line)}, dependency-section default`;
+}
+
+function explicitReason(issueNumber, ref) {
+  const evidence = directionEvidence(ref);
+  if (ref.direction === 'blocks') {
+    return `#${ref.ref} depends on #${issueNumber}: #${issueNumber} states it blocks #${ref.ref} (${evidence})`;
+  }
+  return `#${issueNumber} states a dependency on #${ref.ref} (${evidence})`;
 }
 
 function hasFileOverlap(a, b) {
@@ -954,16 +1009,33 @@ function buildDependencies(analyses, inputs) {
   };
 
   // 1. Explicit — parsed from issue bodies. A reference outside the input set is
-  //    a warning, not a failure: the prerequisite may already be merged.
+  //    a warning, not a failure: the prerequisite may already be merged. Both
+  //    directions are honored (Issue #51): "blocks #N" places THIS issue first.
   for (const analysis of analyses) {
     for (const ref of extractExplicitRefs(analysis._rawBody)) {
-      if (ref === analysis.number) continue;
-      if (inSet.has(ref)) {
-        put(analysis.number, ref, 'explicit', `#${analysis.number} states a dependency on #${ref}`, 2);
+      if (ref.ref === analysis.number) continue;
+      if (ref.ambiguous) {
+        warnings.push({
+          code: 'ambiguous_dependency_direction',
+          detail: redact(
+            `#${analysis.number} states both a forward and a reverse direction about #${ref.ref} on one line ` +
+              `(${quoteBodyLine(ref.line)}); the planner read it as "#${analysis.number} depends on #${ref.ref}". ` +
+              'Split the line so one direction word governs each reference, or state the edge with --depends.',
+          ),
+        });
+      }
+      // 'blocks' means the referenced issue is the consumer: it depends on this one.
+      const [issue, dependsOn] = ref.direction === 'blocks'
+        ? [ref.ref, analysis.number]
+        : [analysis.number, ref.ref];
+      if (inSet.has(ref.ref)) {
+        put(issue, dependsOn, 'explicit', redact(explicitReason(analysis.number, ref)), 2);
       } else {
         warnings.push({
           code: 'external_dependency',
-          detail: `#${analysis.number} depends on #${ref}, which is not in this plan`,
+          detail: ref.direction === 'blocks'
+            ? `#${analysis.number} blocks #${ref.ref}, which is not in this plan (#${ref.ref} would depend on #${analysis.number})`
+            : `#${analysis.number} depends on #${ref.ref}, which is not in this plan`,
         });
       }
     }

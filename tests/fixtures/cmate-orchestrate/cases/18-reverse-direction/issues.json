@@ -1,0 +1,28 @@
+{
+  "issues": [
+    {
+      "number": 28,
+      "title": "feat: define the export contract",
+      "body": "Define the export contract in `src/export/contract.ts`.\n\n## Acceptance criteria\n- [ ] `src/export/contract.ts` declares the export shape\n\n## 依存\n- blocks #29\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 29,
+      "title": "feat: write the export encoder",
+      "body": "Write the export encoder in `src/export/encoder.ts`.\n\n## Acceptance criteria\n- [ ] `src/export/encoder.ts` encodes a record\n\n## 依存\n- blocking #30\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 30,
+      "title": "feat: add the export command",
+      "body": "Add the export command in `src/export/command.ts`.\n\n## Acceptance criteria\n- [ ] `src/export/command.ts` runs an export\n\n## 依存\n- #31 をブロックする\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 31,
+      "title": "feat: document the export command",
+      "body": "Document the export command in `src/export/help.ts`.\n\n## Acceptance criteria\n- [ ] `src/export/help.ts` prints the export usage\n",
+      "labels": ["feature"]
+    }
+  ]
+}

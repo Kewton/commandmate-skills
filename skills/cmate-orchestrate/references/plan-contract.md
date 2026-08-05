@@ -55,6 +55,29 @@ edge は「`issue` が `depends_on` に依存する」を表す。`kind` は3種
 
 同じ (issue, depends_on) に複数の由来が付く場合、優先度の高い kind を採用する。
 
+### 3.0 explicit の方向（Issue #51）
+
+**方向は「行」の性質であり、「節」の性質ではない。** `## 依存` という見出しは
+「この節は依存の話である」としか言っておらず、`- blocks #29` がどちら向きかは
+言っていない。したがって節見出しは、**方向語を持たない行の既定値**を与えるだけである。
+
+| 行の記述 | 方向 | 結果 |
+|---|---|---|
+| `depends on` / `blocked by` / `requires` / `needs` / `prerequisite` / `依存` / `前提` | forward | 書いた側が **後**（`issue` = 書いた側） |
+| `blocks` / `blocking` / `ブロックする` | reverse | 書いた側が **先**（`depends_on` = 書いた側） |
+| 方向語なし、かつ依存節の中 | forward（節の既定） | 書いた側が後 |
+| 方向語なし、依存節の外 | — | edge にしない |
+
+`blocked by` は `blocks` に**マッチしない**（語境界で分ける）。1行に forward と
+reverse の両方があるときは、どちらかを黙って選ばず forward と読んだうえで
+`ambiguous_dependency_direction` を `warnings` に積む（`status` は `partial`）。
+
+同じ相手に両方向を書いた本文は自己矛盾であり、両 edge を残して `cycle_detected`
+で落とす（先に書いた行を勝たせて矛盾を隠さない）。
+
+edge の `reason` には、**どの方向語を・どの行から読んだか**を記録する。
+`dependency-plan.md` だけで edge を再導出できることが要件である。
+
 ### 3.1 inferred の規則
 
 推論は「共有 contract の消費者は、その生産者に依存する」という1規則だけである。
@@ -80,7 +103,8 @@ file overlap は依存では **なく** conflict として扱う（同一 Wave �
 
 Issue 本文が **集合外**の Issue（例: 既に merge 済みの前提）を指す explicit 依存は、
 失敗ではなく `warnings`（`external_dependency`）に落とし、scheduling からは外す。
-この場合 result の `status` は `partial` になる。
+この場合 result の `status` は `partial` になる。warning の文面は**読み取った方向を
+そのまま述べる**（reverse なら「#A blocks #B, which is not in this plan」）。
 
 ## 4. Wave
 
