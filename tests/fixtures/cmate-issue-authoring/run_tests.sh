@@ -285,21 +285,22 @@ fi
 # PATTERNS themselves decide which paths become suspected_files, and a mirror
 # that still matched from the middle of a path would keep telling an author the
 # Issue is ready while the planner extracted something else entirely. The four
-# pattern constants and the deliverable-heading set (Issue #50) are therefore
+# pattern constants and the two heading sets that decide whether a path is the
+# Issue's product (#50) or something it merely cites (#54) are therefore
 # compared as one block, in declaration order, the same way FILE_EXT is.
 # `sed -E` rather than grep: orchestrate.mjs holds raw control bytes in a regex
 # literal, which makes grep treat the whole file as binary.
 mirror_consts() {
   LC_ALL=C sed -E -n \
-    's/^const (PATH_START|CANDIDATE_BACKTICK|CANDIDATE_KNOWN_ROOT|CANDIDATE_WITH_EXT|DELIVERABLE_HEADING_RE) = (.*)$/\1 = \2/p' \
+    's/^const (PATH_START|CANDIDATE_BACKTICK|CANDIDATE_KNOWN_ROOT|CANDIDATE_WITH_EXT|DELIVERABLE_HEADING_RE|CONTEXT_HEADING_RE) = (.*)$/\1 = \2/p' \
     "$1"
 }
 planner_pat=$(mirror_consts "$ORCHESTRATOR")
 mirror_pat=$(mirror_consts "$VALIDATOR")
 planner_pat_count=$(printf '%s\n' "$planner_pat" | grep -c '=' || true)
-if [ "$planner_pat_count" -ne 5 ]; then
+if [ "$planner_pat_count" -ne 6 ]; then
   fail 'the extraction patterns are identical in the planner and its mirror' \
-    "expected 5 pattern constants in the planner, found $planner_pat_count"
+    "expected 6 pattern constants in the planner, found $planner_pat_count"
 elif [ "$planner_pat" = "$mirror_pat" ]; then
   pass 'the extraction patterns are identical in the planner and its mirror'
 else

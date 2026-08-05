@@ -2,6 +2,19 @@
 
 ## Changelog
 
+### 0.4.0 — 引用しかしない path を対象外として扱う（Issue #54）
+
+- planner mirror に `CONTEXT_HEADING_RE` を同期した。「根拠」「出典」「参考」「参照」
+  「背景」「関連」「References」「Context」等の見出し配下**にしか現れない** path は
+  `suspected_files` に入らない（cmate-orchestrate 0.13.0 の planner 本体と同時変更で、
+  集合は byte 単位で同一。一致は test suite が検証する）。
+- 判定は出現ごとではなく path 単位である。散文で指示したうえで根拠にも引用した path は
+  対象のまま残る（引用は指示を取り消さない）。`## 再現手順` `## 現状` `## 調査` は
+  対象外の見出しに含めていない — バグ報告が直すべき file を挙げる場所だからである。
+- 対象外の宣言方法を `issue-body-contract.md` の対象ファイル節に追記した。
+  file をすべて根拠としてしか書かない Issue は `suspected_files` が空になり、
+  planner が「Affected files are unclear」を立てる。
+
 ### 0.3.0 — planner mirror の path 抽出を token 先頭に固定（Issue #49）
 
 - planner mirror の抽出 pattern を **token 先頭からしか一致しない**形に変えた。

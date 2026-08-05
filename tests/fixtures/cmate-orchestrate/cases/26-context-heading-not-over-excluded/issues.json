@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 431,
+      "title": "fix: セッション復元の判定を直す",
+      "body": "src/session/restore.ts の判定を直す。\n\n## 再現手順\n1. src/session/manager.ts 経由で復元する\n2. 失敗する\n\n## 根拠\nsrc/session/restore.ts:88 が原因。\n\n## 受入条件\n- [ ] 復元できる\n",
+      "labels": ["bug"]
+    }
+  ]
+}

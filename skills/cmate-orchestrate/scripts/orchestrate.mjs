@@ -26,7 +26,7 @@ import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.12.0';
+const SKILL_VERSION = '0.13.0';
 const PLAN_SCHEMA_VERSION = 1;
 const RESULT_SCHEMA_VERSION = 1;
 
@@ -603,10 +603,26 @@ const CANDIDATE_WITH_EXT = PATH_START + '([A-Za-z0-9_.-]+/(?:[A-Za-z0-9_.-]+/)*[
 // decide that. Mirrored in cmate-issue-authoring scripts/validate-plan.mjs.
 const DELIVERABLE_HEADING_RE = /(deliverable|成果物|対象ファイル|変更対象|変更ファイル|作成ファイル|編集対象|出力ファイル|生成ファイル|affected files|target files|output files|files to (?:change|edit|create|write|add))/i;
 
-// Character offsets covered by a deliverable heading's section, so a candidate's
-// position in the body decides how it is classified. A section runs from the
-// line after its heading to the next heading of any level (or end of text).
-function deliverableSpans(text) {
+// The counterpart of DELIVERABLE_HEADING_RE (Issue #54). #50 gave an issue a way
+// to say "this path IS what I produce" but no way to say the opposite, and a bug
+// report cites the file it reproduces in — as `path:line`, under 根拠 — far more
+// often than it lists deliverables. Those citations became suspected_files, i.e.
+// the worker's scope.allow, so an issue that wrote "this file is NOT changed"
+// handed out write permission on it anyway.
+//
+// The set is deliberately narrow. Over-excluding is the worse error: it drops a
+// real target out of scope.allow and the worker is refused by the scope gate for
+// writing what it was told to write — the exact failure #50 removed. Headings
+// that a bug report uses for the file it is about (現状 / 調査 / 再現手順) are
+// therefore NOT here, even though they are "context" in a loose sense.
+// Mirrored in cmate-issue-authoring scripts/validate-plan.mjs.
+const CONTEXT_HEADING_RE = /(根拠|出典|参考|参照|背景|関連|references?|context|background|see also|appendix)/i;
+
+// Character offsets covered by the sections whose heading `matches`, so a
+// candidate's position in the body decides how it is classified. A section runs
+// from the line after its heading to the next heading of any level (or end of
+// text).
+function headingSpans(text, matches) {
   const spans = [];
   let offset = 0;
   let open = null;
@@ -616,7 +632,7 @@ function deliverableSpans(text) {
         spans.push([open, offset]);
         open = null;
       }
-      if (DELIVERABLE_HEADING_RE.test(line.trim())) open = offset + line.length + 1;
+      if (matches(line.trim())) open = offset + line.length + 1;
     }
     offset += line.length + 1;
   }
@@ -624,13 +640,22 @@ function deliverableSpans(text) {
   return spans;
 }
 
+const deliverableSpans = (text) => headingSpans(text, (line) => DELIVERABLE_HEADING_RE.test(line));
+
+// A heading that reads as both ("## 対象ファイル（参考）") is a deliverable
+// heading: the statement that something is produced outranks the one that it is
+// only context, the same precedence a candidate gets below.
+const contextSpans = (text) =>
+  headingSpans(text, (line) => !DELIVERABLE_HEADING_RE.test(line) && CONTEXT_HEADING_RE.test(line));
+
 function inSpans(spans, index) {
   return spans.some(([start, end]) => index >= start && index < end);
 }
 
-// Returns { paths, deliverable, shadowed }: the de-duplicated candidates in
-// order of first appearance, the subset of them a deliverable heading covers,
-// and the ones dropped for being a partial of another candidate.
+// Returns { paths, deliverable, contextOnly, shadowed }: the de-duplicated
+// candidates in order of first appearance, the subset a deliverable heading
+// covers, the subset that appears ONLY under a context heading, and the ones
+// dropped for being a partial of another candidate.
 function extractFileCandidates(text) {
   const patterns = [
     new RegExp(CANDIDATE_BACKTICK, 'g'),
@@ -638,8 +663,11 @@ function extractFileCandidates(text) {
     new RegExp(CANDIDATE_WITH_EXT, 'g'),
   ];
   const spans = deliverableSpans(text);
+  const cSpans = contextSpans(text);
   const seen = new Set();
   const deliverable = new Set();
+  const inContext = new Set();
+  const outsideContext = new Set();
   const found = [];
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
@@ -648,14 +676,22 @@ function extractFileCandidates(text) {
       // A path written as context in one place and as a deliverable in another
       // is a deliverable: the stronger statement wins.
       if (inSpans(spans, match.index)) deliverable.add(candidate);
+      if (inSpans(cSpans, match.index)) inContext.add(candidate);
+      else outsideContext.add(candidate);
       if (!seen.has(candidate)) {
         seen.add(candidate);
         found.push(candidate);
       }
     }
   }
+  // Excluded only when EVERY mention sits under a context heading. A path the
+  // issue also names in prose ("src/a.ts を直す") is still a target however many
+  // times it is cited as evidence further down — the citation does not retract
+  // the instruction. This also gives deliverable headings their precedence for
+  // free, since a deliverable span is never a context span.
+  const contextOnly = new Set([...inContext].filter((candidate) => !outsideContext.has(candidate)));
   const { kept, shadowed } = dropShadowedCandidates(found);
-  return { paths: kept, deliverable, shadowed, found };
+  return { paths: kept, deliverable, contextOnly, shadowed, found };
 }
 
 // The other half of Issue #49. Anchoring stops the extraction INVENTING a
@@ -770,11 +806,17 @@ function openQuestionWarnings(analyses) {
 // 対象ファイル / 変更対象 / Deliverables" heading is the issue stating what it
 // produces, and that statement outranks the extension rule. Anywhere else a
 // .md/.rst/.txt or docs/ path stays a reference.
-function classifyFileCandidates(candidates, deliverable) {
+//
+// The symmetric statement is a path mentioned only under a context heading
+// (Issue #54): the issue is citing it, not claiming it. Extension says nothing
+// about that case — a cited `src/foo.ts` is code — so the position has to.
+function classifyFileCandidates(candidates, deliverable, contextOnly) {
   const suspected = [];
   const references = [];
   for (const candidate of candidates) {
-    if (!deliverable.has(candidate) && (/^docs\//.test(candidate) || /\.(md|rst|txt)$/i.test(candidate))) {
+    if (contextOnly.has(candidate)) {
+      references.push(candidate);
+    } else if (!deliverable.has(candidate) && (/^docs\//.test(candidate) || /\.(md|rst|txt)$/i.test(candidate))) {
       references.push(candidate);
     } else {
       suspected.push(candidate);
@@ -873,7 +915,11 @@ function analyzeIssue(issue, profile, binaries) {
   const objective = redact(firstNonEmptyLine(issue.body) || issue.title);
   const acceptance = extractAcceptanceCriteria(issue.body).map(redact);
   const extraction = extractFileCandidates(text);
-  const { suspected, references } = classifyFileCandidates(extraction.paths, extraction.deliverable);
+  const { suspected, references } = classifyFileCandidates(
+    extraction.paths,
+    extraction.deliverable,
+    extraction.contextOnly,
+  );
   const scopeDefaults = scopeDefaultsFor(suspected);
   suspected.push(...scopeDefaults);
   const tests = extractTestExpectations(text, binaries).map(redact);
@@ -1526,6 +1572,13 @@ function renderIssueAnalysis(plan) {
       '',
       'Scope defaults (planner-added lockfiles, included above):',
       ...listItems(issue.scope_defaults),
+      '',
+      // The paths the planner read and deliberately kept OUT of scope.allow. It
+      // is the only place a reviewer can see that decision before dispatch; a
+      // path missing from "Suspected files" is otherwise indistinguishable from
+      // one the planner never noticed (Issue #54).
+      'Reference files (read, not in scope.allow):',
+      ...listItems(issue.reference_files),
       '',
       'Test expectations:',
       ...listItems(issue.test_expectations),

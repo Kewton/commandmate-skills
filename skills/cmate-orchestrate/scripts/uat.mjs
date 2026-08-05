@@ -74,7 +74,7 @@ import { mkdirSync, existsSync, writeFileSync, appendFileSync, readFileSync } fr
 import { join, dirname } from 'node:path';
 
 const SKILL_ID = 'cmate-orchestrate';
-const SKILL_VERSION = '0.12.0';
+const SKILL_VERSION = '0.13.0';
 const UAT_SCHEMA_VERSION = 1;
 const SUPPORTED_PLAN_SCHEMA_VERSION = 1;
 const SUPPORTED_DISPATCH_SCHEMA_VERSION = 1;

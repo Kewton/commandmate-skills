@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 430,
+      "title": "fix: 施設フィルタの判定を直す",
+      "body": "フィルタの判定が誤っている。\n\n## 成果物\n- web/src/lib/filter.ts\n\n## 根拠\nweb/src/lib/store.ts:42 に原因のロジックがある（このファイルは変更しない）。\n\n## 参考\nweb/src/legacy/old-filter.ts の実装が近い。\n\n## 受入条件\n- [ ] フィルタが正しい結果を返す\n",
+      "labels": ["bug"]
+    }
+  ]
+}

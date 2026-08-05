@@ -255,7 +255,11 @@ const CANDIDATE_WITH_EXT = PATH_START + '([A-Za-z0-9_.-]+/(?:[A-Za-z0-9_.-]+/)*[
 // (planner Issue #50). Byte-identical to the planner's.
 const DELIVERABLE_HEADING_RE = /(deliverable|成果物|対象ファイル|変更対象|変更ファイル|作成ファイル|編集対象|出力ファイル|生成ファイル|affected files|target files|output files|files to (?:change|edit|create|write|add))/i;
 
-function plannerDeliverableSpans(text) {
+// Headings under which a path is cited, not claimed (planner Issue #54).
+// Byte-identical to the planner's.
+const CONTEXT_HEADING_RE = /(根拠|出典|参考|参照|背景|関連|references?|context|background|see also|appendix)/i;
+
+function plannerHeadingSpans(text, matches) {
   const spans = [];
   let offset = 0;
   let open = null;
@@ -265,13 +269,20 @@ function plannerDeliverableSpans(text) {
         spans.push([open, offset]);
         open = null;
       }
-      if (DELIVERABLE_HEADING_RE.test(line.trim())) open = offset + line.length + 1;
+      if (matches(line.trim())) open = offset + line.length + 1;
     }
     offset += line.length + 1;
   }
   if (open !== null) spans.push([open, offset]);
   return spans;
 }
+
+const plannerDeliverableSpans = (text) =>
+  plannerHeadingSpans(text, (line) => DELIVERABLE_HEADING_RE.test(line));
+
+// A heading that reads as both is a deliverable heading, as in the planner.
+const plannerContextSpans = (text) =>
+  plannerHeadingSpans(text, (line) => !DELIVERABLE_HEADING_RE.test(line) && CONTEXT_HEADING_RE.test(line));
 
 function plannerFileCandidates(text) {
   const patterns = [
@@ -280,24 +291,31 @@ function plannerFileCandidates(text) {
     new RegExp(CANDIDATE_WITH_EXT, 'g'),
   ];
   const spans = plannerDeliverableSpans(text);
+  const cSpans = plannerContextSpans(text);
   const seen = new Set();
   const deliverable = new Set();
+  const inContext = new Set();
+  const outsideContext = new Set();
   const found = [];
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
       const candidate = match[1].trim();
       if (!plannerIsSafeRepoPath(candidate)) continue;
       if (spans.some(([start, end]) => match.index >= start && match.index < end)) deliverable.add(candidate);
+      if (cSpans.some(([start, end]) => match.index >= start && match.index < end)) inContext.add(candidate);
+      else outsideContext.add(candidate);
       if (!seen.has(candidate)) {
         seen.add(candidate);
         found.push(candidate);
       }
     }
   }
+  // Excluded only when every mention is under a context heading (planner #54).
+  const contextOnly = new Set([...inContext].filter((candidate) => !outsideContext.has(candidate)));
   // A candidate that is a path-boundary suffix of another is a partial of it and
   // never reaches suspected_files (planner Issue #49).
   const paths = found.filter((candidate) => !found.some((other) => other !== candidate && other.endsWith(`/${candidate}`)));
-  return { paths, deliverable };
+  return { paths, deliverable, contextOnly };
 }
 
 // A documentation path is context to read, not a file the Issue is expected to
@@ -306,10 +324,18 @@ function plannerFileCandidates(text) {
 // listed. This is the asymmetry the planner-readiness rule exists to catch. The
 // one exception is an Issue that says a document IS its deliverable, by writing
 // the path under a 成果物 / 対象ファイル / Deliverables heading (Issue #50).
+//
+// The mirror of that exception: a path mentioned only under a 根拠 / 参考 /
+// References heading is cited, not claimed, and does not reach suspected_files
+// whatever its extension (Issue #54). An Issue that names its files ONLY as
+// evidence therefore reads as planner-unready here, which is what the planner
+// will conclude too.
 function plannerSuspectedFiles(text) {
-  const { paths, deliverable } = plannerFileCandidates(text);
+  const { paths, deliverable, contextOnly } = plannerFileCandidates(text);
   return paths.filter(
-    (candidate) => deliverable.has(candidate) || (!/^docs\//.test(candidate) && !/\.(md|rst|txt)$/i.test(candidate)),
+    (candidate) =>
+      !contextOnly.has(candidate) &&
+      (deliverable.has(candidate) || (!/^docs\//.test(candidate) && !/\.(md|rst|txt)$/i.test(candidate))),
   );
 }
 
