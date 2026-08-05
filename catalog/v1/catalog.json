@@ -530,7 +530,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.13.0",
+      "latest": "0.15.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -854,6 +854,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.13.0/cmate-orchestrate-0.13.0.tar.gz",
             "sha256": "4d2a374c9246a904f8604dd6a732f04b0f93ce8c7a114eb06ff451a19c78eb7e",
             "size": 140031,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.15.0",
+          "changelog": "制御文字 guard の生 NUL バイトを除去 (#61)。SKILL.md を781→321行へ減量し経緯を release-notes へ移送、共有 lib.mjs を新設 (#67)。監督責務の境界を明記 (#66)。",
+          "published_at": "2026-08-05T14:34:23Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.15.0",
+            "commit": "d718b51b71141c50645b70a73d16063d78a84e6c"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.15.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.15.0/cmate-orchestrate-0.15.0.tar.gz",
+            "sha256": "397afa5a5a4f2349bc8cc68e274bb0072a834eec590e4d0495b3a8ce88a924a8",
+            "size": 136961,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
