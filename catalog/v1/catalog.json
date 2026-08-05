@@ -2181,7 +2181,7 @@
         "safety",
         "github"
       ],
-      "latest": "0.1.4",
+      "latest": "0.1.5",
       "versions": [
         {
           "version": "0.1.0",
@@ -2285,6 +2285,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worktree-cleanup-v0.1.4/cmate-worktree-cleanup-0.1.4.tar.gz",
             "sha256": "f66f87dd2ee3a9bed503f1a96d134b942c432e9af9c871572c90f3f9c8b4c9e1",
             "size": 21592,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.1.5",
+          "changelog": "ランチャー解決を統一し npx 運用を正式サポート (#37)。--cli は argv 分割で受理し $CM をフォールバックに、シェル構文は助言つきで拒否。SKILL.md 冒頭に読み替え宣言。",
+          "published_at": "2026-08-05T16:46:48Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-worktree-cleanup-v0.1.5",
+            "commit": "d01ed9f6e370b2936cfe713a3f5dbe442678dfe4"
+          },
+          "artifact": {
+            "asset_name": "cmate-worktree-cleanup-0.1.5.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worktree-cleanup-v0.1.5/cmate-worktree-cleanup-0.1.5.tar.gz",
+            "sha256": "272f1efc70bc0cc8d25b6ec7d7b9b6644ccf91600071bfc9f1bf1aee75354e2f",
+            "size": 21850,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
