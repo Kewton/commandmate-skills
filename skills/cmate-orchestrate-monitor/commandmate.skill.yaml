@@ -1,8 +1,8 @@
 schema_version: 1
 id: cmate-orchestrate-monitor
 name: cmate-orchestrate-monitor
-version: 0.5.0
-summary: commandmate wait が見ない停滞（プロンプト待ち・rate limit・リトライ枯渇死）を capture の 1 フレームから検知して回収し、介入と判定の全件を機械可読なログに残す監視レシピ。
+version: 0.6.0
+summary: commandmate wait が見ない停滞（プロンプト待ち・rate limit・リトライ枯渇死）を capture の 1 フレームから検知して回収し、介入と判定の全件を機械可読なログに残す監視レシピ。契約付き dispatch の一次監督は cmate-orchestrate の wait ループで、本 Skill はその回収と可観測性のサイドカーである。
 description: >-
   tmux セッション上で走る worker（coding CLI）を監督するための、実運用で検証済みの監視レシピである。
   この Skill の価値は完了判定そのものではなく（契約付き委任の最終裁定は `commandmate wait --verify` の
@@ -114,14 +114,14 @@ risk_rationale: >-
   mutates a repo.
 files:
   - path: SKILL.md
-    sha256: 58a55faef6be4378550d8bb5ba022744a62e478ce70f2f563582e472b43a0bfb
-    size: 36577
+    sha256: 385295d122e622ecdfb10018c5b815c3aef89cf3dcd25f8682e733958db8d33b
+    size: 19107
     kind: skill_md
     executable: false
     script: false
   - path: references/agent-compatibility.md
-    sha256: 99020733da29327f5aa6a04fd904cca9b35a888d64d0b84963edc9cee55d25cf
-    size: 4744
+    sha256: d488078b35b67b96f1824370462c5288733f159b564a36993bbe2e1df52a5fca
+    size: 4873
     kind: instruction
     executable: false
     script: false
@@ -132,8 +132,8 @@ files:
     executable: false
     script: false
   - path: references/monitor-contract.md
-    sha256: bdff75033a0282f403ffb057b67b95334f7c2d117153f311e1bf820cd9e8aa1d
-    size: 18176
+    sha256: 3508874ca448a387241966c36a67bc9d9ef68919ffdf154f02a7ab9bd8c59661
+    size: 20645
     kind: instruction
     executable: false
     script: false

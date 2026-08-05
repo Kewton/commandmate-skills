@@ -181,6 +181,28 @@ instance suffix は `deriveSessionSuffix` と同じで、`<tool>-` を剥がし�
 `approvals=` に出る。`--verbose` 時は PROMPT 分類として poll 行に残る。
 **保留は行を出す** — 誰かが答えない限り worker は動かないためで、こちらは `held=` に出る。
 
+### ログからの取り出し方
+
+`--verbose` 付きで `2>&1 | tee monitor.log` した監視ログから、判定を実際に下したことを
+機械的に取り出す方法である。「誤報 0 だった」は、この形で数えられて初めて主張になる。
+
+| 知りたいこと | ログからの取り出し方 |
+|---|---|
+| 総ポーリング数（worker 別） | `grep -cE '^monitor\[<wid>\]: poll ' monitor.log` |
+| 状態分類の分布 | `grep -oE 'poll [0-9]+ -> [A-Z_]+' monitor.log \| awk '{print $4}' \| sort \| uniq -c` |
+| タスク状態の分布 | `grep -oE 'task=[a-z_]+' monitor.log \| sort \| uniq -c` |
+| 判定が一次ソース由来かフォールバック由来か | 終局判定の poll 行に `task=` があるか／`FALLBACK MODE` 行が出ているか |
+| 介入の全件（届いたもの） | `grep -E "sent 'a' to\|resent to\|resend budget spent" monitor.log`（プロンプト承認はサイレント。総数は COMPLETE 行の `approvals=` に出る） |
+| 承認しなかったプロンプト | `grep 'PROMPT held' monitor.log`（プロンプト 1 件につき 1 行。理由つき）。総数は COMPLETE 行の `held=` |
+| 承認と保留の別 | COMPLETE 行の `approvals=` と `held=`。`held=` は **1 件以上あるときだけ付く**（`task=` と同じ方針。0 件の run は 0.4.0 と byte 一致のままにする） |
+| 保留の理由の分布 | `grep -oE 'PROMPT held, no Enter sent — [^.]*' monitor.log \| sort \| uniq -c` |
+| 届かなかった介入 | `grep 'NOT delivered' monitor.log`（stderr。`2>&1` で取り込んでいること） |
+| 送信先として解決されたセッション | `grep 'intervention target = ' monitor.log`（worker ごとに 1 行） |
+| 完了判定の根拠 | COMPLETE した poll 行の `started= / streak= / commits= / uncommitted= / task=` |
+| capture 失敗 | `grep -c 'capture failed' monitor.log`（poll 行は出ないので別に数える） |
+| helper 失敗（CommandMate #1614） | `grep -cE 'classify-state failed\|verify-completion failed' monitor.log`。いずれもそのポーリングを捨てる（poll 行は出ない）。**0 でなければ判定を下せなかったポーリングがある** |
+| カウンタが信用できないポーリング | `grep 'monitor hooks: \[' monitor.log`（worker あたり 1 行。出ていれば `commits=` / `uncommitted=` の 0 は「測れなかった」であって「作業ゼロ」ではない） |
+
 worker 横断の状態（streak / started / approvals / held / resends）は `mktemp -d` した temp
 directory 配下の file に持つ。EXIT / INT / TERM で削除される
 （bash 3.2 には連想配列が無いため。[recipe-rationale.md](./recipe-rationale.md) 16）。
