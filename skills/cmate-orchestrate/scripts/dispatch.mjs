@@ -432,7 +432,7 @@ function safeWorktreeTarget(pathValue) {
   if (/^[A-Za-z]:/.test(pathValue)) return null;
   if (pathValue.includes('\\')) return null;
   // eslint-disable-next-line no-control-regex
-  if (/[ -]/.test(pathValue)) return null;
+  if (/[\x00-\x1f\x7f]/.test(pathValue)) return null;
   let rest = pathValue;
   if (rest.startsWith('../')) rest = rest.slice(3);
   if (rest.split('/').some((segment) => segment === '..')) return null;
