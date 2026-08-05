@@ -2,6 +2,47 @@
 
 Catalog の `changelog` はこの Skill の release tag の annotation から生成される。
 その annotation の元になる記述をここに置く。install 前の利用者が読む前提で書く。
+**新しい version を上に置く。version を上げたらこの file も同じ commit で更新する。**
+
+## 0.1.2
+
+`target.issue_ref` の記録規則を定義し、consumer である cmate-orchestrate との
+関係を明記した（Issue #60）。
+
+### 何が変わるか
+
+- **`target.issue_ref` に何を書くかが SKILL.md §5 で決まった。** 呼び出し元から
+  渡された入力をそのまま記録し、何も渡されなかった場合は固定文字列 `unspecified` を
+  記録する。推測で Issue 番号を埋めない。
+  これで「入力が欠けていれば `status: failure` を出力する」という §5 の指示と、
+  `issue_ref` を required・非空とする schema が両立する。schema は変更していない。
+- `unspecified` の result は、cmate-orchestrate の uat runner が **mismatched** に
+  分類し、`--require-acceptance` 付きの実行では不合格になる。安全側の意図した挙動で
+  あることを SKILL.md に明記した。
+- **cmate-orchestrate との関係を明記した。** この result document は orchestrate の
+  UAT 意味ゲートの入力であり、orchestrate から使う場合は `--acceptance-dir` 配下に
+  `issue-<n>.json` という file 名で置く。既定の `./acceptance-result.json` のままでは
+  読まれない。
+- `filesystem_write` の用途にあった参照先の誤り（存在しない「§4 Step 3」の記述）を、
+  実在する `references/test-plan.md` §3 へ直した。
+
+判定規則、outcome の定義、決定表、schema に変更はない。0.1.1 の result document は
+そのまま有効である。
+
+## 0.1.1
+
+互換宣言を実測へ是正。手順本体に変更なし。
+
+compatibility の結論（claude / codex ともに `native`）は 0.1.0 と同じだが、根拠が
+誤っていた。「`.agents/skills` からの標準 discovery」と書いていたが、Claude が読むのは
+`.claude/skills` である（CommandMate#343）。2026-07-26 の隔離環境実測へ差し替えた。
+
+- Claude Code 2.1.220 / CommandMate 0.15.0: `.claude/skills` から発見され、slash palette
+  に完全一致で露出する（機械的証跡）。installer は `.agents/skills` と `.claude/skills`
+  へ byte-identical に配置する（CommandMate#1460）。
+- Codex CLI 0.145.0: `.agents/skills` から SKILL.md を読む（self-report）。この version は
+  skill を slash command として露出しないため、名前で呼ぶ。
+- Gemini / OpenCode は未計測のため `unknown` のまま据え置き。
 
 ## 0.1.0
 
