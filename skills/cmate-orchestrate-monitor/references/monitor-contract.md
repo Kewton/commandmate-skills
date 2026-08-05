@@ -95,6 +95,7 @@ log 行の key も `<id>@<instance>` になる。`<worktree-id>` は
 | `--max-resends <n>` | `2` | 再送の上限。使い切ったらエスカレーション |
 | `--max-polls <n>` | `0` | N ポーリングで exit 0。`0` は全 worker COMPLETE まで回る |
 | `--verbose` | off | 1 ポーリング 1 行の状態ログを **追加**する（既定出力は不変） |
+| `--no-auto-approve` | off | プロンプトへ Enter を一切送らず、全件を保留して報告する。契約付き dispatch を監督するときの既定形（Issue #59） |
 | `--hooks <file>` | `$MONITOR_HOOKS` | フックを source する。**繰り返し指定可**（左から順）。1 つでも与えると `MONITOR_HOOKS` は捨てられる |
 
 | env | 既定 | 意味 |
@@ -131,6 +132,29 @@ instance suffix は `deriveSessionSuffix` と同じで、`<tool>-` を剥がし�
 3 つとも**失敗を stderr へ報告して非 0 を返す**。ログは送信の**結果**を書き、
 **`approvals` と再送予算は 2・3 を通過したときだけ動く**。
 
+### プロンプト承認の判定（Issue #59）
+
+`PROMPT` と分類しても Enter は無条件には送らない。そのポーリングの payload から
+`ml_prompt_enter_verdict` が次のどれかを返し、`approve` のときだけ `send_to_pane()` へ進む。
+
+| 戻り値 | 条件 | 使うフィールド |
+|---|---|---|
+| `approve` | `type` が `yes_no`（default 未指定を含む）、または default 選択肢の label が肯定語で始まる | `promptData.type` / `options[].isDefault` / `options[].label` / `defaultOption` |
+| `hold:policy` | サーバが契約の autoYes ポリシーで応答を保留した | `autoYes.lastSuppression` |
+| `hold:no-prompt-data` | `promptData` が無い（テキストマーカーだけで PROMPT と分類した） | — |
+| `hold:no-default` | `multiple_choice` だが `isDefault` の選択肢が無い | `options[].isDefault` |
+| `hold:choice` | default はあるが label が肯定語でない | `options[].label` |
+| `hold:type` | 未知の `type` | `promptData.type` |
+| `hold:disabled` | `--no-auto-approve` 指定時（判定より前に決まる） | — |
+
+判定順は **`hold:policy` が最初**である。サーバが保留したものは、形が承認可でも承認しない。
+肯定語は `y` / `yes` / `allow` / `approve` / `proceed` / `accept` / `ok` を語頭に持つ label
+（大小無視、直後は非英数字か行末）。`Yes, and don't ask again for: …` は肯定、
+`Yesterday, roll back` は非肯定である。
+
+保留は **prompt 1 件につき 1 行**しか出さない。同一性は `promptData` ブロックの `cksum` で見て、
+`PROMPT` 以外の状態を 1 度でも挟むと忘れる（同じ質問が再び出たら再び報告する）。
+
 ### 出力行
 
 | 行 | 出る条件 |
@@ -146,7 +170,8 @@ instance suffix は `deriveSessionSuffix` と同じで、`<tool>-` を剥がし�
 | `monitor[<lbl>]: terminal API error and resend budget spent (N) — operator needed` | 再送上限到達 |
 | `monitor[<lbl>]: task state unavailable (…) — FALLBACK MODE: …` | `read_task_status` が `unavailable` を返した。**worker ごとに 1 度だけ** |
 | `monitor[<lbl>]: poll <N> -> <STATE> started=… streak=… commits=… uncommitted=… verdict=… [task=…]` | `--verbose` 指定時のみ、1 ポーリング 1 行。`task=` は台帳が答えたときだけ末尾に付く |
-| `monitor[<lbl>]: COMPLETE (approvals=<n>)` | 完了判定 |
+| `monitor[<lbl>]: PROMPT held, no Enter sent — <理由>. Answer it in the pane, or with 'commandmate respond <wid>'` | プロンプトを承認しなかったとき。**プロンプト 1 件につき 1 度だけ**（Issue #59） |
+| `monitor[<lbl>]: COMPLETE (approvals=<n>[ held=<n>])` | 完了判定。`held=` は **1 件以上保留したときだけ**付く（`task=` と同じ方針） |
 | `monitor[<lbl>]: VERIFY_FAILED — contract gates failed; do not merge. …` | タスクが `failed` / `cancelled`。COMPLETE と同じく終局（ループを抜ける） |
 | `monitor[<lbl>]: NOT_STARTED — idle with no work; check the composer / Enter` | NOT_STARTED かつ idle 閾値到達 |
 | `monitor: reached --max-polls (N) after N poll round(s); stopping` | `--max-polls` 到達 |
@@ -154,8 +179,9 @@ instance suffix は `deriveSessionSuffix` と同じで、`<tool>-` を剥がし�
 
 プロンプト自動承認は **行を出さない**（通知の氾濫を防ぐため）。件数は COMPLETE 行の
 `approvals=` に出る。`--verbose` 時は PROMPT 分類として poll 行に残る。
+**保留は行を出す** — 誰かが答えない限り worker は動かないためで、こちらは `held=` に出る。
 
-worker 横断の状態（streak / started / approvals / resends）は `mktemp -d` した temp
+worker 横断の状態（streak / started / approvals / held / resends）は `mktemp -d` した temp
 directory 配下の file に持つ。EXIT / INT / TERM で削除される
 （bash 3.2 には連想配列が無いため。[recipe-rationale.md](./recipe-rationale.md) 16）。
 

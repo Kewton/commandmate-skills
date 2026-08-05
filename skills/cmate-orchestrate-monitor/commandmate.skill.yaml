@@ -1,46 +1,48 @@
 schema_version: 1
 id: cmate-orchestrate-monitor
 name: cmate-orchestrate-monitor
-version: 0.4.0
-summary: 並列 worker の完了判定を CommandMate の実行契約タスク状態（一次）と capture 分類（フォールバック）で下し、健全な worker へ入力を注入しない条件でのみ介入する監視レシピ。
+version: 0.5.0
+summary: commandmate wait が見ない停滞（プロンプト待ち・rate limit・リトライ枯渇死）を capture の 1 フレームから検知して回収し、介入と判定の全件を機械可読なログに残す監視レシピ。
 description: >-
   tmux セッション上で走る worker（coding CLI）を監督するための、実運用で検証済みの監視レシピである。
-  完了判定の一次ソースは CommandMate がサーバ側で検証ゲートを回した後に記録する実行契約の
-  タスク状態であり（succeeded → COMPLETE、failed / cancelled → VERIFY_FAILED、not_started →
-  NOT_STARTED）、capture の正規表現解析は契約なし委任および task 台帳を持たない CommandMate 向けの
-  フォールバックである。判定順はペイン生存 veto → 裁定済みタスク状態 → STARTED ガード → idle 連続と
-  実作業量、の順で固定してあり、ペイン生存 veto を先に置くのは前回 send の裁定で監視を打ち切らせない
-  ため、非終局状態（pending / running / waiting_input / verifying）を短絡させずフォールバックへ落とすのは
-  STARTED ガードを効かせ続けるためである。フォールバック経路では同梱の bash script が
+  この Skill の価値は完了判定そのものではなく（契約付き委任の最終裁定は `commandmate wait --verify` の
+  exit code であり、監視が読むタスク状態はその写しである）、**wait からは見えない停滞の回収と
+  可観測性**にある。すなわち、プロンプトで止まった worker・usage limit で止まった worker・
+  CLI がリトライを使い切って死んだ worker を検知し、何をどのペインへ送ったか、何を送らずに保留したか、
+  どの入力で完了判定を下したかを全件ログへ残す。同梱の bash script が
   `commandmate capture <id> --json` の 1 フレームを 1 つの状態トークン（NOT_RUNNING / GENERATING /
   PROMPT / RATE_LIMIT / IDLE）へ落とす。アンカー照合は ANSI エスケープと NBSP を正規化したうえで
   「いま画面に出ている領域」に限定するため、スクロールバックに流れた作業指示文や spinner 行に
   誤マッチしない。分類順（NOT_RUNNING → リトライ backoff → PROMPT → GENERATING → RATE_LIMIT → IDLE）
-  自体がガードで、各分岐は入力注入か抑止のどちらかを引き起こす。介入は 3 種類だけで、プロンプトの
-  サイレント自動承認、usage limit バナー検出時の即時再開、リトライ枯渇後の上限つき再送に限られる。
-  再送は IDLE かつ idle 閾値到達かつ現ペインに terminal API error があるときのみ発火し、上限到達後は
-  オペレータへエスカレーションする。介入の宛先は固定 prefix の連結ではなく、そのポーリングの capture
-  ペイロードの cliToolId から `mcbd-<cliToolId>-<worktree-id>[-<instance suffix>]` として導出するため、
-  分類したペインと入力するペインが同一であることが構造的に保証され、claude と codex が混在する
-  fleet でもフラグ無しで成立する。送信前に tmux has-session で完全一致指定（`=<name>:`）の存在を
-  検証し、失敗は握り潰さず stderr へ報告する。ログは送信の結果を書き、承認カウンタと再送予算は
-  配信できたときだけ動く。worktree-id は `<id>@<instance-id>` 形式で agent instance を指定でき、
-  指定は capture 側と送信先の両方に効く。フォールバックの完了判定は STARTED ガードを持ち、生成アンカーを
-  一度も観測していない idle や、commit も uncommitted も 0 の idle を COMPLETE と報告しない。
-  タスク状態と作業量カウンタはどちらも差し替え可能なフックとして外部供給し（hooks-task.sh は
-  `commandmate task list <id> --limit 1` の最新行を、hooks-git.sh は worktree-id を実 checkout へ
-  解決して git から数える）、指定した hooks file が存在しない場合は黙ってスタブへ落ちずに即座に失敗する。
-  タスク状態を配線したのに引けなかった場合は worker ごとに 1 度フォールバックモードを宣言してから
-  推定へ降格する（黙って劣化しない）。--verbose は 1 ポーリング 1 行の固定フォーマットで、状態と完了
-  判定に実際に渡した入力を機械可読に残す（既定出力は変わらない）。worker の作成・dispatch・作業指示の
-  送信・PR 作成・merge・Issue の close は行わない。COMPLETE は監視を止めてよいという判定であって
-  マージ可否の裁定ではなく、契約付き委任の最終裁定は `commandmate wait --verify` の exit code である。
+  自体がガードで、各分岐は入力注入か抑止のどちらかを引き起こす。介入は 3 種類だけで、条件つきの
+  プロンプト承認、usage limit バナー検出時の即時再開、リトライ枯渇後の上限つき再送に限られる。
+  プロンプトへの Enter は tmux ペインへ直接入りサーバの承認制御を通らないため、分類だけでは送らない。
+  そのフレームの promptData が「デフォルト選択肢が承認である二択」を示したときだけ送り、
+  契約 autoYes ポリシーがサーバ側で保留したもの・デフォルトの無い選択・promptData の無いフレーム・
+  未知の型は Enter を送らず理由つきで 1 度だけ報告して held に数える。`--no-auto-approve` で全件保留に
+  できる（契約付き dispatch を監督するときの形）。再送は IDLE かつ idle 閾値到達かつ現ペインに
+  terminal API error があるときのみ発火し、上限到達後はオペレータへエスカレーションする。介入の宛先は
+  固定 prefix の連結ではなく、そのポーリングの capture ペイロードの cliToolId から
+  `mcbd-<cliToolId>-<worktree-id>[-<instance suffix>]` として導出するため、分類したペインと入力する
+  ペインが同一であることが構造的に保証され、claude と codex が混在する fleet でもフラグ無しで成立する。
+  送信前に tmux has-session で完全一致指定（`=<name>:`）の存在を検証し、失敗は握り潰さず stderr へ
+  報告する。ログは送信の結果を書き、承認カウンタと再送予算は配信できたときだけ動く。worktree-id は
+  `<id>@<instance-id>` 形式で agent instance を指定でき、指定は capture 側と送信先の両方に効く。
+  監視を止めてよいかの判定は、ペイン生存 veto → 裁定済みタスク状態 → STARTED ガード → idle 連続と
+  実作業量、の順で固定してある。タスク状態と作業量カウンタはどちらも差し替え可能なフックとして
+  外部供給し（hooks-task.sh は `commandmate task list <id> --limit 1` の最新行を、hooks-git.sh は
+  worktree-id を実 checkout へ解決して git から数える）、指定した hooks file が存在しない場合は
+  黙ってスタブへ落ちずに即座に失敗する。タスク状態を配線したのに引けなかった場合は worker ごとに
+  1 度フォールバックモードを宣言してから推定へ降格する（黙って劣化しない）。--verbose は
+  1 ポーリング 1 行の固定フォーマットで、状態と完了判定に実際に渡した入力を機械可読に残す
+  （既定出力は変わらない）。worker の作成・dispatch・作業指示の送信・PR 作成・merge・Issue の close は
+  行わない。COMPLETE は監視を止めてよいという判定であってマージ可否の裁定ではない。
 capabilities:
-  - 実行契約のタスク状態を一次ソースとして読み、終局状態だけで裁定する（failed / cancelled は COMPLETE と分けて VERIFY_FAILED）
-  - ペイン生存 veto をタスク状態より先に、非終局状態をフォールバックより後に評価し、古い裁定と STARTED ガード無効化の両方を防ぐ
+  - 実行契約のタスク状態を一次ソースとして終局状態だけで裁定し（failed / cancelled は VERIFY_FAILED）、ペイン生存 veto をその前に・非終局状態をフォールバックの後に置いて古い裁定と STARTED ガード無効化を防ぐ
   - タスク状態を引けない CommandMate では worker ごとに 1 度宣言してからフォールバックモードへ入る（黙って劣化しない）
   - capture の 1 フレームを NOT_RUNNING / GENERATING / PROMPT / RATE_LIMIT / IDLE へ分類する（ANSI と NBSP を正規化し現ペインに限定するのでスクロールバックへ誤マッチしない）
-  - 生成中・CLI 自身の backoff 中には注入せず、プロンプトのサイレント自動承認・usage limit からの即時再開・リトライ枯渇後の上限つき再送だけを行い、上限到達でエスカレーションする
+  - 生成中・CLI 自身の backoff 中には注入せず、条件つきプロンプト承認・usage limit からの即時再開・リトライ枯渇後の上限つき再送だけを行い、上限到達でエスカレーションする
+  - プロンプトへの Enter を promptData で判定し、デフォルトが承認である二択だけ承認して、契約 autoYes ポリシーの保留・デフォルト無しの選択・promptData 無しのフレームは送らずに理由つきで報告する（--no-auto-approve で全件保留）
   - 介入の宛先を capture ペイロードの cliToolId と `<worktree-id>@<instance-id>` 指定から導出し、分類したペインと入力するペインを一致させる（固定 prefix を連結しない。instance 指定は capture 側にも効く）
   - 送信前に tmux has-session で完全一致指定の存在を検証し、配信できなかった介入を握り潰さず報告する（承認カウンタと再送予算は配信時のみ進む）
   - フォールバック時は生成アンカーの観測有無と実 commit / uncommitted 数で STARTED ガード付きの完了判定を下す
@@ -51,11 +53,11 @@ expected_outcomes:
   - 完了判定がサーバ側の裁定か推定かをログから区別でき、タスク状態を参照できない環境で黙って推定へ劣化することがない
   - 生成中の worker が idle と誤分類されず、思考が長い worker も停止扱いされない
   - 介入がプロンプト・usage limit・枯渇後の再送に限られ、健全な worker へ入力が注入されない
+  - 実行契約が autoYes ポリシーで保留させたプロンプトや、Enter がデフォルト選択肢の確定になる選択が、監視ループのキー送出で意図せず確定されない
   - 介入が空振りのまま「送った」と記録されることがなく、claude / codex 混在でも非既定 instance でもフラグ無しで正しいペインへ届く
   - 未起動 worker や作業の痕跡が無い worker が COMPLETE と誤報されない
-  - 完了判定の根拠（started / streak / commits / uncommitted / task）がログから読み取れる
   - 完了フック未配線のまま「全 worker 完了」と報告されることがなく、NOT_STARTED として露見する
-  - 総ポーリング数・状態分類の分布・介入の全件が監視ログから機械的に取り出せる
+  - 総ポーリング数・状態分類の分布・介入と保留の全件・完了判定の根拠（started / streak / commits / uncommitted / task）が監視ログから機械的に取り出せる
   - 品質ゲートや依存コマンドの非 0 終了が「テスト緑」「作業ゼロ」の見た目に隠されない（git が答えられなかった worker が NOT_STARTED と誤報されず、判定器が落ちたポーリングが無言で素通りしない）
 provider:
   name: CommandMate
@@ -104,40 +106,40 @@ declared_permissions:
   - network_access
 declared_risk: high
 risk_rationale: >-
-  Ships executable scripts (high risk). The loop runs `commandmate capture` per poll and, with
-  hooks wired, reads the task ledger and worker checkouts (git) read-only. It types into worker
-  panes via tmux — Enter, "a" and the resend message only, each gated on a classification that
-  rules out a live turn and delivered only to an existence-checked exact-match session derived from
-  that poll. It never sends task text or mutates a repo. Network is the npx launcher, avoidable
-  with CM=commandmate.
+  Ships executable scripts (high risk). Runs `commandmate capture` per poll and, with hooks wired,
+  reads the task ledger and worker checkouts read-only. It types into worker panes via tmux — Enter,
+  "a" and the resend message only, delivered to an existence-checked exact-match session derived
+  from that poll. Enter bypasses the server's approval control, so it needs a promptData whose
+  default option is affirmative; anything else is held and reported. It never sends task text or
+  mutates a repo.
 files:
   - path: SKILL.md
-    sha256: 7204e9f1405d9607ccc514b6239c85243d7b9ec7b3290bd56442b27738d854d2
-    size: 28333
+    sha256: 58a55faef6be4378550d8bb5ba022744a62e478ce70f2f563582e472b43a0bfb
+    size: 36577
     kind: skill_md
     executable: false
     script: false
   - path: references/agent-compatibility.md
-    sha256: '0b1bf957f2b02b9b1021f6d218bee97675565455679efa7338c15e774a7b8c0b'
-    size: 3878
+    sha256: 99020733da29327f5aa6a04fd904cca9b35a888d64d0b84963edc9cee55d25cf
+    size: 4744
     kind: instruction
     executable: false
     script: false
   - path: references/evidence.md
-    sha256: 216807c7e4af427932a64759ae9653e66c7980bf48c69829c1c67359f0b399fd
-    size: 13125
+    sha256: 38aee3110ce0f79fb47418849ab6127bf6d14fb3035651b8803db1a6dd177cc2
+    size: 18517
     kind: instruction
     executable: false
     script: false
   - path: references/monitor-contract.md
-    sha256: 365f5f1d4cbf036c04ce5798cd843b001055500304cc63c67d19b103d91b3a98
-    size: 15778
+    sha256: bdff75033a0282f403ffb057b67b95334f7c2d117153f311e1bf820cd9e8aa1d
+    size: 18176
     kind: instruction
     executable: false
     script: false
   - path: references/recipe-rationale.md
-    sha256: a40cbcda5ac349af20c2bdd79ef0bcd3eecba7d0b6f550dd91ecc44de0696088
-    size: 16541
+    sha256: 21ea81d86ef9d2d26e1bcf68e07bab4da6eebd045d40eae72e6666ae60b91d3d
+    size: 18715
     kind: instruction
     executable: false
     script: false
@@ -160,14 +162,14 @@ files:
     executable: true
     script: true
   - path: scripts/monitor-lib.sh
-    sha256: 31230e9f56f5546cf5b63090c5f00acbc213a1bd01cb6d109eed1f9f21d3a2be
-    size: 14519
+    sha256: 3586971a77c9c0912bc6d8d1900983f84541860f6ed960fbfd7601234781cd6d
+    size: 21955
     kind: script
     executable: true
     script: true
   - path: scripts/monitor.sh
-    sha256: 3edde3e0d8799283f7adb40e3ae2c7c171ebc5bb1d12d9c406ca37d35b68f6eb
-    size: 24208
+    sha256: 9217c3398770f563ac477e13f93f41b3e7155704a4eb8ae6f220ed35e8d91b92
+    size: 29317
     kind: script
     executable: true
     script: true

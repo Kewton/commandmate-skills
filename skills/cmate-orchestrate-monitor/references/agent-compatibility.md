@@ -41,6 +41,18 @@ manifest の `compatibility.agents` には **実測した Agent と CLI version 
 
 測定条件と限界は [evidence.md](./evidence.md) 第3節に記録してある。
 
+### CommandMate version の宣言
+
+`compatibility.commandmate` はスキーマ上 **1 本のレンジしか持てない**ので、そこに書くのは
+**package 全体の下限**（`>=0.15.0`＝フォールバック経路が成立する最小版）である。
+経路ごとの最小版（台帳による一次ソースは `>=0.17.0`、`hold:policy` は `>=0.21.0`）は
+[SKILL.md](../SKILL.md) 第3節の表にある。
+
+どちらの経路で走っているかを **version の照合で決めない**。実行時に判る:
+台帳が引けなければ `FALLBACK MODE` 行が出て、引ければ poll 行に `task=` が付く。
+「現時点の公開版は…」という形の断定を SKILL.md に書かないのはこのためである
+（0.4.0 の SKILL.md にはそれがあり、書いた当日に嘘になった。[evidence.md](./evidence.md) 第1b節）。
+
 ### Codex での呼び出し方（既知の制約）
 
 Codex CLI 0.145.0 では `/cmate-orchestrate-monitor` のような slash 呼出はできない。

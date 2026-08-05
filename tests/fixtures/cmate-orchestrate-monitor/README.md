@@ -59,15 +59,29 @@ ANSI を剥がした fixture を持ち込むと、この検査が落ちる。
 | `live-generating-rate-limit-source.json` | 生成中フレームのバナー風文字列に反応しない（回帰 7） |
 | `live-idle-rate-limit-source.json` | idle ペインの `rate_limit` 識別子は `RATE_LIMIT` ではない（回帰 7） |
 | `live-idle.json` | 健全な idle |
+| `live-prompt-multiple-choice.json` | 実機の権限プロンプト（`type: multiple_choice`・default は `Yes`）→ **承認する**（回帰 14） |
+| `prompt-no-default.json` | どの選択肢にも `isDefault` が無い picker → 保留（回帰 14） |
+| `prompt-policy-suppressed.json` | 契約の autoYes ポリシーがサーバ側で保留した（`autoYes.lastSuppression`）→ 形が承認可でも保留（回帰 14） |
 | `codex-rate-limit.json` | `cliToolId` が `codex` の payload → 送信先が `mcbd-codex-…` になる（回帰 9） |
 | `no-clitoolid-rate-limit.json` | `cliToolId` を欠く payload → 名前を捏造せず送信を拒否する（回帰 9） |
 | `scope-clean.txt` | 禁止パターンがコメント・散文にあるだけなら `CLEAN`（回帰 2） |
 | `scope-violation.txt` | 実 invocation は `VIOLATIONS:1` |
 
-`live-*.json` は実機採取の生 payload である。末尾 2 つは **`rate-limit.json` から
-`cliToolId` だけを差し替え／削除して作った派生 fixture**で、生採取ではない
-（だから `live-` prefix を持たず、fixture 忠実性検査の対象外である）。
-固定したいのはセッション名の導出であって分類ではないため、これで足りる。
+`live-*.json` は実機採取の生 payload である。`codex-rate-limit.json` /
+`no-clitoolid-rate-limit.json` は **`rate-limit.json` から `cliToolId` だけを差し替え／削除して
+作った派生 fixture**で、生採取ではない（だから `live-` prefix を持たず、fixture 忠実性検査の
+対象外である）。固定したいのはセッション名の導出であって分類ではないため、これで足りる。
+
+`prompt-no-default.json` / `prompt-policy-suppressed.json` も同じ理由で派生である。
+土台は `live-prompt-multiple-choice.json` と同じ実機フレームで、差し替えたのは 1 箇所ずつ:
+
+- `prompt-no-default.json` の `promptData` は、**実在した prompt**
+  （`capture <id> --prompts --json` の台帳 `db9f9d48-…`、選択肢が散文 3 件で `isDefault` なし）
+  をそのまま移植したもの。
+- `prompt-policy-suppressed.json` の `autoYes.lastSuppression` は、製品が publish する形
+  （`buildCurrentOutput` の unit test が固定している `{reason, mode, promptType, pattern, at}`）
+  を移植したもの。**保留を実際に起こす契約を走らせた生採取ではない**
+  （その限界は skill 側の `references/evidence.md` 第1e節に書いてある）。
 
 ## harness が見るもの
 
@@ -182,6 +196,21 @@ delivered / undelivered の 2 本を同じ fixture・同じ hooks で並べ、
 | `monitor.sh` の `verify-completion` 終了コード判定を外す | 3 件（判定なしのポーリングが無言で素通りする） |
 | `hooks-git.sh` を CommandMate#1614 以前へ全戻し | 7 件（`git` 失敗 3 経路 ＋ 解決不能 id ＋ worker 1 回の報告） |
 | 数え方を `printf \| wc -l` へ戻す | 6 件（1 件以上の計数が 1 つずつ減る。0 件のケースは緑のまま） |
+
+`#59` 分（2026-08-05 実測、それぞれ **suite exit 1**）。
+
+| 変異 | 落ちるテスト |
+|---|---|
+| `PROMPT` 分岐を無条件 Enter へ戻す（0.4.0 の挙動） | 14 件（保留 4 arm ＋ `--no-auto-approve` ＋ 報告の重複制御） |
+| `ml_prompt_enter_verdict` のポリシー判定を形の判定より後ろへ移す | 4 件（`hold:policy` の unit ＋ ループ 3 件） |
+| `multiple_choice` を一律保留にする（Issue #59 の字義どおりの提案） | 7 件（**実機の権限プロンプトが承認されなくなる**） |
+| 保留の報告を毎ポーリングにする | 1 件（`reported once, not once per poll`） |
+| `held=` を常に出す | 9 件（`held=` を持たない COMPLETE 行を固定している既存テスト） |
+| `--no-auto-approve` を無視する | 2 件 |
+
+**「一律保留」の変異が赤くなることが、この節でいちばん重要である**: 型で切る実装は
+一見安全側に見えて、実機の権限プロンプトを 1 件も承認しなくなる。
+`live-prompt-multiple-choice.json` は生採取なので、この主張は fixture の作り方に依存しない。
 
 **「`git` が失敗した」と「本当に作業ゼロ」は別のテストが担保している**:
 後者（`a worker that genuinely did nothing produces no warning`）は stderr が空であることを

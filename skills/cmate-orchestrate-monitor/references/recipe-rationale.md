@@ -64,6 +64,22 @@
    **サイレント＋カウンタ化**し、通知を氾濫させない。承認は commit 必須ゲート（＝完了検証）と
    セットで扱う。
 
+9b. **ただし Enter は「分類できたから送る」ものではない**（Issue #59）。Enter は tmux ペインへ
+    直接入るので **サーバの承認制御を通らない**。0.4.0 まではこれを無条件に送っていて、
+    (a) 契約が `autoYes.mode: off` / `denyPatterns` で保留させたプロンプトを黙って再承認し、
+    (b) multiple_choice では「はい」ではなく**デフォルト選択肢の確定**を送っていた
+    （CommandMate #1547 / #1684 / #1699 / #1681）。
+    条件は **deny 側ではなく allow 側**に置いた: そのフレームの `promptData` が
+    「default 選択肢が肯定である二択」を示したときだけ送り、それ以外は保留して報告する。
+    deny 側（「multiple_choice なら送らない」）を採らなかったのは実測のためで、
+    Claude Code の権限プロンプトも含め **測定した 30 フレーム全部が multiple_choice** だった
+    （evidence.md 第1e節）。型で切ると実運用の承認が 100% 止まる。
+    保留は **1 プロンプト 1 行**しか出さない。ここを毎ポーリングにすると、
+    20 秒間隔のログでは「止まっている」という 1 つの事実が数十行になり、
+    9 でサイレントにした理由がそのまま再現する。
+    契約付き dispatch を監督するときは、実装ガードに頼らず `--no-auto-approve` を使う
+    （保留の記録はセッションの Auto-Yes が有効なときしか作られない。evidence.md 第1e節）。
+
 10. **rate limit は待たず即 `a` 送信**で再開する。ただし **撃つ前に GENERATING を否定する**
     こと（上記 6）。
 
@@ -158,6 +174,7 @@
 | 10 | 前回 send の `succeeded` が残った worktree で、生成中の worker を完了扱いして監視を打ち切る | #1589 | ペイン生存 veto をタスク状態より **前** に評価 |
 | 11 | 台帳が `running` を記録しているが Enter が composer に落ちておらず、短絡すると STARTED ガードが盲目になる | #1589 | 非終局状態はフォールバックへ落とす（短絡しない） |
 | 12 | 一次ソースを引けないまま推定で走り、ログ上は健全な COMPLETE に見える | #1589 | `unavailable` センチネル ＋ worker ごと 1 回の `FALLBACK MODE` 宣言 |
+| 14 | **分類だけで Enter を送り、サーバの autoYes ポリシーを迂回する／multiple_choice のデフォルト選択肢を意図せず確定する** | #59 | `promptData` から承認可否を判定し、承認できない形は保留＋報告＋`held` 加算。`--no-auto-approve` で全件保留 |
 | 13 | **外部コマンドの終了コードを見ずに次を決める**（`git \| wc -l` が git の失敗を「作業 0」として返し、完走 worker を NOT_STARTED と誤報／`classify-state.sh` が落ちると空 state が完了判定へ渡り、生存ペインとみなされず **稼働中の worker が COMPLETE**／`verify-completion.sh` が落ちると `case` に default が無く **そのポーリングが無言で素通り**） | CommandMate #1614 | `hooks-git.sh` の 3 つの `git` 呼び出しを終了コード判定＋原因ごと worker 1 回の stderr 報告に、`monitor.sh` の `CLASSIFY` / `VERIFY` を `capture`（既存）と同じ扱いに |
 
 いずれも naive 実装で red → ガード実装で green にした。8 は両方向テスト（対照＋変異注入）で
@@ -168,6 +185,9 @@ poll 行の書式を変える / 参照フックの commit 数を 0 固定にす�
 13 は 7 変異で実測した（`classify` ガード削除で実際に
 `poll 4 -> <空> … verdict=COMPLETE` が出ること、`git` 失敗と真の作業ゼロが別テストで赤くなること、
 数え方を `wc -l` へ戻すと 1 件以上の計数が崩れることを含む）。
+14 は 6 変異で実測した（無条件 Enter へ戻す / ポリシー判定を形の判定より後ろへ移す /
+multiple_choice を一律保留にする / 保留報告を毎ポーリングにする / `held=` を常時出す /
+`--no-auto-approve` を無視する）。
 
 回帰 fixture と test runner は配布元リポジトリ
 <https://github.com/Kewton/commandmate-skills> の
