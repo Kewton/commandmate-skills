@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-task-contract
 name: cmate-task-contract
-version: 0.1.0
+version: 0.2.0
 summary: GitHub Issue から実行契約 .commandmate/tasks/<name>.yaml v1 を起案し、goal・変更可能 scope・検証ゲートを作業前に宣言して send --contract で送れる状態にする。
 description: >-
   作業を始める前に「何を達成するのか」「どのパスを変更してよいのか」「何が満たされたら
@@ -13,9 +13,11 @@ description: >-
   黙って落ちない）。Issue 本文がコードについて述べる主張は転記前にリポジトリで裏取りし、
   食い違えば実測を正とする。verify.gates に書ける id は対象 worktree の
   .commandmate/verify.yaml に実在するものだけで、空リストは契約エラーである。契約 v1 は
-  閉じた集合なので未知キーは無視されず拒否される。SKILL.md が示す雛形は CommandMate の
-  契約パーサに実際に通して valid を確認したものである。パーサ script は同梱せず、
-  検証は送信時にサーバ側が全違反をまとめて返すため 1 往復で修正できる。
+  閉じた集合なので未知キーは無視されず拒否されるが、SKILL.md のフィールド表は正本
+  spec の写しに過ぎないため、表に無いキーは表だけを根拠に削除せず正本と照合する
+  （success.requireCommit のように後から v1 へ足されたキーがある）。SKILL.md が示す
+  雛形は CommandMate の契約パーサに実際に通して valid を確認したものである。パーサ
+  script は同梱せず、検証は送信時にサーバ側が全違反をまとめて返すため 1 往復で修正できる。
 capabilities:
   - GitHub Issue または作業内容の記述から、実行契約 .commandmate/tasks/<name>.yaml v1 を起案する
   - commandmate send --help に --contract が無い環境を検出し、契約を書かずに明示的に停止する
@@ -25,6 +27,7 @@ capabilities:
   - 既定値のままの autoYes / success を書かず、既定から外すときだけ理由付きで明示する
   - 契約ファイルの追跡可否を .gitignore に照らして確認し、規則を迂回せず利用者へ判断を返す
   - 送信時に返る契約エラーを全件まとめて 1 往復で修正する手順を示す
+  - success.requireCommit など v1 に後から足されたキーを、表に無いことだけを理由に契約エラーと誤判定せず正本 spec と照合する
 expected_outcomes:
   - 作業開始前に、達成条件と変更可能範囲と完了判定がレビュー可能な YAML として残る
   - 契約機能を持たない CommandMate では、契約なしの送信へ黙って落ちずに停止する
@@ -32,6 +35,7 @@ expected_outcomes:
   - 完了条件が verify.yaml に実在するゲートで表現され、wait --verify がそのまま判定できる
   - 契約エラーが 1 往復で解消でき、送信のやり直しが 1 回で済む
   - 契約が PR のレビュー対象に含まれ、宣言された範囲と実際の変更を後から突き合わせられる
+  - 本体が v1 へ足した正当なキーが、SKILL.md の表に無いという理由だけで契約から除去されない
 provider:
   name: CommandMate
   url: https://github.com/Kewton/CommandMate
@@ -46,7 +50,7 @@ keywords:
   - issue
   - yaml
 compatibility:
-  commandmate: '>=0.11.0 <1.0.0'
+  commandmate: '>=0.17.0 <1.0.0'
   agents:
     - agent: claude
       support: native
@@ -86,8 +90,8 @@ risk_rationale: >-
   .gitignore の迂回）は手順として禁止している。
 files:
   - path: SKILL.md
-    sha256: 2c22a37be2c8e1573366f4b76607e207666a79e04eca12a7a2d987a31d95b24d
-    size: 21021
+    sha256: 7731aba2a5f4942992729a9e9f0f046343fde7f1bd983c5f2267e7496f0c6582
+    size: 23919
     kind: skill_md
     executable: false
     script: false
