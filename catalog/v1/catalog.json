@@ -1829,7 +1829,7 @@
         "safety",
         "github"
       ],
-      "latest": "0.1.2",
+      "latest": "0.1.4",
       "versions": [
         {
           "version": "0.1.0",
@@ -1889,6 +1889,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worktree-cleanup-v0.1.2/cmate-worktree-cleanup-0.1.2.tar.gz",
             "sha256": "ebe898766721d09f6e1a0043e43947a1f833cd6ec6deacfb44609afd9161fad9",
             "size": 20691,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.1.4",
+          "changelog": "commandmate sync の陳腐化を解消、profile 語彙を setup と統一(legacy 入力は後方互換で受理)、出自 narrative を除去 (#64)。SKILL.md 脱重複 (#68)。",
+          "published_at": "2026-08-05T14:38:18Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-worktree-cleanup-v0.1.4",
+            "commit": "d718b51b71141c50645b70a73d16063d78a84e6c"
+          },
+          "artifact": {
+            "asset_name": "cmate-worktree-cleanup-0.1.4.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worktree-cleanup-v0.1.4/cmate-worktree-cleanup-0.1.4.tar.gz",
+            "sha256": "f66f87dd2ee3a9bed503f1a96d134b942c432e9af9c871572c90f3f9c8b4c9e1",
+            "size": 21592,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
