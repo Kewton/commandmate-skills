@@ -55,11 +55,30 @@ const MIN_TIMEOUT_SEC = 1;
 const MAX_TIMEOUT_SEC = 7200;
 const DEFAULT_MAX_LOG_TAIL_BYTES = 8192;
 const MAX_LOG_TAIL_BYTES_LIMIT = 1048576;
+const DEFAULT_SKIP_IN_PRIMARY_CHECKOUT = 'true';
+const DEFAULT_REQUIRE_COMMIT = 'false';
 const GATE_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const RESERVED_GATE_IDS = new Set(['work-evidence', 'scope']);
 const TOP_LEVEL_KEYS = new Set(['version', 'gates', 'options']);
 const GATE_KEYS = new Set(['id', 'command', 'timeoutSec']);
-const OPTION_KEYS = new Set(['baseRef', 'skipInPrimaryCheckout', 'maxLogTailBytes']);
+// Must stay identical to the set cmate-verify's runner accepts
+// (`skills/cmate-verify/scripts/verify-run.sh`, the `KV_K == ...` chain inside
+// the awk parser). A key the runner accepts and this parser does not turns a
+// perfectly valid repository config into exit 2 here — which is how
+// `requireCommit` (CommandMate #1642) was rejected until Issue #57. The two
+// parsers are separate implementations in separate languages, so the agreement
+// is pinned by a test: `tests/fixtures/cmate-verify-advisor/parser-parity.sh`.
+const OPTION_KEYS = new Set(['baseRef', 'skipInPrimaryCheckout', 'maxLogTailBytes', 'requireCommit']);
+
+// What the runner uses when the key is absent, as strings, so "set it to the
+// value it already has" is recognised as a change to nothing rather than as a
+// change away from the empty string. Mirrors verify-run.sh's initialisers.
+const OPTION_DEFAULTS = new Map([
+  ['baseRef', ''],
+  ['skipInPrimaryCheckout', DEFAULT_SKIP_IN_PRIMARY_CHECKOUT],
+  ['maxLogTailBytes', String(DEFAULT_MAX_LOG_TAIL_BYTES)],
+  ['requireCommit', DEFAULT_REQUIRE_COMMIT],
+]);
 
 // --- tunables ---------------------------------------------------------------
 const TIMEOUT_HEADROOM = 1.5; // p99 x 1.5, per the design
@@ -332,6 +351,10 @@ function parseConfig(text, path) {
   if (skip && skip.value !== 'true' && skip.value !== 'false') {
     errors.push(`line ${skip.line + 1}: options.skipInPrimaryCheckout must be true or false (got: ${skip.value})`);
   }
+  const requireCommit = options.get('requireCommit');
+  if (requireCommit && requireCommit.value !== 'true' && requireCommit.value !== 'false') {
+    errors.push(`line ${requireCommit.line + 1}: options.requireCommit must be true or false (got: ${requireCommit.value})`);
+  }
 
   if (errors.length > 0) {
     throw usageError(`invalid config: ${path}\n${errors.map((e) => `  - ${e}`).join('\n')}`);
@@ -543,6 +566,14 @@ function classifyChange(change) {
         // false -> true means fewer gates run. That is a weakening.
         return String(change.to) === 'false' ? STRENGTHEN : WEAKEN;
       }
+      if (change.key === 'requireCommit') {
+        if (String(change.to) === String(change.from)) return null;
+        // requireCommit is the strict side of work-evidence: with it on, an
+        // uncommitted working tree is not evidence that the work is finished
+        // (cmate-verify's runner, `commits=0 uncommitted=n` -> not_started).
+        // true -> false drops that demand, so it is a weakening.
+        return String(change.to) === 'true' ? STRENGTHEN : WEAKEN;
+      }
       // baseRef moves what "changed" means. It can be right, and it can never be
       // shown to be a strengthening from history alone.
       return WEAKEN;
@@ -607,8 +638,14 @@ function assertNoWeakening(before, after) {
   if (optionOf(before, 'baseRef', '') !== optionOf(after, 'baseRef', '')) {
     throw new AdvisorError(EXIT_ERROR, 'internal guard: --apply would change options.baseRef');
   }
-  if (optionOf(before, 'skipInPrimaryCheckout', 'true') !== optionOf(after, 'skipInPrimaryCheckout', 'true')) {
+  if (optionOf(before, 'skipInPrimaryCheckout', DEFAULT_SKIP_IN_PRIMARY_CHECKOUT) !== optionOf(after, 'skipInPrimaryCheckout', DEFAULT_SKIP_IN_PRIMARY_CHECKOUT)) {
     throw new AdvisorError(EXIT_ERROR, 'internal guard: --apply would change options.skipInPrimaryCheckout');
+  }
+  // Turning requireCommit off is the weakening; turning it on is not something
+  // layer 1 can argue for from durations and exit codes, so neither direction is
+  // ever written. The guard is on the key, not on the direction.
+  if (optionOf(before, 'requireCommit', DEFAULT_REQUIRE_COMMIT) !== optionOf(after, 'requireCommit', DEFAULT_REQUIRE_COMMIT)) {
+    throw new AdvisorError(EXIT_ERROR, 'internal guard: --apply would change options.requireCommit');
   }
 }
 
@@ -1115,7 +1152,7 @@ function readLayer2(path, config) {
     } else if (kind === 'set-option') {
       if (!OPTION_KEYS.has(item.key)) throw usageError(`${where}: unknown options key: ${item.key}`);
       const existing = config.options.get(item.key);
-      const from = existing ? existing.value : item.key === 'maxLogTailBytes' ? String(DEFAULT_MAX_LOG_TAIL_BYTES) : item.key === 'skipInPrimaryCheckout' ? 'true' : '';
+      const from = existing ? existing.value : OPTION_DEFAULTS.get(item.key) ?? '';
       change = { kind, key: item.key, from, to: String(item.value) };
       target = `options.${item.key}`;
       id = `layer2:option:${item.key}`;
