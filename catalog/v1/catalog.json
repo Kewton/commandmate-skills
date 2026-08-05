@@ -974,7 +974,7 @@
         "risk",
         "onboarding"
       ],
-      "latest": "0.1.1",
+      "latest": "0.2.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -1034,6 +1034,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-repository-analysis-v0.1.1/cmate-repository-analysis-0.1.1.tar.gz",
             "sha256": "47b7516b834f0a690ae10d798d0f1e5c8a4c10fada5618d0a6627d7277513bfd",
             "size": 14148,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Discovery path not verified for this version",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Discovery path not verified for this version",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "low"
+        },
+        {
+          "version": "0.2.0",
+          "changelog": "result schema を advisory へ格下げし、完了条件を summary_markdown と evidence 規律へ移行 (#70)。未配線だった採点器を CI ゲートへ登録。",
+          "published_at": "2026-08-05T14:30:20Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-repository-analysis-v0.2.0",
+            "commit": "d718b51b71141c50645b70a73d16063d78a84e6c"
+          },
+          "artifact": {
+            "asset_name": "cmate-repository-analysis-0.2.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-repository-analysis-v0.2.0/cmate-repository-analysis-0.2.0.tar.gz",
+            "sha256": "7180a4fab40515671413a7abd80043ab6196fb8732fadbc160de5809dd02d380",
+            "size": 17038,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
