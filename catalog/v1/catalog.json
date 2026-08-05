@@ -1172,7 +1172,7 @@
         "guard",
         "bash"
       ],
-      "latest": "0.6.0",
+      "latest": "0.6.1",
       "versions": [
         {
           "version": "0.1.0",
@@ -1276,6 +1276,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-monitor-v0.6.0/cmate-orchestrate-monitor-0.6.0.tar.gz",
             "sha256": "e5c00e9f76b69e1a8ed392008d110b14bbdcca8f94de40c602b5ca7c0c80a7a2",
             "size": 59957,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0. An installed skill was discovered from .claude/skills and matched in the slash palette; the installer writes .agents/skills and .claude/skills byte-identically.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0. It reads SKILL.md from .agents/skills (model self-report of the absolute path, not a mechanical trace). This version does not expose skills as slash commands; invoke by name or run the scripts.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; discovery unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. Readable as a procedure; discovery unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.15.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.6.1",
+          "changelog": "ランチャー解決を統一し npx 運用を正式サポート (#37)。--cli は argv 分割で受理し $CM をフォールバックに、シェル構文は助言つきで拒否。SKILL.md 冒頭に読み替え宣言。",
+          "published_at": "2026-08-05T16:43:24Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-monitor-v0.6.1",
+            "commit": "d01ed9f6e370b2936cfe713a3f5dbe442678dfe4"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-monitor-0.6.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-monitor-v0.6.1/cmate-orchestrate-monitor-0.6.1.tar.gz",
+            "sha256": "0b9fa0b28c6eef000ac58a642ed61d68014086b7afebada86975abce2e5dab7f",
+            "size": 60235,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
