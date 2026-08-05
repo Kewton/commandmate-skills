@@ -1687,7 +1687,7 @@
         "timeout",
         "work-evidence"
       ],
-      "latest": "0.4.1",
+      "latest": "0.4.2",
       "versions": [
         {
           "version": "0.1.1",
@@ -1879,6 +1879,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.4.1/cmate-verify-0.4.1.tar.gz",
             "sha256": "ff2a806b911c17ef53769f1bb53957965cb0c2f0cd73f0b201cc32e0e578d577",
             "size": 15526,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.4.2",
+          "changelog": "ランチャー解決を統一し npx 運用を正式サポート (#37)。--cli は argv 分割で受理し $CM をフォールバックに、シェル構文は助言つきで拒否。SKILL.md 冒頭に読み替え宣言。",
+          "published_at": "2026-08-05T16:45:15Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-v0.4.2",
+            "commit": "d01ed9f6e370b2936cfe713a3f5dbe442678dfe4"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-0.4.2.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.4.2/cmate-verify-0.4.2.tar.gz",
+            "sha256": "4738bfdb4a889015f61a854a409f6e54b80ca9a35bdcf7c7a8b82a36fea3296b",
+            "size": 15781,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
