@@ -442,7 +442,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.11.0",
+      "latest": "0.12.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -678,6 +678,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.11.0/cmate-orchestrate-0.11.0.tar.gz",
             "sha256": "059d07e21d2a2de39270405ca6984ee07d5475c26918dc351a95b8e9eb5a6b15",
             "size": 130464,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.12.0",
+          "changelog": "planner の suspected_files 解釈 4 件を是正。file candidate 抽出を token 先頭に固定し、部分パスが scope.allow に化けるのを止め、他候補の suffix になる候補は shadowed_file_candidate として報告 (#49)。成果物見出し配下の path を拡張子によらず suspected_files に入れ、Markdown が成果物の Issue を dispatch 可能にし、あわせて scope が空の契約を dispatch せず contract_scope_unknown で止めるようにした (#50)。依存セクション内でも行単位で方向語を判定し blocks を逆向きに登録、edge の reason に根拠行を残す (#51)。未回答の planner question を warning に昇格して status を partial に落とし、dispatch は既定で拒否、--allow-questions で明示的に引き受けた場合のみ続行する (#52)。あわせて planner の runner suite を .commandmate/verify.yaml と GitHub CI の双方のゲートに追加した（従来はどちらにも無く、planner を壊す変更でも緑になり得た）。",
+          "published_at": "2026-08-05T06:06:35Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.12.0",
+            "commit": "d4940861dc5c7293f5da6042c38e4900f23d7abe"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.12.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.12.0/cmate-orchestrate-0.12.0.tar.gz",
+            "sha256": "ec0142bbe19d31f461b303c74355ac99995005f70ce4364dbf08f26fdd9ab0a1",
+            "size": 138999,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
