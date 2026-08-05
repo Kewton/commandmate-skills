@@ -442,7 +442,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.12.0",
+      "latest": "0.13.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -722,6 +722,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.12.0/cmate-orchestrate-0.12.0.tar.gz",
             "sha256": "ec0142bbe19d31f461b303c74355ac99995005f70ce4364dbf08f26fdd9ab0a1",
             "size": 138999,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.13.0",
+          "changelog": "Issue 本文が「この file は対象外」と宣言できるようにした。DELIVERABLE_HEADING_RE と対になる CONTEXT_HEADING_RE を導入し、根拠 / 出典 / 参考 / 参照 / 背景 / 関連 / References / Context / Background の見出し配下にしか現れない path を reference_files に振り分ける (#54)。0.12.0 までは、バグ報告が再現箇所を path:line で引用すると、その path が suspected_files を経て worker の scope.allow になり、本文に「このファイルは変更しない」と明記しても書き込み権限が出ていた。判定は出現ごとではなく path 単位で、散文でも名指しされている path は対象のまま残る（引用は指示を取り消さない）。見出しが成果物とも文脈とも読める場合は成果物が勝つ。過剰除外は実在する対象を scope.allow から落として worker を scope ゲートで落とすため（0.12.0 で取り除いた失敗そのもの）、除外見出しの集合は意図的に狭くしてあり、バグ報告が直すべき file を挙げる場所である 再現手順 / 現状 / 調査 は含めていない。あわせて reference_files を issue-analysis.md に出力するようにした。planner が読んだうえで scope.allow から外した判断は、これまでどこにも表示されず、planner が気づかなかった path と区別できなかった。",
+          "published_at": "2026-08-05T06:29:28Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.13.0",
+            "commit": "17002e3f6e1e7f2c3794206d8b01ca5cc7bb24f8"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.13.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.13.0/cmate-orchestrate-0.13.0.tar.gz",
+            "sha256": "4d2a374c9246a904f8604dd6a732f04b0f93ce8c7a114eb06ff451a19c78eb7e",
+            "size": 140031,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
