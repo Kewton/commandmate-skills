@@ -71,4 +71,45 @@ jobs:
             --commit "${GITHUB_SHA}"
           diff "${RUNNER_TEMP}/dist/pipeline-selftest-0.1.0.tar.gz" \
                "${RUNNER_TEMP}/dist-again/pipeline-selftest-0.1.0.tar.gz"
+
+  # The runner suites live in their own job so the `validate` job above keeps its
+  # stated property: stdlib-only Python, no toolchain fetched. These suites need
+  # Node, so they pay for it separately.
+  #
+  # They are here because until now NOTHING ran them: not this workflow, and not
+  # `.commandmate/verify.yaml`. A change that broke every planner case still got
+  # a green PR and a green `commandmate verify` (#49-#52 were four such defects,
+  # and merging two independently-green branches broke 7 assertions). A gate that
+  # only exists on a maintainer's laptop is not a gate.
+  runner-suites:
+    name: planner and issue-authoring runner suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the commit under review
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # The runners declare `>=22.0.0` in their manifests; pin the same major
+      # here so CI cannot pass on a Node the package says it does not support.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Record the toolchain
+        run: node --version
+
+      - name: Run the cmate-orchestrate runner suite
+        run: node tests/fixtures/cmate-orchestrate/run_tests.mjs
+
+      - name: Run the cmate-issue-authoring runner suite
+        run: bash tests/fixtures/cmate-issue-authoring/run_tests.sh
+
+      - name: Run the cmate-orchestrate-monitor suite
+        run: bash tests/fixtures/cmate-orchestrate-monitor/run_tests.sh
+
+      - name: Run the cmate-verify selftest
+        run: bash skills/cmate-verify/scripts/tests/run-tests.sh
           echo "artifact reproduced byte-for-byte across two independent builds"
