@@ -174,6 +174,15 @@ blocking question を抽出する。抽出時に token・secret・絶対 path �
 受入条件や対象 file が読み取れない Issue には blocking question を立てる。
 既知拡張子外の backtick path が抽出から落ちた場合は `warnings` に
 `unrecognized_file_extension` を積む（黙って落とさない。Issue #43）。
+
+path 候補は必ず **token 先頭**から取る。`\b` 起点だと path の途中からも一致し、
+`.claude/skills/cmate-verify/scripts/verify-run.sh` から `scripts/verify-run.sh` と
+`claude/skills/…` が、`web/src/lib/filter.ts` から `src/lib/filter.ts` が生まれた。
+`suspected_files` はそのまま worker の `scope.allow` になるので、実在しない部分 path は
+そのまま「実在しない path への書き込み権限」だった（Issue #49）。加えて、他の候補の
+**path 境界つき suffix** になっている候補（`web/src/lib/filter.ts` に対する
+`src/lib/filter.ts`）は落とし、落とした分を `warnings` の `shadowed_file_candidate` に
+出す（`unrecognized_file_extension` と同型で、黙っては捨てない）。
 また、対象 file に依存 manifest（`package.json` / `Cargo.toml` / `go.mod` /
 `pyproject.toml` / `Gemfile`）が含まれる Issue には、同 directory の lockfile
 （node → `package-lock.json` / `pnpm-lock.yaml` / `yarn.lock`、rust → `Cargo.lock` 等）を

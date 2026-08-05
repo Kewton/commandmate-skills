@@ -75,6 +75,13 @@ path は次の 3 通りで拾われる。
   `.github/` のいずれかで始まる path（backtick 不要）
 - ディレクトリを含み既知拡張子で終わる path
 
+いずれの pattern も **token 先頭**からしか一致しない。`web/src/lib/filter.ts` と書いても
+`src/lib/filter.ts` は生まれず、`` `.claude/skills/x/scripts/a.sh` `` は先頭の `.` を含めて
+丸ごと拾われる（Issue #49）。さらに、他の候補の **path 境界つき suffix** になっている候補は
+捨てられる。本文に `web/src/lib/filter.ts` と `src/lib/filter.ts` の両方を書いた場合、
+残るのは前者だけで、planner は `warnings` に `shadowed_file_candidate` を積む。
+両方を対象にしたいときは、短い方も repository 相対の完全な path として書くこと。
+
 拾われた path は 2 つに振り分けられる。
 
 | 行き先 | 条件 |

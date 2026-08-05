@@ -576,25 +576,69 @@ function cleanCriterion(text) {
 const FILE_EXT = 'rs|md|toml|json|yaml|yml|py|sh|ts|tsx|js|jsx|mjs|cjs|go|rb|java|kt|c|h|cpp|css|html|sql|geojson|topojson|geojsonl';
 const SYSTEM_ROOTS = new Set(['users', 'home', 'root', 'tmp', 'private', 'var', 'etc', 'proc']);
 
+// A candidate must begin where a path can begin (Issue #49). `\b` does not: it
+// also matches between "/" and a word character, so the SAME path matched a
+// second time from the middle. Measured on 0.11.0:
+// "bash .claude/skills/cmate-verify/scripts/verify-run.sh" yielded
+// "scripts/verify-run.sh" and "claude/skills/cmate-verify/scripts/verify-run.sh"
+// (neither exists, and the real ".claude/..." path was never produced —
+// a leading "." carries no word boundary); "web/src/lib/filter.ts" additionally
+// yielded "src/lib/filter.ts"; "https://example.com/a/b.ts" yielded
+// "example.com/a/b.ts". suspected_files becomes the worker's scope.allow
+// verbatim, so every one of those was write permission granted to an invented
+// path. The lookbehind pins each match to a token start — a position no path
+// character precedes — which both stops the partials and lets a dotfile root
+// ("`.claude/…`", ".github/…") match from its real first character.
+//
+// PATH_START and the three pattern sources below are mirrored byte for byte in
+// cmate-issue-authoring scripts/validate-plan.mjs; the issue-authoring suite
+// asserts the two copies stay identical.
+const PATH_START = '(?<![A-Za-z0-9_./\\\\-])';
+const CANDIDATE_BACKTICK = '`([^`\\s]+\\.(?:' + FILE_EXT + '))`';
+const CANDIDATE_KNOWN_ROOT = PATH_START + '((?:src|tests|test|scripts|docs|lib|app|pkg|internal|cmd|\\.github)/[A-Za-z0-9_./-]+)\\b';
+const CANDIDATE_WITH_EXT = PATH_START + '([A-Za-z0-9_.-]+/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\\.(?:' + FILE_EXT + '))\\b';
+
+// Returns { paths, shadowed, found }: the de-duplicated candidates in order of
+// first appearance, the ones dropped for being a partial of another candidate,
+// and the pre-drop set (what the extraction recognised at all).
 function extractFileCandidates(text) {
   const patterns = [
-    new RegExp('`([^`\\s]+\\.(?:' + FILE_EXT + '))`', 'g'),
-    /\b((?:src|tests|test|scripts|docs|lib|app|pkg|internal|cmd|\.github)\/[A-Za-z0-9_./-]+)\b/g,
-    new RegExp('\\b([A-Za-z0-9_.-]+/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\\.(?:' + FILE_EXT + '))\\b', 'g'),
+    new RegExp(CANDIDATE_BACKTICK, 'g'),
+    new RegExp(CANDIDATE_KNOWN_ROOT, 'g'),
+    new RegExp(CANDIDATE_WITH_EXT, 'g'),
   ];
   const seen = new Set();
-  const out = [];
+  const found = [];
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
       const candidate = match[1].trim();
       if (!isSafeRepoPath(candidate)) continue;
       if (!seen.has(candidate)) {
         seen.add(candidate);
-        out.push(candidate);
+        found.push(candidate);
       }
     }
   }
-  return out;
+  const { kept, shadowed } = dropShadowedCandidates(found);
+  return { paths: kept, shadowed, found };
+}
+
+// The other half of Issue #49. Anchoring stops the extraction INVENTING a
+// partial path, but an issue can still write "web/src/lib/filter.ts" in one
+// place and "src/lib/filter.ts" in another. At most one of the two is the file
+// the issue means, and the shorter one is a path-boundary suffix of the longer:
+// keeping it would hand the worker a second directory the issue never named.
+// It is dropped — and, like an unrecognised extension, reported rather than
+// silently discarded, because the drop is what removes it from scope.allow.
+function dropShadowedCandidates(paths) {
+  const kept = [];
+  const shadowed = [];
+  for (const candidate of paths) {
+    const covering = paths.find((other) => other !== candidate && other.endsWith(`/${candidate}`));
+    if (covering === undefined) kept.push(candidate);
+    else shadowed.push({ path: candidate, covered_by: covering });
+  }
+  return { kept, shadowed };
 }
 
 // Client-controlled text must never name anything outside the target repository:
@@ -642,6 +686,17 @@ function extractionWarnings(analyses) {
           `#${analysis.number} writes \`${path}\` in backticks, but ".${ext}" is not a recognised extension, ` +
             "so the path is not in suspected_files and stays outside the worker's scope; " +
             "extend the planner's FILE_EXT or state a path with a recognised extension if the worker must touch it",
+        ),
+      });
+    }
+    for (const { path, covered_by: coveredBy } of analysis._shadowedPaths) {
+      out.push({
+        code: 'shadowed_file_candidate',
+        detail: redact(
+          `#${analysis.number} names \`${path}\`, which is a path-boundary suffix of \`${coveredBy}\`; ` +
+            'at most one of the two is the file the issue means, so the shorter path is not in ' +
+            "suspected_files and stays outside the worker's scope; write the full repository-relative " +
+            'path if the worker must also touch it',
         ),
       });
     }
@@ -753,8 +808,8 @@ function analyzeIssue(issue, profile, binaries) {
   const text = `${issue.title}\n\n${issue.body}`;
   const objective = redact(firstNonEmptyLine(issue.body) || issue.title);
   const acceptance = extractAcceptanceCriteria(issue.body).map(redact);
-  const candidates = extractFileCandidates(text);
-  const { suspected, references } = classifyFileCandidates(candidates);
+  const extraction = extractFileCandidates(text);
+  const { suspected, references } = classifyFileCandidates(extraction.paths);
   const scopeDefaults = scopeDefaultsFor(suspected);
   suspected.push(...scopeDefaults);
   const tests = extractTestExpectations(text, binaries).map(redact);
@@ -800,7 +855,10 @@ function analyzeIssue(issue, profile, binaries) {
     _consumer: CONSUMER_RE.test(text),
     _topics: topicTokens(issue),
     _rawBody: issue.body,
-    _unrecognizedPaths: extractUnrecognizedPaths(text, candidates),
+    // `found` rather than `paths`: a candidate dropped as a partial was still
+    // recognised, so it must not be re-reported as an unknown extension.
+    _unrecognizedPaths: extractUnrecognizedPaths(text, extraction.found),
+    _shadowedPaths: extraction.shadowed,
   };
 }
 

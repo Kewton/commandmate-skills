@@ -240,25 +240,38 @@ function plannerIsSafeRepoPath(candidate) {
   return true;
 }
 
+// Anchoring (planner Issue #49): a candidate must begin where a path can begin.
+// `\b` also matches between "/" and a word character, which made the planner
+// emit partial paths ("src/lib/filter.ts" out of "web/src/lib/filter.ts") and
+// miss dotfile roots (".claude/…" matched only from "claude/…"). Since
+// suspected_files becomes the worker's scope.allow, a partial was write
+// permission on a path that does not exist. Byte-identical to the planner's.
+const PATH_START = '(?<![A-Za-z0-9_./\\\\-])';
+const CANDIDATE_BACKTICK = '`([^`\\s]+\\.(?:' + FILE_EXT + '))`';
+const CANDIDATE_KNOWN_ROOT = PATH_START + '((?:src|tests|test|scripts|docs|lib|app|pkg|internal|cmd|\\.github)/[A-Za-z0-9_./-]+)\\b';
+const CANDIDATE_WITH_EXT = PATH_START + '([A-Za-z0-9_.-]+/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\\.(?:' + FILE_EXT + '))\\b';
+
 function plannerFileCandidates(text) {
   const patterns = [
-    new RegExp('`([^`\\s]+\\.(?:' + FILE_EXT + '))`', 'g'),
-    /\b((?:src|tests|test|scripts|docs|lib|app|pkg|internal|cmd|\.github)\/[A-Za-z0-9_./-]+)\b/g,
-    new RegExp('\\b([A-Za-z0-9_.-]+/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\\.(?:' + FILE_EXT + '))\\b', 'g'),
+    new RegExp(CANDIDATE_BACKTICK, 'g'),
+    new RegExp(CANDIDATE_KNOWN_ROOT, 'g'),
+    new RegExp(CANDIDATE_WITH_EXT, 'g'),
   ];
   const seen = new Set();
-  const out = [];
+  const found = [];
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
       const candidate = match[1].trim();
       if (!plannerIsSafeRepoPath(candidate)) continue;
       if (!seen.has(candidate)) {
         seen.add(candidate);
-        out.push(candidate);
+        found.push(candidate);
       }
     }
   }
-  return out;
+  // A candidate that is a path-boundary suffix of another is a partial of it and
+  // never reaches suspected_files (planner Issue #49).
+  return found.filter((candidate) => !found.some((other) => other !== candidate && other.endsWith(`/${candidate}`)));
 }
 
 // A documentation path is context to read, not a file the Issue is expected to

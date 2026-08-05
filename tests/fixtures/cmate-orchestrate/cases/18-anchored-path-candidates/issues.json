@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 414,
+      "title": "fix: verify-run の判定を web の store に合わせる",
+      "body": "`bash .claude/skills/cmate-verify/scripts/verify-run.sh` の判定が web/src/lib/store.ts:42 の状態と食い違う。\n\n## Acceptance criteria\n- [ ] `.claude/skills/cmate-verify/scripts/verify-run.sh` が新しい判定を返す\n- [ ] web/src/lib/store.ts の該当行が更新されている\n",
+      "labels": ["bug"]
+    }
+  ]
+}

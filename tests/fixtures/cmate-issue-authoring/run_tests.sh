@@ -240,6 +240,34 @@ else
     "planner: ${planner_ext:-<not found>} / mirror: ${mirror_ext:-<not found>}"
 fi
 
+# FILE_EXT was never the only thing that could drift (Issue #49): the extraction
+# PATTERNS themselves decide which paths become suspected_files, and a mirror
+# that still matched from the middle of a path would keep telling an author the
+# Issue is ready while the planner extracted something else entirely. The four
+# pattern constants are therefore compared as one block, in declaration order,
+# the same way FILE_EXT is. `sed -E` rather than grep: orchestrate.mjs holds raw
+# control bytes in a regex literal, which makes grep treat the file as binary.
+mirror_consts() {
+  LC_ALL=C sed -E -n \
+    's/^const (PATH_START|CANDIDATE_BACKTICK|CANDIDATE_KNOWN_ROOT|CANDIDATE_WITH_EXT) = (.*)$/\1 = \2/p' \
+    "$1"
+}
+planner_pat=$(mirror_consts "$ORCHESTRATOR")
+mirror_pat=$(mirror_consts "$VALIDATOR")
+planner_pat_count=$(printf '%s\n' "$planner_pat" | grep -c '=' || true)
+if [ "$planner_pat_count" -ne 4 ]; then
+  fail 'the extraction patterns are identical in the planner and its mirror' \
+    "expected 4 pattern constants in the planner, found $planner_pat_count"
+elif [ "$planner_pat" = "$mirror_pat" ]; then
+  pass 'the extraction patterns are identical in the planner and its mirror'
+else
+  fail 'the extraction patterns are identical in the planner and its mirror' \
+    "planner:
+$planner_pat
+mirror:
+${mirror_pat:-<not found>}"
+fi
+
 printf '\n%s mutation(s) injected\n' "$mutations"
 printf '%s passed, %s failed\n' "$passed" "$failed"
 [ "$failed" -eq 0 ] || exit 1

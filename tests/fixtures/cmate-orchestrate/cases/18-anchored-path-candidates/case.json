@@ -1,0 +1,16 @@
+{
+  "description": "Issue #49: every candidate is anchored to a token start. A dotfile root is extracted whole (\".claude/skills/cmate-verify/scripts/verify-run.sh\", which `\\b` could never reach) and neither \"scripts/verify-run.sh\" nor \"claude/skills/...\" nor \"src/lib/store.ts\" is invented from the middle of a path — suspected_files IS scope.allow, so a partial path is write permission on a file that does not exist. A path:line reference still yields the path alone.",
+  "args": ["414", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[414]],
+    "merge_order": [414],
+    "dependencies": [],
+    "classifications": { "414": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "414": [".claude/skills/cmate-verify/scripts/verify-run.sh", "web/src/lib/store.ts"] },
+    "reference_files": { "414": [] }
+  }
+}
