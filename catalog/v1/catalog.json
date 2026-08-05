@@ -1525,7 +1525,7 @@
         "issue",
         "yaml"
       ],
-      "latest": "0.2.1",
+      "latest": "0.2.2",
       "versions": [
         {
           "version": "0.1.0",
@@ -1585,6 +1585,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-task-contract-v0.2.1/cmate-task-contract-0.2.1.tar.gz",
             "sha256": "db74ec2d16d9f97141bbd3f9e8e18aca675f79d9696b3d11495ecc7337851a77",
             "size": 10827,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.17.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.2.2",
+          "changelog": "ランチャー解決を統一し npx 運用を正式サポート (#37)。--cli は argv 分割で受理し $CM をフォールバックに、シェル構文は助言つきで拒否。SKILL.md 冒頭に読み替え宣言。",
+          "published_at": "2026-08-05T16:44:23Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-task-contract-v0.2.2",
+            "commit": "d01ed9f6e370b2936cfe713a3f5dbe442678dfe4"
+          },
+          "artifact": {
+            "asset_name": "cmate-task-contract-0.2.2.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-task-contract-v0.2.2/cmate-task-contract-0.2.2.tar.gz",
+            "sha256": "5b3bc60a9e7c2143ecd6c36a54f762921414ef469259eb7660c88c5f7392cb5f",
+            "size": 11077,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
