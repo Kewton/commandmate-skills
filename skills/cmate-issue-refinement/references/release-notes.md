@@ -2,6 +2,39 @@
 
 ## Changelog
 
+### 0.2.0 — a two-way boundary with cmate-issue-authoring, and planner-ready output (Issue #65)
+
+- **The pair boundary is now stated on both sides.** `cmate-issue-authoring`
+  already pointed here for "refine an existing Issue"; nothing here pointed back.
+  The description, the When-to-use section and Step 6 now say what belongs to
+  that package and why.
+- **Splitting is divided along one line: recommending is this Skill, registering
+  is `cmate-issue-authoring`.** Both packages used to claim "splitting an Issue
+  that is too big". `decomposition.children` is a proposal; opening the child
+  Issues is the other package's step, and it does not re-cut what is proposed
+  here.
+- **Impact / affected files is now required for `feature` and `bug`** (it was
+  *recommended*). A refined Issue is normally implemented through the
+  cmate-orchestrate planner, which blocks with "Affected files are unclear" when
+  no non-documentation path survives extraction from the body — so a `success`
+  here could still produce an Issue nobody could dispatch. `section-contract.md`
+  now carries the heading vocabulary and the path rules the extraction applies,
+  and completion-check statement 2 names the section.
+- **The vocabulary shared with `cmate-issue-authoring` is mapped explicitly**
+  (`analysis-contract.md`, and the schema's own `description` fields): size
+  bands, `parallel_safe` (`true`≡`yes`, `false`≡`no`, `"unknown"`≡`unknown`) and
+  the relation values (`depends_on` / `blocks` are dependencies, not duplicate
+  verdicts). The value sets were **not** collapsed onto one: both result
+  contracts are published as v1, and changing a value domain retroactively
+  invalidates documents already emitted under it. No field's value set changed.
+- **The relation to CommandMate's own commands moved out of this changelog and
+  into `SKILL.md`**, where it is read: this Skill is `/issue-enhance` plus the
+  recommendation half of `/issue-split`; `/issue-create` and the registering half
+  of `/issue-split` are `cmate-issue-authoring`.
+- The description is now Japanese and under 200 characters, symmetric with
+  `cmate-issue-authoring`'s: what it does, when, and which package to use
+  otherwise. The body of `SKILL.md` stays English.
+
 ### 0.1.2 — state that comments are not input (Issue #45 / CommandMate #1678 B-3)
 
 - Step 1 now states explicitly that Issue comments are read neither here nor by

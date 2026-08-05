@@ -188,14 +188,19 @@ function validateAgainstSchema(value, schema, root, pointer, out) {
 // Planner mirror
 // =============================================================================
 //
-// Verbatim behaviour of the extraction in cmate-orchestrate 0.11.0
-// `scripts/orchestrate.mjs` (`analyzeIssue`), measured 2026-08-04. The planner
-// raises exactly two blocking questions — "acceptance criteria are unclear" and
-// "affected files are unclear" — and both are decided by this extraction. Keeping
-// a copy here is what lets a body be checked before the Issue exists; if the
-// planner's extraction changes, this mirror and the version above change with it.
-// The FILE_EXT set below must stay byte-identical to the planner's; the suite in
-// tests/fixtures/cmate-issue-authoring/run_tests.sh asserts the two match.
+// Verbatim behaviour of the extraction in the cmate-orchestrate planner
+// (`scripts/orchestrate.mjs`, `analyzeIssue`). The planner raises exactly two
+// blocking questions — "acceptance criteria are unclear" and "affected files are
+// unclear" — and both are decided by this extraction. Keeping a copy here is what
+// lets a body be checked before the Issue exists.
+//
+// No planner version number is written here on purpose: one did rot in three
+// separate places before this note replaced it. The rule is the invariant, not a
+// number — **this mirror changes in the same commit as the planner it copies**,
+// and the constants below stay byte-identical to the planner's. The repository's
+// own CI proves it (a conformance test compares the constants and runs both
+// copies over a corpus); it is not something the installed package can check,
+// and nothing here asks you to run it.
 
 const ACCEPTANCE_HEADING_RE = /(acceptance|criteria|受入|受け入れ|完了条件|期待結果|受入条件)/i;
 const HEADING_RE = /^#{1,6}\s+/;

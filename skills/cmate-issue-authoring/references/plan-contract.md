@@ -103,3 +103,36 @@ schema が validator の実装していない keyword を使っていたら、�
 
 - field の追加・削除・意味の変更、enum への値追加 → `plan_schema_version` を上げる。
 - rule の追加・文言の調整のみ → Skill の `version` を上げる。
+
+## 7. cmate-issue-refinement との語彙対応
+
+同じ概念を両 package が別々の値域で持っている。**片方に寄せて統一していない**のは、
+どちらの schema も v1 として公開済みで、値域の変更は既に出力された artifact を
+遡って invalid にするからである（第 6 節のとおり、値域の変更は
+`plan_schema_version` を上げる変更であって minor で行えるものではない）。
+代わりに**全単射の対応表**を正本として置く。受け渡しはこの表で行い、変換を
+その場で発明しない。
+
+| 概念 | この package | cmate-issue-refinement | 対応 |
+|---|---|---|---|
+| 大きさ | `issues[].size`: `xs` / `s` / `m` / `l` | `decomposition.size`, `decomposition.children[].size`: `xs` / `s` / `m` / `l` / `xl` / `unknown` | 帯の定義は同一。`xl` と `unknown` はこちらに無い（下記） |
+| 並列可否 | `issues[].parallel_safe`: `yes` / `no` / `unknown` | `dependencies.parallel_safe`: `true` / `false` / `"unknown"` | `yes` ≡ `true`、`no` ≡ `false`、`unknown` ≡ `"unknown"`。全単射 |
+| 重複判定 | `duplicate_suspicions[].verdict`: `duplicate` / `overlapping` / `unrelated` | `related_issues[].relation`: `duplicate` / `overlapping` / `depends_on` / `blocks` / `unrelated` | 同名の 3 値は同義。`depends_on` / `blocks` は重複判定ではなく**依存**なので、こちらでは `issues[].depends_on` の辺になる |
+
+補足。
+
+- **`xl` を持たない理由。** `xl` は refinement 側で「これ以上見積もらず slice を
+  列挙せよ」を意味する帯である。この package が出すのは分割**後**の Issue なので、
+  `xl` の Issue を計画に載せることは分割が終わっていないことの表明にしかならない。
+  値域が狭いのは欠落ではなく制約である。
+- **`unknown` size を持たない理由。** 自分で設計した slice の大きさを「分からない」と
+  書ける状況が無い。分からないなら分割線が決まっていないので、open question にする。
+- **`parallel_safe` の型が違うこと。** refinement 側は boolean 2 値 + 文字列 1 値の
+  混在 enum、こちらは文字列 3 値である。混在型のほうが受け手に型分岐を強いる分だけ
+  悪い契約だが、既に公開済みなので直していない。**両者を跨ぐときは必ず上の対応表で
+  変換する。** `unknown` の意味は両者で同一（証拠が無いことは `yes` / `true` ではない）。
+- **重複判定の値域が違うこと。** refinement の `relation` は「関係」の enum であり、
+  そのうち 3 値が重複判定、2 値が依存の向きである。こちらは依存を `depends_on` で
+  別に持つので、`verdict` は重複判定だけの値域になる。refinement が `depends_on` /
+  `blocks` を返した候補は、`duplicate_suspicions` ではなく `issues[].depends_on` へ
+  写すこと。**`verdict` に依存の向きを書かない。**

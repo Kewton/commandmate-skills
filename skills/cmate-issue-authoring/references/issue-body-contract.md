@@ -38,9 +38,15 @@
 
 ## 2. なぜこの型なのか（実測）
 
-2026-08-01 に `skills/cmate-orchestrate/scripts/orchestrate.mjs` を読み、
-fixture を入力して実際に走らせて確認した（対象 package version 0.7.1。runner が
-artifact に書く `skill_version` は 0.7.0 で、manifest と drift している）。
+cmate-orchestrate planner の `orchestrate.mjs` を読み、fixture を入力して実際に
+走らせて確認した内容である。
+
+**planner の version 番号はここに書かない。** 番号は必ず腐る（実際に、この package の
+3 箇所で別々の番号に割れていた）。代わりに不変条件を書く。
+
+> この文書と `scripts/validate-plan.mjs` の planner mirror は、**planner 本体と同じ
+> commit で同時に変更する**。両者の一致はこのリポジトリの conformance テストが
+> 保証する。install 先で確かめるものではない。
 
 planner が立てうる blocking question は **2 つだけ**であり、条件は次である。
 
@@ -116,8 +122,8 @@ scope ゲートに落ちるという構造的な行き止まりだった）。
 絶対 path・`..`・drive letter・制御文字を含む候補、および `users` `home` `root` `tmp`
 `private` `var` `etc` `proc` で始まる候補は、安全のため捨てられる。
 
-既知拡張子の集合は planner（cmate-orchestrate 0.11.0）の `FILE_EXT` と同一で、
-`geojson` / `topojson` / `geojsonl` を含む。集合の外の拡張子を backtick path に
+既知拡張子の集合は planner の `FILE_EXT` と byte 単位で同一であり（第 2 節冒頭の
+不変条件）、`geojson` / `topojson` / `geojsonl` を含む。集合の外の拡張子を backtick path に
 書いた場合（例: `` `data/tiles/demo.mbtiles` ``）、その path は抽出されないが、
 planner は plan の `warnings` に `unrecognized_file_extension` を積んで run を
 partial に落とす（Issue #43 / CommandMate #1678 B-1: 以前は黙って消え、worker が
@@ -154,6 +160,9 @@ backtick か code fence の中にあり、先頭語が `make` `bash` `sh` `pytes
 `planner_ready` と `body_states_objective` と `dependency_link_in_body` の 3 rule が
 上の条件をそのまま実装している（planner の抽出コードの写しである）。
 
-planner 側の抽出が変われば、この文書と validator の写しも同時に変える。
-`tests/fixtures/cmate-issue-authoring/run_tests.sh` は、計画から本文を描画して
-**実物の planner に食わせ**、blocking question が 0 件であることを毎回確かめている。
+planner 側の抽出が変われば、この文書と validator の写しも**同じ commit で**変える。
+一致はリポジトリの CI が検証する。計画から本文を描画して実物の planner に食わせ
+blocking question が 0 件であることと、mirror の定数・挙動が planner と一致することの
+両方を、変更のたびに機械で確かめている。**install 先で走らせる test は無い**。
+install 済み package で確かめられるのは、この文書の型を守った計画が
+`node scripts/validate-plan.mjs <plan.json>` を exit 0 で通ることだけである。

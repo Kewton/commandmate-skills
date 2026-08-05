@@ -170,7 +170,8 @@
           "number": { "type": "integer", "minimum": 1 },
           "repository": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
           "relation": {
-            "enum": ["duplicate", "overlapping", "depends_on", "blocks", "unrelated"]
+            "enum": ["duplicate", "overlapping", "depends_on", "blocks", "unrelated"],
+            "description": "Three of these five answer 'is this the same work?' and map onto cmate-issue-authoring's duplicate_suspicions[].verdict. 'depends_on' and 'blocks' answer 'which goes first?' and are handed over as dependencies, never as duplicate suspicions."
           },
           "rationale": { "type": "string", "minLength": 1 },
           "evidence_refs": { "type": "array", "items": { "type": "string" } }
@@ -183,7 +184,10 @@
       "required": ["recommendation", "size", "rationale", "children"],
       "properties": {
         "recommendation": { "enum": ["keep_single", "split"] },
-        "size": { "enum": ["xs", "s", "m", "l", "xl", "unknown"] },
+        "size": {
+          "enum": ["xs", "s", "m", "l", "xl", "unknown"],
+          "description": "The bands in references/analysis-contract.md. cmate-issue-authoring uses the same bands for the slices it registers, without 'xl' or 'unknown': both would mean the split is unfinished there. See the vocabulary table in that reference."
+        },
         "rationale": { "type": "string", "minLength": 1 },
         "children": {
           "type": "array",
@@ -194,7 +198,10 @@
             "properties": {
               "title": { "type": "string", "minLength": 1 },
               "scope": { "type": "string", "minLength": 1 },
-              "size": { "enum": ["xs", "s", "m", "l", "xl", "unknown"] },
+              "size": {
+                "enum": ["xs", "s", "m", "l", "xl", "unknown"],
+                "description": "A recommended slice, not a registered Issue. Registering these is cmate-issue-authoring's step, and its issues[].size enum is narrower — see the vocabulary table in references/analysis-contract.md."
+              },
               "depends_on": { "type": "array", "items": { "type": "string" } },
               "acceptance_criterion": { "type": "string", "minLength": 1 }
             }
@@ -252,7 +259,10 @@
             }
           }
         },
-        "parallel_safe": { "enum": [true, false, "unknown"] },
+        "parallel_safe": {
+          "enum": [true, false, "unknown"],
+          "description": "Maps one-to-one onto cmate-issue-authoring's issues[].parallel_safe: true=yes, false=no, 'unknown'=unknown. Absence of evidence is 'unknown', never true."
+        },
         "rationale": { "type": "string", "minLength": 1 }
       }
     },
