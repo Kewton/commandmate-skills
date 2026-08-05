@@ -4,8 +4,9 @@
 package には含まれない（配布物は `skills/cmate-verify-advisor/` の下だけ）。
 
 ```bash
-bash tests/fixtures/cmate-verify-advisor/run_tests.sh            # 69 assertions
-bash tests/fixtures/cmate-verify-advisor/run_tests.sh --mutants  # 13 mutants, 0 survivors
+bash tests/fixtures/cmate-verify-advisor/run_tests.sh            # 80 assertions
+bash tests/fixtures/cmate-verify-advisor/run_tests.sh --mutants  # 15 mutants, 0 survivors
+bash tests/fixtures/cmate-verify-advisor/parser-parity.sh        # 18 assertions（単体でも動く）
 ```
 
 bash・node・git だけで動く。ネットワークは使わない（`commandmate` は shim である）。
@@ -15,6 +16,7 @@ bash・node・git だけで動く。ネットワークは使わない（`command
 | path | 役割 |
 |---|---|
 | `run_tests.sh` | suite 本体。`--mutants` で変異注入ドライバになる |
+| `parser-parity.sh` | verify.yaml パーサ 2 実装（awk / JS）の options キー集合が一致することを検査する。`run_tests.sh` の末尾から 1 assertion として呼ばれるが、単体でも実行できる |
 | `mutate.mjs` | アナライザのガードを 1 つずつ壊した複製を作る |
 | `make-cases.mjs` | `cases/*.json` の生成器。`node make-cases.mjs cases` で再生成できる |
 | `cases/*.yaml` | 入力になる verify.yaml |
@@ -37,6 +39,7 @@ bash・node・git だけで動く。ネットワークは使わない（`command
 | `outlier.json` | 120 run。nearest-rank の p99 が最大値より下に来る |
 | `empty.json` | 履歴 0 件。exit 3 |
 | `layer2-mixed.json` | 層 2 の提案（追加＝強化 / 削除＝弱体化 / ログ縮小＝弱体化）。**どれも適用されない** |
+| `require-commit.yaml` | `options.requireCommit: true` を持つ設定。Issue #57（advisor が正当な設定を exit 2 で拒否していた）の回帰ケース |
 
 ## 何を証明しているか
 
@@ -54,10 +57,15 @@ bash・node・git だけで動く。ネットワークは使わない（`command
    `OBSERVATION proposed-config-invalid` で報告する
 6. **書いたものがまだ verify.yaml である** — `--apply` 後のファイルを
    `cmate-verify` の実ランナー（`verify-run.sh`）に読ませ、`invalid config` にならないこと
+7. **2 つのパーサが同じ options キーを受理する** — `verify.yaml` は awk（`verify-run.sh`）と
+   JS（`verify-advisor.mjs`）の 2 実装で読まれる。片方だけが知る key は、正当な設定に対する
+   exit 2 になる（Issue #57 の `requireCommit`）。`parser-parity.sh` が
+   **キー名の抽出**（awk の accept リスト / shell の dispatch / `OPTION_KEYS` の 3 つ）と
+   **実際に両パーサへ食わせる振る舞い**の両面で一致を要求する
 
 ## 変異注入
 
-`--mutants` は `mutate.mjs` が定義する 13 の変異それぞれについて suite 全体を回し、
+`--mutants` は `mutate.mjs` が定義する 15 の変異それぞれについて suite 全体を回し、
 **赤が出ること**を要求する。生き残った変異は「誰もテストしていないガード」である。
 
 変異は正確な文字列置換であり、置換対象が見つからなければ**エラーで止まる**。

@@ -40,6 +40,26 @@ const MUTATIONS = {
     describes: 'dropping a gate is reported as a strengthening',
     edits: [["    case 'remove-gate':\n      return WEAKEN;", "    case 'remove-gate':\n      return STRENGTHEN;"]],
   },
+  'classify-requirecommit-off-as-strengthen': {
+    describes: 'dropping options.requireCommit is reported as a strengthening',
+    edits: [["        return String(change.to) === 'true' ? STRENGTHEN : WEAKEN;", '        return STRENGTHEN;']],
+  },
+  // The guard alone is unreachable while isApplicable() still refuses layer 2,
+  // so removing it has to be paired with the bookkeeping failure it exists to
+  // survive — the same shape as apply-weakening-without-guard above.
+  'requirecommit-guard-removed': {
+    describes: 'the layer check is dropped AND the internal guard stops watching options.requireCommit',
+    edits: [
+      [
+        '  return proposal.layer === 1 && proposal.direction === STRENGTHEN && LAYER1_KINDS.has(proposal.kind);',
+        '  return true;',
+      ],
+      [
+        "  if (optionOf(before, 'requireCommit', DEFAULT_REQUIRE_COMMIT) !== optionOf(after, 'requireCommit', DEFAULT_REQUIRE_COMMIT)) {\n    throw new AdvisorError(EXIT_ERROR, 'internal guard: --apply would change options.requireCommit');\n  }",
+        '  // requireCommit guard removed by mutation',
+      ],
+    ],
+  },
   'layer2-is-applicable': {
     describes: 'the layer check is dropped, so layer-2 proposals become writable',
     edits: [

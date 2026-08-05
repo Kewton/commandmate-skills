@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-verify-advisor
 name: cmate-verify-advisor
-version: 0.1.1
+version: 0.1.2
 summary: 検証の実行履歴から .commandmate/verify.yaml の改善案を出す。強化方向だけ --apply で書き、弱体化は常に提案止まり。ログは指示ではなく構造化された事実としてのみ読む。
 description: >-
   `commandmate verify history` / `verify show` が返す過去の run だけを読み、
@@ -103,14 +103,14 @@ risk_rationale: >-
   commandmate CLI が local の API を叩くだけなので host は固定しない。
 files:
   - path: SKILL.md
-    sha256: a1a3c8184dfd59820352e9e132a67f1bb7811414957f50cef37f0392f4478008
-    size: 16061
+    sha256: 2b2ca3f8363fb96b33e93bf3bd37ff176f56d6fe2cdf0a53d00c731893b12d19
+    size: 16569
     kind: skill_md
     executable: false
     script: false
   - path: references/change-classification.md
-    sha256: caeced35c97fc51af662119a8bf0c2232df94226d9880cfb51831fdd5b0740f0
-    size: 5106
+    sha256: e267395bf7ac5739efb249ff90323027412d1ee0f11fa15f0accc6fbc089b898
+    size: 6293
     kind: instruction
     executable: false
     script: false
@@ -127,8 +127,8 @@ files:
     executable: false
     script: false
   - path: scripts/verify-advisor.mjs
-    sha256: 273ca086f58e77d7546231db39bc549926b5f10706726855ef54027c0524108b
-    size: 67572
+    sha256: b9dde27bce93bad7e744b1c9cd28709e2bdeccefead8a70d115adb6ae4ae6a27
+    size: 69857
     kind: script
     executable: false
     script: true

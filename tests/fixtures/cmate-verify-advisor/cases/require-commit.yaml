@@ -1,0 +1,25 @@
+# baseline.yaml plus options.requireCommit — the key CommandMate #1642 added to
+# cmate-verify's runner and Issue #57 found the advisor rejecting outright.
+#
+# The gates are the baseline's, so the layer-1 analysis over the same history is
+# the same analysis; the only thing under test is that the option is read, is
+# classified, and survives --apply untouched.
+version: 1
+gates:
+  - id: lint
+    command: "npm run lint"
+    timeoutSec: 600
+  - id: typecheck
+    command: "npx tsc --noEmit"
+  # 1800s because the suite talks to a container that can take a minute to come up.
+  - id: unit
+    command: "npm run test:unit"
+    timeoutSec: 1800
+  - id: build
+    command: "npm run build"
+    timeoutSec: 900
+options:
+  baseRef: origin/main
+  skipInPrimaryCheckout: false
+  maxLogTailBytes: 4096
+  requireCommit: true

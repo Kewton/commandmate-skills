@@ -83,8 +83,14 @@ allowed-tools: Bash(.claude/skills/cmate-verify-advisor/scripts/*), Bash(.agents
 
 分類は提案の自己申告ではなく、`(key, 変更前, 変更後)` から導出する。認識できない変更は
 **弱める側に倒す**（fail closed）。さらに、書き込む直前に「書こうとしているバイト列」を
-読み直して、ゲートが減っていないか・timeout が伸びていないか・ログ予算が縮んでいないかを
+読み直して、ゲートが減っていないか・timeout が伸びていないか・ログ予算が縮んでいないか・
+`baseRef` / `skipInPrimaryCheckout` / `requireCommit` が動いていないかを
 **ファイル同士の比較で**確認する。分類の記録が壊れても、この最後の門は通れない。
+
+`options.requireCommit`（CommandMate #1642）は work-evidence を厳しい側へ倒す key なので、
+**外す変更は弱体化**である。読める options キーは `cmate-verify` のランナーと同一集合で
+なければならず（片方だけが知る key は正当な設定への exit 2 になる — Issue #57）、
+一致は `tests/fixtures/cmate-verify-advisor/parser-parity.sh` で固定してある。
 
 分類表の正本は [`references/change-classification.md`](references/change-classification.md)。
 

@@ -103,11 +103,11 @@ assert_status() {
   if [ "$STATUS" -eq "$2" ]; then pass "$1"; else fail "$1" "expected exit $2, got $STATUS: $(head -3 "$ERR" 2>/dev/null)"; fi
 }
 
-# --- a worktree copy of the baseline config, so --apply has something to write to
+# --- a worktree copy of a config, so --apply has something to write to
 scratch_config() {
   local dir="$WORK/$1"
   mkdir -p "$dir"
-  cp "$BASE" "$dir/verify.yaml"
+  cp "${2:-$BASE}" "$dir/verify.yaml"
   printf '%s' "$dir"
 }
 
@@ -280,6 +280,54 @@ printf '{"proposals":[{"kind":"reorder-gates","rationale":"x","evidence":[{"runI
 advise "$CASES/steady.json" --proposals "$WORK/layer1-kind.json"
 assert_status 'layer 2 may not hand-order the gates' 2
 
+printf '\n-- options.requireCommit (Issue #57) --\n'
+# The advisor and cmate-verify's runner read the same file. A key the runner
+# accepts and the advisor does not is not a difference of opinion; it is the
+# advisor refusing to read a config that was never wrong. `requireCommit` was
+# exactly that for one release: valid to the runner (CommandMate #1642), exit 2
+# here. The key-set agreement itself is pinned by parser-parity.sh; what is
+# checked here is the behaviour that agreement is supposed to buy.
+RC="$CASES/require-commit.yaml"
+node "$ADVISOR" --cwd "$CASES" --config "$RC" --input "$CASES/steady.json" > "$WORK/rc.txt" 2> "$WORK/rc.err"
+status=$?
+[ "$status" -eq 0 ] && pass 'a config declaring requireCommit is read, not refused' \
+  || fail 'a config declaring requireCommit is read, not refused' "exit $status: $(cat "$WORK/rc.err")"
+assert_absent 'requireCommit is not reported as an unknown key' "$WORK/rc.err" 'unknown options key'
+
+# The runner rejects anything but true/false, so accepting a third value here
+# would let the advisor bless a config the next verify run stops on.
+printf 'version: 1\ngates:\n  - id: lint\n    command: "npm run lint"\noptions:\n  requireCommit: maybe\n' > "$WORK/rc-bad.yaml"
+node "$ADVISOR" --cwd "$WORK" --config "$WORK/rc-bad.yaml" --input "$CASES/steady.json" > /dev/null 2> "$WORK/rc-bad.err"
+[ $? -eq 2 ] && pass 'a non-boolean requireCommit is exit 2' || fail 'a non-boolean requireCommit is exit 2' "$(cat "$WORK/rc-bad.err")"
+assert_contains 'the rejected value is named the way the runner names it' "$WORK/rc-bad.err" 'options.requireCommit must be true or false'
+
+# Turning it off drops the demand that the work be committed, so it is a
+# weakening — and a weakening is never written, whatever flags are passed.
+printf '{"proposals":[{"kind":"set-option","key":"requireCommit","value":"false","rationale":"agents keep leaving work uncommitted","evidence":[{"runId":108}]}]}' > "$WORK/rc-off.json"
+node "$ADVISOR" --cwd "$CASES" --config "$RC" --input "$CASES/steady.json" --proposals "$WORK/rc-off.json" > "$WORK/rc-off.txt" 2>&1
+assert_contains 'dropping requireCommit is classified as a weakening' "$WORK/rc-off.txt" 'layer2:option:requireCommit layer=2 kind=set-option direction=weaken applicable=no'
+
+D6=$(scratch_config requirecommit "$RC")
+node "$ADVISOR" --cwd "$D6" --config "$D6/verify.yaml" --input "$CASES/steady.json" \
+  --proposals "$WORK/rc-off.json" --apply > "$WORK/rc-apply.txt" 2>&1
+status=$?
+[ "$status" -eq 0 ] && pass '--apply over a requireCommit proposal exits 0' || fail '--apply over a requireCommit proposal exits 0' "$(cat "$WORK/rc-apply.txt")"
+assert_contains '--apply did NOT drop requireCommit' "$D6/verify.yaml" 'requireCommit: true'
+# ... and the layer-1 strengthenings in the same run still landed, so the guard
+# is refusing one change rather than the whole write.
+assert_contains '--apply still wrote the layer-1 strengthening alongside it' "$D6/verify.yaml" 'timeoutSec: 30'
+
+# The other direction is a strengthening, and is still not applied: it is a
+# layer-2 proposal, and layer 2 is never written. `baseline.yaml` declares no
+# requireCommit, so the runner default (false) is what it moves away from.
+printf '{"proposals":[{"kind":"set-option","key":"requireCommit","value":"true","rationale":"uncommitted work kept being reported as finished","evidence":[{"runId":108}]}]}' > "$WORK/rc-on.json"
+advise "$CASES/steady.json" --proposals "$WORK/rc-on.json"
+assert_contains 'demanding a commit is classified as a strengthening' "$OUT" 'layer2:option:requireCommit layer=2 kind=set-option direction=strengthen applicable=no'
+D7=$(scratch_config requirecommit-on)
+node "$ADVISOR" --cwd "$D7" --config "$D7/verify.yaml" --input "$CASES/steady.json" \
+  --proposals "$WORK/rc-on.json" --apply > /dev/null 2>&1
+assert_absent '--apply did not write the layer-2 strengthening either' "$D7/verify.yaml" 'requireCommit'
+
 printf '\n== 3. a truncated failure log raises the budget ==\n'
 advise "$CASES/truncated.json"
 assert_status 'the truncated-log history exits 0' 0
@@ -346,9 +394,21 @@ else
   pass "cmate-verify's runner accepts the file written alongside layer-2 proposals"
 fi
 
+printf '\n== the two verify.yaml parsers agree ==\n'
+# Runs the standalone parity suite as one assertion of this one, so it is not an
+# orphan nobody executes. It reads the two shipped parsers, not $ADVISOR: parity
+# is a property of what the packages ship, so a mutant copy is not its subject.
+# Its own output is shown only when it fails.
+if bash "$SUITE_DIR/parser-parity.sh" > "$WORK/parity.txt" 2>&1; then
+  pass "the options keys of cmate-verify's runner and this advisor are the same set"
+else
+  fail "the options keys of cmate-verify's runner and this advisor are the same set" \
+    "$(sed 's/^/       /' "$WORK/parity.txt")"
+fi
+
 # The suite is worthless if a case silently stopped running. This floor is the
 # same guard cmate-verify's suite uses.
-MIN_ASSERTIONS=68
+MIN_ASSERTIONS=78
 total=$((passed + failed))
 if [ "$total" -lt "$MIN_ASSERTIONS" ]; then
   fail 'the suite ran every case' "only $total assertion(s) ran, expected at least $MIN_ASSERTIONS"

@@ -17,8 +17,18 @@
 | `options.maxLogTailBytes` の減少 | **弱める** | 失敗の原因がログから消える |
 | `options.skipInPrimaryCheckout` を `true` へ | **弱める** | 実行されるゲートが減る |
 | `options.skipInPrimaryCheckout` を `false` へ | 強める | 実行されるゲートが増える |
+| `options.requireCommit` を `false` へ | **弱める** | 未 commit の作業を「作業証跡あり」として通すようになる |
+| `options.requireCommit` を `true` へ | 強める | 未 commit の変更だけの状態が not_started として止まる |
 | `options.baseRef` の変更 | **弱める** | 「何が変更か」の基準が動く。履歴からは強化と示せない |
 | 上記以外 | **弱める** | 認識できない変更は fail closed |
+
+`options.requireCommit` は `cmate-verify` のランナー（`verify-run.sh`）が work-evidence
+ゲートを厳しい側へ倒すための key である（CommandMate #1642）。既定は `false` で、
+`true` のとき `commits=0 uncommitted=n` は PASS ではなく `not_started` になる。
+**この key を受理する options キー集合は 2 つのパーサ（`verify-run.sh` の awk と
+`verify-advisor.mjs` の `OPTION_KEYS`）で一致していなければならない。** 一致は
+`tests/fixtures/cmate-verify-advisor/parser-parity.sh` で固定してある。片方だけが
+知っている key は、正当な設定に対して advisor が exit 2 を返す事故になる（Issue #57）。
 
 ## 「timeout の増加は弱める」について
 
@@ -51,8 +61,10 @@ merge するところまでが手順である。
 2. `isApplicable()` — 上の 3 条件を満たすかを判定する
 3. `assertNoWeakening()` — **書き込む直前に、書こうとしているバイト列を再パースして
    元のファイルと比較する**。ゲートが減っていないか、`timeoutSec` が伸びていないか、
-   `maxLogTailBytes` が縮んでいないか、`baseRef` / `skipInPrimaryCheckout` が動いていないか。
-   1 つでも該当すれば内部ガードとして exit 2 で停止する
+   `maxLogTailBytes` が縮んでいないか、`baseRef` / `skipInPrimaryCheckout` /
+   `requireCommit` が動いていないか。1 つでも該当すれば内部ガードとして exit 2 で停止する。
+   この 3 つの option は方向ではなく key で見張る。層 1 は履歴の数値からこれらを
+   動かす根拠を持たないので、強化方向であっても書かない
 
 3 番目は 1・2 の記録を一切参照しない。提案の帳簿が嘘をついても、ファイル同士の比較は
 嘘をつけない。`tests/fixtures/cmate-verify-advisor/run_tests.sh --mutants` の
