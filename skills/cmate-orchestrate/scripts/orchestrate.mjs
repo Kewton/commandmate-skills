@@ -598,21 +598,56 @@ const CANDIDATE_BACKTICK = '`([^`\\s]+\\.(?:' + FILE_EXT + '))`';
 const CANDIDATE_KNOWN_ROOT = PATH_START + '((?:src|tests|test|scripts|docs|lib|app|pkg|internal|cmd|\\.github)/[A-Za-z0-9_./-]+)\\b';
 const CANDIDATE_WITH_EXT = PATH_START + '([A-Za-z0-9_.-]+/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\\.(?:' + FILE_EXT + '))\\b';
 
-// Returns { paths, shadowed, found }: the de-duplicated candidates in order of
-// first appearance, the ones dropped for being a partial of another candidate,
-// and the pre-drop set (what the extraction recognised at all).
+// Headings under which a path is the issue's PRODUCT rather than its context
+// (Issue #50). See classifyFileCandidates for why the extension alone cannot
+// decide that. Mirrored in cmate-issue-authoring scripts/validate-plan.mjs.
+const DELIVERABLE_HEADING_RE = /(deliverable|成果物|対象ファイル|変更対象|変更ファイル|作成ファイル|編集対象|出力ファイル|生成ファイル|affected files|target files|output files|files to (?:change|edit|create|write|add))/i;
+
+// Character offsets covered by a deliverable heading's section, so a candidate's
+// position in the body decides how it is classified. A section runs from the
+// line after its heading to the next heading of any level (or end of text).
+function deliverableSpans(text) {
+  const spans = [];
+  let offset = 0;
+  let open = null;
+  for (const line of text.split('\n')) {
+    if (HEADING_RE.test(line.trim())) {
+      if (open !== null) {
+        spans.push([open, offset]);
+        open = null;
+      }
+      if (DELIVERABLE_HEADING_RE.test(line.trim())) open = offset + line.length + 1;
+    }
+    offset += line.length + 1;
+  }
+  if (open !== null) spans.push([open, offset]);
+  return spans;
+}
+
+function inSpans(spans, index) {
+  return spans.some(([start, end]) => index >= start && index < end);
+}
+
+// Returns { paths, deliverable, shadowed }: the de-duplicated candidates in
+// order of first appearance, the subset of them a deliverable heading covers,
+// and the ones dropped for being a partial of another candidate.
 function extractFileCandidates(text) {
   const patterns = [
     new RegExp(CANDIDATE_BACKTICK, 'g'),
     new RegExp(CANDIDATE_KNOWN_ROOT, 'g'),
     new RegExp(CANDIDATE_WITH_EXT, 'g'),
   ];
+  const spans = deliverableSpans(text);
   const seen = new Set();
+  const deliverable = new Set();
   const found = [];
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
       const candidate = match[1].trim();
       if (!isSafeRepoPath(candidate)) continue;
+      // A path written as context in one place and as a deliverable in another
+      // is a deliverable: the stronger statement wins.
+      if (inSpans(spans, match.index)) deliverable.add(candidate);
       if (!seen.has(candidate)) {
         seen.add(candidate);
         found.push(candidate);
@@ -620,7 +655,7 @@ function extractFileCandidates(text) {
     }
   }
   const { kept, shadowed } = dropShadowedCandidates(found);
-  return { paths: kept, shadowed, found };
+  return { paths: kept, deliverable, shadowed, found };
 }
 
 // The other half of Issue #49. Anchoring stops the extraction INVENTING a
@@ -704,13 +739,20 @@ function extractionWarnings(analyses) {
   return out;
 }
 
-function classifyFileCandidates(candidates) {
+// The extension alone cannot decide whether a path is context or product
+// (Issue #50). A documentation path is USUALLY context to read — but an issue
+// whose deliverable IS a Markdown document (a design note, an ADR, a runbook)
+// named every file it had to write and still got an empty suspected_files, so
+// the contract declared no scope and the worker was refused by the scope gate
+// for writing exactly what it was told to write. A path under a "成果物 /
+// 対象ファイル / 変更対象 / Deliverables" heading is the issue stating what it
+// produces, and that statement outranks the extension rule. Anywhere else a
+// .md/.rst/.txt or docs/ path stays a reference.
+function classifyFileCandidates(candidates, deliverable) {
   const suspected = [];
   const references = [];
   for (const candidate of candidates) {
-    // A path pinned to a documentation tree is context to read, not a file the
-    // issue is expected to change.
-    if (/^docs\//.test(candidate) || /\.(md|rst|txt)$/i.test(candidate)) {
+    if (!deliverable.has(candidate) && (/^docs\//.test(candidate) || /\.(md|rst|txt)$/i.test(candidate))) {
       references.push(candidate);
     } else {
       suspected.push(candidate);
@@ -809,7 +851,7 @@ function analyzeIssue(issue, profile, binaries) {
   const objective = redact(firstNonEmptyLine(issue.body) || issue.title);
   const acceptance = extractAcceptanceCriteria(issue.body).map(redact);
   const extraction = extractFileCandidates(text);
-  const { suspected, references } = classifyFileCandidates(extraction.paths);
+  const { suspected, references } = classifyFileCandidates(extraction.paths, extraction.deliverable);
   const scopeDefaults = scopeDefaultsFor(suspected);
   suspected.push(...scopeDefaults);
   const tests = extractTestExpectations(text, binaries).map(redact);

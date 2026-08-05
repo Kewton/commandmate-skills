@@ -1,0 +1,16 @@
+{
+  "description": "Issue #50: an issue whose deliverable IS Markdown. The two documents written under the 成果物 heading are suspected_files — the scope the worker gets — even though .md and docs/ would otherwise mark them as references; the background document named in prose stays a reference. Before this, every such issue produced an empty suspected_files, so the worker was refused by the scope gate for writing exactly what it was told to write.",
+  "args": ["416", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[416]],
+    "merge_order": [416],
+    "dependencies": [],
+    "classifications": { "416": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "416": ["docs/design/worktree-contract.md", "docs/design/worktree-lifecycle.md"] },
+    "reference_files": { "416": ["docs/adr/0001-context.md"] }
+  }
+}

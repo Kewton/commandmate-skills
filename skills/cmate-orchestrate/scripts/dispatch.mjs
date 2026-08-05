@@ -734,10 +734,13 @@ function buildTaskContract(plan, issue, inputs) {
   lines.push(`  mode: ${yamlString(inputs.autoYes ? 'safe' : 'off')}`);
   lines.push('success:');
   lines.push('  requireWorkEvidence: true');
-  // Declaring requireScopeClean while listing no path would make the scope gate
-  // reject every change. When the plan named no file we say so in the contract
-  // and record a limitation, rather than inventing a scope or claiming one.
-  lines.push(`  requireScopeClean: ${allow.length > 0}`);
+  // Always true (Issue #50). It used to be `allow.length > 0`, which turned an
+  // empty scope into the ONE configuration where a worker may write any file in
+  // the worktree and still be judged clean — the plan that named no file got the
+  // widest permission of all. The gate is now unconditional, and an empty scope
+  // is refused before a contract is ever sent (see the dispatch loop); a
+  // contract built with no allow list therefore fails closed rather than open.
+  lines.push('  requireScopeClean: true');
   lines.push('  autoVerifyOnStop: false');
   return `${lines.join('\n')}\n`;
 }
@@ -1483,10 +1486,19 @@ async function runDispatch(inputs, plan, outDir) {
       if (contractMode) {
         const allow = contractScopeAllow(res.issue);
         if (allow.length === 0) {
+          // Issue #50: an empty scope used to be dispatched with
+          // `requireScopeClean: false`, which disabled the scope gate entirely —
+          // so the issue whose files the planner could NOT name was the one
+          // whose worker could write anything. Refusing here is the only reading
+          // that is not a widening: the boundary was never declared, so nothing
+          // is dispatched against it. Name the issue's 対象ファイル and re-plan.
+          worker.note = redact(`#${number} was not dispatched: the plan declares no scope for it`);
           report.limitations.push({
             code: 'contract_scope_unknown',
-            detail: `#${number}: the plan names no suspected file, so the contract declares no scope and sets success.requireScopeClean false; the scope gate cannot judge a boundary that was never declared`,
+            detail: `#${number}: the plan names no suspected file, so the contract would declare no scope; the issue is NOT dispatched (a scope-less contract would either disable the scope gate or reject every change). State the issue's target files and re-run the planner`,
           });
+          workers.push(worker);
+          continue;
         }
         try {
           contractPath = placeContract(res.worktreePath, number, buildTaskContract(plan, res.issue, inputs), contractsDir);
@@ -1600,6 +1612,13 @@ async function runDispatch(inputs, plan, outDir) {
       } else if (workers.some((worker) => worker.worker_state === 'timeout')) {
         const timed = workers.find((worker) => worker.worker_state === 'timeout');
         halt('partial', 'timeout', 'worker_timeout', `#${timed.issue} timed out; the next wave was not dispatched`);
+      } else if (workers.some((worker) => worker.worker_state === 'not_dispatched')) {
+        // A worker the runner REFUSED to start — no declared scope (Issue #50),
+        // an unsafe worktree target — never ran, so it cannot be a verification
+        // failure. Saying it was would name the wrong cause and send the
+        // operator into a worktree to debug a plan-level defect.
+        const skipped = workers.find((worker) => worker.worker_state === 'not_dispatched');
+        halt('partial', 'dispatch_error', 'not_dispatched', `#${skipped.issue} was never dispatched: ${skipped.note || 'the runner refused to start it'}`);
       } else if (!allVerified) {
         const failedVerify = workers.find((worker) => worker.verification.outcome !== 'pass');
         halt('partial', 'verification_failed', 'verification_failed', `#${failedVerify.issue} completed but its verification did not pass; the next wave was not dispatched`);

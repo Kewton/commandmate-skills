@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 416,
+      "title": "docs: worktree 契約の設計ノートを書く",
+      "body": "worktree 契約の設計判断を文書として残す。背景の経緯は docs/adr/0001-context.md にある。\n\n## 成果物\n\n- `docs/design/worktree-contract.md`\n- `docs/design/worktree-lifecycle.md`\n\n## Acceptance criteria\n- [ ] 設計ノートが採用案と却下案の両方を述べている\n- [ ] merge 条件が文書に書かれている\n",
+      "labels": ["docs"]
+    }
+  ]
+}
