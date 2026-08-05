@@ -1,0 +1,16 @@
+{
+  "description": "Issue #54: a path cited under 根拠 / 参考 is evidence, not a target. #50 gave an issue a way to say \"this path IS my product\" but no way to say the opposite, so a bug report that cited the file it reproduces in — the normal way to write one — handed the worker write permission on a file the body explicitly says is not changed. Only web/src/lib/filter.ts, written under 成果物, becomes scope.allow; store.ts and old-filter.ts are read-only context. A green run with three suspected_files here would be the bug.",
+  "args": ["430", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[430]],
+    "merge_order": [430],
+    "dependencies": [],
+    "classifications": { "430": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "430": ["web/src/lib/filter.ts"] },
+    "reference_files": { "430": ["web/src/lib/store.ts", "web/src/legacy/old-filter.ts"] }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "description": "Issue #54, the other direction: excluding too much is the worse error, because it drops a real target out of scope.allow and the worker is refused for writing what it was told to write. restore.ts is named in prose AND cited under 根拠 — the citation does not retract the instruction, so it stays a target. manager.ts sits under 再現手順, which is deliberately NOT a context heading: a bug report names the file it reproduces in there. Both remain suspected_files and nothing is excluded.",
+  "args": ["431", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[431]],
+    "merge_order": [431],
+    "dependencies": [],
+    "classifications": { "431": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "431": ["src/session/restore.ts", "src/session/manager.ts"] },
+    "reference_files": { "431": [] }
+  }
+}
