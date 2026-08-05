@@ -1,8 +1,9 @@
 # safety規約
 
 `cmate-worktree-cleanup` は破壊的操作を行う Skill である。`declared_risk` は `high`。
-この文書は、削除方式・除外規則・profile・診断のみ扱う範囲・redaction を定める。
-SKILL.md の Step 0 / Step 5 / Step 6 から参照される。
+この文書は、禁止操作・除外規則・削除方式・入力の安全性・sync・診断のみ扱う範囲・redaction を
+定める。SKILL.md の権限・発見・plan・apply・診断の各節から参照される（項番ではなく内容で
+参照すること。項番は編集のたび黙って腐る）。
 
 安全基準は CommandAgent 版の honest-failure semantics（dirty/unmerged は拒否し、
 force remove や `branch -D` を使わない）を採用する。CommandMate 版が持つ利便性
@@ -21,6 +22,11 @@ force remove や `branch -D` を使わない）を採用する。CommandMate 版
 - remote branch の削除。
 - rollback / backup / Skill Runtime の停止。
 - 利用者が渡した path を直接 `git worktree remove` すること（第4節）。
+- 対象 repository の外の path を読むこと。読み取りは worktree と git metadata に閉じる。
+- evidence（proof・diagnostics・result）を外部へ upload すること。`network_access` は
+  `git fetch` と `gh` による merge 証跡の取得にだけ使う。
+- `requirements.commands` に宣言していない command の実行（宣言は `git` / `gh` /
+  `commandmate` の3つで、実行してよい subcommand は SKILL.md の allowlist に限る）。
 
 これらは CommandMate 版 `worktree-cleanup` に含まれるが、本 Skill の scope 外である。
 該当するものは診断（第6節）と `next_actions` に回す。

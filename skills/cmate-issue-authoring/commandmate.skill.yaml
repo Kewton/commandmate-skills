@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-issue-authoring
 name: cmate-issue-authoring
-version: 0.5.0
+version: 0.5.1
 summary: Feature 記述から実装可能な Issue 群を起案する。read-only の分割計画を schema 準拠 artifact で出し、明示承認の下でだけ依存順に GitHub へ一括登録する 2 phase 手順。
 description: >-
   Feature 記述・仕様断片・epic Issue を入力に、着手できる Issue 群を起案する手順である。
@@ -96,8 +96,8 @@ risk_rationale: >-
   既存 Issue の本文編集・クローズ・ラベル張り替えは手順として禁止している。
 files:
   - path: SKILL.md
-    sha256: 6f2b58a579f1fd7d80df0f336c3585d10744b866f737dc6c484d25efaa9a8826
-    size: 14058
+    sha256: 1cb3b5fe5b074e39e2e9261bfb1b9a0bdb6afee9da323b4a3078a984d38b63a4
+    size: 12032
     kind: skill_md
     executable: false
     script: false
@@ -120,8 +120,8 @@ files:
     executable: false
     script: false
   - path: references/plan-contract.md
-    sha256: fc4c8122fc66626fbabe15fcb2ed749d2d3906cc4c823993faf0a2c16a4f78ec
-    size: 8557
+    sha256: cd8b0f9d6ca35671e2c803c8608f936ac8f964060654c0d29e67db325721580a
+    size: 10196
     kind: instruction
     executable: false
     script: false
@@ -132,8 +132,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: dce879ce407d4da08e958993701ff0ae318110c12c7c49e57ecd4c0073bc1c98
-    size: 9986
+    sha256: 7467f27bda786151698e3f52e590eca1d7e8b1df44b8431165fb08e4fc305c3b
+    size: 11336
     kind: instruction
     executable: false
     script: false

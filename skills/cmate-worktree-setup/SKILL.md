@@ -15,6 +15,10 @@ CommandMate（Node）と CommandAgent（Rust）双方の実績あるworktree作�
 この Skill は既存の branch / directory / worktree を **暗黙に上書き・reset・reuse しない**。
 作成前に dry-run の plan を提示し、利用者の確認を経てから作成する。
 
+この文書が述べるのは「いつ使うか」「どう呼ぶか」「出力をどう読むか」「どこで止まり、
+人間が何をするか」の 4 つだけである。規則の正本は第8節の references と schema にあり、
+食い違った場合はそちらを採る。
+
 ## 1. この Skill が答える問い
 
 1. この repository はどの profile か（Node/CommandMate か Rust/CommandAgent か、あるいは unverified か）。
@@ -35,37 +39,30 @@ CommandMate（Node）と CommandAgent（Rust）双方の実績あるworktree作�
 | `reuse_existing` | 任意 | 真偽 | `false` | exact match の branch/directory/worktree の reuse を許可する（明示時のみ） |
 | `install_dependencies` | 任意 | 真偽 | `false` | dependency install を許可する。plan 表示＋明示承認が別途必要 |
 
-### 入力検証（Step 0 で行い、不備があればここで終了する）
-
-- `issue_numbers` が空、正の整数でない値を含む、または全体が読み取れない場合は、
-  status `failure`、`blocking_reasons` に理由を記録して即座に返す。**推測で番号を補わない。**
-- `issue_numbers` が `max_issues` を超える場合は、先頭 `max_issues` 件だけを採用し、
-  落とした番号を `limitations` に記録する。**黙って切り捨てない。**
-- `profile` / `base` に client・Agent が構成した **絶対path・`..`・symlink・repository 外を指す値**
-  が含まれる場合は、その値を採用せず status `failure`、`blocking_reasons` に記録する。
-  詳細は [references/safety.md](./references/safety.md)。
+Step 0 で検証し、不備があればそこで終了する。**推測で番号を補わない**（`issue_numbers` の
+規則は [references/result-contract.md](./references/result-contract.md) 3.1 と schema の
+`request`、`profile` / `base` に絶対path・`..`・symlink・repository 外が混じった場合の拒否は
+[references/safety.md](./references/safety.md) 第1節が正本）。`max_issues` を超えた分は
+落として `limitations` に記録する。**黙って切り捨てない。**
 
 ## 3. 権限と禁止事項
 
-宣言している権限は `filesystem_read` / `filesystem_write` / `process_execution` / `network_access` である。
-この Skill の手順として **禁止** される操作は次のとおりで、利用者に許可を求めることもしない。
+宣言している権限は `filesystem_read` / `filesystem_write` / `process_execution` / `network_access`
+である。この Skill の手順として **禁止** される操作（既存物の暗黙上書き・path escape・
+未承認の dependency install・secret と絶対path の残置など）は
+[references/safety.md](./references/safety.md) が正本であり、そのいずれについても
+利用者に許可を求めない。
 
-- 既存の branch / directory / worktree の暗黙上書き・reset・削除
-- dirty な integration worktree への変更
-- repository root（および許可された worktree 作成先）の **外** への書き込み
-- 絶対path・`..`・symlink 経由で解決される target への作成
-- 明示承認のない dependency install、および private package 内 script の install 時実行
-- token・secret・環境変数・絶対path を result / audit へ残すこと
-- CommandMate server の起動停止、GitHub Project 更新、PR / Issue への write
-- 既存worktree の強制削除、cleanup、並列 dispatch
+本体 CommandMate の `/worktree-setup` slash command や GUI / API 経由の worktree 作成が
+行うこと（server の起動停止、Issue 専用 DB / port の設定、GitHub Project status 更新、
+PR / Issue への write、既存worktree の強制削除・cleanup・並列 dispatch）は、いずれも
+**本 Skill の scope 外**である。棲み分けは [references/safety.md](./references/safety.md)
+第0節、scope 外の列挙は
+[references/profile-conventions.md](./references/profile-conventions.md) 第6節にある。
 
-これらの一部（server の起動停止、Issue 専用 DB / port の設定、GitHub Project status 更新）は
-CommandMate 本体の `/worktree-setup` slash command や GUI / API 経由の worktree 作成に含まれるが、
-本 Skill の scope 外である。棲み分けは [references/safety.md](./references/safety.md) 第0節にある。
-
-`network_access` は **dependency install を明示承認したときだけ** 使う。その host は
-target repository の package manager 設定に依存するため、install 前に plan で列挙する（[references/safety.md](./references/safety.md)）。
-worktree 作成そのもの（branch を local の resolved SHA から作る）は network を必要としない。
+`network_access` は **dependency install を明示承認したときだけ** 使う（host は target
+repository の package manager 設定次第なので、install 前に plan で列挙する）。worktree 作成
+そのもの（branch を local の resolved SHA から作る）は network を必要としない。
 
 ## 4. 手順
 
@@ -90,95 +87,71 @@ worktree 作成そのもの（branch を local の resolved SHA から作る）�
 ### Step 2. profile を検出する
 
 [references/profile-conventions.md](./references/profile-conventions.md) の signal で
-`node`（Node/CommandMate）か `rust`（Rust/CommandAgent）かを判定する。
+`node`（Node/CommandMate）か `rust`（Rust/CommandAgent）かを判定し、検出根拠を
+`profile.detection_evidence` に repository 相対 path 付きで記録する。
 
 - `profile` 入力があればそれを優先し、検出結果と食い違えば `limitations` に記録する。
-- signal が曖昧、またはどちらの profile にも一致しない場合は、profile を `unverified` とし、
-  **実行前に profile / base / path 規約を利用者へ提示して確認を得る**。確認が得られなければ
-  status `failure` で止まる。動作確認済みは Node / Rust profile のみである。
-- 検出根拠は `profile.detection_evidence` に repository 相対 path 付きで記録する。
+- どちらにも一致しなければ `unverified` とし、**実行前に利用者の確認を得る**。確認が
+  得られなければ status `failure` で止まる（同 第3節）。動作確認済みは `node` / `rust` だけである。
 
 ### Step 3. plan を組み立てる（dry-run。ここでは作成しない）
 
 profile から branch / directory / base ref を解決し、base ref を **resolved commit SHA** に確定する
 （`profile.base_sha` と各 `plan[].base_sha`）。symbolic ref だけを base として記録しない。
 
-各Issueについて plan に次を載せる。
-
-- Issue番号 / branch / directory（**repository 相対**） / base ref と base SHA
-- baseline command（profile の proportional baseline）
-- CommandMate sync の有無
-- collision（既存の local/remote branch・directory・worktree との一致）
+各Issueについて、Issue番号 / branch / directory（repository 相対）/ base ref と base SHA /
+baseline command / CommandMate sync の有無 / collision を plan に載せる。plan entry の各 field は
+[references/result-contract.md](./references/result-contract.md) 3.4 が正本である。
 
 collision を検出した対象は `plan[].blocked_by` に列挙し、`collisions` にも記録する。
 plan を提示し、利用者の確認を得る。**確認前に作成へ進まない。**
 
 ### Step 4. worktree を作成する（確認後）
 
-作成の直前に **base SHA を再確認** する（plan 後に base が動いていないか）。plan 時と食い違う場合は、
-その entry を作成せず drift として `limitations` に記録し、当該Issueを未作成のまま残す。
-
-- `blocked_by` が空でない entry は作成しない。ただし `reuse_existing` が明示され、かつ
-  exact match の場合のみ reuse を許可する（`worktrees[].reused = true`、`created = false`）。
-- 再確認した SHA から branch と worktree を作成する（`worktrees[].base_sha` に記録）。
-- dependency install は `install_dependencies` が真、かつ plan を提示して **明示承認** を得たときだけ実行する。
-  package lifecycle script（`postinstall` 等）が走りうる risk と network host を承認前に説明する
-  （[references/safety.md](./references/safety.md)）。承認が無ければ install しない。
+作成の直前に **base SHA を再確認** する（plan 後に base が動いていないか）。再確認した SHA から
+branch と worktree を作成する。drift・collision・reuse・未承認 install の扱いは
+[references/safety.md](./references/safety.md) 第2〜4節が正本で、要点は
+「`blocked_by` が空でない entry は作らない」「reuse は `reuse_existing` の明示かつ exact match の
+ときだけ」「drift した entry は作らず `limitations` に記録する」「install は明示承認時だけ」である。
 
 ### Step 5. baseline を実行する
 
-profile 別の **proportional baseline** を、作成した worktree 内で実行する。
-
-- 結果は丸めず `baseline[]` に `outcome`（pass/fail/not_run/skipped）と `exit_code` で記録する。
-- **baseline が失敗しても worktree を自動削除しない。** 作成済みworktreeを保持し、診断できる形で返す。
-  この場合 status は `success` にならない（`partial`）。
-- 出力は redaction した短い excerpt だけを残す。raw terminal の全量は残さない。
+profile 別の **proportional baseline** を、作成した worktree 内で実行し、`baseline[]` に
+`outcome` と `exit_code` で記録する。**結果を丸めない。baseline が失敗しても worktree を
+自動削除しない**（診断できる形で保持し、status は `partial` になる。
+[references/safety.md](./references/safety.md) 第5節）。出力は redaction した短い excerpt だけを残す。
 
 ### Step 6. CommandMate sync を行う（optional）
 
-`git worktree add` で作った worktree は、CommandMate server 側の一覧には自動で載らない。
-CLI から server 側の再走査を起動し、登録された worktree ID を
-`commandmate_sync.worktree_id` に記録する。
+`git worktree add` で作った worktree は CommandMate server 側の一覧に自動では載らないので、
+CLI から server 側の再走査を起動し、登録された worktree ID を `commandmate_sync.worktree_id`
+に記録する。CommandMate `>=0.21` の CLI には `commandmate sync` が **実在する**。
 
-- CommandMate `>=0.21` の CLI には `commandmate sync` があり、これを使う（`--json` で API 応答を
-  そのまま得られる）。起動中の server へ接続するため、server 未起動や `<0.21` の CLI では使えない。
-- **sync を使えない環境では失敗にしない。** `available=false`、`worktree_id=null` として記録し、
-  worktree 作成自体の成否には影響させない（sync は optional）。
-- sync の応答は再走査の結果であって worktree ID ではない。ID は sync 後に `commandmate ls --json` の
-  `worktrees[].id` から解決する。解決できなければ null にし、**推測 id を書かない。**
-- 公式経路は public `commandmate` を使い、`commandmatedev` は公式経路に使わない。port 決め打ちの
-  curl sync は使わない。詳細は [references/profile-conventions.md](./references/profile-conventions.md)。
+**sync を使えない環境（server 未起動、sync を持たない旧 CLI）では失敗にしない。**
+`available=false` / `worktree_id=null` として記録し、worktree 作成の成否には影響させない。
+ID の解決経路（`commandmate ls --json`）・推測 id の禁止・public `commandmate` を使うことは
+[references/profile-conventions.md](./references/profile-conventions.md) 第5節が正本である。
 
 ### Step 7. result を組み立てる
 
 [references/result-contract.md](./references/result-contract.md) と
 [schemas/worktree-setup.result.v1.json](./schemas/worktree-setup.result.v1.json) に従って
-result object を作り、`summary_markdown` に人が読む要約を同 reference の見出し構成で書く。
+result object を作り、`summary_markdown` に人が読む要約を同 reference 第4節の見出し構成で書く。
 
 ### Step 8. completion check を実行する
 
-result を返す前に、6つの check を自分で実行し `completion_check` に記録する。
-
-| check id | 内容 |
-|---|---|
-| `input_validated` | `issue_numbers` が正の整数のみで、上限適用が記録されている |
-| `plan_confirmed` | 作成前に plan を提示し、確認を得た（または未作成で終わった） |
-| `no_implicit_overwrite` | 既存 branch/directory/worktree を暗黙上書き・reset・reuse していない |
-| `base_reconfirmed` | 作成した worktree の base SHA を作成直前に再確認した |
-| `baseline_reported` | baseline の結果を丸めず、失敗時は worktree を保持した |
-| `no_secret_or_abspath` | result / summary に token・secret・絶対path が無い |
-
+result を返す前に、`completion_check` の6件を自分で実行して記録する。6件の id と、
+それぞれが何を確かめるかは
+[references/result-contract.md](./references/result-contract.md) 3.11 が正本である。
 いずれかが false なら status は `success` にならない。
 
 ## 5. 出力
 
-result object 1件を返す。契約は [references/result-contract.md](./references/result-contract.md) にある。
-status は次の3値である。
-
-- `success` — 要求された全Issueの worktree を作成し、baseline が pass、6つの check がすべて通った
-- `partial` — worktree は作成したが、baseline 失敗・sync が使えない・collision による skip・drift など、
-  check の失敗が1つ以上ある。作成済みworktreeは保持する。`limitations` を必ず1件以上書く
-- `failure` — worktree を1件も作成していない。`blocking_reasons` を必ず1件以上書く
+result object 1件を返す。契約は
+[references/result-contract.md](./references/result-contract.md) にある。
+status は `success` / `partial` / `failure` の3値で、どの条件でどれになるか、
+`limitations` / `blocking_reasons` を何件書く必要があるかは同 reference 第2節と
+schema の `status` description が正本である。
 
 `partial` を `success` に見せかけないこと。この Skill の価値は、
 **作成済み / 未作成と、どこで止まったか** が後から検証できることにある。
@@ -201,20 +174,15 @@ status は次の3値である。
 
 ## 7. 完了条件
 
-次がすべて満たされたときにのみ、この Skill の実行は完了である。
-
-- [ ] result object が result contract に適合している
-- [ ] `completion_check.passed` が true、または status が `partial` / `failure` で理由が記録されている
-- [ ] branch 作成元が resolved commit SHA として plan / result に記録されている
-- [ ] 既存 branch / directory / worktree を1件も暗黙上書きしていない
-- [ ] baseline 失敗が success に丸められず、作成済みworktreeが保持されている
-- [ ] result / summary に token・secret・絶対path が含まれていない
-- [ ] `summary_markdown` が既定の見出し構成を満たしている
+result object が [references/result-contract.md](./references/result-contract.md) の契約
+（status の規則、field ごとの定義、`summary_markdown` の見出し構成）と
+[schemas/worktree-setup.result.v1.json](./schemas/worktree-setup.result.v1.json) に適合し、
+`completion_check` の6件を実行して結果を申告したときにのみ、この Skill の実行は完了である。
 
 ## 8. 参照
 
-- [references/profile-conventions.md](./references/profile-conventions.md) — Node/Rust profile 規約、検出、unverified、CommandMate sync 経路
-- [references/result-contract.md](./references/result-contract.md) — result の各 field と summary の構成
-- [references/safety.md](./references/safety.md) — path escape 拒否、redaction、暗黙上書き禁止、dependency install risk
+- [references/profile-conventions.md](./references/profile-conventions.md) — Node/Rust profile 規約、検出、unverified、proportional baseline、CommandMate sync 経路、scope 外
+- [references/result-contract.md](./references/result-contract.md) — result の各 field、status、completion check、summary の構成
+- [references/safety.md](./references/safety.md) — 本体経路との棲み分け、path escape 拒否、暗黙上書き禁止、base 再確認、dependency install risk、redaction、fail closed
 - [references/agent-compatibility.md](./references/agent-compatibility.md) — Agent 差異と Claude/Codex の reload・呼出方法
 - [schemas/worktree-setup.result.v1.json](./schemas/worktree-setup.result.v1.json) — 機械検証用 schema

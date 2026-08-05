@@ -17,6 +17,10 @@ preview** したあと、**clean かつ merge 証跡が十分な worktree だけ
 出力は **plan / result 文書**（[`schemas/`](./schemas/)）と **human-readable summary** の
 2つで、どちらか一方だけを返して終了しない。
 
+この文書が述べるのは「いつ使うか」「どう呼ぶか」「出力をどう読むか」「どこで止まり、
+人間が何をするか」の 4 つだけである。規則の正本は §9 の references と schema にあり、
+食い違った場合はそちらを採る。
+
 ## 0. 使う場面 / 使わない場面
 
 使う場面:
@@ -55,26 +59,20 @@ preview** したあと、**clean かつ merge 証跡が十分な worktree だけ
 入力に関する強い制約:
 
 1. **worktree は git metadata から解決する。** 対象は issue 番号か `all_eligible` で受け取り、
-   `git worktree list --porcelain` から発見する。**利用者が渡した path を直接 remove しない。**
-   絶対 path・`..`・symlink・worktree 外 escape は拒否する（[references/safety.md](./references/safety.md) §4）。
+   `git worktree list --porcelain` から発見する。**利用者が渡した path を直接 remove しない**
+   （拒否する path の種類は [references/safety.md](./references/safety.md) §4）。
 2. **branch/base/path/baseline を hardcode しない。** `develop` / `feature/...` / npm / Cargo を
-   決め打ちせず、`profile` から解決する。検証済み profile は `node`（Node/CommandMate）と
-   `rust`（Rust/CommandAgent）の2つ。`unverified` は実行前に利用者確認を取ってから使う。
+   決め打ちせず、`profile` から解決する。`unverified` は実行前に利用者確認を取ってから使う。
 3. Issue 本文や PR の取得は読み取りのみ。`gh pr edit` などで書き換えない。
 
 ## 2. 権限
 
-`commandmate.skill.yaml` の `declared_permissions` とその用途:
-
-| 権限 | 用途 | やらないこと |
-|---|---|---|
-| `filesystem_read` | worktree の status / branch / tree の読み取り | 対象 repository の外の path を読む |
-| `filesystem_write` | `git worktree remove`（非 force）と guarded ref delete による worktree/branch 削除 | force remove、`branch -D`、DB/log/cache 削除 |
-| `process_execution` | `git` / `gh` / `commandmate` の実行 | 宣言外 command、process kill |
-| `network_access` | `git fetch` と `gh` による merge 証跡の取得 | それ以外の外部送信。evidence の外部 upload |
-
-`declared_permissions` は宣言であって強制ではない。この一覧を超える操作が必要になった時点で、
-実行せず利用者へ確認する。
+宣言している権限は `filesystem_read` / `filesystem_write` / `process_execution` /
+`network_access` で、用途は worktree の状態読み取り・非 force の worktree remove と
+guarded ref delete・宣言 command の実行・merge 証跡の取得に限る。**やらないこと**の一覧は
+[`references/safety.md`](./references/safety.md) §1 と manifest の `risk_rationale` が正本である。
+`declared_permissions` は宣言であって強制ではないので、この範囲を超える操作が必要になった
+時点で、実行せず利用者へ確認する。
 
 ## 3. 実行してよい command
 
@@ -103,43 +101,35 @@ preview** したあと、**clean かつ merge 証跡が十分な worktree だけ
 
 ### Step 1 — 発見と除外
 
-1. `git worktree list --porcelain` で全 worktree を発見する。path naming は truth にしない。
-2. current worktree・integration worktree・対象外 issue を `excluded` に振り分ける
-   （[references/safety.md](./references/safety.md) §2）。**この2つは指定されても消さない。**
-3. 残りを候補 (`candidates`) とする。
+`git worktree list --porcelain` で全 worktree を発見する。path naming は truth にしない。
+current worktree・integration worktree・対象外 issue を `excluded` に振り分け、残りを候補
+(`candidates`) とする。除外の reason と、**current / integration は指定されても消さない**という
+不変条件は [`references/safety.md`](./references/safety.md) §2 が正本である。
 
 ### Step 2 — remote 最新化
 
 `git fetch <remote> <base-branch> --prune` を実行する。失敗しても停止しないが、
 **stale な remote を最新と見なさない。** fetch 結果を `fetch` に記録する
-（[references/proof-algorithm.md](./references/proof-algorithm.md) §0）。
+（[`references/proof-algorithm.md`](./references/proof-algorithm.md) §0）。
 
 ### Step 3 — 候補ごとの状態検査
 
 各候補に `git -C <path> status --porcelain` / `branch --show-current` / `rev-parse HEAD` を
 実行し、`state` を決める。dirty / detached / locked / missing は証明へ進まず `skip`。
-clean な候補だけが削除の前提を満たす。
+clean な候補だけが削除の前提を満たす（[`references/proof-algorithm.md`](./references/proof-algorithm.md) §1）。
 
 ### Step 4 — merge 証跡の判定
 
-clean な候補ごとに proof を求める（詳細は
-[references/proof-algorithm.md](./references/proof-algorithm.md)）。
-
-- **direct ancestry**: `git merge-base --is-ancestor <tip> <base>` が exit 0 → `direct`。
-- 祖先でない場合のみ **merged-equivalent** を判定する。次の **4条件すべて** が成立したときだけ
-  `merged_equivalent`:
-  1. exact head/base の merged PR がちょうど1件。
-  2. その PR の `headRefOid` が worktree tip と一致（tip drift が無い）。
-  3. reachable な merge commit がある（base から到達可能）。
-  4. tree equality（branch の正味 tree 変更 = merge commit が持ち込んだ変更）。
-- fetch 失敗・GitHub data 不足・PR なし/複数・tip drift・merge commit 到達不能・tree 不一致は
-  すべて `unverifiable` = **削除しない**。迷ったら `unverifiable`。
+clean な候補ごとに proof を求める。型は `direct` / `merged_equivalent` / `unverifiable` の
+3つだけで、各型の成立条件（`merged_equivalent` の **4条件すべて** を含む）と
+`unverifiable` に落ちる事由は [`references/proof-algorithm.md`](./references/proof-algorithm.md)
+が正本である。**1つでも欠けたら `unverifiable` = 削除しない。迷ったら `unverifiable`。**
 
 `decision: delete` は `state: clean` かつ `proof.type ∈ {direct, merged_equivalent}` のときだけ。
 
 ### Step 5 — plan の提示と確認（apply の前提）
 
-1. plan（[references/result-contract.md](./references/result-contract.md) §1）を dry-run で提示する。
+1. plan（[`references/result-contract.md`](./references/result-contract.md) §1）を dry-run で提示する。
    removed と skipped を混ぜず、target ごとに proof / skip 理由を示す。**使った profile
    （名前・`verified`・`base`・`remote`）も併せて提示する。** 自動検出した場合はその旨を明示する。
 2. `mode: apply` に進むには、利用者の **明示確認** が要る。承認された worktree を
@@ -152,12 +142,10 @@ clean な候補ごとに proof を求める（詳細は
 
 1. **drift 再検査**: 削除の直前に各対象の status / tip / ref を再取得し、plan と照合する。
    tip が動いた・dirty になった・ref が動いた対象は `plan_drift` として skip する
-   （[references/proof-algorithm.md](./references/proof-algorithm.md) §5）。
-2. 生き残った対象を削除する（[references/safety.md](./references/safety.md) §3）:
-   - `direct` → `git worktree remove <path>` + `git branch -d <branch>`。
-   - `merged_equivalent` → `git worktree remove <path>` +
-     `git update-ref -d refs/heads/<branch> <verified-tip>`（expected-old-OID 付き。race 時は失敗させる）。
-   - **`--force` も `-D` も使わない。**
+   （[`references/proof-algorithm.md`](./references/proof-algorithm.md) §5）。
+2. 生き残った対象を、proof の型ごとの方式で削除する。`direct` と `merged_equivalent` の
+   command、guarded ref delete が race で失敗したときの扱い、**`--force` も `-D` も
+   使わない**ことは [`references/safety.md`](./references/safety.md) §3 が正本である。
 3. `git worktree prune` を実行する。
 
 ### Step 7 — sync と診断
@@ -175,19 +163,18 @@ removed / skipped / proof / evidence を残し、token/secret/絶対path/raw Git
 ## 5. CommandMate sync（optional）
 
 削除・prune のあと、削除済み worktree を CommandMate 一覧から外すため public `commandmate` CLI で
-sync する。CommandMate `>=0.21` の CLI には `commandmate sync`（server 側の repository 再走査。
-`--json` で API 応答をそのまま得られる）があり、これを使う。sync は起動中の server へ接続するため、
-server 未起動、または sync を持たない旧 version の CLI では使えない。その場合は
-`commandmate_sync.outcome` を `unavailable`/`failed`、`worktree_ids` を欠落 (null) にして返し、
-**run を失敗にしない**（sync は optional）。`worktree_ids` は sync の応答ではなく
-`commandmate ls --json` の `worktrees[].id` から解決する（削除前に控える）。推測 id を書かない。
-port 決め打ちの curl sync は使わない。
+sync する。CommandMate `>=0.21` の CLI には `commandmate sync` が **実在する**が、起動中の
+server へ接続するため、server 未起動または sync を持たない旧 CLI では使えない。
+**その場合も run を失敗にしない**（sync は optional）。`unavailable` / `failed` の記録、
+`worktree_ids` を `commandmate ls --json` から削除前に控えること、推測 id を書かないこと、
+port 決め打ちの curl sync を使わないことは
+[`references/safety.md`](./references/safety.md) §5 が正本である。
 
 ## 6. 診断のみ（自動停止・削除しない）
 
-worktree 周辺の server / process / tmux / DB / log は **表示だけ** する。process owner/CWD を
-完全検証できない段階で process を止めない。DB/log を worktree 削除と同じ確認で消さない。
-これらは `diagnostics` と `next_actions` に載せ、実行は利用者に委ねる（[references/safety.md](./references/safety.md) §6）。
+worktree 周辺の server / process / tmux / DB / log は **表示だけ** し、`diagnostics` と
+`next_actions` に載せて実行は利用者に委ねる。止めない理由と載せてよい粒度は
+[`references/safety.md`](./references/safety.md) §6 が正本である。
 
 ## 7. 失敗時の動作
 
@@ -209,21 +196,16 @@ worktree 周辺の server / process / tmux / DB / log は **表示だけ** す�
 
 ## 8. 完了条件（completion check）
 
-以下がすべて真のときだけ、この Skill は完了したと報告してよい。1つでも偽なら
-`status` は `success` にならない（[references/result-contract.md](./references/result-contract.md) §2.6）。
-
-1. `exclusions_honored` — current / integration worktree を一切消していない。
-2. `zero_delete_honored` — dirty / detached / unmerged / unverifiable を一切消していない。
-3. `proof_sufficient` — `removed` の各要素が direct または4条件完備の merged_equivalent 証跡を持つ。
-4. `guarded_delete_used` — merged_equivalent の削除が expected-old-OID 付き delete で、force/`-D` を使っていない。
-5. `drift_rechecked` — apply の各削除前に plan 後 drift を再検査した。
-6. `no_sensitive_values` — result / summary に token/secret/絶対path/raw GitHub response が無い。
+result を返す前に `completion_check` の6件を自分で実行して記録する。6件の id と、
+それぞれが何を確かめるかは
+[`references/result-contract.md`](./references/result-contract.md) §2.6 が正本である。
+1つでも偽なら `status` は `success` にならない。
 
 ## 9. 参照
 
 - [`references/proof-algorithm.md`](./references/proof-algorithm.md) — direct / merged-equivalent / unverifiable の判定と drift 再検査
-- [`references/safety.md`](./references/safety.md) — 禁止操作、除外、削除方式、guarded ref delete、sync、診断、redaction
-- [`references/result-contract.md`](./references/result-contract.md) — plan / result の各 field と summary の構成
+- [`references/safety.md`](./references/safety.md) — 禁止操作、除外、削除方式、入力の安全性、sync、診断、redaction
+- [`references/result-contract.md`](./references/result-contract.md) — plan / result の各 field、status、completion check、summary の構成
 - [`references/agent-compatibility.md`](./references/agent-compatibility.md) — Agent 差異と fallback
 - [`schemas/cleanup-plan.v1.json`](./schemas/cleanup-plan.v1.json) — plan 文書 schema
 - [`schemas/cleanup-result.v1.json`](./schemas/cleanup-result.v1.json) — result 文書 schema

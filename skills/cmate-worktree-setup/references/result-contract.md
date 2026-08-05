@@ -128,12 +128,19 @@ kind は schema の `redaction_kind` enum に従う。
 
 ### 3.11 `completion_check`
 
-`checks` は6件で、id は次がちょうど1回ずつ現れる。
+`checks` は6件で、id は次がちょうど1回ずつ現れる。各 check が何を確かめるかは次のとおり。
 
-`input_validated` / `plan_confirmed` / `no_implicit_overwrite` /
-`base_reconfirmed` / `baseline_reported` / `no_secret_or_abspath`
+| check id | 何を確かめるか | 規則の正本 |
+|---|---|---|
+| `input_validated` | `issue_numbers` が正の整数のみで、`max_issues` の上限適用が記録されている | 本書 3.1、schema の `request` |
+| `plan_confirmed` | 作成前に plan を提示し、確認を得た（または未作成で終わった） | 本書 3.4 |
+| `no_implicit_overwrite` | 既存 branch / directory / worktree を暗黙に上書き・reset・reuse していない | [safety.md](./safety.md) 第2節 |
+| `base_reconfirmed` | 作成した worktree の base SHA を作成直前に再確認した | [safety.md](./safety.md) 第3節、本書 3.5 |
+| `baseline_reported` | baseline の結果を丸めず、失敗時は worktree を保持した | [safety.md](./safety.md) 第5節、本書 3.6 |
+| `no_secret_or_abspath` | result / summary に token・secret・絶対path が無い | [safety.md](./safety.md) 第6節、本書 3.9 |
 
 `passed` は6件すべて true のときだけ true。false の check には理由を `detail` に書く。
+**1件でも false なら status を `success` にしてはならない**（第2節）。
 
 ## 4. `summary_markdown`
 
