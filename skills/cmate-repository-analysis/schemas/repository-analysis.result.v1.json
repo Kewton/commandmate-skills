@@ -1,35 +1,28 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-repository-analysis/schemas/repository-analysis.result.v1.json",
-  "title": "cmate-repository-analysis result v1",
-  "description": "Structured result returned by the cmate-repository-analysis Skill. Closed schema: an unknown field is a contract violation, not something a reader may ignore.",
+  "title": "cmate-repository-analysis result v1 (advisory)",
+  "description": "Optional structured by-product of the cmate-repository-analysis Skill. Advisory schema: the deliverable is `summary_markdown` plus the evidence discipline, and nothing in this repository — no other Skill, no CI job, no runner — reads this document field by field, so an unknown field is tolerated rather than treated as a contract violation. Two shapes stay closed on purpose, because an extra key there is exactly how a secret value or a quoted source line would leave the analysed repository: `sensitive_locations` items and `evidence`.",
   "type": "object",
-  "additionalProperties": false,
   "required": [
     "result_schema_version",
     "skill_id",
     "skill_version",
     "status",
-    "request",
     "scope",
-    "repository_profile",
-    "findings",
-    "reuse_candidates",
-    "risks",
-    "recommended_verification",
-    "sensitive_locations",
-    "unresolved",
-    "completion_check",
     "summary_markdown"
   ],
   "properties": {
     "result_schema_version": { "const": 1 },
     "skill_id": { "const": "cmate-repository-analysis" },
     "skill_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
-    "status": { "enum": ["success", "partial", "failure"] },
+    "status": {
+      "description": "Closed on purpose: the three values are what keeps a partial analysis from being read as a complete one, and the grader branches on them.",
+      "enum": ["success", "partial", "failure"]
+    },
     "request": {
       "type": "object",
-      "additionalProperties": false,
+      "description": "Echo of the caller's own input. Optional: no receiver needs it back, and a reader who has `summary_markdown` already knows what was asked.",
       "required": ["objective", "roots", "focus"],
       "properties": {
         "objective": { "type": "string", "minLength": 1 },
@@ -39,7 +32,7 @@
     },
     "scope": {
       "type": "object",
-      "additionalProperties": false,
+      "description": "How much of the repository was actually covered. Required even under an advisory schema: declaring the budget and the truncation is one of the disciplines this Skill exists for.",
       "required": ["files_listed", "files_read", "bytes_read", "excluded", "truncated"],
       "properties": {
         "files_listed": { "type": "integer", "minimum": 0 },
@@ -49,10 +42,10 @@
           "type": "array",
           "items": {
             "type": "object",
-            "additionalProperties": false,
             "required": ["rule", "count"],
             "properties": {
               "rule": {
+                "description": "Closed on purpose: the grader compares these tokens between runs, and an invented seventh name makes the exclusion counts incomparable.",
                 "enum": [
                   "excluded_directory",
                   "binary_file",
@@ -71,7 +64,6 @@
     },
     "repository_profile": {
       "type": "object",
-      "additionalProperties": false,
       "required": ["primary_languages", "project_kinds", "entry_points", "conventions"],
       "properties": {
         "primary_languages": { "type": "array", "items": { "type": "string", "minLength": 1 } },
@@ -84,12 +76,14 @@
       "type": "array",
       "items": {
         "type": "object",
-        "additionalProperties": false,
         "required": ["id", "category", "statement", "confidence", "evidence"],
         "properties": {
           "id": { "$ref": "#/$defs/item_id" },
           "category": {
-            "enum": [
+            "type": "string",
+            "minLength": 1,
+            "description": "Taxonomy for a human reader; nothing machine-reads it. Prefer the vocabulary below and extend it when none of the six fits.",
+            "examples": [
               "structure",
               "convention",
               "existing_implementation",
@@ -108,12 +102,16 @@
       "type": "array",
       "items": {
         "type": "object",
-        "additionalProperties": false,
         "required": ["id", "statement", "reuse_mode", "confidence", "evidence"],
         "properties": {
           "id": { "$ref": "#/$defs/item_id" },
           "statement": { "type": "string", "minLength": 1 },
-          "reuse_mode": { "enum": ["as_is", "extend", "reference"] },
+          "reuse_mode": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Taxonomy for a human reader; nothing machine-reads it.",
+            "examples": ["as_is", "extend", "reference"]
+          },
           "confidence": { "$ref": "#/$defs/confidence" },
           "evidence": { "$ref": "#/$defs/evidence_list" }
         }
@@ -123,12 +121,16 @@
       "type": "array",
       "items": {
         "type": "object",
-        "additionalProperties": false,
         "required": ["id", "statement", "severity", "confidence", "mitigation", "evidence"],
         "properties": {
           "id": { "$ref": "#/$defs/item_id" },
           "statement": { "type": "string", "minLength": 1 },
-          "severity": { "enum": ["low", "moderate", "high"] },
+          "severity": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Ranking for a human reader; nothing machine-reads it and nothing sorts or thresholds on it.",
+            "examples": ["low", "moderate", "high"]
+          },
           "confidence": { "$ref": "#/$defs/confidence" },
           "mitigation": { "type": "string", "minLength": 1 },
           "evidence": { "$ref": "#/$defs/evidence_list" }
@@ -139,7 +141,6 @@
       "type": "array",
       "items": {
         "type": "object",
-        "additionalProperties": false,
         "required": ["id", "command", "purpose", "evidence"],
         "properties": {
           "id": { "$ref": "#/$defs/item_id" },
@@ -153,12 +154,14 @@
       "type": "array",
       "items": {
         "type": "object",
+        "description": "Closed on purpose. Every additional key here is a channel for the value this Skill promised not to carry, so an unknown field is a leak, not an extension.",
         "additionalProperties": false,
         "required": ["path", "line", "classification"],
         "properties": {
           "path": { "$ref": "#/$defs/repo_path" },
           "line": { "type": "integer", "minimum": 1 },
           "classification": {
+            "description": "Closed on purpose, for the same reason as the surrounding object: a free-text classification is somewhere the value itself can be written.",
             "enum": [
               "env_file",
               "credential_assignment",
@@ -175,10 +178,10 @@
       "type": "array",
       "items": {
         "type": "object",
-        "additionalProperties": false,
         "required": ["reason_code", "detail"],
         "properties": {
           "reason_code": {
+            "description": "Closed on purpose: the grader compares these tokens, and the difference between `no_evidence_found` and `out_of_scope` is the difference between looking and not looking.",
             "enum": [
               "ambiguous_objective",
               "invalid_root",
@@ -196,7 +199,7 @@
     },
     "completion_check": {
       "type": "object",
-      "additionalProperties": false,
+      "description": "Self-declared result of the five discipline checks. Optional as a field; when present it must not contradict itself, which is what the grader enforces.",
       "required": ["passed", "checks"],
       "properties": {
         "passed": { "type": "boolean" },
@@ -206,10 +209,10 @@
           "maxItems": 5,
           "items": {
             "type": "object",
-            "additionalProperties": false,
             "required": ["id", "passed", "detail"],
             "properties": {
               "id": {
+                "description": "Closed on purpose: these five ids are the discipline itself, and the grader requires each exactly once.",
                 "enum": [
                   "evidence_present",
                   "evidence_resolvable",
@@ -225,11 +228,20 @@
         }
       }
     },
-    "summary_markdown": { "type": "string", "minLength": 1 }
+    "summary_markdown": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The deliverable. Everything else in this document is a by-product."
+    }
   },
   "$defs": {
     "item_id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$" },
-    "confidence": { "enum": ["high", "medium", "low"] },
+    "confidence": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Hedge for a human reader; nothing machine-reads it.",
+      "examples": ["high", "medium", "low"]
+    },
     "repo_path": {
       "type": "string",
       "minLength": 1,
@@ -238,6 +250,7 @@
     },
     "evidence": {
       "type": "object",
+      "description": "Closed on purpose. A path and a line range carry no source text; an extra key — `snippet`, `excerpt`, `context` — is how a secret-bearing line would end up quoted in the result.",
       "additionalProperties": false,
       "required": ["path", "line_start", "line_end"],
       "properties": {
@@ -253,7 +266,6 @@
     },
     "observation": {
       "type": "object",
-      "additionalProperties": false,
       "required": ["statement", "evidence"],
       "properties": {
         "statement": { "type": "string", "minLength": 1 },

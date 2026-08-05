@@ -12,23 +12,30 @@
 # them, so `wait --verify` could return 0 on a change that broke every planner
 # case (#49-#52 are four such changes).
 #
-# verify-advisor-fixtures was the last suite still outside (Issue #69): the
-# parser-parity check #57 added — the awk parser in cmate-verify and the JS
-# parser in cmate-verify-advisor must accept the same options keys — existed in
-# the repository but was never executed by anything. A test nobody runs is not a
-# gate; every gate in this repository is now wired here and in validate.yml.
+# verify-advisor-fixtures was wired by Issue #69: the parser-parity check #57
+# added — the awk parser in cmate-verify and the JS parser in
+# cmate-verify-advisor must accept the same options keys — existed in the
+# repository but was never executed by anything.
+#
+# It was not the last one, though. Issue #70 found the same defect class again:
+# tests/fixtures/cmate-repository-analysis/check_result.py and its samples had
+# been in the repository since 0.1.0 and appeared in neither this file nor
+# validate.yml, so the grader that is supposed to reject a result leaking a
+# secret value had never run in CI. repository-analysis-fixtures closes it. A
+# test nobody runs is not a gate.
 #
 # Timeouts are the measured wall clock on the development machine (warm cache)
 # with generous headroom for a cold CI runner:
-#   validate                  0.25s   (2026-08-01)
-#   validate-fixtures         0.13s   (2026-08-01)
-#   selftest                  0.86s   (2026-08-01)
-#   monitor-fixtures         18.5s    (2026-08-01)
-#   verify-selftest           4.9s    (2026-08-05)
-#   bash-syntax              <0.1s    (2026-08-01)
-#   orchestrate-fixtures     54s      (2026-08-05)
-#   issue-authoring-fixtures  2s      (2026-08-05)
-#   verify-advisor-fixtures   2.3s    (2026-08-05)
+#   validate                       0.25s   (2026-08-01)
+#   validate-fixtures              0.13s   (2026-08-01)
+#   selftest                       0.86s   (2026-08-01)
+#   monitor-fixtures              18.5s    (2026-08-01)
+#   verify-selftest                4.9s    (2026-08-05)
+#   bash-syntax                   <0.1s    (2026-08-01)
+#   orchestrate-fixtures          54s      (2026-08-05)
+#   issue-authoring-fixtures       2s      (2026-08-05)
+#   verify-advisor-fixtures        2.3s    (2026-08-05)
+#   repository-analysis-fixtures   0.3s    (2026-08-05)
 #
 # The runner reads a YAML subset: 2-space indent, single-line scalars, no inline
 # comments. Keep it that way — a file it cannot parse is exit 2, not a partial run.
@@ -60,6 +67,9 @@ gates:
     timeoutSec: 300
   - id: verify-advisor-fixtures
     command: "bash tests/fixtures/cmate-verify-advisor/run_tests.sh"
+    timeoutSec: 300
+  - id: repository-analysis-fixtures
+    command: "python3 tests/fixtures/cmate-repository-analysis/check_result.py --selftest"
     timeoutSec: 300
 options:
   baseRef: origin/main

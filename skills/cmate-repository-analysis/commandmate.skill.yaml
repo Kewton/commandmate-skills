@@ -1,15 +1,16 @@
 schema_version: 1
 id: cmate-repository-analysis
 name: cmate-repository-analysis
-version: 0.1.2
+version: 0.2.0
 summary: リポジトリをread-onlyで走査し、構造・既存実装・再利用候補・変更risk・推奨verificationをfile/line evidence付きで返す。
 description: >-
   変更に着手する前の現状把握を、再現可能な標準手順にしたものである。対象リポジトリを
   read-only で走査し、構成と規約、目的に関係する既存実装、再利用できる資産、変更した
   ときに壊れうる箇所、そしてリポジトリに実在する検証手段を、すべて file と行番号の
-  evidence に結び付けて返す。secret らしき値は位置と分類だけを報告し、値は result にも
-  要約にも含めない。結果は versioned な result schema に適合し、5つの completion check
-  の合否を自身で申告するので、どこまで確かめた分析なのかを受け取った側が検証できる。
+  evidence に結び付けて返す。secret らしき値は位置と分類だけを報告し、値は要約にも
+  result にも含めない。主成果物は人が読む要約で、5つの evidence 規律の check の合否を
+  自身で申告するので、どこまで確かめた分析なのかを受け取った側が検証できる。構造化した
+  result JSON は任意の副産物であり、その schema は advisory である。
   書き込み、command 実行、network access のいずれも行わない。
 capabilities:
   - 対象リポジトリの構成・言語・entry point・build と CI 経路を evidence 付きで把握する
@@ -22,7 +23,7 @@ expected_outcomes:
   - 実装に着手する前に、影響範囲と再利用候補が file と行番号で確認できる
   - 推奨された検証手段が実在するので、そのまま実行して変更を確かめられる
   - 走査の打ち切りや未解決点が明示されるので、分析の網羅性を鵜呑みにせず判断できる
-  - 分析結果が schema 適合の構造化データなので、後続の手順や自動処理へそのまま渡せる
+  - evidence の path と行が実在するかを機械で検査できるので、報告の妥当性を読み合わせに頼らず確かめられる
 provider:
   name: CommandMate
   url: https://github.com/Kewton/CommandMate
@@ -62,20 +63,20 @@ risk_rationale: >-
   環境変数や credential の読み取りは手順として禁止している。
 files:
   - path: SKILL.md
-    sha256: 6546d0dbc8506b977c0b4a901029dad14297076d37c24329562dcf28ebdb18ef
-    size: 9567
+    sha256: 7ef1b2125efb995991ef01814673e2c2dd421ff380ca0717a7395063300c1571
+    size: 10880
     kind: skill_md
     executable: false
     script: false
   - path: references/agent-compatibility.md
-    sha256: 44d2f1f96d198f1fc8e8ad0974b9301bf617ba6badd3971c977d7fb76fb6894a
-    size: 3667
+    sha256: c6ccf937076684154e4a3b53f893a516e5e62f716625182931f9d9992b96d25e
+    size: 3994
     kind: instruction
     executable: false
     script: false
   - path: references/result-contract.md
-    sha256: 80d49e1ae5cec1b8792620d002c86cd3b54f497135da9206d5d00e9fa356765e
-    size: 8616
+    sha256: 9680f6ceed54bff71d013738564608bff7dd09082bbbb2ebca2d216e2e97b342
+    size: 13933
     kind: instruction
     executable: false
     script: false
@@ -86,8 +87,8 @@ files:
     executable: false
     script: false
   - path: schemas/repository-analysis.result.v1.json
-    sha256: 996d7a4028b2ce5d16cedeb421877cf5575482c90060ed9953e2872a22d8b219
-    size: 9040
+    sha256: 46caf80104164c6ddaaf82b9c20bcc6c8df5a0c23c0e337ac0f69a2c4bd0a24b
+    size: 11352
     kind: asset
     executable: false
     script: false

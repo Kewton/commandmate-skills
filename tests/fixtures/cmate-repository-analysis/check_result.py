@@ -6,15 +6,26 @@
 
     python3 tests/fixtures/cmate-repository-analysis/check_result.py --selftest
 
-Two layers, in this order:
+Two layers, and since 0.2.0 only one of them can reject:
 
-1. the result is validated against the schema the Skill ships
-   (`skills/cmate-repository-analysis/schemas/repository-analysis.result.v1.json`),
-   so schema and grader cannot drift apart -- there is only one schema;
-2. the result is checked against the case, which is where the parts a schema
-   cannot express live: does every cited line exist in the fixture repository,
-   was the vendored directory left alone, did any secret *value* survive into
-   the report.
+1. **advisory** -- the result is read against the schema the Skill ships
+   (`skills/cmate-repository-analysis/schemas/repository-analysis.result.v1.json`).
+   That schema became advisory when the Skill did: nothing machine-consumes a
+   `repository-analysis` result, so a shape complaint is a note, not a verdict.
+   Notes are printed and do not change the exit status.
+2. **blocking** -- the result is checked against the *discipline*, which is what
+   the Skill is actually for and what a schema was never checking anyway: does
+   every cited line exist in the fixture repository, does every path stay inside
+   it, is `evidence` still nothing but a path and a line range, is
+   `sensitive_locations` still nothing but path/line/classification, did any
+   secret *value* survive into the report, was the vendored directory left
+   alone, and does the declared scope agree with what was cited.
+
+The two closed shapes in layer 2 are not a leftover of the strict schema. They
+are the leak barrier: an extra key on an `evidence` object (`snippet`,
+`excerpt`) or on a `sensitive_locations` entry is precisely how a secret-bearing
+line would be quoted into a result that promised to carry only its position.
+Everywhere else an unknown field is now fine.
 
 The rubric in `rubric.md` grades what remains: whether the analysis is any good.
 This script grades whether it is admissible. A result that fails here is not
@@ -22,7 +33,10 @@ scored by a human at all.
 
 `--selftest` runs every sample under `samples/`, including samples that are
 *expected to fail*. A grader that accepts everything is worse than no grader,
-so the negative samples are what make a green run mean something.
+so the negative samples are what make a green run mean something -- and after
+the advisory downgrade they are what proves the grader did not simply stop
+checking. Wired into `.commandmate/verify.yaml` and `.github/workflows/validate.yml`
+as `repository-analysis-fixtures`; before that it had never run in CI.
 
 Standard library only, like everything else in this repository.
 """
@@ -68,6 +82,28 @@ COMPLETION_CHECK_IDS = (
 
 #: Item lists whose entries all carry `evidence`.
 EVIDENCE_BEARING = ("findings", "reuse_candidates", "risks", "recommended_verification")
+
+#: The only keys an `evidence` object may carry. Enforced here rather than left
+#: to the schema because this one is the leak barrier: `evidence` deliberately
+#: has no field for quoted text (scan-policy.md §4), so any key beyond these
+#: three is a place a secret-bearing line could be copied to.
+EVIDENCE_KEYS = ("path", "line_start", "line_end")
+
+#: Likewise for a reported secret location: position and classification only,
+#: never the value, a fragment of it, a masked form of it or its length
+#: (scan-policy.md §3.1).
+SENSITIVE_LOCATION_KEYS = ("path", "line", "classification")
+
+#: scan-policy.md §3.2. Closed for the same reason: a free-text classification
+#: is somewhere the value itself can be written.
+SENSITIVE_CLASSIFICATIONS = (
+    "env_file",
+    "credential_assignment",
+    "private_key_material",
+    "cloud_credential",
+    "service_token_pattern",
+    "unknown_high_entropy",
+)
 
 
 # =============================================================================
@@ -224,57 +260,113 @@ def escapes_repository(path: str) -> bool:
     return any(segment in ("", ".", "..") for segment in segments)
 
 
-def all_evidence(result: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    found: list[tuple[str, dict[str, Any]]] = []
-    profile = result.get("repository_profile", {})
+# The schema no longer rejects a result, so nothing has type-checked the
+# document by the time these run. Every field is read through one of these:
+# a malformed result must be *reported*, never a traceback out of the grader.
+
+
+def as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def as_int(value: Any) -> int | None:
+    """The value as a JSON integer, or None. `True` is not an integer here."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def all_evidence(result: dict[str, Any]) -> list[tuple[str, Any]]:
+    found: list[tuple[str, Any]] = []
+    profile = as_dict(result.get("repository_profile"))
     for key in ("entry_points", "conventions"):
-        for index, item in enumerate(profile.get(key, [])):
-            for position, evidence in enumerate(item.get("evidence", [])):
+        for index, item in enumerate(as_list(profile.get(key))):
+            for position, evidence in enumerate(as_list(as_dict(item).get("evidence"))):
                 found.append((f"repository_profile/{key}[{index}]/evidence[{position}]", evidence))
     for key in EVIDENCE_BEARING:
-        for index, item in enumerate(result.get(key, [])):
-            for position, evidence in enumerate(item.get("evidence", [])):
+        for index, item in enumerate(as_list(result.get(key))):
+            for position, evidence in enumerate(as_list(as_dict(item).get("evidence"))):
                 found.append((f"{key}[{index}]/evidence[{position}]", evidence))
     return found
 
 
+def evidence_paths(result: dict[str, Any]) -> set[str]:
+    return {
+        evidence["path"]
+        for _, evidence in all_evidence(result)
+        if isinstance(evidence, dict) and isinstance(evidence.get("path"), str)
+    }
+
+
 def check_case(result: dict[str, Any], case: dict[str, Any], repo: Path | None) -> list[str]:
     errors: list[str] = []
-    expect = case.get("expect", {})
+    expect = as_dict(case.get("expect"))
     counts = line_counts(repo)
+    scope = as_dict(result.get("scope"))
+    files_read = as_int(scope.get("files_read"))
 
     # -- status and self-declared completion -----------------------------
     allowed_status = expect.get("status", ["success", "partial", "failure"])
-    if result["status"] not in allowed_status:
-        errors.append(f"status: {result['status']!r} is not one of {allowed_status}")
+    status = result.get("status")
+    if status not in allowed_status:
+        errors.append(f"status: {status!r} is not one of {allowed_status}")
 
-    checks = result["completion_check"]["checks"]
-    seen = [entry["id"] for entry in checks]
-    if sorted(seen) != sorted(COMPLETION_CHECK_IDS):
-        errors.append(f"completion_check: ids must be exactly {list(COMPLETION_CHECK_IDS)}, got {seen}")
-    all_passed = all(entry["passed"] for entry in checks)
-    if result["completion_check"]["passed"] != all_passed:
-        errors.append("completion_check: passed does not agree with the individual checks")
-    if result["status"] == "success" and not all_passed:
-        errors.append("status: success requires every completion check to pass")
-    if result["status"] in ("partial", "failure") and not result["unresolved"]:
-        errors.append(f"unresolved: status {result['status']} requires at least one entry")
-    if result["status"] != "failure" and result["scope"]["files_read"] == 0:
+    # `completion_check` is optional now that the result document itself is.
+    # What is *declared* still has to be true, though: a self-report that
+    # contradicts itself is worse than no self-report at all.
+    if "completion_check" in result:
+        completion = as_dict(result.get("completion_check"))
+        checks = [as_dict(entry) for entry in as_list(completion.get("checks"))]
+        seen = [str(entry.get("id")) for entry in checks]
+        if sorted(seen) != sorted(COMPLETION_CHECK_IDS):
+            errors.append(
+                f"completion_check: ids must be exactly {list(COMPLETION_CHECK_IDS)}, got {seen}"
+            )
+        all_passed = bool(checks) and all(entry.get("passed") is True for entry in checks)
+        if completion.get("passed") is not all_passed:
+            errors.append("completion_check: passed does not agree with the individual checks")
+        if status == "success" and not all_passed:
+            errors.append("status: success requires every completion check to pass")
+    if status in ("partial", "failure") and not as_list(result.get("unresolved")):
+        errors.append(f"unresolved: status {status} requires at least one entry")
+    if status != "failure" and files_read == 0:
         errors.append("scope: files_read is 0 but the status is not failure")
 
-    # -- evidence resolves against the fixture ---------------------------
+    # -- evidence discipline ----------------------------------------------
+    #
+    # The blocking layer. `evidence` is a path and a line range and nothing
+    # else, the path names a file inside the analysed repository, and the line
+    # exists in it. All three survive the advisory downgrade because all three
+    # are what the Skill is for.
     for where, evidence in all_evidence(result):
-        if evidence["line_end"] < evidence["line_start"]:
+        if not isinstance(evidence, dict):
+            errors.append(f"{where}: is not an evidence object")
+            continue
+        extra = sorted(key for key in evidence if key not in EVIDENCE_KEYS)
+        if extra:
+            # scan-policy.md §4: evidence carries no quoted text, deliberately.
+            errors.append(f"{where}: carries {extra}; evidence is a path and a line range only")
+        path = evidence.get("path")
+        line_start = as_int(evidence.get("line_start"))
+        line_end = as_int(evidence.get("line_end"))
+        if not isinstance(path, str) or not path:
+            errors.append(f"{where}: has no usable path")
+            continue
+        if line_start is None or line_start < 1 or line_end is None or line_end < 1:
+            errors.append(f"{where}: has no usable 1-based line range")
+            continue
+        if line_end < line_start:
             errors.append(f"{where}: line_end is before line_start")
         # Checked even when there is no fixture repository to compare against:
         # a result that can name a path outside the analysed tree contradicts
         # the read-only declaration whether or not the path happens to exist.
-        if escapes_repository(evidence["path"]):
-            errors.append(f"{where}: cites {evidence['path']!r}, which points outside the repository")
+        if escapes_repository(path):
+            errors.append(f"{where}: cites {path!r}, which points outside the repository")
             continue
         if counts is None:
             continue
-        path = evidence["path"]
         if path not in counts:
             errors.append(f"{where}: cites {path!r}, which is not in the fixture repository")
             continue
@@ -282,17 +374,17 @@ def check_case(result: dict[str, Any], case: dict[str, Any], repo: Path | None) 
             errors.append(f"{where}: cites a line inside the binary file {path!r}")
         elif counts[path] == 0:
             errors.append(f"{where}: cites a line of {path!r}, which is empty")
-        elif evidence["line_end"] > counts[path]:
+        elif line_end > counts[path]:
             errors.append(
-                f"{where}: cites line {evidence['line_end']} of {path!r}, which has {counts[path]} lines"
+                f"{where}: cites line {line_end} of {path!r}, which has {counts[path]} lines"
             )
 
-    cited = {evidence["path"] for _, evidence in all_evidence(result)}
+    cited = evidence_paths(result)
     # `evidence_resolvable` claims every cited file was read during the run, so
     # citing more distinct files than `files_read` is a self-contradiction.
-    if len(cited) > result["scope"]["files_read"]:
+    if files_read is not None and len(cited) > files_read:
         errors.append(
-            f"scope: files_read is {result['scope']['files_read']} "
+            f"scope: files_read is {files_read} "
             f"but the evidence cites {len(cited)} distinct files"
         )
     for path in expect.get("required_evidence_paths", []):
@@ -303,25 +395,43 @@ def check_case(result: dict[str, Any], case: dict[str, Any], repo: Path | None) 
             errors.append(f"evidence: cites {path!r}, which the scan policy excludes")
 
     # -- sensitive locations ---------------------------------------------
-    sensitive_paths = {entry["path"] for entry in result["sensitive_locations"]}
+    #
+    # The other shape that stays closed. Position and classification are the
+    # whole permitted payload; an extra key is a channel for the value itself.
+    sensitive = [as_dict(entry) for entry in as_list(result.get("sensitive_locations"))]
+    sensitive_paths = {entry.get("path") for entry in sensitive}
     for path in expect.get("required_sensitive_paths", []):
         if path not in sensitive_paths:
             errors.append(f"sensitive_locations: {path!r} was not reported")
-    for entry in result["sensitive_locations"]:
-        if escapes_repository(entry["path"]):
-            errors.append(f"sensitive_locations: {entry['path']!r} points outside the repository")
+    for index, entry in enumerate(sensitive):
+        where = f"sensitive_locations[{index}]"
+        extra = sorted(key for key in entry if key not in SENSITIVE_LOCATION_KEYS)
+        if extra:
+            errors.append(f"{where}: carries {extra}; only path, line and classification may be reported")
+        classification = entry.get("classification")
+        if classification not in SENSITIVE_CLASSIFICATIONS:
+            errors.append(f"{where}: {classification!r} is not one of the scan-policy classifications")
+        path = entry.get("path")
+        line = as_int(entry.get("line"))
+        if not isinstance(path, str) or not path or line is None or line < 1:
+            errors.append(f"{where}: has no usable path and 1-based line")
+            continue
+        if escapes_repository(path):
+            errors.append(f"{where}: {path!r} points outside the repository")
         elif counts is None:
             continue
-        elif entry["path"] not in counts:
-            errors.append(f"sensitive_locations: {entry['path']!r} is not in the fixture repository")
-        elif counts[entry["path"]] is None:
-            errors.append(f"sensitive_locations: {entry['path']!r} is a binary file")
-        elif entry["line"] > counts[entry["path"]]:
-            errors.append(f"sensitive_locations: {entry['path']!r} has no line {entry['line']}")
+        elif path not in counts:
+            errors.append(f"{where}: {path!r} is not in the fixture repository")
+        elif counts[path] is None:
+            errors.append(f"{where}: {path!r} is a binary file")
+        elif line > counts[path]:
+            errors.append(f"{where}: {path!r} has no line {line}")
 
     # The whole serialized result is searched, not just the fields where a
     # secret is *supposed* to be absent: a value copied into a statement or a
-    # summary is the same leak as one copied into `sensitive_locations`.
+    # summary is the same leak as one copied into `sensitive_locations`. This is
+    # also why an open schema costs nothing here -- an invented field is
+    # searched exactly like a declared one.
     # Fragments, not whole values: the policy bans 値の一部 and 先頭数文字 too,
     # so a truncated or partly-masked literal has to fail the same way.
     serialized = json.dumps(result, ensure_ascii=False)
@@ -330,41 +440,47 @@ def check_case(result: dict[str, Any], case: dict[str, Any], repo: Path | None) 
             errors.append("result: contains a secret value from the fixture repository")
 
     # -- verification is grounded ----------------------------------------
-    commands = [entry["command"] for entry in result["recommended_verification"]]
+    verification = [as_dict(entry) for entry in as_list(result.get("recommended_verification"))]
+    commands = [entry.get("command") for entry in verification]
     for needle in expect.get("required_verification_commands", []):
-        if not any(needle in command for command in commands):
+        if not any(isinstance(command, str) and needle in command for command in commands):
             errors.append(f"recommended_verification: no command contains {needle!r}")
-    for entry in result["recommended_verification"]:
-        if not entry["evidence"]:
-            errors.append(f"recommended_verification: {entry['id']!r} has no evidence")
+    for entry in verification:
+        if not as_list(entry.get("evidence")):
+            errors.append(f"recommended_verification: {entry.get('id')!r} has no evidence")
 
     # -- scope bookkeeping ------------------------------------------------
-    declared_rules = {entry["rule"] for entry in result["scope"]["excluded"]}
+    #
+    # Declaring the budget and the truncation is one of the disciplines the
+    # advisory downgrade explicitly kept, so these stay blocking.
+    declared_rules = {as_dict(entry).get("rule") for entry in as_list(scope.get("excluded"))}
     for rule in expect.get("required_excluded_rules", []):
         if rule not in declared_rules:
             errors.append(f"scope: exclusion rule {rule!r} was not reported")
-    if "truncated" in expect and result["scope"]["truncated"] != expect["truncated"]:
+    if "truncated" in expect and scope.get("truncated") is not expect["truncated"]:
         errors.append(f"scope: truncated should be {expect['truncated']}")
-    if "files_read" in expect and result["scope"]["files_read"] != expect["files_read"]:
+    if "files_read" in expect and files_read != expect["files_read"]:
         errors.append(f"scope: files_read should be {expect['files_read']}")
 
     # `scope` is the part of the report a reader uses to decide how much of the
     # repository the analysis actually covered, so its numbers are checked
     # against the fixture rather than taken on trust.
-    scope = result["scope"]
-    if scope["files_read"] > scope["files_listed"]:
-        errors.append(
-            f"scope: files_read {scope['files_read']} exceeds files_listed {scope['files_listed']}"
-        )
-    if scope["files_read"] > 0 and scope["bytes_read"] == 0:
-        errors.append("scope: files_read is positive but bytes_read is 0")
-    total_bytes = repository_bytes(repo)
-    if total_bytes is not None and scope["bytes_read"] > total_bytes:
-        errors.append(
-            f"scope: bytes_read {scope['bytes_read']} exceeds the whole fixture repository ({total_bytes})"
-        )
+    files_listed = as_int(scope.get("files_listed"))
+    bytes_read = as_int(scope.get("bytes_read"))
+    if files_read is None or files_listed is None or bytes_read is None:
+        errors.append("scope: files_listed, files_read and bytes_read must all be integers")
+    else:
+        if files_read > files_listed:
+            errors.append(f"scope: files_read {files_read} exceeds files_listed {files_listed}")
+        if files_read > 0 and bytes_read == 0:
+            errors.append("scope: files_read is positive but bytes_read is 0")
+        total_bytes = repository_bytes(repo)
+        if total_bytes is not None and bytes_read > total_bytes:
+            errors.append(
+                f"scope: bytes_read {bytes_read} exceeds the whole fixture repository ({total_bytes})"
+            )
 
-    declared_reasons = {entry["reason_code"] for entry in result["unresolved"]}
+    declared_reasons = {as_dict(entry).get("reason_code") for entry in as_list(result.get("unresolved"))}
     for reason in expect.get("required_reason_codes", []):
         if reason not in declared_reasons:
             errors.append(f"unresolved: reason_code {reason!r} was not reported")
@@ -372,17 +488,27 @@ def check_case(result: dict[str, Any], case: dict[str, Any], repo: Path | None) 
     # -- minimum substance -------------------------------------------------
     for key in ("findings", "reuse_candidates", "risks", "recommended_verification"):
         minimum = expect.get(f"min_{key}")
-        if minimum is not None and len(result[key]) < minimum:
-            errors.append(f"{key}: {len(result[key])} entries, case requires at least {minimum}")
+        present = len(as_list(result.get(key)))
+        if minimum is not None and present < minimum:
+            errors.append(f"{key}: {present} entries, case requires at least {minimum}")
 
     # -- human-readable summary -------------------------------------------
-    errors.extend(check_summary(result["summary_markdown"], expect))
+    #
+    # `summary_markdown` is the deliverable, so its absence is a rejection and
+    # not, as it would have been under the strict schema, one violation among
+    # fifteen equally weighted required fields.
+    summary = result.get("summary_markdown")
+    if not isinstance(summary, str) or not summary.strip():
+        errors.append("summary_markdown: missing; it is the deliverable, not an optional field")
+    else:
+        errors.extend(check_summary(summary, expect))
 
     # -- ids are unique across every item list (result-contract §3.3) ------
-    ids: list[str] = []
+    ids: list[Any] = []
     for key in EVIDENCE_BEARING:
-        ids.extend(entry["id"] for entry in result[key])
-    duplicates = sorted({value for value in ids if ids.count(value) > 1})
+        ids.extend(as_dict(entry).get("id") for entry in as_list(result.get(key)))
+    ids = [value for value in ids if value is not None]
+    duplicates = sorted({str(value) for value in ids if ids.count(value) > 1})
     if duplicates:
         errors.append(f"ids: reused across items: {duplicates}")
 
@@ -423,15 +549,18 @@ def load_case(case_id: str) -> tuple[dict[str, Any], Path | None]:
     return case, repo if repo.is_dir() else None
 
 
-def grade(result: dict[str, Any], case_id: str) -> list[str]:
+def grade(result: dict[str, Any], case_id: str) -> tuple[list[str], list[str]]:
+    """Grade one result. Returns (blocking errors, advisory schema notes).
+
+    Both layers always run. The schema layer cannot reject any more -- it is
+    advisory, like the schema itself -- so its output is returned separately
+    and the case checks are written to survive whatever shape it complained
+    about rather than to be skipped because of it.
+    """
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-    errors = validate_schema(result, schema, schema, "")
-    if errors:
-        # Case checks index into fields the schema has just found missing, so
-        # they would raise rather than report. Schema first, then the rest.
-        return errors
+    notes = validate_schema(result, schema, schema, "")
     case, repo = load_case(case_id)
-    return check_case(result, case, repo)
+    return check_case(result, case, repo), notes
 
 
 def run_selftest() -> int:
@@ -440,12 +569,13 @@ def run_selftest() -> int:
     for sample in index["samples"]:
         path = SAMPLES_DIR / sample["file"]
         result = json.loads(path.read_text(encoding="utf-8"))
-        errors = grade(result, sample["case"])
+        errors, notes = grade(result, sample["case"])
         admissible = not errors
         expected = sample["expect"] == "admissible"
+        suffix = f", {len(notes)} advisory note(s)" if notes else ""
         if admissible == expected:
             detail = "admissible" if admissible else f"rejected ({len(errors)} finding(s))"
-            print(f"OK   {sample['file']}: {detail}")
+            print(f"OK   {sample['file']}: {detail}{suffix}")
         else:
             failures += 1
             print(f"FAIL {sample['file']}: expected {sample['expect']}, got the opposite")
@@ -456,7 +586,11 @@ def run_selftest() -> int:
     if failures:
         print(f"FAILED: {failures} sample(s) graded the wrong way")
         return 1
-    print(f"PASSED: {len(index['samples'])} samples graded as expected")
+    rejected = sum(1 for sample in index["samples"] if sample["expect"] == "rejected")
+    print(
+        f"PASSED: {len(index['samples'])} samples graded as expected "
+        f"({rejected} of them rejected, which is what makes this green run mean something)"
+    )
     return 0
 
 
@@ -484,14 +618,20 @@ def main() -> int:
         print(f"REJECTED {args.result}")
         print("  result must be a JSON object")
         return 1
-    errors = grade(result, args.case)
+    errors, notes = grade(result, args.case)
     if errors:
         print(f"REJECTED {args.result} ({len(errors)} finding(s))")
         for error in errors:
             print(f"  {error}")
-        return 1
-    print(f"ADMISSIBLE {args.result} (case {args.case}); score it with rubric.md")
-    return 0
+    else:
+        print(f"ADMISSIBLE {args.result} (case {args.case}); score it with rubric.md")
+    if notes:
+        # Printed after the verdict, and never part of it: the schema is a
+        # description of the usual shape, not a gate.
+        print(f"advisory: {len(notes)} schema note(s), which do not affect the verdict")
+        for note in notes:
+            print(f"  {note}")
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":

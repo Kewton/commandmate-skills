@@ -49,13 +49,17 @@ evidence は path と行範囲だけなので、本文を捨てても結果は�
 
 ## 5. 出力形式
 
-result object は JSON である。
-Agent が構造化出力の機構を持つ場合はそれを使う。
+主成果物は `summary_markdown` であり、これは常に返す。
+構造化した result JSON は任意である
+（[result-contract.md](./result-contract.md) 第5節）。
+
+result JSON を添える場合、Agent が構造化出力の機構を持つならそれを使う。
 持たない場合は、`summary_markdown` に続けて JSON を単一の code block で出す。
 JSON を複数の block に分割しない。
 
-`summary_markdown` は result object の field であって、
-result object の代わりではない。片方だけを返さないこと。
+JSON を返さないことは欠落ではない。`summary_markdown` を返さないことは欠落である。
+構造化出力の機構が無い Agent で JSON の組み立てに手間取るくらいなら、
+その分を evidence の確認に使うほうがこの Skill の価値に沿う。
 
 ## 6. 検証済みの組み合わせ
 

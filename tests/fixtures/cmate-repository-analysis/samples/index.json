@@ -1,5 +1,5 @@
 {
-  "description": "Samples graded by check_result.py --selftest. The rejected ones are what make a green run meaningful: a grader that accepts everything proves nothing.",
+  "description": "Samples graded by check_result.py --selftest. The rejected ones are what make a green run meaningful: a grader that accepts everything proves nothing. Two samples pin down the 0.2.0 advisory downgrade from both sides: nextjs-app.extra-fields.json must now be accepted (the closed schema used to reject it), and nextjs-app.quoted-evidence.json must still be rejected (the leak barrier the downgrade kept).",
   "samples": [
     {
       "file": "nextjs-app.success.json",
@@ -24,6 +24,12 @@
       "case": "invalid-input",
       "expect": "admissible",
       "reason": "reference failure result that stops before scanning"
+    },
+    {
+      "file": "nextjs-app.extra-fields.json",
+      "case": "nextjs-app",
+      "expect": "admissible",
+      "reason": "carries fields the schema does not declare; under the advisory schema that is a note, not a rejection"
     },
     {
       "file": "nextjs-app.leaked-secret.json",
@@ -54,6 +60,12 @@
       "case": "mixed-monorepo",
       "expect": "rejected",
       "reason": "grounds a finding in vendored code and declares no exclusions"
+    },
+    {
+      "file": "nextjs-app.quoted-evidence.json",
+      "case": "nextjs-app",
+      "expect": "rejected",
+      "reason": "quotes a source line inside an evidence object and reports a value beside a sensitive location; both shapes stay closed because an extra key there is how a secret leaves the repository"
     }
   ]
 }

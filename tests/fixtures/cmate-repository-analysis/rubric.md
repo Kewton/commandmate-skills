@@ -8,8 +8,11 @@
 
 | 何を見るか | どこで見るか |
 |---|---|
-| schema 適合、evidence が実在するか、secret が漏れていないか | `check_result.py`（機械） |
+| evidence が実在するか、走査範囲の申告が数字と合うか、secret が漏れていないか | `check_result.py`（機械） |
 | 分析として役に立つか | この rubric（人、または独立した採点用 Agent） |
+
+schema 適合はどちらにも無い。0.2.0 で advisory へ格下げしたので、
+`check_result.py` は schema 違反を助言として印字するだけで合否を変えない。
 
 ## 1. 採点項目
 
