@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-verify
 name: cmate-verify
-version: 0.3.1
+version: 0.4.0
 summary: 検証ゲートを .commandmate/verify.yaml に宣言し、未着手ガードとプライマリ checkout skip を挟んで worktree で逐次実行し、出力ではなく実 exit code で合否を判定する bash 3.2 互換ランナー。
 description: >-
   「このリポジトリで何が通れば合格か」を `.commandmate/verify.yaml`（形式 v1）に宣言し、
@@ -32,7 +32,6 @@ capabilities:
   - プライマリ checkout ではコマンド系ゲートを実行せず、skipped を passed と区別して返す
   - stdout を 1 ゲート 1 行の機械可読形式に保ち、失敗ログの末尾は stderr へ出す
   - --gates で一部だけ実行し、存在しない id は静かな空実行ではなく設定エラーにする
-  - bash と git だけで動く fixture テスト suite を同梱し、Node の無い環境でも自己検証できる
 expected_outcomes:
   - 「何が通れば合格か」がリポジトリ内の file として宣言され、後から検証・レビューできる
   - 出力が緑でも exit code が非 0 のコマンドが PASS と誤報告されない
@@ -90,194 +89,20 @@ declared_permissions:
   - network_access
 declared_risk: high
 risk_rationale: >-
-  実行 bit 付きの script を 2 本同梱するため computed risk は high であり、moderate 申告は
-  SKILLS_RISK_UNDERSTATED で拒否される。ランナーは対象リポジトリの verify.yaml に宣言された
-  任意コマンドを sh -c で実行するので、実効的な権限はその file の内容に等しい。ゲートは --cwd の
-  worktree 内で走り、既定ではプライマリ checkout で実行しない。runner 自身は network へ接続しない
-  が、典型的なゲート（npm run lint 等）が接続するため network_access を宣言し、host は対象
-  リポジトリ依存なので固定しない。書き込みは mktemp の作業 directory と、確認を得て起案する
+  実行 bit 付きの script（scripts/verify-run.sh）を 1 本同梱するため computed risk は high で、
+  moderate 申告は SKILLS_RISK_UNDERSTATED で拒否される。ランナーは対象リポジトリの verify.yaml に
+  宣言された任意コマンドを sh -c で実行するので、実効的な権限はその file の内容に等しい。ゲートは
+  --cwd の worktree 内で走り、既定ではプライマリ checkout で実行しない。runner 自身は network へ
+  接続しないが、典型的なゲート（npm run lint 等）が接続するため network_access を宣言し、host は
+  対象リポジトリ依存なので固定しない。書き込みは mktemp の作業 directory と、確認を得て起案する
   verify.yaml に限られる。credential は読まない。
 files:
   - path: SKILL.md
-    sha256: 80c0e4f57e8e43e3425dcec9ceb66940f697d15e90536d7c48acc6daa27fcc14
-    size: 17816
+    sha256: 51b4648cc090b82bee7b7e5b782df6f3cd8228b23676e78948cc755d1eb31c3e
+    size: 11629
     kind: skill_md
     executable: false
     script: false
-  - path: scripts/tests/fixtures/all-pass.yaml
-    sha256: 830fe8f301d9e06871eb8ea58ca272e4db63f6d38c0ebce18470ca3a79ceb6c9
-    size: 299
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-anchor.yaml
-    sha256: 1b80b0829432f4269f2a8842aa7f4c89e32e3bda205d37a53b49670796be29d0
-    size: 55
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-block-scalar.yaml
-    sha256: b89117a79cfab8b2099c187337e1339bcedca63dc0e201c79d411a7a6e10bf80
-    size: 57
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-duplicate-id.yaml
-    sha256: dcc323cd41552d9aa76d2d8d10a54b9e8ee234dc37f99cd7993764ce488ffb91
-    size: 86
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-flow.yaml
-    sha256: 3179c3ac553c2a308e270a098ba4ac95ff69f024ae0836106e062f5b7cdf5b37
-    size: 52
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-gate-key.yaml
-    sha256: 1d62c602d1c59b5c9bbd20f99b11525f28c0316945f4b2a4caf8e86eb94832b3
-    size: 64
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-indent.yaml
-    sha256: 99e0f97fd288bfb565a5fa808fbb8bb046e7cbb208aac67bd360b7f81ef8319e
-    size: 50
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-invalid-id.yaml
-    sha256: 9c96187607ef74c2d5086166f836aeae161bbf94357b37d1c011e857fdb3ef1f
-    size: 57
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-missing-command.yaml
-    sha256: 810a6f34c4f2a5a77dc635c2a0243d159272f0e43d14823a6add79aed87fb59e
-    size: 28
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-missing-id.yaml
-    sha256: 44c9ce1e2d331cf521961398bdea34b5fb890376d8dfe059470774a9d1e616b6
-    size: 39
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-no-gates.yaml
-    sha256: 7be542f8bb5954519fab54267758b48bd0c9b9fd44e1f6d6a906a52e8e4e1d26
-    size: 43
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-no-version.yaml
-    sha256: 43e806edf29c0d52ec09e1094ca4ab8eded9fccd62ffb609f620bc5a508239df
-    size: 38
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-option-key.yaml
-    sha256: eea039f08edd17bdb3cf01898e56485a151a40f3afab339a7b8439b9d29680a6
-    size: 75
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-option-value.yaml
-    sha256: a41b5672d7adfdf698062ce1e47c154106e38eabd97ebb9906d109acf11053ff
-    size: 89
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-require-commit.yaml
-    sha256: 2262736fa5dfcd4ae37e512c8f9cf5d054b5590a54036ce2c2bd9517c8d69586
-    size: 81
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-reserved-id.yaml
-    sha256: f8a526bc59f198505c82533c184572b5ac1191f30dad70f3907a703967acb231
-    size: 61
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-tab.yaml
-    sha256: 1f6043cb5ae62709915a406b4564122e3793ed51cb4c41e9d1f8ac6d0daec984
-    size: 46
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-timeout-range.yaml
-    sha256: 95e1907fbcb531ca1cda9a49a90bc6b4b96aefc0ff3839750f2ca1e8d382ef79
-    size: 71
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-timeout-type.yaml
-    sha256: bc42beb805d8b57dc00a9c63107e228f38142a1ada72fc2c446fca8984415188
-    size: 69
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/bad-version.yaml
-    sha256: deb52d8f8205df596c026404f913d15cde8d7afc6c96f7a0fbc881d1086dd75c
-    size: 49
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/default-options.yaml
-    sha256: 98657da4079c59565c23d66d46373c8c71b2df3abe8b7f63a1f7aa5556180396
-    size: 163
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/no-log-tail.yaml
-    sha256: 7cddb975d5c3af7f4b316e879bd20cf12ecc64b121934d3b5db328692bbbde33
-    size: 341
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/one-fail.yaml
-    sha256: 62580fa87300a3e79736df33a2c4e2e4a7b5260ee3455c1de329ce4c07f56993
-    size: 428
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/parsing.yaml
-    sha256: 262417735fae50aa79e3addb33e5157cc202df16045ec2af2b47110e39581edf
-    size: 333
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/require-commit.yaml
-    sha256: a734180dcf4dec0f97549f4e79ecd976b14e0b6a8d8b2bdcf7611412d01b6670
-    size: 383
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/side-effect.yaml
-    sha256: 1e9b218d5e3cb63f9e09469dd95c4bfd1813aac6911ab62ff40364e4df227b3e
-    size: 201
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/silent-fail.yaml
-    sha256: a3a640a9f4ad179f802cf411d6ce51f551ca8691a1e7b829165438335f5888bb
-    size: 553
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/fixtures/timeout.yaml
-    sha256: 8ba1f347093da9d80378d75e403279954339cd63232616a218607238f381350d
-    size: 585
-    kind: asset
-    executable: false
-    script: false
-  - path: scripts/tests/run-tests.sh
-    sha256: 431e0c5f54dff5b1b81fe2f6e516aba29ce9bb901e6b83b9130d4714e946b6d6
-    size: 36428
-    kind: script
-    executable: true
-    script: true
   - path: scripts/verify-run.sh
     sha256: 31abf46f78f013391522e87a1a72a4e0d3651312cbb2477465b5b6a2a81f08ea
     size: 21860

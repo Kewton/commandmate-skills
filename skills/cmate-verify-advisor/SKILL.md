@@ -90,7 +90,7 @@ allowed-tools: Bash(.claude/skills/cmate-verify-advisor/scripts/*), Bash(.agents
 `options.requireCommit`（CommandMate #1642）は work-evidence を厳しい側へ倒す key なので、
 **外す変更は弱体化**である。読める options キーは `cmate-verify` のランナーと同一集合で
 なければならず（片方だけが知る key は正当な設定への exit 2 になる — Issue #57）、
-一致は `tests/fixtures/cmate-verify-advisor/parser-parity.sh` で固定してある。
+一致はリポジトリ側の `parser-parity.sh` が CI で固定している（後述「テスト」）。
 
 分類表の正本は [`references/change-classification.md`](references/change-classification.md)。
 
@@ -229,27 +229,18 @@ v1 は**手動起動**である。リリース前と週次の定点を推奨す�
 
 ## テスト
 
-```bash
-bash tests/fixtures/cmate-verify-advisor/run_tests.sh            # 69 assertions
-bash tests/fixtures/cmate-verify-advisor/run_tests.sh --mutants  # 13 mutants
-```
+回帰 suite は package ではなく **commandmate-skills リポジトリ**に在り、CI が回す
+（`.commandmate/verify.yaml` の `verify-advisor-fixtures` ゲートと
+`.github/workflows/validate.yml` の `runner-suites` job）。install 先には存在しないので、
+利用者がこれを実行する手順は無い。
 
-`--mutants` は解析スクリプトのガードを 1 つずつ壊した複製を作り、suite 全体を回して
-**赤が出ることを要求する**。生き残った変異は「誰もテストしていないガード」である。
-2026-08-02 時点で 13 変異すべてが検出され、赤の件数は次のとおり:
-
-| 変異 | 赤 |
-|---|---|
-| `apply-weakening`（`isApplicable` が全提案を通す） | 8 |
-| `apply-weakening-without-guard`（上に加えて最終ガードも無効化） | 9 |
-| `classify-timeout-increase-as-strengthen` | 5 |
-| `classify-removal-as-strengthen` | 1 |
-| `layer2-is-applicable`（層の判定を落とす） | 2 |
-| `unsorted-history` / `unsorted-proposals` | 1 / 1 |
-| `ignore-log-cap` / `ignore-summary-detection` / `no-truncation-detection` | 1 / 1 / 4 |
-| `ignore-censoring` | 1 |
-| `forward-log-bodies`（ログ本文を evidence に載せる） | 1 |
-| `no-timeout-floor`（実測最大値の下限を外す） | 1 |
+固定しているのは層 1 の決定性、弱体化系が `--apply` でも適用されないこと、ログ末尾切れ検出と
+その 3 つの反証ケース、ログ本文が出力に現れないこと（カナリア）、書いたものがまだ
+`cmate-verify` のランナーに読める verify.yaml であること、そして 2 つのパーサ（awk / JS）が
+同じ options キーを受理すること（Issue #57）である。suite は解析スクリプトのガードを 1 つずつ
+壊した複製でも回り、**赤が出ることを要求する**（生き残った変異は「誰もテストしていない
+ガード」である）。assertion 数・変異の一覧と赤の件数の正本は
+[`tests/fixtures/cmate-verify-advisor/README.md`](https://github.com/Kewton/commandmate-skills/blob/main/tests/fixtures/cmate-verify-advisor/README.md)。
 
 ## この Skill がやらないこと
 

@@ -11,6 +11,17 @@ bash tests/fixtures/cmate-verify-advisor/parser-parity.sh        # 18 assertions
 
 bash・node・git だけで動く。ネットワークは使わない（`commandmate` は shim である）。
 
+## CI での実行
+
+| 経路 | 定義 |
+|---|---|
+| `commandmate verify` | `.commandmate/verify.yaml` の `verify-advisor-fixtures` ゲート |
+| GitHub Actions | `.github/workflows/validate.yml` の `runner-suites` job |
+
+どちらも `--mutants` を付けない既定の run（80 assertions）を回す。変異注入は所要 30 秒台で、
+ガードを触ったときに手で回すもの。**Issue #69 まで、この suite はどちらにも登録されて
+いなかった** — #57 の parser-parity テストは在るのに一度も実行されていなかった。
+
 ## 構成
 
 | path | 役割 |
