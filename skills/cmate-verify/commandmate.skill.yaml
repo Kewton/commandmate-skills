@@ -1,27 +1,22 @@
 schema_version: 1
 id: cmate-verify
 name: cmate-verify
-version: 0.4.0
+version: 0.4.1
 summary: 検証ゲートを .commandmate/verify.yaml に宣言し、未着手ガードとプライマリ checkout skip を挟んで worktree で逐次実行し、出力ではなく実 exit code で合否を判定する bash 3.2 互換ランナー。
 description: >-
   「このリポジトリで何が通れば合格か」を `.commandmate/verify.yaml`（形式 v1）に宣言し、
   各ゲートを `sh -c "$cmd" > log 2>&1` で走らせて `$?` を直接読むランナーである。出力の grep で
-  合否を決めない。`cmd | grep ...` は `$?` を grep へ渡して非ゼロ終了を隠し、vitest は全テスト緑でも
-  Unhandled Rejection で exit 1 を出しうるため、要約を読んだ判定は失敗を PASS と報告する。役割は
-  2 つある。第一に verify.yaml の起案で、まだ設定を持たないリポジトリの CI 定義・package.json・
-  Makefile・言語マニフェストからゲート候補を拾い、出所とセットで提示してユーザーの確認を得てから
-  書き出す。第二にスタンドアロン実行で、CommandMate が入っていない環境や検証ゲートをまだ持たない
-  version の CommandMate でも、bash と git だけで同じ verify.yaml から同じ判定を出す。コマンド系
-  ゲートの前に組み込みゲート work-evidence が走り、base ref からの commit 数と uncommitted 数が
-  ともに 0 なら not_started (exit 21) として 1 つもゲートを実行しない。変更ゼロのリポジトリでは
-  lint も typecheck も当然通るため、未起動のセッションを全ゲート PASS と誤報告しないためである。
-  プライマリ checkout では既定でコマンド系ゲートを実行せず、その run は passed ではなく
-  skipped (exit 22) として区別する。1 つのゲートが失敗しても残りは実行し、1 回の run で全ての失敗を
-  報告する。timeout は watchdog がプロセスグループごと TERM / KILL するので、時間切れのゲートが
-  子プロセスを残さない。設定が受理する YAML はサブセットに限られ、規約外の記述は best-effort で
-  解釈せず exit 2 で拒否する。黙って読み飛ばすと「設定したつもりのゲートが走っていないのに passed」
-  になるためである。stdout は 1 ゲート 1 行の機械可読形式を保ち、失敗ログの末尾は stderr へ出す。
-  verify.yaml v1 仕様そのものの改訂・PR 作成・merge・デプロイは行わない。
+  合否を決めない（grep へ渡した `$?` は非ゼロ終了を隠すため、要約を読んだ判定は失敗を PASS と
+  報告する）。役割は 2 つ。まだ設定を持たないリポジトリの CI 定義・package manifest からゲートを
+  起案し、出所とセットで提示してユーザーの確認を得てから書き出すことと、CommandMate が入って
+  いない環境でも bash と git だけで同じ verify.yaml から同じ判定を出すことである。コマンド系
+  ゲートの前に組み込みゲート work-evidence が走り、変更の痕跡がゼロなら not_started (exit 21)
+  として 1 つもゲートを実行しない。プライマリ checkout では既定でコマンド系ゲートを実行せず、
+  その run は passed ではなく skipped (exit 22) として区別する。1 つのゲートが失敗しても残りは
+  実行し、1 回の run で全ての失敗を報告する。受理する YAML はサブセットに限られ、規約外の記述は
+  best-effort で解釈せず exit 2 で拒否する。stdout は 1 ゲート 1 行の機械可読形式を保ち、失敗
+  ログの末尾は stderr へ出す。verify.yaml v1 仕様そのものの改訂・PR 作成・merge・デプロイは
+  行わない。
 capabilities:
   - CI 定義・package.json・Makefile・言語マニフェストからゲートを起案し、確認を得てから書き出す
   - verify.yaml v1 のサブセットを awk で読み、規約外の記述を解釈せず exit 2 で拒否する
