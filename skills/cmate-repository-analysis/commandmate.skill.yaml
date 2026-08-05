@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-repository-analysis
 name: cmate-repository-analysis
-version: 0.1.1
+version: 0.1.2
 summary: リポジトリをread-onlyで走査し、構造・既存実装・再利用候補・変更risk・推奨verificationをfile/line evidence付きで返す。
 description: >-
   変更に着手する前の現状把握を、再現可能な標準手順にしたものである。対象リポジトリを
@@ -62,8 +62,8 @@ risk_rationale: >-
   環境変数や credential の読み取りは手順として禁止している。
 files:
   - path: SKILL.md
-    sha256: fa79d96753f6c29bd5a7424118ca2fb1ac6887df1ba7d836a7a5d02dfa22412c
-    size: 10439
+    sha256: 6546d0dbc8506b977c0b4a901029dad14297076d37c24329562dcf28ebdb18ef
+    size: 9567
     kind: skill_md
     executable: false
     script: false
@@ -74,8 +74,8 @@ files:
     executable: false
     script: false
   - path: references/result-contract.md
-    sha256: 1354659bae1ba7775089a0d02c6cb651cfff6fc7fd55d0594a4f3c610baddcb0
-    size: 7870
+    sha256: 80d49e1ae5cec1b8792620d002c86cd3b54f497135da9206d5d00e9fa356765e
+    size: 8616
     kind: instruction
     executable: false
     script: false

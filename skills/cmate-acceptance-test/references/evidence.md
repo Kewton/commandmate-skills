@@ -90,5 +90,7 @@ evidence を書き出す前に伏字処理する。**書いてから消すので
 
 - evidence は `evidence_dir`（既定 `./acceptance-evidence/`）配下に置く。
 - result document には evidence の `id` と相対 path を書く。内容の全文を埋め込まない。
-- criterion からは `evidence_ids` で参照する。`outcome: pass` の criterion に
-  evidence が 1 件も結び付いていない状態は、完了条件 (§6-2) 違反である。
+- criterion からは `evidence_ids` で参照する。`outcome: pass` / `fail` / `flaky` の
+  criterion に evidence が 1 件も結び付いていない状態は schema 違反であり
+  （`schemas/acceptance-result.v1.json` の `criterion.evidence_ids`）、
+  `SKILL.md` §6 の完了条件を満たさない。

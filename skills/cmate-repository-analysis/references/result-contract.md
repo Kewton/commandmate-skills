@@ -147,12 +147,20 @@ summary や後続の手順が `id` だけで項目を指せない。
 ### 3.9 `completion_check`
 
 `checks` は5件で、id は次の5つがちょうど1回ずつ現れる。
+result を返す前に5件すべてを自分で実行し、結果をここに記録する。
+各 check が何を確かめるかは、この表が正本である。
 
-`evidence_present` / `evidence_resolvable` / `verification_grounded` /
-`no_secret_values` / `scope_declared`
+| check id | 何を確かめるか |
+|---|---|
+| `evidence_present` | `findings` / `reuse_candidates` / `risks` の各要素が1件以上の evidence を持つ |
+| `evidence_resolvable` | evidence の `path` が今回読んだ file であり、行番号がその file の行数内にある |
+| `verification_grounded` | `recommended_verification` の各要素が出典 evidence を持つ |
+| `no_secret_values` | `sensitive_locations` が `path` / `line` / `classification` だけで構成されている |
+| `scope_declared` | 除外と打ち切りが `scope` と `unresolved` に反映されている |
 
 `passed` は5件すべてが true のときだけ true にする。
 false の check には、何が足りなかったかを `detail` に書く。
+1件でも false なら status を `success` にしてはならない（第2節）。
 
 ### 3.10 `evidence`
 

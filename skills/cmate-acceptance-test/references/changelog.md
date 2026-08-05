@@ -4,6 +4,27 @@ Catalog の `changelog` はこの Skill の release tag の annotation から生
 その annotation の元になる記述をここに置く。install 前の利用者が読む前提で書く。
 **新しい version を上に置く。version を上げたらこの file も同じ commit で更新する。**
 
+## 0.1.3
+
+SKILL.md を「いつ使うか / どう呼ぶか / 出力をどう読むか / 止まったとき何をするか」の
+4 つに絞り、references と schema にある規則の再掲をやめた（Issue #68）。
+
+### 何が変わるか
+
+- **規則の正本が references と schema だけになった。** SKILL.md が持っていた
+  決定表の要約（Step 5）、権限の用途表（§2）、完了条件の 8 項目（§6）、evidence の
+  type 別必須項目（Step 4）、summary の構成（Step 7）、分類と risk tier の定義
+  （Step 2）は、いずれも `verdict-rubric.md` / `evidence.md` / `test-plan.md` /
+  `acceptance-result.v1.json` / `commandmate.skill.yaml` にある内容だった。
+  二重に書かれていた分だけ乖離の余地があったので、SKILL.md 側を参照に置き換えた。
+- **手順そのもの、判定規則、outcome の定義、決定表、schema に変更はない。**
+  0.1.2 の result document はそのまま有効である。
+- `evidence.md` §4 が SKILL.md の項番（`§6-2`）を指していたのを、schema の
+  `criterion.evidence_ids` を指すように直した。項番に依存した参照は、節を編集するたび
+  黙って壊れるからである。
+- 0.1.2 で入れた `target.issue_ref` の記録規則、cmate-orchestrate との consumer 関係、
+  `result_path` の規約は、いずれも他所に正本が無いのでそのまま残している。
+
 ## 0.1.2
 
 `target.issue_ref` の記録規則を定義し、consumer である cmate-orchestrate との
