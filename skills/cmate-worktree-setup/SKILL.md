@@ -5,6 +5,12 @@ description: 1つ以上のIssueについて、profile から解決した branch�
 
 # cmate-worktree-setup
 
+> **ランチャー表記** — 本文中の `commandmate …` は**読み替え可能**である。グローバル導入をしない
+> npx 運用では `npx commandmate@latest …` と読む。呼び出し頻度が高い経路では npx の起動コスト
+> （1 回あたり 0.5〜0.9 秒）を避けるため、`~/.local/bin/commandmate` に
+> `exec npx --yes commandmate@latest "$@"` の薄いラッパを置く導入形態を推奨する（README の
+> 「CommandMate CLI の導入形態」）。
+
 1つ以上のIssueについて、対象repositoryを検証し、**衝突しない専用worktree**を作成し、
 その base commit と baseline 結果を **証跡付き** で返すための、portable な標準手順である。
 

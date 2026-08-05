@@ -36,6 +36,12 @@ CANARY="CMATE-ADVISOR-INJECTION-CANARY"
 
 ADVISOR=${ADVISOR:-$REAL_ADVISOR}
 
+# `CM` is the launcher variable the analyser now reads (Issue #37). An operator
+# who exports it in their own shell would otherwise change what every default-path
+# case here exercises, so the suite starts from a known-empty one and the launcher
+# cases set it explicitly.
+unset CM
+
 WORK=$(mktemp -d -t cmate-verify-advisor-tests.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT INT TERM
 
@@ -394,6 +400,59 @@ else
   pass "cmate-verify's runner accepts the file written alongside layer-2 proposals"
 fi
 
+printf '\n== the launcher is resolved, not assumed (#37) ==\n'
+# Dropping the global install takes the bare `commandmate` off PATH, so this tool
+# has to reach the CLI the way monitor.sh does: --cli, else $CM, else the bare
+# name. `$WORK/bin/commandmate` is the 0.10.2 shim built above — a launcher that
+# really runs, and whose output ("0.10.2") proves which program was spawned.
+# `env <path>` is the stand-in for `npx commandmate@latest`: the same two-token
+# shape, without the network. Before this change spawnSync took the whole string
+# as one program name, so a two-token launcher could only ever be ENOENT.
+SHIM="$WORK/bin/commandmate"
+
+node "$ADVISOR" --cwd "$CASES" --config "$BASE" --cli "env $SHIM" > /dev/null 2> "$WORK/l1.txt"
+[ $? -eq 3 ] && pass 'a multi-token --cli is exit 3 (it ran, and that CLI has no history)' \
+  || fail 'a multi-token --cli is exit 3 (it ran, and that CLI has no history)' "$(cat "$WORK/l1.txt")"
+assert_contains 'a multi-token --cli spawned the launcher rather than reporting ENOENT' "$WORK/l1.txt" '0.10.2'
+assert_absent 'a multi-token --cli is not misreported as a missing program' "$WORK/l1.txt" 'is not on PATH'
+
+CM="env $SHIM" node "$ADVISOR" --cwd "$CASES" --config "$BASE" > /dev/null 2> "$WORK/l2.txt"
+[ $? -eq 3 ] && pass 'CM alone drives the collection (no --cli, no global install)' \
+  || fail 'CM alone drives the collection (no --cli, no global install)' "$(cat "$WORK/l2.txt")"
+assert_contains 'CM alone spawned the launcher it names' "$WORK/l2.txt" '0.10.2'
+
+CM=commandmate-does-not-exist node "$ADVISOR" --cwd "$CASES" --config "$BASE" --cli "env $SHIM" > /dev/null 2> "$WORK/l3.txt"
+assert_contains '--cli wins over CM' "$WORK/l3.txt" '0.10.2'
+
+CM="env $SHIM" node "$ADVISOR" --cwd "$CASES" --config "$BASE" --cli commandmate-does-not-exist > /dev/null 2> "$WORK/l4.txt"
+assert_contains '--cli wins over CM in the other direction too' "$WORK/l4.txt" 'is not on PATH'
+
+# What is refused, and why: a launcher is split on whitespace and run WITHOUT a
+# shell, so anything only a shell could read is rejected up front with the wrapper
+# recipe named — instead of the ENOENT this used to produce from deep in a run.
+# The offending launcher is built from the shim on purpose: if the guard is ever
+# removed, the tokens must reach a program this suite controls rather than npx.
+node "$ADVISOR" --cwd "$CASES" --config "$BASE" --cli "$SHIM | tee /tmp/x" > /dev/null 2> "$WORK/l5.txt"
+[ $? -eq 2 ] && pass 'a --cli carrying shell syntax is exit 2' || fail 'a --cli carrying shell syntax is exit 2' "$(cat "$WORK/l5.txt")"
+assert_contains 'the refusal says shell syntax is what it refused' "$WORK/l5.txt" 'contains shell syntax'
+assert_contains 'the refusal says nothing here runs a shell' "$WORK/l5.txt" 'WITHOUT a shell'
+assert_contains 'the refusal names the wrapper recipe' "$WORK/l5.txt" 'exec npx --yes commandmate@latest "$@"'
+assert_absent 'the refusal is not the old bare ENOENT' "$WORK/l5.txt" 'ENOENT'
+
+node "$ADVISOR" --cwd "$CASES" --config "$BASE" --cli '   ' > /dev/null 2> "$WORK/l6.txt"
+[ $? -eq 2 ] && pass 'an empty --cli is exit 2' || fail 'an empty --cli is exit 2' "$(cat "$WORK/l6.txt")"
+assert_contains 'the empty launcher says it is empty' "$WORK/l6.txt" 'is empty'
+
+CM='commandmate && echo hi' node "$ADVISOR" --cwd "$CASES" --config "$BASE" > /dev/null 2> "$WORK/l7.txt"
+[ $? -eq 2 ] && pass 'a CM carrying shell syntax is exit 2' || fail 'a CM carrying shell syntax is exit 2' "$(cat "$WORK/l7.txt")"
+assert_contains 'a bad launcher is attributed to the source it came from' "$WORK/l7.txt" 'CM commandmate && echo hi'
+
+# Resolution happens after the help path, so a broken launcher never costs the
+# user the one output that would have explained it.
+CM='commandmate | cat' node "$ADVISOR" --help > "$WORK/l8.txt" 2>&1
+[ $? -eq 0 ] && pass '--help still answers under an unusable CM' || fail '--help still answers under an unusable CM' "$(cat "$WORK/l8.txt")"
+assert_contains '--help documents the launcher contract' "$WORK/l8.txt" 'Falls back to $CM'
+
 printf '\n== the two verify.yaml parsers agree ==\n'
 # Runs the standalone parity suite as one assertion of this one, so it is not an
 # orphan nobody executes. It reads the two shipped parsers, not $ADVISOR: parity
@@ -408,7 +467,7 @@ fi
 
 # The suite is worthless if a case silently stopped running. This floor is the
 # same guard cmate-verify's suite uses.
-MIN_ASSERTIONS=78
+MIN_ASSERTIONS=96
 total=$((passed + failed))
 if [ "$total" -lt "$MIN_ASSERTIONS" ]; then
   fail 'the suite ran every case' "only $total assertion(s) ran, expected at least $MIN_ASSERTIONS"

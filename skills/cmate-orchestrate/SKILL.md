@@ -5,6 +5,15 @@ description: 複数の GitHub Issue を並列で進める。dry-run で依存と
 
 # cmate-orchestrate（plan → dispatch → merge → uat）
 
+> **ランチャー表記** — 本文中の `commandmate …` は**読み替え可能**である。グローバル導入をしない
+> npx 運用では `npx commandmate@latest …` と読む。同梱 runner（dispatch / uat）は `--cli <launcher>`
+> または環境変数 `CM` で解決する（既定 `commandmate`、`npx commandmate@latest` のようなスペース
+> 区切りの複数トークンも可。シェルは経由しないので、パイプ・リダイレクト・変数展開・引用符は
+> 助言つきで拒否する）。ランチャー解決は実行時の話であり、**plan.json には混入しない**。呼び出し
+> 頻度が高い経路では npx の起動コスト（1 回あたり 0.5〜0.9 秒）を避けるため、
+> `~/.local/bin/commandmate` に `exec npx --yes commandmate@latest "$@"` の薄いラッパを置く導入
+> 形態を推奨する（README の「CommandMate CLI の導入形態」）。
+
 複数の Issue を並列で進めるための、**計画**・**監督付き実行**・**PR/CI/merge**・
 **UAT と回数上限つき修正ループ** を安全に行う手順である。実務は4つの
 **deterministic runner**（Node stdlib のみ）が行う。

@@ -66,6 +66,7 @@ import {
   parseCliJson,
   redact,
   redactionsList,
+  resolveLauncher,
   safeWorktreeTarget,
 } from './lib.mjs';
 
@@ -182,7 +183,12 @@ Options:
   --plan <path>          Approved plan.json from the plan-core runner (required).
   --out <dir>            Where dispatch artifacts are written
                          (default: <plan-dir>/dispatch).
-  --cli <path>           The commandmate CLI to drive (default "commandmate").
+  --cli <launcher>       The CommandMate launcher to drive: an executable plus
+                         fixed leading arguments, split on whitespace and run
+                         WITHOUT a shell — "commandmate" (default),
+                         "/usr/local/bin/commandmate", "npx commandmate@latest".
+                         Falls back to $CM (monitor.sh's variable) when omitted.
+                         Shell syntax is refused; wrap it in a script instead.
   --git <path>           The git CLI used for drift checks (default "git").
   --gh <path>            The gh CLI used for the repo-access check (default "gh").
   --auto-yes             Answer worker prompts automatically. OFF by default; a
@@ -290,10 +296,15 @@ function resolveInputs(parsed) {
   if (!values.plan) {
     throw new SkillError('invalid_input', '--plan <path> is required', 3);
   }
+  // The launcher is argv, not a program name: `npx commandmate@latest` is two
+  // tokens and execFileSync takes no shell (Issue #37). `cli` keeps the resolved
+  // string for messages; every spawn goes through cliArgv.
+  const cliArgv = resolveLauncher(values.cli);
   return {
     planPath: values.plan,
     outDir: values.out ?? null,
-    cli: values.cli ?? 'commandmate',
+    cliArgv,
+    cli: cliArgv.join(' '),
     git: values.git ?? 'git',
     gh: values.gh ?? 'gh',
     autoYes: Boolean(values['auto-yes']),
@@ -435,6 +446,20 @@ async function runCliAsync(bin, args, extra = {}) {
   }
 }
 
+// One call to the CommandMate CLI. The launcher may carry fixed leading
+// arguments (`npx commandmate@latest` is program "npx" plus one argument), so
+// the subcommand is appended to it rather than passed as the whole argv. Every
+// commandmate spawn in this runner goes through these two — a direct
+// runCli(inputs.cli, …) would pass the launcher string as a program name and
+// reintroduce the ENOENT this replaced (Issue #37).
+function runCm(inputs, args, extra = {}) {
+  return runCli(inputs.cliArgv[0], [...inputs.cliArgv.slice(1), ...args], extra);
+}
+
+function runCmAsync(inputs, args, extra = {}) {
+  return runCliAsync(inputs.cliArgv[0], [...inputs.cliArgv.slice(1), ...args], extra);
+}
+
 // =============================================================================
 // Drift re-check (branch / HEAD / worktree / permission)
 // =============================================================================
@@ -451,7 +476,7 @@ function driftChecks(inputs, plan, waveIndex, resolutions) {
   const add = (code, ok, blocking, detail) =>
     checks.push({ wave_index: waveIndex, code, ok, blocking, detail });
 
-  const cli = runCli(inputs.cli, ['--version']);
+  const cli = runCm(inputs, ['--version']);
   add('cli_available', cli.ok, true, cli.ok ? 'commandmate CLI is runnable' : 'commandmate CLI is not runnable (permission or install)');
 
   const repo = runCli(inputs.gh, ['repo', 'view', plan.profile.repository, '--json', 'nameWithOwner']);
@@ -501,8 +526,8 @@ function driftChecks(inputs, plan, waveIndex, resolutions) {
 // reporting `verification.outcome: pass` while the thing that produced it had
 // changed from "every declared gate passed" to "the profile baseline exited 0".
 function probeContractSupport(inputs) {
-  const send = runCli(inputs.cli, ['send', '--help']);
-  const wait = runCli(inputs.cli, ['wait', '--help']);
+  const send = runCm(inputs, ['send', '--help']);
+  const wait = runCm(inputs, ['wait', '--help']);
   const hasContract = send.ok && `${send.stdout}${send.stderr}`.includes('--contract');
   const hasVerify = wait.ok && `${wait.stdout}${wait.stderr}`.includes('--verify');
   if (hasContract && hasVerify) {
@@ -765,7 +790,7 @@ function resolveWorktreeId(inputs, issue) {
   }
   const branch = typeof issue.branch === 'string' ? issue.branch : null;
   if (!branch) return { id: null, path: null, note: 'issue has no branch to resolve a worktree from' };
-  const result = runCli(inputs.cli, ['ls', '--json']);
+  const result = runCm(inputs, ['ls', '--json']);
   const rows = parseCliJson(result);
   if (!Array.isArray(rows)) {
     return { id: null, path: null, note: excerpt(result.stderr || result.stdout || 'ls returned no worktree list') };
@@ -803,14 +828,14 @@ async function worktreeHeadSha(inputs, worktreePath) {
 // unconfirmed and re-send once to force submission. The commit check below is the
 // real ground truth, so this is a best-effort confirmation, not a guarantee.
 async function sendAndConfirm(inputs, worktreeId, message) {
-  const first = await runCliAsync(inputs.cli, ['send', worktreeId, message]);
+  const first = await runCmAsync(inputs, ['send', worktreeId, message]);
   if (!first.ok) {
     return { sent: false, note: excerpt(first.stderr || first.stdout || 'send failed') };
   }
-  const capture = parseCliJson(await runCliAsync(inputs.cli, ['capture', worktreeId, '--json']));
+  const capture = parseCliJson(await runCmAsync(inputs, ['capture', worktreeId, '--json']));
   const started = capture && (capture.isGenerating === true || capture.isRunning === true || capture.isPromptWaiting === true);
   if (started) return { sent: true, confirmed: true, note: '' };
-  const again = await runCliAsync(inputs.cli, ['send', worktreeId, message]);
+  const again = await runCmAsync(inputs, ['send', worktreeId, message]);
   if (!again.ok) {
     return { sent: true, confirmed: false, note: 'send may not have submitted and the re-send failed' };
   }
@@ -845,18 +870,18 @@ const COMMIT_REQUEST_MESSAGE = [
 // violation on stderr and sends nothing, so a rejected contract is an honest
 // failed dispatch — never a quiet downgrade to a plain send.
 async function sendContractAndConfirm(inputs, worktreeId, relativeContractPath) {
-  const first = await runCliAsync(inputs.cli, ['send', worktreeId, '--contract', relativeContractPath]);
+  const first = await runCmAsync(inputs, ['send', worktreeId, '--contract', relativeContractPath]);
   if (!first.ok) {
     return { sent: false, taskId: null, note: excerpt(first.stderr || first.stdout || 'contract send failed') };
   }
   const taskId = readTaskId(first.stdout);
-  const capture = parseCliJson(await runCliAsync(inputs.cli, ['capture', worktreeId, '--json']));
+  const capture = parseCliJson(await runCmAsync(inputs, ['capture', worktreeId, '--json']));
   const started = capture && (capture.isGenerating === true || capture.isRunning === true || capture.isPromptWaiting === true);
   if (started) return { sent: true, taskId, confirmed: true, note: '' };
   // Re-sending WITH --contract would create a second task row for the same work
   // and leave the first one running forever, so the confirmation is a plain
   // message: it submits whatever the first send left in the input box.
-  const again = await runCliAsync(inputs.cli, ['send', worktreeId, CONTRACT_CONFIRM_MESSAGE]);
+  const again = await runCmAsync(inputs, ['send', worktreeId, CONTRACT_CONFIRM_MESSAGE]);
   if (!again.ok) {
     return { sent: true, taskId, confirmed: false, note: 'the contract send may not have submitted and the confirmation send failed' };
   }
@@ -908,7 +933,7 @@ async function describeFailingGates(inputs, worktreeId) {
   // read — a failing gate — the exit is 20, not 0. The run document is still on
   // stdout; parse it regardless of exit status (parseCliJson's ok-check would
   // discard every failing run and leave the re-instruction with no gate names).
-  const result = await runCliAsync(inputs.cli, ['verify', worktreeId, '--json']);
+  const result = await runCmAsync(inputs, ['verify', worktreeId, '--json']);
   let run = null;
   try {
     run = JSON.parse(result.stdout);
@@ -1048,7 +1073,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
     const waitArgs = passed
       ? ['wait', worktreeId, '--on-prompt', 'agent', '--timeout', String(inputs.waitTimeout)]
       : ['wait', worktreeId, '--on-prompt', 'agent', '--verify', '--timeout', String(inputs.waitTimeout)];
-    const waited = await runCliAsync(inputs.cli, waitArgs);
+    const waited = await runCmAsync(inputs, waitArgs);
     const code = waited.ok ? VERIFY_EXIT_PASS : (waited.status ?? null);
     const done = (state, note) => ({ state, taskId, verdict, notJudged: false, promptExcerpt: null, nudges: turns - 1, autoResponded, note });
 
@@ -1187,7 +1212,7 @@ async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMes
   // prompt/respond ping-pong under --auto-yes can never spin forever.
   const hardIterations = inputs.maxTurns * 4 + 8;
   for (let i = 0; i < hardIterations; i += 1) {
-    const waited = await runCliAsync(inputs.cli, ['wait', worktreeId, '--timeout', String(inputs.waitTimeout)]);
+    const waited = await runCmAsync(inputs, ['wait', worktreeId, '--timeout', String(inputs.waitTimeout)]);
     if (!waited.ok && waited.status === WAIT_EXIT_PROMPT) {
       const promptExcerpt = await capturePrompt(inputs, worktreeId);
       if (inputs.autoYes) {
@@ -1229,7 +1254,7 @@ async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMes
 }
 
 async function capturePrompt(inputs, worktreeId) {
-  const result = await runCliAsync(inputs.cli, ['capture', worktreeId, '--json']);
+  const result = await runCmAsync(inputs, ['capture', worktreeId, '--json']);
   const payload = parseCliJson(result);
   const raw = payload?.promptData?.question ?? payload?.content ?? result.stdout ?? '';
   return excerpt(raw) ?? 'a prompt is awaiting input';
@@ -1321,7 +1346,7 @@ async function respondWorker(inputs, worktreeId) {
   // Only ever reached when --auto-yes is explicitly set. A generic affirmative;
   // the default path never calls this, which is what keeps prompt handling
   // human-in-the-loop.
-  const result = await runCliAsync(inputs.cli, ['respond', worktreeId, 'yes']);
+  const result = await runCmAsync(inputs, ['respond', worktreeId, 'yes']);
   return result.ok;
 }
 

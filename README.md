@@ -63,6 +63,61 @@ python3 scripts/verify_artifact.py --help      # 公開 artifact の keyless 検
 - Agent 対応状況: [docs/agent-support-matrix.md](./docs/agent-support-matrix.md)
 - pipeline の設計判断: [docs/design/release-pipeline.md](./docs/design/release-pipeline.md)
 
+## CommandMate CLI の導入形態
+
+この repository の Skill は本文でもスクリプトでも CommandMate CLI を呼ぶ。**どちらの導入形態でも
+動くが、前提はグローバル導入である。** npx 単独運用（`npx commandmate@latest`）も正式にサポート
+するが、そのままでは遅く、追加の設定が要る。
+
+| 形態 | 裸の `commandmate` が PATH に居るか | 1 呼び出しの起動コスト | 追加設定 |
+|---|---|---|---|
+| グローバル導入（`npm i -g commandmate`） | 居る | ほぼ 0 | 不要 |
+| npx 運用（ラッパあり）**← 推奨** | 居る（ラッパとして） | ほぼ 0 | ラッパ 1 本 |
+| npx 運用（ラッパなし） | **居ない** | **0.5〜0.9 秒**（報告者実測） | `CM` の設定 |
+
+npx は `node_modules/.bin` を**実行中の子プロセスの PATH にしか足さない**。worker 側（CommandMate が
+起こす tmux セッション）はサーバプロセスの PATH を継承するので裸名が引けるが、**オーケストレーター側**
+（利用者自身のエージェントセッション・ターミナル・cron）では引けない。
+
+### 推奨手順: 薄いラッパを置く
+
+orchestrate の監視は `capture` / `wait` / `verify` を高頻度で叩くため、1 呼び出しあたり 0.5〜0.9 秒の
+npx 起動コストがそのままポーリング周期に乗る。**npx 運用ならラッパを置くことを公式に推奨する。**
+
+```bash
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/commandmate <<'EOF'
+#!/usr/bin/env bash
+exec npx --yes commandmate@latest "$@"
+EOF
+chmod +x ~/.local/bin/commandmate
+# PATH に無ければ通す（お使いの shell の rc に）
+export PATH="$HOME/.local/bin:$PATH"
+
+commandmate --version   # ラッパ経由で引けることを確認する
+```
+
+`--yes` はラッパ側に置く。非対話（cron・エージェントセッション）で npx が install 確認を
+求めて失敗するのを防ぐためである。`@latest` の pin は外さないこと — 外すと npx cache が
+掴んでいる古い版が黙って走る（`cmate-orchestrate-monitor` の `verify-scope.sh` はこれを違反として数える）。
+
+### ラッパを置かない場合: `CM`
+
+ラッパ無しで回すなら、ランチャーを `CM` 環境変数で渡す。`cmate-orchestrate-monitor` の
+`monitor.sh` / `hooks-task.sh`、`cmate-orchestrate` の `dispatch.mjs` / `uat.mjs`、
+`cmate-verify-advisor` の `verify-advisor.mjs` が**同じ規約**で読む。
+
+```bash
+export CM="npx commandmate@latest"
+```
+
+- 解決順は `--cli <launcher>` → `$CM` → 既定（`monitor.sh` 系は `npx commandmate@latest`、
+  Node runner 系は `commandmate`）。
+- ランチャーは**スペース区切りで argv に分割**される。`npx commandmate@latest` のような複数
+  トークンを受理する。
+- **シェルは経由しない。** パイプ・リダイレクト・変数展開・引用符を含む値は、黙って誤動作する
+  代わりに助言つきエラーで拒否される。それが要るならラッパスクリプトにして、そのパスを渡す。
+
 ## 公式 Skill
 
 | Skill ID | 内容 | risk |

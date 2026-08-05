@@ -1,10 +1,19 @@
 ---
 name: cmate-verify-advisor
 description: 検証の実行履歴（commandmate verify history）から .commandmate/verify.yaml の改善案を出す。ゲートは実行せず、既定は提案止まり。リリース前と週次の定点、検証が PASS したのに壊れていたと疑うときに使う。
-allowed-tools: Bash(.claude/skills/cmate-verify-advisor/scripts/*), Bash(.agents/skills/cmate-verify-advisor/scripts/*), Bash(commandmate verify history:*), Bash(commandmate verify show:*), Bash(git log:*), Bash(git show:*), Bash(gh pr list:*), Read, Write, Glob, Grep
+allowed-tools: Bash(.claude/skills/cmate-verify-advisor/scripts/*), Bash(.agents/skills/cmate-verify-advisor/scripts/*), Bash(commandmate verify history:*), Bash(commandmate verify show:*), Bash(npx commandmate@latest verify history:*), Bash(npx commandmate@latest verify show:*), Bash(git log:*), Bash(git show:*), Bash(gh pr list:*), Read, Write, Glob, Grep
 ---
 
 # cmate-verify-advisor（検証設定を履歴から改善する）
+
+> **ランチャー表記** — 本文中の `commandmate …` は**読み替え可能**である。グローバル導入をしない
+> npx 運用では `npx commandmate@latest …` と読む（allowed-tools は両形を並記している）。同梱
+> runner は `--cli <launcher>` または環境変数 `CM` で解決する（既定 `commandmate`。
+> `npx commandmate@latest` のようなスペース区切りの複数トークンも可。シェルは経由しないので、
+> パイプ・リダイレクト・変数展開・引用符は助言つきで拒否する）。呼び出し頻度が高い経路では npx の起動
+> コスト（1 回あたり 0.5〜0.9 秒）を避けるため、`~/.local/bin/commandmate` に
+> `exec npx --yes commandmate@latest "$@"` の薄いラッパを置く導入形態を推奨する（README の
+> 「CommandMate CLI の導入形態」）。
 
 ## 1. いつ使うか
 

@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-task-contract
 name: cmate-task-contract
-version: 0.2.1
+version: 0.2.2
 summary: GitHub Issue から実行契約 .commandmate/tasks/<name>.yaml v1 を起案し、goal・変更可能 scope・検証ゲートを作業前に宣言して send --contract で送れる状態にする。
 description: >-
   作業を始める前に「何を達成するのか」「どのパスを変更してよいのか」「何が満たされたら
@@ -90,8 +90,8 @@ risk_rationale: >-
   .gitignore の迂回）は手順として禁止している。
 files:
   - path: SKILL.md
-    sha256: 8438e32047467ef0f46b3395388ebc8ad1f440c3d5386e86b75bf3fc36aeed46
-    size: 22322
+    sha256: a10de2bf03b98fef8f6bbb02ec96a37b2790e73553c57f2f1b374736f17b5ca7
+    size: 22825
     kind: skill_md
     executable: false
     script: false

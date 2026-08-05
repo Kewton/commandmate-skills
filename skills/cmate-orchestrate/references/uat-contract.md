@@ -45,7 +45,7 @@ uat.mjs --plan <plan.json> --dispatch <dispatch-report.json> (--write-uat | --cr
 | `--acceptance-dir <dir>` | 任意 | なし | 意味ゲートの入力 directory（第4節）。`issue-<n>.json` を読む。read-only |
 | `--require-acceptance` | 任意 | off | 意味ゲートを必須にする。`--acceptance-dir` 無しでの指定は `invalid_input`（exit 3） |
 | `--out <dir>` | 任意 | `<dispatch-dir>/<phase>` | 出力先。既存なら `out_exists` で拒否 |
-| `--cli <path>` | 任意 | `commandmate` | preflight と fix worker dispatch（send/wait）に使う CLI |
+| `--cli <launcher>` | 任意 | `$CM` → `commandmate` | preflight と fix worker dispatch（send/wait）に使うランチャー。解決規約は dispatch-contract.md 第 2.8 節と同一 |
 | `--git <path>` | 任意 | `git` | base 解決・fix worktree 作成・再merge に使う git |
 | `--gh <path>` | 任意 | `gh` | repo 到達性 preflight に使う gh |
 | `--wait-timeout <sec>` | 任意 | `300` | fix worker の1回あたり wait timeout |

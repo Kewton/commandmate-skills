@@ -112,7 +112,10 @@ const USAGE = `cmate-verify-advisor — layer 1 (deterministic history analysis)
                         ({"history":[...],"details":[...]} or a bare history array)
   --dump <path>         write the collected snapshot to this path
   --proposals <path>    layer-2 proposals to render and diff (never applied)
-  --cli <name>          CommandMate executable to collect with (default: commandmate)
+  --cli <launcher>      CommandMate launcher to collect with: an executable plus fixed
+                        leading arguments, split on whitespace and run WITHOUT a shell
+                        ("commandmate" — the default, "npx commandmate@latest", a path).
+                        Falls back to $CM when omitted. Shell syntax is refused.
   --worktree <id>       collect only this worktree (repeatable)
   --worktree-prefix <s> keep only runs whose worktree id starts with <s> (repeatable)
   --days <n>            collection window, 1..90 (default 30)
@@ -139,6 +142,57 @@ class AdvisorError extends Error {
 
 const usageError = (message) => new AdvisorError(EXIT_ERROR, message);
 const noHistoryError = (message) => new AdvisorError(EXIT_NO_HISTORY, message);
+
+// =============================================================================
+// Launcher resolution (Issue #37)
+// =============================================================================
+//
+// The same convention cmate-orchestrate-monitor/scripts/monitor.sh:108 and
+// cmate-orchestrate's runners use, so an npx-only operator sets ONE variable for
+// the whole toolchain:
+//
+//   --cli <launcher>   explicit, wins
+//   $CM                monitor.sh's variable, same name and same meaning
+//   "commandmate"      the default
+//
+// The value is a LAUNCHER, not merely an executable: it is split on whitespace
+// and spawned WITHOUT a shell, which is what makes `npx commandmate@latest`
+// usable here. Before this, spawnSync took the whole string as one program name
+// and reported ENOENT — an error about a program nobody named. This is runtime
+// resolution only; nothing about it reaches a report.
+//
+// Accepted: one or more whitespace-separated tokens, the first the program and
+//           the rest fixed leading arguments — "commandmate",
+//           "/usr/local/bin/commandmate", "npx commandmate@latest".
+// Refused:  an empty value, a first token starting with "-", and any shell
+//           syntax or control character. Nothing here runs a shell, so a pipe, a
+//           redirect, a substitution or a quote would be passed to the program
+//           as a literal argument and silently misbehave.
+const DEFAULT_LAUNCHER = 'commandmate';
+const LAUNCHER_SHELL_CHARS = /[|&;<>()$`\\"']/;
+// eslint-disable-next-line no-control-regex
+const LAUNCHER_CONTROL_CHARS = /[\x00-\x08\x0a-\x1f\x7f]/;
+const LAUNCHER_ADVICE =
+  'a launcher is an executable plus fixed leading arguments, split on whitespace and run WITHOUT a shell ' +
+  '(accepted: "commandmate", "/usr/local/bin/commandmate", "npx commandmate@latest"). ' +
+  'For anything a shell would have to read — a pipe, a redirect, a substitution, a quote — put a wrapper on PATH ' +
+  '(~/.local/bin/commandmate containing: exec npx --yes commandmate@latest "$@") and pass its path.';
+
+function resolveLauncher(cliFlag, env = process.env) {
+  const fromEnv = typeof env.CM === 'string' && env.CM.trim() !== '' ? env.CM : undefined;
+  const source = cliFlag !== undefined && cliFlag !== null ? '--cli' : (fromEnv !== undefined ? 'CM' : 'default');
+  const raw = cliFlag ?? fromEnv ?? DEFAULT_LAUNCHER;
+  const reject = (why) => {
+    throw usageError(`${source} ${raw}: ${why}; ${LAUNCHER_ADVICE}`);
+  };
+  if (typeof raw !== 'string') reject('must be a string');
+  if (LAUNCHER_CONTROL_CHARS.test(raw)) reject('contains a control character');
+  if (LAUNCHER_SHELL_CHARS.test(raw)) reject('contains shell syntax, which nothing here interprets');
+  const argv = raw.trim().split(/\s+/).filter((token) => token !== '');
+  if (argv.length === 0) reject('is empty');
+  if (argv[0].startsWith('-')) reject('starts with "-", so it would be read as a flag rather than a program');
+  return argv;
+}
 
 // =============================================================================
 // verify.yaml — the same subset cmate-verify's runner accepts
@@ -685,8 +739,12 @@ function readSnapshot(path) {
   throw usageError(`${path} is neither a history array nor {"history": [...], "details": [...]}`);
 }
 
-function runCli(cli, args) {
-  const result = spawnSync(cli, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+// `launcher` is the resolved argv prefix, so a multi-token launcher spawns as
+// program + fixed arguments + subcommand rather than as one impossible program
+// name (Issue #37).
+function runCli(launcher, args) {
+  const cli = launcher.join(' ');
+  const result = spawnSync(launcher[0], [...launcher.slice(1), ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (result.error && result.error.code === 'ENOENT') {
     throw noHistoryError(
       `\`${cli}\` is not on PATH.\n` +
@@ -705,9 +763,9 @@ function collect(options) {
   const history = [];
   for (const worktree of worktrees) {
     const call = worktree === null ? args : [...args, '--worktree', worktree];
-    const result = runCli(options.cli, call);
+    const result = runCli(options.cliArgv, call);
     if (result.status !== 0) {
-      const version = runCli(options.cli, ['--version']);
+      const version = runCli(options.cliArgv, ['--version']);
       const detected = version.status === 0 ? version.stdout.trim() : 'unknown';
       throw noHistoryError(
         `\`${options.cli} verify history\` failed (exit ${result.status}); detected version: ${detected}.\n` +
@@ -732,7 +790,7 @@ function collect(options) {
     details = [];
     const ids = [...new Set(history.map((run) => run.id))].sort((a, b) => a - b);
     for (const id of ids) {
-      const result = runCli(options.cli, ['verify', 'show', String(id), '--json']);
+      const result = runCli(options.cliArgv, ['verify', 'show', String(id), '--json']);
       if (result.status !== 0) continue; // a run that vanished between the two calls is not fatal
       try {
         details.push(JSON.parse(result.stdout));
@@ -1435,7 +1493,11 @@ function parseArgs(argv) {
     input: null,
     dump: null,
     proposals: null,
-    cli: 'commandmate',
+    // null means "not passed": the launcher falls through to $CM and then to the
+    // bare default. Resolved in main(), so --help still answers with a --cli the
+    // resolver would refuse (Issue #37).
+    cli: null,
+    cliArgv: null,
     worktrees: [],
     worktreePrefixes: [],
     days: 30,
@@ -1484,6 +1546,9 @@ function main(argv) {
     process.stdout.write(`${USAGE}\n`);
     return EXIT_OK;
   }
+
+  options.cliArgv = resolveLauncher(options.cli);
+  options.cli = options.cliArgv.join(' ');
 
   const cwd = resolve(options.cwd);
   const configPath = resolve(options.config || `${cwd}/.commandmate/verify.yaml`);

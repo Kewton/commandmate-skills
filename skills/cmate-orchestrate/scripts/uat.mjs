@@ -82,6 +82,7 @@ import {
   parseCliJson,
   redact,
   redactionsList,
+  resolveLauncher,
   safeBranch,
   safeWorktreeTarget,
   validateDispatch,
@@ -177,7 +178,12 @@ Options:
                          is a FAILURE instead of a recorded limitation. Needs
                          --acceptance-dir.
   --out <dir>            Where UAT artifacts are written (default: <dispatch-dir>/<phase>).
-  --cli <path>           The commandmate CLI to drive (default "commandmate").
+  --cli <launcher>       The CommandMate launcher to drive: an executable plus
+                         fixed leading arguments, split on whitespace and run
+                         WITHOUT a shell — "commandmate" (default),
+                         "/usr/local/bin/commandmate", "npx commandmate@latest".
+                         Falls back to $CM (monitor.sh's variable) when omitted.
+                         Shell syntax is refused; wrap it in a script instead.
   --git <path>           The git CLI for base/worktree/re-merge (default "git").
   --gh <path>            The gh CLI for the repo-access preflight (default "gh").
   --wait-timeout <sec>   --timeout for the fix worker's commandmate wait (default ${DEFAULT_WAIT_TIMEOUT_SECONDS}).
@@ -257,6 +263,10 @@ function resolveInputs(parsed) {
     throw new SkillError('invalid_input', '--require-acceptance needs --acceptance-dir <dir>: there is nowhere to read an acceptance result from', 3);
   }
 
+  // Resolved exactly as dispatch.mjs resolves it — one launcher convention for
+  // the whole toolchain, and never a program name with a space in it (Issue #37).
+  const cliArgv = resolveLauncher(values.cli);
+
   return {
     phase: phases[0],
     planPath: values.plan,
@@ -266,7 +276,8 @@ function resolveInputs(parsed) {
     acceptanceDir: values['acceptance-dir'] ?? null,
     requireAcceptance: Boolean(values['require-acceptance']),
     outDir: values.out ?? null,
-    cli: values.cli ?? 'commandmate',
+    cliArgv,
+    cli: cliArgv.join(' '),
     git: values.git ?? 'git',
     gh: values.gh ?? 'gh',
     waitTimeout: positiveInt(values['wait-timeout'], 'wait-timeout', DEFAULT_WAIT_TIMEOUT_SECONDS),
@@ -346,6 +357,13 @@ function runCli(bin, args, extra = {}) {
       status: error.status ?? null,
     };
   }
+}
+
+// One call to the CommandMate CLI, through the resolved launcher. Identical to
+// dispatch.mjs's helper: the launcher may carry fixed leading arguments, so the
+// subcommand is appended to it instead of being the whole argv (Issue #37).
+function runCm(inputs, args, extra = {}) {
+  return runCli(inputs.cliArgv[0], [...inputs.cliArgv.slice(1), ...args], extra);
 }
 
 // The CommandMate worktree id for a branch, computed the way the CLI does
@@ -594,7 +612,7 @@ function preflight(inputs, plan) {
   const checks = [];
   const add = (code, ok, detail) => checks.push({ code, ok, blocking: true, detail });
 
-  const cli = runCli(inputs.cli, ['--version']);
+  const cli = runCm(inputs, ['--version']);
   add('cli_available', cli.ok, cli.ok ? 'commandmate CLI is runnable' : 'commandmate CLI is not runnable (permission or install)');
 
   const repo = runCli(inputs.gh, ['repo', 'view', plan.profile.repository, '--json', 'nameWithOwner']);
@@ -785,14 +803,14 @@ function worktreeHeadSha(inputs, worktreePath) {
 // worker is neither generating nor prompting, re-send once. Best-effort — the
 // commit check below is the ground truth.
 function sendAndConfirm(inputs, worktreeId, message) {
-  const first = runCli(inputs.cli, ['send', worktreeId, message]);
+  const first = runCm(inputs, ['send', worktreeId, message]);
   if (!first.ok) {
     return { sent: false, note: excerpt(first.stderr || first.stdout || 'send failed') };
   }
-  const capture = parseCliJson(runCli(inputs.cli, ['capture', worktreeId, '--json']));
+  const capture = parseCliJson(runCm(inputs, ['capture', worktreeId, '--json']));
   const started = capture && (capture.isGenerating === true || capture.isRunning === true || capture.isPromptWaiting === true);
   if (started) return { sent: true, confirmed: true, note: '' };
-  const again = runCli(inputs.cli, ['send', worktreeId, message]);
+  const again = runCm(inputs, ['send', worktreeId, message]);
   if (!again.ok) return { sent: true, confirmed: false, note: 'send may not have submitted and the re-send failed' };
   return { sent: true, confirmed: false, note: 're-sent after an unconfirmed first send' };
 }
@@ -818,7 +836,7 @@ function superviseFixUntilCommit(inputs, worktreeId, worktreeDir, message) {
   let turns = 1;
   const hardIterations = inputs.maxTurns * 4 + 8;
   for (let i = 0; i < hardIterations; i += 1) {
-    const waited = runCli(inputs.cli, ['wait', worktreeId, '--timeout', String(inputs.waitTimeout)]);
+    const waited = runCm(inputs, ['wait', worktreeId, '--timeout', String(inputs.waitTimeout)]);
     if (!waited.ok && waited.status === WAIT_EXIT_PROMPT) {
       return { state: 'prompt', dispatched: true, note: 'fix worker raised a prompt; the loop does not auto-answer' };
     }
