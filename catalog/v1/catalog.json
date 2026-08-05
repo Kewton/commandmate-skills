@@ -1467,7 +1467,7 @@
         "timeout",
         "work-evidence"
       ],
-      "latest": "0.3.1",
+      "latest": "0.4.1",
       "versions": [
         {
           "version": "0.1.1",
@@ -1615,6 +1615,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.3.1/cmate-verify-0.3.1.tar.gz",
             "sha256": "0840140a53a39de4d4021db3b3844e6676acededeff2985d5306b78b825de029",
             "size": 30651,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.4.1",
+          "changelog": "テストを package から tests/ へ移送して CI へ配線し、配布物を約半分に (#69)。SKILL.md 脱重複と陳腐化サンプルの修正 (#68)。",
+          "published_at": "2026-08-05T14:39:24Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-v0.4.1",
+            "commit": "d718b51b71141c50645b70a73d16063d78a84e6c"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-0.4.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.4.1/cmate-verify-0.4.1.tar.gz",
+            "sha256": "ff2a806b911c17ef53769f1bb53957965cb0c2f0cd73f0b201cc32e0e578d577",
+            "size": 15526,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
