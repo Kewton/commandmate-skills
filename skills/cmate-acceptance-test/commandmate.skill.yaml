@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-acceptance-test
 name: cmate-acceptance-test
-version: 0.1.2
+version: 0.1.3
 summary: Issue の受入条件を証跡付きで検証し、Go / Conditional Go / No-Go を versioned な result として返す。
 description: |-
   対象 Issue の受入条件を自動検証と手動確認に分け、command exit code、test 結果、diff、手動観察を evidence として構造化したうえで、受入の可否を判定する手順である。
@@ -71,8 +71,8 @@ risk_rationale: >-
   no executable file ships in this package.
 files:
   - path: SKILL.md
-    sha256: b4e671164d3213f952acafe744a3773c0a40427e68a5f38c61b1607f4f511851
-    size: 16119
+    sha256: 0870823a8ef3f79b269f12e7dafc2dfbcb2e35968e1690721ecc9a0de262eb92
+    size: 13402
     kind: skill_md
     executable: false
     script: false
@@ -83,14 +83,14 @@ files:
     executable: false
     script: false
   - path: references/changelog.md
-    sha256: fcfe2ca4355e993622e1a74ec0afb5db8a9affa1bd044a34a07b5d3717c4b97a
-    size: 5514
+    sha256: b0dcf751a3054112218c590f52f7630e7433ae99d17f4569a6ba17940cd7acce
+    size: 6980
     kind: instruction
     executable: false
     script: false
   - path: references/evidence.md
-    sha256: b9e643efe219efb5d51c37fcc26f13505f492498b618779077e51240191040b8
-    size: 4454
+    sha256: 961a1ec2523c0f447cd46a927fd46fe521996669345290a4557e704472dda969
+    size: 4584
     kind: instruction
     executable: false
     script: false

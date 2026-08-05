@@ -12,6 +12,12 @@ description: リポジトリを read-only で走査し、構造・規約・既�
 この Skill は書き込みも command 実行も network access も行わない。
 読み取りと報告だけを行う。
 
+この文書が述べるのは「いつ使うか」「どう呼ぶか」「出力をどう読むか」「止まったとき
+何をするか」の 4 つだけである。走査の上限・除外規則・secret 分類は
+[references/scan-policy.md](./references/scan-policy.md)、result の各 field と status と
+completion check の定義は [references/result-contract.md](./references/result-contract.md)
+が正本であり、食い違った場合は references を採る。
+
 ## 1. この Skill が答える問い
 
 1. このリポジトリは何でできているか（構成・言語・entry point・build/test 経路）。
@@ -28,7 +34,7 @@ description: リポジトリを read-only で走査し、構造・規約・既�
 | `objective` | 必須 | 文字列 | なし | これから行おうとしている変更、または調査したい主題。1文以上 |
 | `roots` | 任意 | 文字列配列 | `["."]` | 走査の起点。リポジトリ root からの相対path のみ |
 | `focus` | 任意 | 文字列配列 | `[]` | 優先的に探す語（module 名・関数名・機能名） |
-| `budget` | 任意 | object | 下記 | 走査上限の上書き。[references/scan-policy.md](./references/scan-policy.md) を参照 |
+| `budget` | 任意 | object | 下記 | 走査上限の上書き。[references/scan-policy.md](./references/scan-policy.md) §1 を参照 |
 
 `objective` が空、または「何をしたいのか」が読み取れない場合は
 **推測して走査を始めないこと**。status `failure`、`reason_code` は
@@ -40,23 +46,22 @@ description: リポジトリを read-only で走査し、構造・規約・既�
 
 ## 3. 権限と禁止事項
 
-宣言している権限は `filesystem_read` のみである。
-以下は **この Skill の手順としては禁止** である。実行してよいかを利用者に尋ねることもしない。
+宣言している権限は `filesystem_read` のみである。file への書き込み、あらゆる command の
+実行、network access、環境変数や credential の読み取りは、**この Skill の手順としては
+禁止**である（`commandmate.skill.yaml` の `risk_rationale`）。
+実行してよいかを利用者に尋ねることもしない。宣言からは読み取れない線が 2 つある。
 
-- file の作成・変更・削除、および任意の path への書き込み
-- build / test / package manager / linter / migration など、あらゆる command の実行
-- network access（HTTP、git fetch、package registry の参照を含む）
-- 環境変数・credential store・鍵素材の読み取り
-- 対象リポジトリの外にある path の読み取り
+- 対象リポジトリの外にある path を読まない。
+- `.git/` の内部 object を直接読まない。履歴が必要なら、それはこの Skill の
+  scope 外であることを `unresolved` に記録する。
 
-必要な情報が「command を実行しないと得られない」場合は、実行せずに
-`recommended_verification` へ **利用者が実行する候補として** 記載する。
-実行結果を推測で書かない。
-
-`.git/` の内部 object を直接読まないこと。履歴が必要なら、それは
-この Skill の scope 外であることを `unresolved` に記録する。
+command を実行しないと得られない情報は §6 のとおり `recommended_verification` へ回す。
 
 ## 4. 手順
+
+Step 2–6 で書き出す主張には、例外なく file/line evidence を付ける。付けられないものは
+書かない。field ごとの evidence 要件は
+[references/result-contract.md](./references/result-contract.md) 第3節が正本である。
 
 ### Step 0. 入力を検証する
 
@@ -64,8 +69,8 @@ description: リポジトリを read-only で走査し、構造・規約・既�
 
 ### Step 1. scope を決める
 
-[references/scan-policy.md](./references/scan-policy.md) の除外規則と上限を適用し、
-走査対象の file 一覧を作る。除外した理由は分類ごとに数えておく。
+[references/scan-policy.md](./references/scan-policy.md) の除外規則・上限・読む順序を
+適用し、走査対象の file 一覧を作る。除外した理由は分類ごとに数えておく。
 上限に達した場合は、その時点の一覧で続行し、`scope.truncated` を true にする。
 
 ### Step 2. 構造と規約を把握する
@@ -78,19 +83,13 @@ description: リポジトリを read-only で走査し、構造・規約・既�
 - test の置き場と命名規則
 - lint / format / type check の設定
 
-ここで得た「このリポジトリの流儀」は `repository_profile.conventions` に、
-根拠 path 付きで記録する。
+ここで得た「このリポジトリの流儀」は `repository_profile.conventions` に記録する。
 
 ### Step 3. 既存実装と再利用候補を特定する
 
-`objective` と `focus` の語、およびそこから導かれる同義語で検索し、
-関係する実装を特定する。各候補について次を判断する。
-
-- そのまま使えるか、拡張が必要か、参考にするだけか
-- 呼び出し元がどれだけあるか（変更時の波及範囲）
-
-`reuse_candidates` の各要素には、**必ず** file/line evidence を付ける。
-evidence を付けられない候補は、候補として書かない。
+`objective` と `focus` の語、およびそこから導かれる同義語で検索し、関係する実装を
+特定する。各候補について、そのまま使えるか・拡張が必要か・参考にするだけかと、
+呼び出し元の数（変更時の波及範囲）を判断する。
 
 ### Step 4. 変更riskを評価する
 
@@ -101,64 +100,45 @@ evidence を付けられない候補は、候補として書かない。
 - test が存在しない、または薄い箇所
 - 生成物・lockfile・catalog など「手で書き換えてはいけない」file
 
-各 risk に `severity` と mitigation を付ける。severity は
-「起きたときの影響 × 気付きにくさ」で決める。evidence は必須である。
-
 ### Step 5. 推奨verificationを抽出する
 
-**リポジトリに実在する** 実行手段だけを挙げる。
-`package.json` の `scripts`、`Makefile` の target、CI workflow の step、
-`CONTRIBUTING` に書かれた手順などが出典になる。
-出典 path/line を evidence として付ける。
-
-一般論としての「unit test を書くべき」は verification ではない。
-それは finding として書く。
+**リポジトリに実在する** 実行手段だけを挙げる。一般論としての
+「unit test を書くべき」は verification ではない。それは finding として書く。
 
 ### Step 6. secret らしき値の位置を記録する
 
-[references/scan-policy.md](./references/scan-policy.md) の分類に従い、
-`sensitive_locations` へ `path` / `line` / `classification` だけを記録する。
-
-**値、値の一部、伏字化した値、長さ、先頭数文字のいずれも記録しない。**
-result にも summary にも出さない。`.env.example` のような
-「値が入っていないことが期待される file」も、位置は記録する。
+[references/scan-policy.md](./references/scan-policy.md) §3 に従い、
+`sensitive_locations` へ位置と分類だけを記録する。
 
 ### Step 7. result を組み立てる
 
 [references/result-contract.md](./references/result-contract.md) と
 [schemas/repository-analysis.result.v1.json](./schemas/repository-analysis.result.v1.json)
 に従って result object を作る。あわせて `summary_markdown` に
-人が読む要約を、同 reference の見出し構成で書く。
+人が読む要約を、同 reference 第4節の見出し構成で書く。
 
 ### Step 8. completion check を実行する
 
-result を返す前に、5つの check を自分で実行し、結果を `completion_check` に記録する。
-
-| check id | 内容 |
-|---|---|
-| `evidence_present` | finding / reuse_candidate / risk の各要素が1件以上の evidence を持つ |
-| `evidence_resolvable` | evidence の path が今回読んだ file であり、行番号が file の行数内にある |
-| `verification_grounded` | recommended_verification の各要素が出典 evidence を持つ |
-| `no_secret_values` | sensitive_locations が位置と分類だけで構成されている |
-| `scope_declared` | 除外・打ち切りが scope と unresolved に反映されている |
-
+result を返す前に、`completion_check` の 5 件を自分で実行して結果を記録する。
+5 件の id と、それぞれが何を確かめるかは
+[references/result-contract.md](./references/result-contract.md) §3.9 が正本である。
 いずれかが false なら status は `success` にならない。
 
 ## 5. 出力
 
 result object 1件を返す。契約は
 [references/result-contract.md](./references/result-contract.md) にある。
-status は次の3値である。
-
-- `success` — 5つの check がすべて通り、`objective` に答えられている
-- `partial` — 報告できる内容はあるが、check の失敗、budget 打ち切り、
-  読めない path のいずれかがある。`unresolved` に理由を必ず1件以上書く
-- `failure` — 報告できる分析がない。`unresolved` に理由を必ず1件以上書く
+status は `success` / `partial` / `failure` の3値で、どの条件でどれになるか、
+`unresolved` を何件書く必要があるかは同 reference 第2節が正本である。
 
 `partial` を `success` に見せかけないこと。この Skill の価値は、
 「どこまで確かめたか」が後から検証できることにある。
 
 ## 6. 失敗時の動作
+
+`reason_code` の語彙は
+[references/result-contract.md](./references/result-contract.md) §3.8 が正本である。
+主な状況と、そのときこの手順が取る動作は次のとおり。
 
 | 状況 | 動作 |
 |---|---|
@@ -166,8 +146,7 @@ status は次の3値である。
 | `roots` が不正 | `failure` / `invalid_root`。走査しない |
 | root が存在しない・読めない | `failure` / `unreadable_path` |
 | 一部の file が読めない | 続行。`partial` / `unreadable_path` に path を記録 |
-| budget 上限に到達 | 続行。`scope.truncated` を true、`partial` / `scan_budget_exhausted` |
-| binary・vendor を検出 | 除外して続行。分類ごとの件数を scope に記録 |
+| budget 上限に到達、binary・vendor を検出 | 除外・打ち切って続行。記録の仕方は [references/scan-policy.md](./references/scan-policy.md) §1–§2 |
 | 目的に関係する実装が見つからない | `partial` / `no_evidence_found`。「無かった」と明記する。推測で埋めない |
 | command 実行が必要と判断した | 実行しない。`recommended_verification` に回す |
 
@@ -176,18 +155,16 @@ status は次の3値である。
 
 ## 7. 完了条件
 
-次がすべて満たされたときにのみ、この Skill の実行は完了である。
-
-- [ ] result object が result contract に適合している
-- [ ] `completion_check.passed` が true、または status が `partial` / `failure` で理由が記録されている
-- [ ] すべての判断が file/line evidence に結び付いている
-- [ ] secret の値が result・summary のどこにも含まれていない
-- [ ] `recommended_verification` がリポジトリに実在する手段だけで構成されている
-- [ ] `summary_markdown` が既定の見出し構成を満たしている
+この Skill の実行が完了なのは、result object が
+[references/result-contract.md](./references/result-contract.md) の契約
+（status と `unresolved` の規則、field ごとの evidence 要件、`summary_markdown` の
+見出し構成）と
+[schemas/repository-analysis.result.v1.json](./schemas/repository-analysis.result.v1.json)
+に適合し、`completion_check` の 5 件を実行して結果を申告したときだけである。
 
 ## 8. 参照
 
 - [references/scan-policy.md](./references/scan-policy.md) — 除外規則、走査上限、secret 分類
-- [references/result-contract.md](./references/result-contract.md) — result の各 field と summary の構成
+- [references/result-contract.md](./references/result-contract.md) — status、result の各 field、completion check、summary の構成
 - [references/agent-compatibility.md](./references/agent-compatibility.md) — Agent 差異と fallback
 - [schemas/repository-analysis.result.v1.json](./schemas/repository-analysis.result.v1.json) — 機械検証用 schema
