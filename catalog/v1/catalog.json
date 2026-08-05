@@ -845,7 +845,7 @@
     {
       "id": "cmate-orchestrate-monitor",
       "name": "cmate-orchestrate-monitor",
-      "summary": "並列 worker の完了判定を CommandMate の実行契約タスク状態（一次）と capture 分類（フォールバック）で下し、健全な worker へ入力を注入しない条件でのみ介入する監視レシピ。",
+      "summary": "commandmate wait が見ない停滞（プロンプト待ち・rate limit・リトライ枯渇死）を capture の 1 フレームから検知して回収し、介入と判定の全件を機械可読なログに残す監視レシピ。契約付き dispatch の一次監督は cmate-orchestrate の wait ループで、本 Skill はその回収と可観測性のサイドカーである。",
       "provider": {
         "name": "CommandMate",
         "url": "https://github.com/Kewton/CommandMate"
@@ -864,7 +864,7 @@
         "guard",
         "bash"
       ],
-      "latest": "0.4.0",
+      "latest": "0.6.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -924,6 +924,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-monitor-v0.4.0/cmate-orchestrate-monitor-0.4.0.tar.gz",
             "sha256": "ebc92e904108956929bf58667c923cf1e5dba7b645659e47141e0cb5003faa9c",
             "size": 53558,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0. An installed skill was discovered from .claude/skills and matched in the slash palette; the installer writes .agents/skills and .claude/skills byte-identically.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0. It reads SKILL.md from .agents/skills (model self-report of the absolute path, not a mechanical trace). This version does not expose skills as slash commands; invoke by name or run the scripts.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; discovery unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. Readable as a procedure; discovery unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.15.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.6.0",
+          "changelog": "プロンプト自動承認を promptData で判定し、契約 autoYes ポリシーの迂回と multiple_choice の危険側承認を防止 (#59)。陳腐化した version 断定を実行時 probe へ (#63)。監督責務の境界を明記 (#66)。SKILL.md 脱重複 (#68)。",
+          "published_at": "2026-08-05T14:32:21Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-monitor-v0.6.0",
+            "commit": "d718b51b71141c50645b70a73d16063d78a84e6c"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-monitor-0.6.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-monitor-v0.6.0/cmate-orchestrate-monitor-0.6.0.tar.gz",
+            "sha256": "e5c00e9f76b69e1a8ed392008d110b14bbdcca8f94de40c602b5ca7c0c80a7a2",
+            "size": 59957,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
