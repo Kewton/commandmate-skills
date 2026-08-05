@@ -1,6 +1,6 @@
 ---
 name: cmate-task-contract
-description: GitHub Issue（または作業内容の記述）から実行契約 `.commandmate/tasks/<name>.yaml` v1 を起案し、`commandmate send --contract` で送れる状態にする手順である。作業を始める前に goal・変更してよい scope・完了を判定する verify ゲートを宣言し、レビュー可能な成果物として残す。契約 v1 は閉じた集合なので、未知キー・空の verify.gates・scope 未宣言はいずれも送信時に契約エラーになる。
+description: GitHub Issue または作業内容の記述から、実行契約 `.commandmate/tasks/<name>.yaml` v1 を起案し `commandmate send --contract` で送れる状態にする。作業を始める前に goal・変更してよい scope・完了を判定する verify ゲートを宣言し、レビュー可能な成果物として残したいときに使う。
 ---
 
 # cmate-task-contract
@@ -15,6 +15,12 @@ description: GitHub Issue（または作業内容の記述）から実行契約 
 
 この Skill は YAML を 1 つ書く。パーサは同梱しない（契約の検証はサーバ側で行われ、
 違反は全件まとめて返るので、1 往復で直せる）。
+
+この文書が述べるのは「いつ使うか」「どう呼ぶか」「出力をどう読むか」「どこで止まり、
+人間が何をするか」の 4 つだけである。**契約 v1 の field 仕様の正本は CommandMate 本体の
+[docs/design/task-contract.md](https://github.com/Kewton/CommandMate/blob/v0.21.1/docs/design/task-contract.md)**
+（`v0.21.1` に pin。新しいリリースを使っているなら、そのタグの同 path を読む）であり、
+第 4 節はそこから **起案で罠になる差分だけ** を抜いたものである。食い違った場合は正本を採る。
 
 ---
 
@@ -118,8 +124,8 @@ Issue の内容から、**実際に変更されるファイル群** を列挙す
 
 ### Step 4. 契約を書く
 
-第 3 節の雛形を使い、第 4 節の表に照らして 1 キーずつ確認する。
-特に **綴り**（v1 は閉じた集合。未知キーは契約エラー）。
+第 3 節の雛形を使い、第 4 節（起案で罠になる差分）と正本 spec に照らして 1 キーずつ
+確認する。特に **綴り**（v1 は閉じた集合。未知キーは契約エラー）。
 
 ### Step 5. 配置する
 
@@ -168,7 +174,7 @@ Error: invalid task contract:
 > **注意: `send --contract` はバリデータではない。**
 > 契約が妥当だった時点で **タスクが作られ、メッセージが実際にエージェントへ送られる**。
 > 「構文チェックのつもりで叩く」ことはできない。送る準備ができてから叩くこと。
-> 送信前の確認は、第 4 節の表に照らした自己レビューで行う。
+> 送信前の確認は、第 4 節と正本 spec に照らした自己レビューで行う。
 
 ### Step 7. 完了を判定する
 
@@ -222,6 +228,13 @@ verify:
 `autoYes` と `success` は既定値のままなので **書かない**。既定値の再掲は、後から
 「なぜこの契約はこれを明示したのか」という読み違いを生む。
 
+`goal` は Issue の写しではなく **エージェントへの指示** であり、送信メッセージ本文に
+なる。最低限これを含める:
+
+- Issue の URL（後から辿れるように）
+- 受入条件を **検証可能な形** で（「正しく動くこと」ではなく「`python3 scripts/validate.py` が exit 0」）
+- やらないこと（scope 外の作業を思いつきで足させない）
+
 ### 3.2 全キー（既定から外す必要があるときだけ）
 
 ```yaml
@@ -258,69 +271,38 @@ success:
 
 ---
 
-## 4. フィールド仕様
+## 4. 起案で罠になる差分
 
-正本は CommandMate の
-[docs/design/task-contract.md](https://github.com/Kewton/CommandMate/blob/v0.21.1/docs/design/task-contract.md)
-（`v0.21.1` に pin。新しいリリースを使っているなら、そのタグの同 path を読む）。
-以下はそれを起案の観点でまとめたもので、値はパーサの実測に基づく。
+キーの一覧・型・既定値・上限は
+[正本 spec](https://github.com/Kewton/CommandMate/blob/v0.21.1/docs/design/task-contract.md)
+を読むこと。ここに挙げるのは、**正本を読んでいても起案時に踏みやすい**、または
+直感と逆に振る舞う点だけである。値はパーサの実測に基づく。
 
-> **この表は正本の写しであって、正本ではない。** v1 が閉じた集合であることと、
-> 「この表に無いキーは存在しない」ことは別である。本体が v1 にキーを足せば、
-> この表は古くなる。**表に無いキーを見つけても、それだけを根拠に契約エラーと
+> **以下は正本の写しであって、正本ではない。** v1 が閉じた集合であることと、
+> 「ここに無いキーは存在しない」ことは別である。本体が v1 にキーを足せば、
+> ここは古くなる。**ここに無いキーを見つけても、それだけを根拠に契約エラーと
 > 判定して削除しないこと。** 正本を読んで、そこにも無いことを確かめる。
 
-### 4.1 トップレベル
+### 4.1 トップレベル — v1 は閉じた集合
 
-| キー | 型 | 必須 | 既定 | 制約 |
-|---|---|---|---|---|
-| `version` | integer | ✅ | — | `1` のみ。欠落・他の値は契約エラー |
-| `title` | string | ✅ | — | 非空。最大 200 文字。**省略すると契約エラー** |
-| `goal` | string | ✅ | — | 非空。最大 8000 文字。**送信メッセージ本文になる** |
-| `scope` | map | — | `allow: []` / `deny: []` | `success.requireScopeClean`（既定 true）なら `allow` は 1 件以上。§4.2 |
-| `verify` | map | — | 全ゲート | §4.3 |
-| `autoYes` | map | — | ポリシー宣言なし | §4.4 |
-| `success` | map | — | §4.5 の既定 | §4.5 |
+必須は `version`（`1` のみ）・`title`・`goal` の 3 つ。`scope` / `verify` / `autoYes` /
+`success` は任意で、省略は「既定のまま」を意味する。
 
 **未知キーはトップレベル・各サブマップとも契約エラー**（v1 は閉じた集合）。
 `allowPromtTypes` のような綴り間違いが黙って無視されると、「auto-yes を縛って
 いるように見えて縛っていない契約」が生まれるため、実装は無視ではなく拒否する。
 
-`goal` は Issue の写しではなく **エージェントへの指示** である。最低限これを含める:
+### 4.2 `scope` — glob の解釈が glob ライブラリと違う
 
-- Issue の URL（後から辿れるように）
-- 受入条件を **検証可能な形** で（「正しく動くこと」ではなく「`python3 scripts/validate.py` が exit 0」）
-- やらないこと（scope 外の作業を思いつきで足させない）
+パターンは **worktree root からの相対 glob** で、絶対パス・`..` を含むパス・NUL バイトは
+いずれも契約エラーである。解釈は glob ライブラリではなく閉じた部分集合で、次の 3 点が
+直感と食い違う。
 
-### 4.2 `scope`
-
-| キー | 型 | 既定 | 制約 |
-|---|---|---|---|
-| `allow` | list of string | `[]` | 各要素は非空・最大 200 文字。最大 200 件 |
-| `deny` | list of string | `[]` | 同上。`allow` にマッチしても `deny` が勝つ |
-
-パターンは **worktree root からの相対 glob**。次はいずれも契約エラー:
-
-- 絶対パス（`/etc/passwd`）
-- `..` を含むパス（`../other-repo/**`）
-- NUL バイトを含む文字列
-
-glob の解釈は glob ライブラリではなく、次の閉じた部分集合である。
-
-| 記法 | 意味 |
+| 記法 | 罠 |
 |---|---|
-| `**` | セグメント全体を占めるときだけディレクトリ境界を越える。**0 セグメントにもマッチ** |
-| `*` | `/` を含まない任意の文字列 |
-| `?` | `/` 以外の 1 文字 |
-| `{a,b}` | 選択（入れ子可）。閉じていない `{` はリテラル |
-| `[` `]` | **リテラル**。文字クラスではない（`src/app/[...path]/` のような path をそのまま書ける） |
-| 先頭の `.` | 普通の文字。`.github/**` はそのまま読める通りに動く |
-
-大文字小文字は区別する。バックスラッシュのエスケープは無い。
-
-**ディレクトリを指すパターンは配下すべてにマッチする。** `src/lib`・`src/lib/`・
-`src/lib/**` は同義である。裏返しに、`X/*` で「直下のみ」は表せない
-（拡張子で絞る `docs/*.md` は意図通り動く）。
+| `[` `]` | **リテラルであって文字クラスではない**（`src/app/[...path]/` をそのまま書ける）。`autoYes.denyPatterns` とは規則が逆 |
+| `**` | セグメント全体を占めるときだけディレクトリ境界を越え、**0 セグメントにもマッチ** |
+| ディレクトリ指定 | 配下すべてにマッチする。`src/lib`・`src/lib/`・`src/lib/**` は同義で、`X/*` で「直下のみ」は表せない（`docs/*.md` のような拡張子絞りは意図通り動く） |
 
 `.commandmate/` 配下と契約ファイル自身は `allow` の要求から除外されるので、
 契約を置くために `allow` へ `.commandmate/**` を書く必要はない。
@@ -332,43 +314,25 @@ rename は移動元・移動先の **両方** が判定される。許可され�
 
 ### 4.3 `verify`
 
-| キー | 型 | 既定 | 制約 |
-|---|---|---|---|
-| `gates` | list of string | 省略 = 全ゲート | `.commandmate/verify.yaml` の `gates[].id`。最大 32 件。重複不可。id は `^[a-z0-9][a-z0-9-]{0,31}$` |
-
 - **`gates: []`（空リスト）は契約エラー。** 「ゲート無しで合格」と読めてしまうため。
   「全部走らせる」は `verify` キーごと、または `gates` キーの省略で表す。
-- 存在しない id は **送信時**（`send --contract`）に verify.yaml と照合されて契約エラーになる。
+- 書ける id は対象 worktree の `.commandmate/verify.yaml` の `gates[].id` だけで、
+  存在しない id は **送信時**（`send --contract`）に照合されて契約エラーになる。
 - 絞る場合は **理由をコメントで残す**。理由の無い絞り込みは、後から誰も戻せない。
 
 ### 4.4 `autoYes`
 
-| キー | 型 | 既定 | 制約 |
-|---|---|---|---|
-| `mode` | string | `null` | `off` / `safe` / `allow-listed` |
-| `allowPromptTypes` | list of string | `[]` | `yes_no` / `multiple_choice` / `approval` / `choice` / `input` / `continue`。最大 16 件。`mode: allow-listed` のときだけ意味を持つ |
-| `denyPatterns` | list of string | `[]` | **JavaScript の正規表現**。1 件最大 200 文字、最大 32 件 |
-
-`mode` の省略（`null`）は「契約はポリシーを述べていない」であり、`off`（自動応答を
-禁止する積極的な宣言）とは異なる。既定のままでよいなら **`autoYes` ブロックごと書かない**。
-
-`denyPatterns` は **JavaScript の `RegExp` としてコンパイルできること**。
-インラインフラグ `(?i)` は JavaScript では使えず、書くと契約エラーになる
-（実測: `Invalid regular expression: /(?i).../: Invalid group`）。
-大文字小文字を吸収したいなら `[Ff]orce` のように文字クラスで書く。
-**ここでの `[` は文字クラスである**（`scope` の glob と規則が逆なので注意）。
-
-`denyPatterns` は `mode` を書かなくても効く。パターンを書いた契約は既に
-ポリシーを述べている。
+- `denyPatterns` は **JavaScript の `RegExp` としてコンパイルできること**。
+  インラインフラグ `(?i)` は JavaScript では使えず、書くと契約エラーになる
+  （実測: `Invalid regular expression: /(?i).../: Invalid group`）。
+  大文字小文字を吸収したいなら `[Ff]orce` のように文字クラスで書く。
+  **ここでの `[` は文字クラスである**（`scope` の glob と規則が逆なので注意）。
+- `denyPatterns` は `mode` を書かなくても効く。パターンを書いた契約は既に
+  ポリシーを述べている。
+- `mode` の省略は「契約はポリシーを述べていない」であり、`off`（自動応答を
+  禁止する積極的な宣言）とは異なる。既定のままでよいなら **`autoYes` ブロックごと書かない**。
 
 ### 4.5 `success`
-
-| キー | 型 | 既定 | 意味 |
-|---|---|---|---|
-| `requireWorkEvidence` | boolean | `true` | commit も差分も無い「作業ゼロ」を不合格にする |
-| `requireScopeClean` | boolean | `true` | `scope` 外の変更を不合格にする（組み込み `scope` ゲート） |
-| `requireCommit` | boolean | `false` | `work-evidence` に「変更が在る」ではなく **「commit が在る」** を要求する（CommandMate `v0.20.0` 以降） |
-| `autoVerifyOnStop` | boolean | `false` | エージェント停止イベントで検証ランを自動起動する |
 
 `requireScopeClean` が true（既定）のまま `scope.allow` が空だと **契約エラー**である。
 「スコープを守れ」と言いながらスコープを挙げていない契約は、ゲートが有効になった
@@ -380,9 +344,10 @@ scope ゲートは `skipped` になる。**scope の洗い出しを省くため�
 #### `requireCommit`
 
 既定（`false`）では `work-evidence` は「commit された差分」と「未 commit の変更」の
-どちらでも合格する。`requireCommit: true` にすると **commit だけ**が証跡として数えられ、
-`commits=0 uncommitted=1`（作業はしたが commit していない）は不合格になる。
-ワーカーへの委任のように「PR に載る形まで持っていく」ことを完了条件にしたい契約で使う。
+どちらでも合格する。`requireCommit: true`（CommandMate `v0.20.0` 以降）にすると
+**commit だけ**が証跡として数えられ、`commits=0 uncommitted=1`（作業はしたが commit
+していない）は不合格になる。ワーカーへの委任のように「PR に載る形まで持っていく」ことを
+完了条件にしたい契約で使う。
 
 **`requireCommit: true` かつ `requireWorkEvidence: false` は契約エラー**である。
 commit の要求を裁定するのは `work-evidence` ゲートであり、`requireWorkEvidence: false` は
@@ -406,7 +371,7 @@ commit の要求を裁定するのは `work-evidence` ゲートであり、`requ
 
 | 出力 | 原因 | 直し方 |
 |---|---|---|
-| `top level: unknown key "..." (v1 is a closed set)` | キーの綴り違い / v1 に無いキー | §4.1 の表、次に正本 spec と照合する。独自キーは足せない（が、表に無い = v1 に無い、ではない） |
+| `top level: unknown key "..." (v1 is a closed set)` | キーの綴り違い / v1 に無いキー | §4.1、次に正本 spec と照合する。独自キーは足せない（が、§4 に無い = v1 に無い、ではない） |
 | `autoYes: unknown key "allowPromtTypes"` | 綴り違い | `allowPromptTypes` |
 | `title: required, must be a non-empty string (got nothing)` | `title` 忘れ | 200 文字以内で 1 行書く |
 | `scope.allow: at least one pattern is required while success.requireScopeClean is true` | scope 未宣言 | Step 3 に戻って洗い出す |
@@ -442,9 +407,9 @@ commit の要求を裁定するのは `work-evidence` ゲートであり、`requ
 5. `verify.gates` を書いたなら、その id が `.commandmate/verify.yaml` に実在するか。
    絞ったなら理由をコメントに残したか。
 6. 既定値のままのキー（`autoYes`・`success`）を無駄に書いていないか。
-7. 綴りを 1 語ずつ照合したか。§4 の表に無いキーがある場合、**表だけを根拠に消さず**、
+7. 綴りを 1 語ずつ照合したか。§4 に無いキーがある場合、**§4 だけを根拠に消さず**、
    正本 spec（[docs/design/task-contract.md](https://github.com/Kewton/CommandMate/blob/v0.21.1/docs/design/task-contract.md)、
    使っているリリースのタグ）に照らして、v1 に実在しないことを確認したか。
-   実在するなら残す — 表が古いだけである。
+   実在するなら残す — §4 が古いだけである。
 
 いずれかが no のまま送信しないこと。

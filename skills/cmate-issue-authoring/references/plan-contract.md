@@ -136,3 +136,20 @@ schema が validator の実装していない keyword を使っていたら、�
   別に持つので、`verdict` は重複判定だけの値域になる。refinement が `depends_on` /
   `blocks` を返した候補は、`duplicate_suspicions` ではなく `issues[].depends_on` へ
   写すこと。**`verdict` に依存の向きを書かない。**
+
+## 8. completion check（報告前の自己申告）
+
+計画または登録結果を人間に返す前に、次の 8 件を 1 件ずつ pass / fail で申告する。
+**fail が 1 件でもあれば、その run は success ではない。** 各 check が何を要求して
+いるかを決めているのは「正本」列の文書であり、この表はその index である。
+
+| # | check | 正本 |
+|---|---|---|
+| 1 | 本文のすべての主張が、入力か実際に読んだ file にトレースされている | [safety.md](./safety.md) 第 4 節 |
+| 2 | 既存 Issue と merged PR の両方を検索した（できなかったなら warning に積んだ） | [duplicate-guard.md](./duplicate-guard.md) 第 1・3 節 |
+| 3 | `duplicate` 判定はすべて open question で blocking されている | [duplicate-guard.md](./duplicate-guard.md) 第 2 節、本書 第 4 節、rule `duplicate_needs_open_question` |
+| 4 | 計画が validator を exit 0 で通った | 本書 第 5 節 |
+| 5 | 各 Issue が受入条件を 1 つ以上持ち、非 documentation の対象 file を 1 つ以上持つ | 本書 第 3 節、schema の `acceptance_criteria` / `target_files` |
+| 6 | 依存が DAG であり、本文の placeholder と `depends_on` が一致している | rule `acyclic_dependencies` / `dependency_link_in_body`（本書 第 5.2 節） |
+| 7 | Phase 1 で GitHub への mutation を 1 件も実行していない | [safety.md](./safety.md) 第 1 節 |
+| 8 | 次の行動と、それを取るのが誰かを述べた | Phase 1 は要約の末尾、登録後は [register-contract.md](./register-contract.md) 第 6 節 |

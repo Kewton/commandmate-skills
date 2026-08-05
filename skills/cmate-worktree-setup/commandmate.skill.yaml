@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-worktree-setup
 name: cmate-worktree-setup
-version: 0.1.3
+version: 0.1.4
 summary: 対象repositoryを検証し既存branch/directory/worktreeを暗黙上書きせず、profile規約に沿った専用worktreeをresolved base SHAから作成し、proportional baseline結果を証跡付きで返す。
 description: >-
   1つ以上のIssueについて、対象リポジトリを検証し、衝突しない専用 worktree を作成し、
@@ -86,8 +86,8 @@ risk_rationale: >-
   directory・worktree を暗黙上書きせず、secret と絶対path を result へ残さない。
 files:
   - path: SKILL.md
-    sha256: 7d759f2f3e34edd7d15a213c7d1a24ba8348b4b782fd05de7754d691e6ca813b
-    size: 14776
+    sha256: 73f4c5e3c68dc3bf12487446be5606892a382e7883be007237a7018d709eabd0
+    size: 12562
     kind: skill_md
     executable: false
     script: false
@@ -104,14 +104,14 @@ files:
     executable: false
     script: false
   - path: references/result-contract.md
-    sha256: f6b05fdeb0b0d9d9d9de68b36e5934b6f10fa460276ea9e25d46452017d7e921
-    size: 8200
+    sha256: e271758d3180631596431a8d78ba8e6b76cf96692f815c36efade6b28fd5da91
+    size: 9142
     kind: instruction
     executable: false
     script: false
   - path: references/safety.md
-    sha256: 9d7eb7eaf2f93a799e34098187f50d3f5a678d89c938e2ab60721565fd6d2253
-    size: 6890
+    sha256: d6a4554814b4281e55dc8eac33e82d35a079d566a4632ba187e9809052007609
+    size: 7009
     kind: instruction
     executable: false
     script: false

@@ -19,6 +19,22 @@ install 先で走らせるよう案内している箇所は無い。
 
 ## Changelog
 
+### 0.5.1 — SKILL.md の規則再掲を references / schema へ一本化する（Issue #68）
+
+- SKILL.md を「いつ使うか / 呼び方・入力 / 出力の読み方 / 停止条件と人間の動き」の 4 つに
+  絞り、references・schema・manifest にも書かれていた規則の再掲を外した。**references と
+  schema の内容は削っていない。** 規則そのもの、validator の rule、schema、計画 artifact と
+  receipt の互換性に変更は無い。
+- 外した主なもの: 権限と禁止事項の全文（[safety.md](./safety.md) 第 1 節）、Step 3 の重複
+  検査手順（[duplicate-guard.md](./duplicate-guard.md)）、Step 4 の `size` / `parallel_safe`
+  と `xl` の説明（[plan-contract.md](./plan-contract.md) 第 3・7 節と schema の
+  `description`）、Phase 2 の前提 3 件と登録規則の逐語再掲
+  （[register-contract.md](./register-contract.md)）。
+- completion check の 8 件は **[plan-contract.md](./plan-contract.md) 第 8 節へ移設**した。
+  8 件の文言は SKILL.md にしか無く、どこにも正本が無い記述を消さないため、外す前に正本側へ
+  移している。各 check が何を要求しているかの参照先も同節の表に置いた。
+- frontmatter の `description` は 175 字で 200 字以内のため未変更。
+
 ### 0.5.0 — mirror の同期を機械で保証し、ペアの境界を双方向にする（Issue #62 / #65）
 
 - planner mirror の一致を検証する conformance テストを追加した。定数を byte 単位で

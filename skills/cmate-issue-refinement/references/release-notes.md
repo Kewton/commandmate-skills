@@ -2,6 +2,29 @@
 
 ## Changelog
 
+### 0.2.1 — the rules live in the references; `SKILL.md` points at them (Issue #68)
+
+- `SKILL.md` now settles only four things — when to use the Skill, how to call
+  it, how to read the result, and where it stops — and no longer restates rules
+  that the references, the schema or the manifest already carry. **Nothing was
+  removed from a reference or from the schema.** No rule, no field, no status
+  condition and no result-document compatibility changed.
+- Removed from `SKILL.md`: the *Boundaries* section in full (it repeated
+  [`safety.md`](./safety.md) §1–§5), the prohibition list under *Permissions*
+  (same, plus the manifest's `declared_permissions`, which declares no write at
+  all), the failure-behaviour table (status and `failure_reason` are settled by
+  [`output-contract.md`](./output-contract.md)), and the per-step restatements of
+  the section states, the size bands, the `parallel_safe` rule and the severity
+  definitions.
+- **The nine completion-check statements moved into
+  [`output-contract.md`](./output-contract.md)**, which already claimed to mirror
+  them. They existed nowhere else, so they were moved rather than dropped, and
+  the field note now points at the list instead of back at `SKILL.md`.
+- The pair boundary with `cmate-issue-authoring` (When-to-use, Step 6 and the
+  handoff), the Step 1 note that comments are not input, and the
+  Impact / affected files requirement are unchanged: they are load-bearing.
+- The `description` is 148 characters, already under 200, so it was not touched.
+
 ### 0.2.0 — a two-way boundary with cmate-issue-authoring, and planner-ready output (Issue #65)
 
 - **The pair boundary is now stated on both sides.** `cmate-issue-authoring`

@@ -62,8 +62,8 @@ indistinguishable from a crash, and the caller has to be able to tell.
 - `redactions` carries kind and count only, never the value.
 - `github_writes` is always the empty array. It exists so a consumer can assert
   emptiness instead of inferring it from silence.
-- `completion_check` mirrors the nine statements in `SKILL.md`, each with
-  `passed` and, when false, `detail`.
+- `completion_check` carries the nine statements below, each with `passed` and,
+  when false, `detail`.
 
 ## The summary
 
@@ -115,9 +115,26 @@ Rules:
 
 ## Completion check
 
-Run it before reporting, and report it either way. The statements are the nine
-in `SKILL.md`. A statement that cannot be evaluated is `passed: false` with the
-reason — not omitted.
+Run it before reporting, and report it either way. A statement that cannot be
+evaluated is `passed: false` with the reason — not omitted.
 
-A failed statement caps the status at `partial`. Reporting a `success` beside a
-failed statement is the single worst outcome this contract exists to prevent.
+The run is complete when every one of these holds, and you have said so
+explicitly:
+
+1. `issue_type` is assigned, or `unknown` with an open question attached.
+2. Every required section for that type has a state, and every generated section
+   has at least one evidence ref. For `feature` and `bug` that set includes
+   **Impact / affected files**, whose test is what keeps the refined body from
+   being blocked downstream by "Affected files are unclear"
+   ([`section-contract.md`](./section-contract.md)).
+3. Every Issue-stated assumption about the code has a verification verdict.
+4. Every finding has a severity and a locator or evidence ref.
+5. Every open question states why it blocks and is unanswered by you.
+6. `dependencies.parallel_safe` is `true`, `false` or `unknown`, with a rationale.
+7. The result document validates against the result schema.
+8. No GitHub write happened, and the summary says so.
+9. The summary names the next action and who has to take it.
+
+Report the check as a list of statements with pass or fail. A failed statement
+caps the status at `partial`. Reporting a `success` beside a failed statement is
+the single worst outcome this contract exists to prevent.
