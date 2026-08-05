@@ -84,17 +84,23 @@ dispatch 時のシェル展開の欠陥で、worker へ届いた指示文から 
 CLI が既に持っている。curl では両方を再実装し、トークンをプロセスリストへ晒すことになる。
 `task show` ではなく `task list` なのは、監視ループが知っているのが worktree-id だけだからである。
 
-**バージョンゲートが既定になる、という実測**:
+**台帳が入った version（境界の実測、2026-08-05）**:
 
-| 対象 | `commandmate task` |
+| 対象 | `src/cli/commands/task.ts` |
 |---|---|
-| homebrew 導入版 0.10.2 | **無し**（`error: unknown command 'task'`） |
-| npm 公開最新 0.16.0（tarball 検査） | **無し**（`dist/cli/commands/task.js` が存在しない） |
-| tag `v0.15.0` / `v0.16.0` | **無し**（`src/cli/commands/task.ts` が存在しない） |
-| develop（#1566 以降） | 有り |
+| tag `v0.15.0` / `v0.16.0` | **無し** |
+| tag `v0.17.0`（2026-07-31 リリース） | **有り** |
+| tag `v0.18.0` … `v0.21.1` | 有り |
+| homebrew 導入版 0.10.2（実行時確認） | **無し**（`error: unknown command 'task'`） |
 
-つまり **2026-07-31 時点の公開版 CommandMate では、この Skill は必ずフォールバックモードで走る。**
-「タスク状態が一次ソース」は、task 台帳を含む CommandMate に対してのみ成立する主張である。
+したがって **一次ソース経路の最小 version は 0.17.0** である。
+
+> **0.4.0 の本節にあった「2026-07-31 時点の公開版では必ずフォールバックで走る」という断定は
+> 誤りとして削除した。** 断定した当日に 0.17.0 が出ており、以後の公開版はすべて台帳を持つ。
+> 「今日の公開版は」の形で書かれた事実は次のリリースで嘘になり、しかも**嘘になったことが
+> 誰にも見えない**。version 境界（上表）は時間が経っても真だが、
+> 「いま目の前の CommandMate がどちらか」は version の照合ではなく実行時 probe で決める:
+> 台帳が引けなければ `FALLBACK MODE` 行が出て、引ければ poll 行に `task=` が付く。
 
 ## 1c. 介入の宛先（0.3.0 で修正、Issue #1602）
 
@@ -155,13 +161,69 @@ verify-completion.sh --started 1 --state GENERATING …（他は同じ） -> WOR
 （ガードを 1 つずつ外す / 数え方を `wc -l` へ戻す）でそれぞれ赤くなることを確認しているが、
 実運用で `git` や判定器が落ちた実績は未計測である。
 
+## 1e. プロンプト自動承認の条件（0.5.0 で追加、Issue #59）
+
+0.4.0 までの `PROMPT` 分岐は、分類しただけで無条件に Enter を送っていた。Enter は tmux ペインへ
+直接入るのでサーバの承認制御を通らず、(1) 契約の autoYes ポリシー（`mode: off` / `denyPatterns`、
+CommandMate #1547 / #1684 / #1699）を迂回し、(2) multiple_choice では**デフォルト選択肢の確定**に
+なる（#1681）。
+
+**Issue #59 の提案（「multiple_choice なら保留」）は実測により採らなかった。**
+理由は下表の 1 行目である。
+
+実測（2026-08-05、CommandMate 0.21.2、実 worktree 6 件を 1 秒間隔で probe。
+`capture <id> --json` を 840 回叩き、`promptData` が非 null だった 30 フレームを採取した）:
+
+| 実測項目 | 結果 |
+|---|---|
+| `promptData.type` の分布 | **30/30 が `multiple_choice`**。Claude Code の権限プロンプト（`Do you want to proceed?` / 選択肢は Yes・「今後聞かない」・No）も multiple_choice として記録される。**型で保留すると実運用の承認が 100% 止まる** |
+| `promptData.options[].isDefault` | 30/30 のフレームに存在。default は常に**ちょうど 1 つ** |
+| その default の label / number | **34/34 が `Yes` / `1`**（3 択 27 件・2 択 7 件） |
+| `autoYes.lastSuppression` | 30/30 のフレームに key として存在（値はすべて `null`。窓の間に保留を起こす契約は走っていない） |
+| `promptData` が null のフレーム | 大多数。`❯ 1. Submit answers` のような AskUserQuestion 形式は製品の検出器が prompt と扱わないため（`prompt-submit-answers.json`）、**保留側の既定になる** |
+| 危険な形の実在 | `capture <id> --prompts --json` の台帳に、選択肢が散文 3 件で **`isDefault` がどれにも付かない** prompt が実在した（`db9f9d48-3a5d-4a58-8d7d-ad64b4b5b59d`、`answeredBy: terminal`）。ここで Enter を送るとカーソル位置が確定する |
+
+したがって条件は**型ではなくデフォルトの意味**に置いた: 「default 選択肢の label が肯定語で
+始まる二択」だけを承認し、それ以外（ポリシー保留・default 無し・肯定でない default・
+promptData 無し・未知の型）は保留する。
+
+`promptData` の型定義は `src/types/models.ts`（`YesNoPromptData` / `MultipleChoicePromptData` /
+`MultipleChoiceOption`）、`lastSuppression` の形は
+`src/lib/polling/auto-yes-suppression-state.ts` と、それを publish する
+`buildCurrentOutput` の unit test で固定されている。
+
+**この節も実運用実績ではない。** 承認側 1 本と保留側 4 本を fixture で固定し、
+変異注入（無条件 Enter へ戻す / ポリシー判定を後ろへ移す / multiple_choice を一律保留にする /
+保留報告を毎ポーリングにする / `held=` を常時出す / `--no-auto-approve` を無視する）で
+それぞれ赤くなることを確認しているが、**実運用で保留が発火した実績は未計測である**。
+
+### 実装していない保護
+
+- **セッションの Auto-Yes が off のときのポリシー保留**。`lastSuppression` を記録するのは
+  Auto-Yes ポーラーであり、ポーラーはセッションの Auto-Yes が有効なときしか走らない
+  （`src/lib/auto-yes-poller.ts`）。「契約は autoYes off、セッションの Auto-Yes も off」の
+  組み合わせでは保留が記録されないので、monitor からは見えない。
+  **契約付き dispatch では `--no-auto-approve` を使うこと**が、この穴に対する唯一の保護である。
+- **`lastSuppression` の鮮度判定**。この record はセッションごとの「最後の保留」で、解決後も残る
+  （製品側も「`isPromptWaiting` と併せて読め」と書いている）。monitor は `at` と現在時刻を
+  比較していないので、**同一セッションの後続プロンプトも保留側へ倒しうる**。
+  安全側だが、止まる方向の誤りである。
+- **`isAskUserQuestion`**。`MultipleChoicePromptData` に実在する（#807）が、上の 30 フレームには
+  **1 件も現れなかった**。観測していないフィールドを条件に入れていない。
+  危険な picker は `isDefault` の不在で捕まる（上表最終行）。
+
 ## 2. 測定の限界（この Skill について）
 
 - **修正後の介入経路は fixture / shim テストのみ**。実 worker のペインへ Enter / `a` /
   再送が実際に届いた実績は **未計測**である（第 1b・1c 節）。
 - **タスク状態経路は fixture / shim テストのみ**。実 worker を契約付きで委任し、
   `succeeded` / `failed` を実際に読んで監視を終わらせた実績は **未計測**である
-  （公開版 CommandMate に `task` コマンドが無いため、リリース後にしか測れない）。
+  （0.17.0 以降の CommandMate では経路自体は存在する。第1b節）。
+- **プロンプト保留経路も fixture / shim テストのみ**（第1e節）。承認条件は実 capture 30 件の
+  実測に基づくが、実運用で `hold:` が出た実績は **未計測**である。
+  `hold:policy` に至っては、**保留を実際に起こす契約（`mode: off` / `denyPatterns`）を
+  走らせた測定が無い**（fixture の `lastSuppression` は製品の unit test が固定している形を
+  実 capture フレームへ移植したもので、生採取ではない）。
 - **worker 側 CLI は Claude Code のみ**。同梱の生成中・idle・プロンプトのアンカーは
   その TUI から実際に採取した capture に基づく。他の coding CLI の TUI 文字列は **未計測**である。
 - **rate limit・リトライ枯渇の実地発火は 0 回**。この 2 経路は fixture（実機採取した

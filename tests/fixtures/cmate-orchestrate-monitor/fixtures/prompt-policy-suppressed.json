@@ -1,0 +1,59 @@
+{
+  "isRunning": true,
+  "cliToolId": "claude",
+  "sessionStatus": "waiting",
+  "sessionStatusReason": "prompt_detected",
+  "content": "",
+  "realtimeSnippet": "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n  \u001b[1m\u001b[38;5;246m6\u001b[0m\u001b[38;5;246m tasks (\u001b[1m0\u001b[0m\u001b[38;5;246m done, \u001b[1m1\u001b[0m\u001b[38;5;246m in progress, \u001b[1m5\u001b[0m\u001b[38;5;246m open)\u001b[39m\n  \u001b[38;5;174m◼ \u001b[1m\u001b[39mWave 1: 5並列ワーカー (#57 #58 #59+#63 #61 #64)\u001b[0m\n  ◻ 共有ファイル配線（直列・宙吊り防止）\n  ◻ #70 の扱いをユーザーに諮る\n  ◻ \u001b[38;5;246mWave 1 の PR 作成・main へマージ › blocked by #1\u001b[39m\n  ◻ \u001b[38;5;246mWave 2: #60（acceptance schema + orchestrate uat.mjs 整合）, #62+#65（issue ペア）, #66（境界） › blocked by #2\u001b[39m\n  \u001b[38;5;246m … +1 pending\u001b[39m\n",
+  "lineCount": 1001,
+  "lastCapturedLine": 1000,
+  "isComplete": true,
+  "isGenerating": false,
+  "thinking": false,
+  "thinkingMessage": null,
+  "isPromptWaiting": true,
+  "promptData": {
+    "type": "multiple_choice",
+    "question": "commandmatedev capture commandmate-skills-issue-58 2>&1 | tail -40 | cat -v | sed 's/\\^\\[\\[[0-9;?]*[A-Za-z]//g' | grep -v \"^$\" | tail -25 Capture raw pane content of worker 58 This command requires approval Do you want to proceed?",
+    "options": [
+      {
+        "number": 1,
+        "label": "Yes",
+        "isDefault": true,
+        "requiresTextInput": false
+      },
+      {
+        "number": 2,
+        "label": "Yes, and don’t ask again for: commandmatedev capture *",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 3,
+        "label": "No",
+        "isDefault": false,
+        "requiresTextInput": false
+      }
+    ],
+    "status": "pending",
+    "instructionText": "❯ /model\n  ⎿  Set model to Opus 5 (1M context) and saved as your default for new sessions\n\n❯ /orchestrate https://github.com/Kewton/commandmate-skillsの下記Issue\n57 58 59 60 61 62 63 64 65 66 67 68 69 70\n\n⏺ Searching for 1 pattern, reading 1 file, calling 11 tools, running 25 shell commands, recalling 1 memory, writing 2 memories…\n  ⎿  $ commandmatedev capture commandmate-skills-issue-58 2>&1 | tail -40 | cat -v | sed 's/\\^\\[\\[[0-9;?]*[A-Za-z]//g' | grep -v \"^$\" | tail -25\n\n⏺ #58 と #64 が waiting 状態です。プロンプトで停止していないか内容を確認します。\n\n Bash command\n\n   commandmatedev capture commandmate-skills-issue-58 2>&1 | tail -40 | cat -v | sed 's/\\^\\[\\[[0-9;?]*[A-Za-z]//g' | grep -v \"^$\" | tail -25\n   Capture raw pane content of worker 58\n\n This command requires approval\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don’t ask again for: commandmatedev capture *\n   3. No",
+    "approvalTarget": "Bash command\n\n   commandmatedev capture commandmate-skills-issue-58 2>&1 | tail -40 | cat -v | sed 's/\\^\\[\\[[0-9;?]*[A-Za-z]//g' | grep -v \"^$\" | tail -25\n   Capture raw pane content of worker 58\n\n This command requires approval\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don’t ask again for: commandmatedev capture *\n   3. No"
+  },
+  "autoYes": {
+    "enabled": true,
+    "expiresAt": 1785948080237,
+    "lastSuppression": {
+      "reason": "deny-pattern",
+      "mode": "allow-listed",
+      "promptType": "multiple_choice",
+      "pattern": "rm\\s+-rf",
+      "at": 1785948079000
+    }
+  },
+  "isSelectionListActive": false,
+  "isPagerActive": false,
+  "isUnclassifiedActive": false,
+  "lastServerResponseTimestamp": 1785920057471,
+  "serverPollerActive": true,
+  "lastStopEventAt": null
+}

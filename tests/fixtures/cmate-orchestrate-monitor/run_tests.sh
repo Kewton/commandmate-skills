@@ -683,6 +683,113 @@ check "the failure is re-reported every poll, so it cannot be missed" 3 \
   "$(printf '%s\n' "$LOOP_STDERR" | grep -c "NOT delivered")"
 
 echo
+echo "== the Enter sent at a PROMPT is judged, not unconditional (Issue #59) =="
+# Enter is typed into the pane, so it is not subject to the server's autoYes
+# policy, and on a multiple_choice prompt it confirms the DEFAULT option rather
+# than answering "yes" (CommandMate #1681). Before 0.5.0 the loop sent it on the
+# classification alone.
+#
+# The rule is a positive test — approve only a binary approval whose default is
+# affirmative — because the obvious deny-list does not work: measured against
+# live captures (2026-08-05, CommandMate 0.21.2), promptData.type was
+# `multiple_choice` on 30/30 frames carrying a prompt, Claude Code's plain
+# permission prompt included. "Hold every multiple_choice" would hold every real
+# approval, which is why that shape is pinned as an APPROVE below.
+
+check "the measured permission prompt still approves" approve \
+  "$(mlib "ml_prompt_enter_verdict $FIXTURES/live-prompt-multiple-choice.json")"
+check "…because its default option is the affirmative one" "Yes" \
+  "$(mlib "ml_prompt_default_label $FIXTURES/live-prompt-multiple-choice.json")"
+# The picker shape, as the server recorded it: prose options, no default at all.
+check "a picker with no default option is held" hold:no-default \
+  "$(mlib "ml_prompt_enter_verdict $FIXTURES/prompt-no-default.json")"
+# The server already decided not to answer this one. Enter would undo that.
+check "a policy suppression is held" hold:policy \
+  "$(mlib "ml_prompt_enter_verdict $FIXTURES/prompt-policy-suppressed.json")"
+check "…and the reason survives for the operator" deny-pattern \
+  "$(mlib "ml_autoyes_suppression_reason $FIXTURES/prompt-policy-suppressed.json")"
+# Ordering: the suppressed frame's promptData is the approvable one, so a green
+# here fails the moment the policy check is moved after the shape check.
+check "the policy check outranks an otherwise approvable shape" "Yes" \
+  "$(mlib "ml_prompt_default_label $FIXTURES/prompt-policy-suppressed.json")"
+# `❯ 1. Submit answers` is PROMPT by text marker only; the product attached no
+# promptData, so there is no evidence about what Enter selects.
+check "a frame with no promptData is held" hold:no-prompt-data \
+  "$(mlib "ml_prompt_enter_verdict $FIXTURES/prompt-submit-answers.json")"
+check "a yes_no prompt with no stated default approves" approve \
+  "$(mlib "ml_prompt_enter_verdict $FIXTURES/prompt-yes-no.json")"
+
+# The affirmative test is anchored at the start and must not swallow a prose
+# option that merely begins with an approving word.
+check "'Yes' is affirmative" 0 "$(mlib 'ml_is_affirmative Yes; printf "%s" $?')"
+check "a Yes-prefixed allowlist option is affirmative" 0 \
+  "$(mlib 'ml_is_affirmative "Yes, and do not ask again for: python3 *"; printf "%s" $?')"
+check "'No' is not affirmative" 1 "$(mlib 'ml_is_affirmative No; printf "%s" $?')"
+check "a prose answer is not affirmative" 1 \
+  "$(mlib 'ml_is_affirmative "Resolver reverted to instructionText"; printf "%s" $?')"
+check "'Yesterday, roll back' is not affirmative" 1 \
+  "$(mlib 'ml_is_affirmative "Yesterday, roll back"; printf "%s" $?')"
+check "an empty label is not affirmative" 1 "$(mlib 'ml_is_affirmative ""; printf "%s" $?')"
+
+# Loop level. Same fixtures, same hooks, only the prompt frame differs — so the
+# approve arm and each hold arm cannot satisfy each other's assertions.
+printf 'count_commits() { echo 2; }\ncount_uncommitted() { echo 5; }\n' > "$WORK/hooks-both.sh"
+
+run_loop prompt-approve 5 live-generating-token.json,live-prompt-multiple-choice.json,live-idle.json \
+  --hooks "$WORK/hooks-both.sh"
+check "an approvable prompt is still answered with Enter" \
+  "send-keys -t =mcbd-claude-w1: Enter" "$(printf '%s\n' "$LOOP_TMUX" | grep send-keys)"
+check_contains "…and counted as an approval" "monitor[w1]: COMPLETE (approvals=1)" "$LOOP_STDOUT"
+check_lacks "…with no held counter on the COMPLETE line" "held=" "$LOOP_STDOUT"
+check_lacks "…and nothing reported as held" "PROMPT held" "$LOOP_STDOUT"
+
+run_loop prompt-hold-no-default 5 live-generating-token.json,prompt-no-default.json,live-idle.json \
+  --hooks "$WORK/hooks-both.sh"
+check "a picker is never typed into" "" "$(printf '%s\n' "$LOOP_TMUX" | grep send-keys || true)"
+check_contains "the hold is reported with its reason" \
+  "monitor[w1]: PROMPT held, no Enter sent — no option is marked default" "$LOOP_STDOUT"
+check_contains "…and says how to resolve it" "commandmate respond w1" "$LOOP_STDOUT"
+check_contains "the COMPLETE line separates held from approved" \
+  "monitor[w1]: COMPLETE (approvals=0 held=1)" "$LOOP_STDOUT"
+
+run_loop prompt-hold-policy 5 live-generating-token.json,prompt-policy-suppressed.json,live-idle.json \
+  --hooks "$WORK/hooks-both.sh"
+check "a suppressed prompt is never typed into" "" "$(printf '%s\n' "$LOOP_TMUX" | grep send-keys || true)"
+check_contains "the hold names the server-side policy" \
+  "the contract's autoYes policy withheld this answer server-side (autoYes.lastSuppression: deny-pattern)" \
+  "$LOOP_STDOUT"
+check_contains "…and is counted, not approved" "monitor[w1]: COMPLETE (approvals=0 held=1)" "$LOOP_STDOUT"
+
+run_loop prompt-hold-no-data 5 live-generating-token.json,prompt-submit-answers.json,live-idle.json \
+  --hooks "$WORK/hooks-both.sh"
+check "a marker-only prompt is never typed into" "" "$(printf '%s\n' "$LOOP_TMUX" | grep send-keys || true)"
+check_contains "the hold says the frame carried no promptData" \
+  "the poll carries no promptData" "$LOOP_STDOUT"
+
+# The switch for contract-backed supervision: the SAME frame that approves above
+# is held here, so this can only pass because of the flag.
+run_loop prompt-no-auto-approve 5 live-generating-token.json,live-prompt-multiple-choice.json,live-idle.json \
+  --no-auto-approve --hooks "$WORK/hooks-both.sh"
+check "--no-auto-approve types nothing at an approvable prompt" "" \
+  "$(printf '%s\n' "$LOOP_TMUX" | grep send-keys || true)"
+check_contains "--no-auto-approve says why it held" \
+  "auto-approve is off (--no-auto-approve)" "$LOOP_STDOUT"
+check_contains "--no-auto-approve counts the hold" \
+  "monitor[w1]: COMPLETE (approvals=0 held=1)" "$LOOP_STDOUT"
+
+# A prompt sits on screen for many polls. Reporting per poll would flood the
+# stream at the operator's 20s interval and inflate `held=` into a poll counter.
+run_loop prompt-hold-once 4 prompt-no-default.json
+check "the held prompt is reported once, not once per poll" 1 \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep -c 'PROMPT held' || true)"
+check "four polls happened" 4 "$LOOP_CAPTURES"
+
+# …but a prompt that comes back after the pane moved on is a new episode.
+run_loop prompt-hold-again 4 prompt-no-default.json,live-idle.json,prompt-no-default.json,live-idle.json
+check "a prompt raised again after an idle poll is reported again" 2 \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep -c 'PROMPT held' || true)"
+
+echo
 echo "== monitor.sh with the task ledger wired (Issue #1589) =="
 TASK_LOOP_DIR="$WORK/task-loop"
 mkdir -p "$TASK_LOOP_DIR"

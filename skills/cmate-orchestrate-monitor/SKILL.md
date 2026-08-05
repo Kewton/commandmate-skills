@@ -1,6 +1,6 @@
 ---
 name: cmate-orchestrate-monitor
-description: 並列で走らせた worker（tmux セッション上の coding CLI）を監督するための監視レシピ。完了判定の一次ソースは CommandMate が記録した実行契約のタスク状態（succeeded / failed / not_started …）であり、capture の正規表現解析は契約なし委任・タスク台帳を持たない CommandMate 向けのフォールバックである。commandmate capture --json の1フレームを状態トークン（NOT_RUNNING / GENERATING / PROMPT / RATE_LIMIT / IDLE）へ分類し、権限プロンプトの自動承認・rate limit からの即時復帰・リトライ枯渇後の再送を最小条件で行い、フォールバック時は生成アンカーと実 commit / uncommitted 数に基づく STARTED ガード付きの完了判定を下す。タスク状態が読めない環境では明示メッセージつきでフォールバックモードへ入る。誤報（未完了を完了と報告する・健全な worker へ入力を注入する・停滞を見逃す）を防ぐことが目的であり、判定ロジックは実 capture 由来の fixture で固定されている。worker の dispatch や PR 作成は行わない。
+description: 並列で走らせた worker（tmux セッション上の coding CLI）を監督するための監視レシピ。commandmate wait が見ない「見えない停滞」——プロンプトで止まった・rate limit で止まった・CLI がリトライを使い切って死んだ——を検知し、介入と判定の全件をログへ残す。commandmate capture --json の1フレームを状態トークン（NOT_RUNNING / GENERATING / PROMPT / RATE_LIMIT / IDLE）へ分類し、rate limit からの即時復帰・リトライ枯渇後の再送、および「デフォルト選択肢が承認である二択」と判定できたプロンプトの自動承認だけを行う。それ以外のプロンプト（契約 autoYes ポリシーがサーバ側で保留したもの・デフォルトの無い選択・promptData の無いフレーム）は Enter を送らず保留して報告する。監視を止めてよいかの判定はタスク台帳の実行契約状態が一次ソースで、capture ヒューリスティクスは契約なし委任と台帳を持たない CommandMate 向けのフォールバックである（台帳が引けない環境では明示メッセージつきでフォールバックモードへ入る）。誤報（未完了を完了と報告する・健全な worker へ入力を注入する・停滞を見逃す）を防ぐことが目的であり、判定ロジックは実 capture 由来の fixture で固定されている。worker の dispatch や PR 作成は行わない。
 ---
 
 # cmate-orchestrate-monitor（worker 監視の判定コア）
@@ -60,8 +60,22 @@ worker をどう作るか・どう dispatch するか・成果物をどう merge
 | `bash` 3.2 以上 | script の実行 | 成立しない。`process_execution` を要求する |
 | `tmux` | 介入（キー送出・宛先セッションの存在検証） | 分類と完了判定は動くが、介入が届かない（**届かなかったことは stderr に出る**） |
 | `commandmate` | `capture <id> --json` | 監視の主シグナルが取れない。成立しない |
-| `commandmate task`（task 台帳） | 完了判定の一次ソース（`hooks-task.sh`） | 明示メッセージつきでフォールバックモード（第5節）。**公開版にはまだ含まれない** |
+| `commandmate task`（task 台帳） | 完了判定の一次ソース（`hooks-task.sh`） | 明示メッセージつきでフォールバックモード（第5節） |
 | `git` | フォールバックのフック（`hooks-git.sh`） | フォールバック時に完了判定が発火しない（第8節） |
+
+**経路別の最小 CommandMate version**:
+
+| 経路 | 最小 version | 判定に使うもの |
+|---|---|---|
+| フォールバック（capture ヒューリスティクス） | `>=0.15.0` | `capture <id> --json` |
+| 一次ソース（タスク台帳） | `>=0.17.0` | `commandmate task list <id> --limit 1` |
+| プロンプト保留のうち `hold:policy` | `>=0.21.0` | `capture` payload の `autoYes.lastSuppression` |
+
+manifest の `compatibility.commandmate` は package 全体の下限（`>=0.15.0`）である。
+上の 2 経路は**それより新しい版を要求するが、無くても Skill は成立する**（前者は
+フォールバックへ、後者は「保留すべきものを保留しない」方向へ縮退する。第7.2節）。
+**どちらの経路で走っているかは version を調べるのではなく実行時に判る** — 台帳が引けなければ
+第5節の `FALLBACK MODE` 行が出る。
 
 `monitor.sh` は既定で `npx commandmate@latest` を launcher に使う。`CM` env で上書きできる
 （install 済みの `commandmate` を使うなら `CM=commandmate`）。既定のままだと npm registry への
@@ -69,7 +83,7 @@ network access が発生する。
 
 **この Skill は worker へ入力を送る。** 送るのは Enter（プロンプト承認）・`a`（rate limit からの再開）・
 `--resend-message` の文字列（既定 `continue`）の3種類だけで、いずれも第7節の条件を満たしたときに限る。
-作業指示は送らない。
+作業指示は送らない。**Enter は分類だけでは送らない**（第7.2節）。
 
 ## 4. 使い方
 
@@ -97,6 +111,9 @@ MONITOR_HOOKS_BASE=origin/main \
   同じ「空振りが見えない」状態に戻る。
 - 既定の worker は tool の primary instance である。`<worktree-id>@<instance-id>`
   （例 `w1@codex-2`）で指定した instance は capture 側と送信先の両方に効く。
+- **契約付きで委任した worker を監督するなら `--no-auto-approve` を付ける。**
+  プロンプトに答えてよいかを決めるのはサーバの autoYes ポリシーであって監視ループではない
+  （第7.2節）。
 
 複数の worktree-id を渡すと 1 プロセスで同時に監督する。全 worker が COMPLETE になると
 `monitor: all N worker(s) complete` を出して exit 0 で終わる。
@@ -138,7 +155,7 @@ capture の JSON を自前で grep して状態を判断しない（第6節の�
 |---|---|---|
 | `NOT_RUNNING` | セッションが無い | idle streak を進める（介入先が無い） |
 | `GENERATING` | ターン実行中（CLI 自身の backoff 中を含む） | started を latch、streak を 0 に戻す |
-| `PROMPT` | 承認・選択待ち | Enter を送る（サイレント・カウント） |
+| `PROMPT` | 承認・選択待ち | **承認可と判定できたときだけ** Enter（サイレント・カウント）。それ以外は保留して報告（第7.2節） |
 | `RATE_LIMIT` | usage limit / credits バナー | `a` を送る（待たない） |
 | `IDLE` | 上記のいずれでもない | streak を進める |
 
@@ -182,11 +199,21 @@ capture の JSON を自前で grep して状態を判断しない（第6節の�
 monitor[<wid>]: task state unavailable (CommandMate without 'commandmate task', server down, or unknown worktree) — FALLBACK MODE: completion is inferred from capture, not adjudicated. Diagnose with: commandmate task list <wid> --limit 1
 ```
 
-**実測（2026-07-31）: `commandmate task` は未リリースである。** npm 公開版の最新 0.16.0 の tarball に
-`dist/cli/commands/task.js` は無く、tag `v0.15.0` / `v0.16.0` にも `src/cli/commands/task.ts` は無い
-（develop のみ）。したがって**今日の公開版 CommandMate ではこの経路が常にフォールバックへ入る。**
-一次ソースが効くのは task 台帳（#1566）を含む CommandMate だけである。
+タスク台帳（#1566）は **CommandMate 0.17.0 以降**に入っている。それより古い版では
+一次ソースが存在しないので、この経路は必ずフォールバックへ落ちる。
+
+**どちらで走っているかを version から推定しない。実行時の probe に委ねる。**
+この行が出ていればフォールバック、出ずに poll 行へ `task=` が付いていれば一次ソースである
+（第9節）。version の照合が要るのは「なぜ引けないのか」を切り分けるときだけで、そのときは
+`commandmate task list <wid> --limit 1` を直接叩けば、古い版か・サーバ停止か・未知の worktree かが
+そのまま出る。
+
 `hooks-task.sh` を配線しなければこの行は出ない（契約なし委任として従来どおり動く）。
+
+> この SKILL.md には**日付つきのバージョン実測（「現時点の公開版は…」の類）を書かない**。
+> そう書いた行は次のリリースで嘘になり、しかも嘘になったことが誰にも見えない
+> （実際 0.4.0 の本節は「`commandmate task` は未リリース」と断定していた）。
+> 測定日つきの記録は [references/evidence.md](./references/evidence.md) にだけ置く。
 
 ## 6. 判定順（順序自体がガード）
 
@@ -212,7 +239,7 @@ NOT_RUNNING → is_retrying(→GENERATING) → PROMPT → GENERATING → RATE_LI
 
 | 状態 | 介入 | 条件 |
 |---|---|---|
-| `PROMPT` | Enter | 分類のみ。サイレント＋カウント（`approvals`。**配信成功時のみ**加算） |
+| `PROMPT` | Enter | 分類**＋そのフレームの promptData 判定**（第7.2節）。承認可のときだけサイレント＋カウント（`approvals`。**配信成功時のみ**加算）。それ以外は送らずに 1 度だけ報告し `held` を加算 |
 | `RATE_LIMIT` | `a` | 分類のみ。待たずに即時 |
 | `IDLE` | `--resend-message`（既定 `continue`） | **すべて満たすとき**: idle 閾値到達済み・現在のペインに terminal API error・`--max-resends` 未消化 |
 
@@ -246,6 +273,62 @@ mcbd-<cliToolId>-<worktree-id>[-<instance suffix>]
   **承認カウンタと再送予算は配信できたときだけ動く**（空振りで予算を消費して
   「budget spent」へエスカレーションしない）。stdout は介入と終局判定の stream なので、
   **届かなかった介入は介入として出力しない**。運用の標準形が `2>&1 | tee` なのはこのためである。
+
+### 7.2 プロンプト自動承認の危険と、承認してよい条件（Issue #59）
+
+**Enter は tmux ペインへ直接送る。したがって CommandMate サーバの承認制御を一切通らない。**
+0.4.0 まではこれを `PROMPT` と分類しただけで無条件に送っていた。危険は 2 つある。
+
+1. **実行契約の autoYes ポリシーを迂回する。** 契約が `autoYes.mode: off` や `denyPatterns` を
+   宣言していると、サーバは**意図的に**応答を保留する（CommandMate #1547 / #1684 / #1699）。
+   monitor の Enter はサーバを経由しないので、**契約作者が人間へエスカレーションさせたかった
+   プロンプトを、監視ループが黙って再承認する**。
+2. **multiple_choice では Enter ＝ デフォルト選択の確定である**（CommandMate #1681）。
+   「はい」を答えているのではなく、カーソルが載っている選択肢を確定している。
+   デフォルトが承認でないプロンプト（AskUserQuestion 形式の設問など）では、
+   **意図しない選択肢が確定する**。
+
+0.5.0 はこれを**積極的な承認条件**へ変えた。Enter を送るのは、そのポーリングの `promptData` が
+**「デフォルト選択肢が肯定である二択」であることを示したときだけ**である。示さないものは
+**保留（hold）**する: キーを送らず、理由つきで 1 度だけ報告し、`held` を加算する。
+
+| hold 理由 | 何が起きているか | オペレータの手 |
+|---|---|---|
+| `hold:policy` | 契約の autoYes ポリシーがサーバ側で応答を保留した（`autoYes.lastSuppression`） | 契約の意図どおり。人が答えるか、契約を直して再委任する |
+| `hold:no-default` | どの選択肢も default ではない。Enter はカーソル位置を確定する | ペインで選ぶ／`commandmate respond` で答える |
+| `hold:choice` | default はあるが、その label が承認ではなく「選択」である | 同上 |
+| `hold:no-prompt-data` | フレームに `promptData` が無い（テキストマーカーだけで `PROMPT` と分類した） | ペインを見る。製品側の検出器が読めていない形である |
+| `hold:type` | 未計測のプロンプト型 | ペインを見る。判定条件の更新が要る |
+| `hold:disabled` | `--no-auto-approve` が指定されている | 意図どおり |
+
+判定に使うフィールドは **実測で存在を確認したものだけ**である（`promptData.type` /
+`promptData.options[].isDefault` / `promptData.options[].label` / `autoYes.lastSuppression`。
+測定は [references/evidence.md](./references/evidence.md) 第1e節）。
+**「multiple_choice なら一律保留」にはしていない。** 実測では Claude Code の
+権限プロンプトも含め `promptData.type` は測定した全フレームで `multiple_choice` であり、
+一律保留は**実運用のプロンプト承認を 100% 止める**。危険なのは型ではなく
+「デフォルトが承認かどうか」なので、条件はそちらに置いてある。
+
+#### 契約付き dispatch の監督には、この自動承認を使わない
+
+契約を付けて委任したなら、**プロンプトに答えてよいかを決めるのはサーバの autoYes ポリシーであり、
+監視ループではない**。契約付き dispatch を監督するときは `--no-auto-approve` を付ける。
+
+```bash
+<skill-dir>/scripts/monitor.sh --verbose --no-auto-approve \
+  --hooks <skill-dir>/scripts/hooks-task.sh --hooks <skill-dir>/scripts/hooks-git.sh <worktree-id>
+```
+
+`hold:policy` は**保険であって保証ではない**。理由は 3 つある。
+
+- サーバがポリシー保留を記録するのは Auto-Yes ポーラーが走っているときだけである
+  （セッションの Auto-Yes が off なら poller 自体が起動しない）。
+  **「契約は autoYes off、セッションの Auto-Yes も off」の組み合わせでは、保留は記録されず
+  monitor には見えない。**
+- `lastSuppression` は**セッションごとの「最後の保留」**である。プロンプトが画面に出ている間は
+  毎ポーリング更新されるが、解決後も残る。したがって monitor は
+  **同一セッションの後続プロンプトも保留側へ倒す**ことがある（安全側だが、止まる）。
+- `autoYes.lastSuppression` を持たない CommandMate（第3節の表）では、この分岐は常に無反応である。
 
 ## 8. 完了判定とフック（必ず配線する）
 
@@ -299,7 +382,7 @@ MONITOR_HOOKS=<skill-dir>/scripts/hooks-git.sh <skill-dir>/scripts/monitor.sh <w
   変数へ受けると `$()` が末尾改行を落とすため `wc -l` は 1 件を 0 と数え（bash 3.2.57 実測）、
   `|| echo 0` は 0 件で `"0\n0"` になる。
 
-### なぜ CLI で、API ではないのか（実測 2026-07-31）
+### なぜ CLI で、API ではないのか
 
 `commandmate task list <worktree-id> [--limit n] [--json]` と
 `GET /api/worktrees/<id>/tasks` は同じ行を返す（CLI はこの route の薄いクライアント）。
@@ -308,6 +391,7 @@ shell フックからは **CLI が有利**である: base URL（`CM_PORT`）と�
 トークンをプロセスリストへ晒すことになる。
 `task show <task-id>` ではなく `task list` を使うのは、監視ループが知っているのが worktree-id
 だけだからである（task id は `send --contract` が出力するが、worker ごとに配線し直す必要が出る）。
+測定日つきの記録は [references/evidence.md](./references/evidence.md) 第1b節にある。
 
 **arm する前に、フックが実値を返すことを対照実験で確かめること。**
 
@@ -342,6 +426,9 @@ monitor[<wid>]: poll <N> -> <STATE> started=<0|1> streak=<n> commits=<n> uncommi
 | タスク状態の分布 | `grep -oE 'task=[a-z_]+' monitor.log \| sort \| uniq -c` |
 | 判定が一次ソース由来かフォールバック由来か | 終局判定の poll 行に `task=` があるか／`FALLBACK MODE` 行が出ているか |
 | 介入の全件（届いたもの） | `grep -E "sent 'a' to\|resent to\|resend budget spent" monitor.log`（プロンプト承認はサイレント。総数は COMPLETE 行の `approvals=` に出る） |
+| 承認しなかったプロンプト | `grep 'PROMPT held' monitor.log`（プロンプト 1 件につき 1 行。理由つき）。総数は COMPLETE 行の `held=` |
+| 承認と保留の別（第7.2節） | COMPLETE 行の `approvals=` と `held=`。`held=` は **1 件以上あるときだけ付く**（`task=` と同じ方針。0 件の run は 0.4.0 と byte 一致のままにする） |
+| 保留の理由の分布 | `grep -oE 'PROMPT held, no Enter sent — [^.]*' monitor.log \| sort \| uniq -c` |
 | 届かなかった介入 | `grep 'NOT delivered' monitor.log`（stderr。`2>&1` で取り込んでいること） |
 | 送信先として解決されたセッション | `grep 'intervention target = ' monitor.log`（worker ごとに 1 行） |
 | 完了判定の根拠 | COMPLETE した poll 行の `started= / streak= / commits= / uncommitted= / task=` |
@@ -357,6 +444,8 @@ monitor[<wid>]: poll <N> -> <STATE> started=<0|1> streak=<n> commits=<n> uncommi
 - worker の作成・dispatch・作業指示の送信（`cmate-orchestrate` の担当）。
 - PR 作成・merge・Issue の close。
 - 完了したかどうかの **推測**。証拠（commit / uncommitted）が無ければ `COMPLETE` にしない。
+- **プロンプトの中身の判断**。「この操作を承認してよいか」は決めない。決めるのは
+  「Enter が承認を意味する形かどうか」だけで、意味しないものは保留して人へ返す（第7.2節）。
 - 未計測の Agent・CLI version を「対応」と宣言すること
   （[references/agent-compatibility.md](./references/agent-compatibility.md)）。
 
@@ -382,6 +471,11 @@ monitor[<wid>]: poll <N> -> <STATE> started=<0|1> streak=<n> commits=<n> uncommi
 0.3.0 で宛先を導出に変え、配信を検証するようにしたが（第7.1節）、
 **修正後の介入が実 worker へ届いた実績は未計測である**
 （[references/evidence.md](./references/evidence.md) 1c）。
+
+**0.5.0 のプロンプト保留（第7.2節）にも実運用実績はまだ無い。** 承認条件は
+実 `capture --json` フレーム 30 件の実測（同 1e）に基づき、承認側・保留側それぞれの
+fixture と、条件を外す変異で赤くなることで固定してあるが、
+**実運用で保留が発火した実績は未計測である**。
 運用条件・状態分布・介入内訳・完了判定の根拠・測定の限界は
 [references/evidence.md](./references/evidence.md) に記録してある。
 

@@ -1,0 +1,51 @@
+{
+  "isRunning": true,
+  "cliToolId": "claude",
+  "sessionStatus": "waiting",
+  "sessionStatusReason": "prompt_detected",
+  "content": "",
+  "realtimeSnippet": "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n  \u001b[1m\u001b[38;5;246m6\u001b[0m\u001b[38;5;246m tasks (\u001b[1m0\u001b[0m\u001b[38;5;246m done, \u001b[1m1\u001b[0m\u001b[38;5;246m in progress, \u001b[1m5\u001b[0m\u001b[38;5;246m open)\u001b[39m\n  \u001b[38;5;174m◼ \u001b[1m\u001b[39mWave 1: 5並列ワーカー (#57 #58 #59+#63 #61 #64)\u001b[0m\n  ◻ 共有ファイル配線（直列・宙吊り防止）\n  ◻ #70 の扱いをユーザーに諮る\n  ◻ \u001b[38;5;246mWave 1 の PR 作成・main へマージ › blocked by #1\u001b[39m\n  ◻ \u001b[38;5;246mWave 2: #60（acceptance schema + orchestrate uat.mjs 整合）, #62+#65（issue ペア）, #66（境界） › blocked by #2\u001b[39m\n  \u001b[38;5;246m … +1 pending\u001b[39m\n",
+  "lineCount": 1001,
+  "lastCapturedLine": 1000,
+  "isComplete": true,
+  "isGenerating": false,
+  "thinking": false,
+  "thinkingMessage": null,
+  "isPromptWaiting": true,
+  "promptData": {
+    "type": "multiple_choice",
+    "question": "Non-vacuity — three mutations, each confirmed red",
+    "options": [
+      {
+        "number": 1,
+        "label": "Resolver reverted to instructionText -> 5 red, spanning both detector paths and the resolver unit.",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 2,
+        "label": "Boundary scan replaced by the old fixed 19-line lookback -> 6 red (detection-level assertions plus the end-to-end ones).",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 3,
+        "label": "approvalTarget dropped from the deny surface entirely -- the \"disable the guard\" non-fix -- -> 3 red.",
+        "isDefault": false,
+        "requiresTextInput": false
+      }
+    ],
+    "status": "pending"
+  },
+  "autoYes": {
+    "enabled": true,
+    "expiresAt": 1785948080237,
+    "lastSuppression": null
+  },
+  "isSelectionListActive": false,
+  "isPagerActive": false,
+  "isUnclassifiedActive": false,
+  "lastServerResponseTimestamp": 1785920057471,
+  "serverPollerActive": true,
+  "lastStopEventAt": null
+}
