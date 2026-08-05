@@ -24,6 +24,9 @@ description: Issue の受入条件を自動検証と手動確認に分け、証�
 - Issue の受入条件を満たしたかどうかを、証跡付きで確認したいとき。
 - 実装が終わったあと、マージ・リリースの可否を第三者が再現できる形で残したいとき。
 - 何が検証済みで、何が未検証のまま残っているかを分けて報告したいとき。
+- **cmate-orchestrate の UAT 意味ゲートへ判定を渡したいとき。** この Skill の result
+  document は、orchestrate の uat runner が `--acceptance-dir` から読む意味ゲートの
+  **入力**である。orchestrate から使う場合の file 名は §1 の `result_path` に従う。
 
 使わない場面:
 
@@ -35,7 +38,7 @@ description: Issue の受入条件を自動検証と手動確認に分け、証�
 
 | 名前 | 必須 | 内容 | 欠けたときの動作 |
 |---|---|---|---|
-| `issue_ref` | 必須 | Issue 番号または Issue URL | `status: failure` / `verdict: no_go` を出力して停止 |
+| `issue_ref` | 必須 | Issue 番号または Issue URL | `status: failure` / `verdict: no_go` を出力して停止。`target.issue_ref` に何を書くかは §5 に従う |
 | `target_ref` | 必須 | 検証対象の worktree path、branch、commit | 利用者に問い合わせる。応答が得られなければ `failure` で停止 |
 | `test_commands` | 任意 | 実行してよい command と引数の一覧 | 自動検証を行わず、全 criterion を `manual` または `not_run` として扱う |
 | `criteria_override` | 任意 | Issue 本文の代わりに使う受入条件 | Issue 本文から抽出する |
@@ -49,6 +52,10 @@ description: Issue の受入条件を自動検証と手動確認に分け、証�
 2. Issue 本文の取得は読み取りのみ。`gh issue edit` などで Issue を書き換えない。
 3. 受入条件が Issue 本文から機械的に抽出できないときは、抽出結果を利用者に提示して
    確認を取る。確認が取れない条件は `classification: not_verifiable` として記録する。
+4. **cmate-orchestrate から使う場合の `result_path`。** 既定の `./acceptance-result.json`
+   は orchestrate の uat runner からは読まれない。runner は `--acceptance-dir` 配下の
+   `issue-<n>.json`（`<n>` は対象 Issue 番号）だけを開くので、その file 名で置く。
+   例: `--acceptance-dir ./acceptance/` に対して `./acceptance/issue-60.json`。
 
 ## 2. 権限
 
@@ -57,7 +64,7 @@ description: Issue の受入条件を自動検証と手動確認に分け、証�
 | 権限 | 用途 | やらないこと |
 |---|---|---|
 | `filesystem_read` | 対象 repository の source、test、設定の読み取り | 対象 repository の外の path を読まない |
-| `filesystem_write` | `evidence_dir` と `result_path` への書き込み、および §4 Step 3 で確認を得た test file の作成 | 既存 file の暗黙上書き。既存 file がある場合は必ず確認する |
+| `filesystem_write` | `evidence_dir` と `result_path` への書き込み、および [`references/test-plan.md`](./references/test-plan.md) §3 に従って確認を得た test 用 file の作成 | 既存 file の暗黙上書き。既存 file がある場合は必ず確認する |
 | `process_execution` | §3 の command 実行 | 宣言外 command の実行 |
 | `network_access` | Issue 本文の取得のみ | それ以外の外部送信。evidence を外部へ upload しない |
 | `environment_read` | 必要な環境変数が**設定されているか否か**の確認 | 値の読み出し、値の evidence への記録 |
@@ -197,6 +204,25 @@ summary の雛形は [`references/verdict-rubric.md`](./references/verdict-rubri
 | result document を書けない | summary を必ず標準出力へ出し、書けなかったことを明示する |
 
 いかなる失敗経路でも、**result document と summary を出さずに終了しない**。
+
+### `target.issue_ref` に何を書くか
+
+`target.issue_ref` は schema 上 required で、空文字列を許さない
+（`schemas/acceptance-result.v1.json`）。失敗経路でも result document を出す以上、
+`issue_ref` が渡されなかったときに何を書くかがここで決まっている必要がある。
+
+- **呼び出し元から渡された入力をそのまま記録する。** 裸番号、`#<n>`、`owner/repo#<n>`、
+  Issue URL のいずれでもよい。正規化も補完もしない。
+- **何も渡されなかった場合は、固定文字列 `unspecified` を記録する。**
+  推測で Issue 番号を埋めてはならない。branch 名、作業 directory 名、直近の commit から
+  番号を復元することもこれに当たる。
+
+`unspecified` は Issue 番号として解決できない文字列である。consumer である
+cmate-orchestrate の uat runner は `target.issue_ref` から Issue 番号を解決できないと、
+その result を **mismatched**（対象 Issue を担保すると確認できない）に分類し、
+`--require-acceptance` 付きの実行ではその Issue を不合格にする。
+これは意図した安全側の挙動である。どの Issue のものか分からない判定を、
+その Issue の意味ゲートとして通してはならないからである。
 
 ## 6. 完了条件（completion check）
 
