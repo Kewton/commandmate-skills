@@ -1,0 +1,25 @@
+{
+  "description": "A node repository that declares everything: slug, CI base branch, branch and worktree conventions, npm scripts.",
+  "args": [],
+  "expect": {
+    "status": "success",
+    "sources": {
+      "id": "derived",
+      "repository": "detected",
+      "base": "detected",
+      "branch_template": "detected",
+      "worktree_template": "detected",
+      "baseline": "detected",
+      "verified": "fixed"
+    },
+    "todos": [],
+    "warnings": [],
+    "evidence_files": {
+      "repository": ["package.json"],
+      "base": [".github/workflows/ci.yml"],
+      "branch_template": ["CONTRIBUTING.md"],
+      "worktree_template": ["CONTRIBUTING.md"],
+      "baseline": ["package-lock.json", "package.json", "package.json", "package.json"]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "node-repo",
+  "repository": "OWNER/REPO",
+  "base": "origin/main",
+  "branch_template": "feat/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": [
+    "pnpm install --frozen-lockfile",
+    "pnpm test"
+  ],
+  "verified": false
+}
