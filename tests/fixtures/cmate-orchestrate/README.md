@@ -13,6 +13,8 @@ dispatch-cases/<id>/contracts/  （契約 case のみ）生成された実行契
 dispatch-cases/issues-multifile.json  複数 file を保有する Issue fixture（契約決定性の case 用）
 merge-cases/<id>/case.json      plan/dispatch 生成・merge scenario・merge 期待値（scenario は inline）
 uat-cases/<id>/case.json        plan/dispatch 生成・uat scenario・UAT/修正ループ 期待値（scenario は inline）
+status-cases/<id>/case.json     status view の期待値（phase 状態・Issue ごとの値・次アクション）
+status-cases/<id>/run/          checked-in の run directory。実 runner の出力をそのまま置いた status の入力
 fake-cli.mjs                    commandmate/git/gh を模した stub（failure injection）
 profiles/                       独自 profile の例（unverified）
 run_tests.mjs                   fixture test harness（Node stdlib のみ）
@@ -162,6 +164,33 @@ worktree 作成・fix dispatch・再merge が呼ばれていないこと、修�
 | `u07-no-eligible` | verification pass が無いとき UAT を実行せず no-op success になるか |
 | `u08-fix-remerge-conflict` | 再検証は pass しても再merge conflict（injection）で partial 停止するか |
 | `u09-fix-nudge-until-commit` | idle だが未 commit の fix worker を継続 nudge で駆動し、commit を完了判定にしてから再検証・再merge するか（#1468） |
+
+## status case 一覧
+
+`status-cases/<id>/` だけは fake CLI を使わない。`status.mjs` は run directory の artifact を
+読むだけの完全 read-only runner なので、case の入力は **checked-in の run directory**
+（`status-cases/<id>/run/`）そのものである。中身は実 runner（plan / dispatch / merge / uat）の
+出力を1度生成して置いたもので、`out_dir` だけは生成時の絶対 temp path を run 相対に書き換えて
+ある（`status.mjs` は読まないフィールドであり、他人の host path を repo に入れないため）。
+
+checked-in artifact が古い形のまま緑になり続けることを防ぐため、harness は **view を見る前に
+各 artifact を同梱 schema（`execution-plan.v1` / `dispatch-report.v1` / `merge-report.v1` /
+`uat-report.v1`）で検証する**。意図的に壊した artifact だけが `schema_unvalidatable` で免除される。
+さらに全 case で次を無条件に確かめる: artifact が無い phase は Issue 行でも必ず「未実行」、
+全 artifact が読めない phase は必ず「読取不能」、その2つは text 表にも必ず現れる、`--json` は
+2回実行して byte 一致（決定性）、そして 3 回実行しても run directory が byte 単位で変わらない
+（read-only であること）。
+
+| case | 何を見るための case か |
+|---|---|
+| `s01-plan-only` | plan だけの run で dispatch/merge/uat を「未実行」と出し、次アクションを最初の未実行 phase 1件に絞るか |
+| `s02-plan-dispatch` | dispatch の worker_state と verification.outcome を Issue ごとに出し、完走時のみ次 phase のコマンドを示すか |
+| `s03-all-phases` | create_prs と merge_prs の2 artifact から PR 番号・URL・CI verdict・merge 状態を畳み、uat verdict まで1表に出すか |
+| `s04-dispatch-partial` | partial を success に丸めず、`failed/pass`（完了と裁定の分離）と未 dispatch の「記録なし」を出すか |
+| `s05-unreadable-dispatch` | 壊れた dispatch report で当該 phase だけを「読取不能」に落とし、他 phase を通常表示するか |
+| `s06-unreadable-plan` | plan.json が読めないとき Issue 集合と run_id を下流 artifact から復元し、plan phase だけを落とすか |
+| `s07-blocking-hints` | blocking/limitation の code を §5 対処表にマップし、Issue を名指しした reason だけをその行に出し、未登録 code を推測しないか |
+| `s08-uat-blocked` | 上限到達の blocked と Issue ごとの fix attempt 数、未承認 merge の `previewed` を丸めずに出すか |
 
 ## Claude/Codex parity の確認
 

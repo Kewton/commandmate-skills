@@ -1,0 +1,334 @@
+{
+  "uat_schema_version": 1,
+  "skill_id": "cmate-orchestrate",
+  "skill_version": "0.13.0",
+  "phase": "fix_uat",
+  "status": "blocked",
+  "stop_reason": "max_attempts_reached",
+  "approved": true,
+  "mutated": true,
+  "plan_run_id": "plan",
+  "out_dir": "dispatch/uat-fix",
+  "max_attempts": 2,
+  "attempts_used": 2,
+  "profile": {
+    "id": "node-fake",
+    "repository": "Kewton/CommandMate",
+    "base": "origin/develop",
+    "verified": true
+  },
+  "acceptance": {
+    "configured": false,
+    "required": false,
+    "issues_evaluated": 2,
+    "verdicts": {
+      "go": 0,
+      "conditional_go": 0,
+      "no_go": 0,
+      "missing": 0,
+      "invalid": 0,
+      "mismatched": 0,
+      "not_configured": 2
+    }
+  },
+  "eligible_issues": [
+    201,
+    200
+  ],
+  "preflight": [
+    {
+      "code": "cli_available",
+      "ok": true,
+      "blocking": true,
+      "detail": "commandmate CLI is runnable"
+    },
+    {
+      "code": "repo_access",
+      "ok": true,
+      "blocking": true,
+      "detail": "repo Kewton/CommandMate is reachable"
+    },
+    {
+      "code": "base_resolvable",
+      "ok": true,
+      "blocking": true,
+      "detail": "base origin/develop resolves"
+    }
+  ],
+  "attempts": [
+    {
+      "index": 0,
+      "kind": "fix",
+      "fix_performed": true,
+      "uat_results": [
+        {
+          "issue": 201,
+          "ran": true,
+          "report_schema_version": null,
+          "outcome": "pass",
+          "scenarios": [
+            "cat cmate-verify-ok"
+          ],
+          "note": "acceptance gate not configured (--acceptance-dir was not given); adjudicated on the baseline alone",
+          "verdict": "pass",
+          "verdict_source": "baseline_only",
+          "baseline": {
+            "outcome": "pass",
+            "checks": [
+              "cat cmate-verify-ok"
+            ],
+            "note": ""
+          },
+          "acceptance": {
+            "state": "not_configured",
+            "verdict": null,
+            "status": null,
+            "issue_ref": null,
+            "verdict_reason": "",
+            "findings": [],
+            "conditions": [],
+            "note": "acceptance gate not configured (--acceptance-dir was not given); adjudicated on the baseline alone"
+          }
+        },
+        {
+          "issue": 200,
+          "ran": true,
+          "report_schema_version": null,
+          "outcome": "fail",
+          "scenarios": [
+            "cat cmate-verify-ok"
+          ],
+          "note": "cat: cmate-verify-ok: No such file or directory; acceptance gate not configured (--acceptance-dir was not given); adjudicated on the baseline alone",
+          "verdict": "fail",
+          "verdict_source": "baseline",
+          "baseline": {
+            "outcome": "fail",
+            "checks": [
+              "cat cmate-verify-ok"
+            ],
+            "note": "cat: cmate-verify-ok: No such file or directory"
+          },
+          "acceptance": {
+            "state": "not_configured",
+            "verdict": null,
+            "status": null,
+            "issue_ref": null,
+            "verdict_reason": "",
+            "findings": [],
+            "conditions": [],
+            "note": "acceptance gate not configured (--acceptance-dir was not given); adjudicated on the baseline alone"
+          }
+        }
+      ],
+      "failing_issues": [
+        200
+      ],
+      "worktrees": [
+        {
+          "issue": 200,
+          "branch": "feature/issue-200-feat-add-a-session-store-uat-fix-1",
+          "directory": "../CommandMate-issue-200-feat-add-a-session-store-uat-fix-1",
+          "base_sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+          "created": true,
+          "reused": false,
+          "note": "created fix worktree from deadbeef"
+        }
+      ],
+      "fixes": [
+        {
+          "issue": 200,
+          "task_id": "commandmate-feature-issue-200-feat-add-a-session-store-uat-fix-1",
+          "dispatched": true,
+          "worker_state": "completed",
+          "verification": {
+            "ran": true,
+            "report_schema_version": null,
+            "outcome": "fail",
+            "checks": [
+              "cat cmate-verify-ok"
+            ]
+          },
+          "note": "fix completed; new commit detected; cat: cmate-verify-ok: No such file or directory"
+        }
+      ],
+      "remerge": {
+        "attempted_issues": [],
+        "merged_issues": [],
+        "outcome": "skipped",
+        "note": "no re-verified fix to re-merge"
+      },
+      "advanced": false
+    },
+    {
+      "index": 1,
+      "kind": "fix",
+      "fix_performed": true,
+      "uat_results": [
+        {
+          "issue": 200,
+          "ran": true,
+          "report_schema_version": null,
+          "outcome": "fail",
+          "scenarios": [
+            "cat cmate-verify-ok"
+          ],
+          "note": "cat: cmate-verify-ok: No such file or directory; acceptance gate not configured (--acceptance-dir was not given); adjudicated on the baseline alone",
+          "verdict": "fail",
+          "verdict_source": "baseline",
+          "baseline": {
+            "outcome": "fail",
+            "checks": [
+              "cat cmate-verify-ok"
+            ],
+            "note": "cat: cmate-verify-ok: No such file or directory"
+          },
+          "acceptance": {
+            "state": "not_configured",
+            "verdict": null,
+            "status": null,
+            "issue_ref": null,
+            "verdict_reason": "",
+            "findings": [],
+            "conditions": [],
+            "note": "acceptance gate not configured (--acceptance-dir was not given); adjudicated on the baseline alone"
+          }
+        }
+      ],
+      "failing_issues": [
+        200
+      ],
+      "worktrees": [
+        {
+          "issue": 200,
+          "branch": "feature/issue-200-feat-add-a-session-store-uat-fix-2",
+          "directory": "../CommandMate-issue-200-feat-add-a-session-store-uat-fix-2",
+          "base_sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+          "created": true,
+          "reused": false,
+          "note": "created fix worktree from deadbeef"
+        }
+      ],
+      "fixes": [
+        {
+          "issue": 200,
+          "task_id": "commandmate-feature-issue-200-feat-add-a-session-store-uat-fix-2",
+          "dispatched": true,
+          "worker_state": "completed",
+          "verification": {
+            "ran": true,
+            "report_schema_version": null,
+            "outcome": "fail",
+            "checks": [
+              "cat cmate-verify-ok"
+            ]
+          },
+          "note": "fix completed; new commit detected; cat: cmate-verify-ok: No such file or directory"
+        }
+      ],
+      "remerge": {
+        "attempted_issues": [],
+        "merged_issues": [],
+        "outcome": "skipped",
+        "note": "no re-verified fix to re-merge"
+      },
+      "advanced": false
+    },
+    {
+      "index": 2,
+      "kind": "assess",
+      "fix_performed": false,
+      "uat_results": [
+        {
+          "issue": 200,
+          "ran": true,
+          "report_schema_version": null,
+          "outcome": "fail",
+          "scenarios": [
+            "cat cmate-verify-ok"
+          ],
+          "note": "cat: cmate-verify-ok: No such file or directory; acceptance gate not configured (--acceptance-dir was not given); adjudicated on the baseline alone",
+          "verdict": "fail",
+          "verdict_source": "baseline",
+          "baseline": {
+            "outcome": "fail",
+            "checks": [
+              "cat cmate-verify-ok"
+            ],
+            "note": "cat: cmate-verify-ok: No such file or directory"
+          },
+          "acceptance": {
+            "state": "not_configured",
+            "verdict": null,
+            "status": null,
+            "issue_ref": null,
+            "verdict_reason": "",
+            "findings": [],
+            "conditions": [],
+            "note": "acceptance gate not configured (--acceptance-dir was not given); adjudicated on the baseline alone"
+          }
+        }
+      ],
+      "failing_issues": [
+        200
+      ],
+      "worktrees": [],
+      "fixes": [],
+      "remerge": null,
+      "advanced": false
+    }
+  ],
+  "unresolved_issues": [
+    200
+  ],
+  "conditional_issues": [],
+  "blocking_reasons": [
+    {
+      "code": "max_attempts_reached",
+      "detail": "UAT still failing for #200 after 2 fix attempt(s); stopping as blocked"
+    }
+  ],
+  "limitations": [],
+  "redactions": [],
+  "next_actions": [
+    {
+      "action": "manual triage: the bounded fix loop could not make #200 pass UAT within 2 attempt(s)",
+      "owner": "human"
+    }
+  ],
+  "completion_check": {
+    "passed": true,
+    "checks": [
+      {
+        "id": "single_phase",
+        "passed": true,
+        "detail": "exactly one phase was enabled (fix_uat)"
+      },
+      {
+        "id": "approval_enforced",
+        "passed": true,
+        "detail": "a mutation ran and it was explicitly approved"
+      },
+      {
+        "id": "attempts_bounded",
+        "passed": true,
+        "detail": "2 fix attempt(s) used of a 2 cap"
+      },
+      {
+        "id": "blocked_reported",
+        "passed": true,
+        "detail": "the cap was reached with failures remaining and the status is blocked (not rounded up)"
+      },
+      {
+        "id": "verification_gated",
+        "passed": true,
+        "detail": "every UAT target was a verification-passed issue, and every re-merged fix had re-verified"
+      },
+      {
+        "id": "acceptance_not_rounded",
+        "passed": true,
+        "detail": "no issue with a non-go acceptance verdict was reported as passed, and no conditional_go was rounded up to success"
+      }
+    ]
+  },
+  "summary_markdown": "## 対象と結論\nUAT 修正ループ（承認あり）を Kewton/CommandMate で実行: blocked（上限到達で停止（blocked）, stop=max_attempts_reached）。\nfix 上限 2 回に到達しても UAT が通らなかったため blocked とした（成功に丸めない）。\n\n## eligible（verification pass 済み）\n- #201, #200\n\n## 受入判定（機械ゲート + 意味ゲート）\n- `--acceptance-dir` 無し。baseline（機械ゲート）のみで裁定した。受入条件の意味判定は行っていない。\n\n## attempt 履歴\n- attempt 0 (fix): UAT #201=pass（baseline pass / acceptance not_configured）, #200=fail（baseline fail / acceptance not_configured） / fix=#200:completed/fail / re-merge=skipped\n- attempt 1 (fix): UAT #200=fail（baseline fail / acceptance not_configured） / fix=#200:completed/fail / re-merge=skipped\n- attempt 2 (assess): UAT #200=fail（baseline fail / acceptance not_configured）\n\n## preflight\n- cli_available: ok\n- repo_access: ok\n- base_resolvable: ok\n\n## 未解決と next action\n- 未解決（UAT 未通過）: #200\n- blocking: max_attempts_reached — UAT still failing for #200 after 2 fix attempt(s); stopping as blocked\n- next: manual triage: the bounded fix loop could not make #200 pass UAT within 2 attempt(s)（owner: human）"
+}

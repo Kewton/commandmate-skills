@@ -1,0 +1,125 @@
+{
+  "merge_schema_version": 1,
+  "skill_id": "cmate-orchestrate",
+  "skill_version": "0.13.0",
+  "phase": "merge_prs",
+  "status": "success",
+  "stop_reason": "completed",
+  "approved": true,
+  "mutated": true,
+  "merge_method": "squash",
+  "plan_run_id": "plan",
+  "out_dir": "dispatch/merge-prs",
+  "profile": {
+    "id": "node-fake",
+    "repository": "Kewton/CommandMate",
+    "base": "origin/develop",
+    "verified": true
+  },
+  "eligible_issues": [
+    201,
+    200
+  ],
+  "preflight": [
+    {
+      "code": "cli_available",
+      "ok": true,
+      "blocking": true,
+      "detail": "gh CLI is runnable"
+    },
+    {
+      "code": "repo_access",
+      "ok": true,
+      "blocking": true,
+      "detail": "repo Kewton/CommandMate is reachable"
+    },
+    {
+      "code": "base_resolvable",
+      "ok": true,
+      "blocking": true,
+      "detail": "base origin/develop resolves"
+    }
+  ],
+  "targets": [
+    {
+      "issue": 201,
+      "branch": "feature/issue-201-feat-add-base-configuration-loader",
+      "eligible": true,
+      "action": "merge_pr",
+      "pr_number": 201,
+      "pr_url": "https://github.com/Kewton/CommandMate/pull/201",
+      "pushed": false,
+      "pr_created": false,
+      "ci_checked": true,
+      "ci_passed": true,
+      "ci_summary": "1 passed, 0 failed, 0 pending",
+      "ci_checks": [
+        {
+          "name": "build",
+          "state": "SUCCESS"
+        }
+      ],
+      "merge_attempted": true,
+      "merged": true,
+      "outcome": "merged",
+      "note": "merged PR #201 via squash"
+    },
+    {
+      "issue": 200,
+      "branch": "feature/issue-200-feat-add-a-session-store",
+      "eligible": true,
+      "action": "merge_pr",
+      "pr_number": 200,
+      "pr_url": "https://github.com/Kewton/CommandMate/pull/200",
+      "pushed": false,
+      "pr_created": false,
+      "ci_checked": true,
+      "ci_passed": true,
+      "ci_summary": "1 passed, 0 failed, 0 pending",
+      "ci_checks": [
+        {
+          "name": "build",
+          "state": "SUCCESS"
+        }
+      ],
+      "merge_attempted": true,
+      "merged": true,
+      "outcome": "merged",
+      "note": "merged PR #200 via squash"
+    }
+  ],
+  "blocking_reasons": [],
+  "limitations": [],
+  "redactions": [],
+  "completion_check": {
+    "passed": true,
+    "checks": [
+      {
+        "id": "single_phase",
+        "passed": true,
+        "detail": "exactly one mutating phase was enabled (merge_prs)"
+      },
+      {
+        "id": "approval_enforced",
+        "passed": true,
+        "detail": "a mutation ran and it was explicitly approved"
+      },
+      {
+        "id": "verification_gated",
+        "passed": true,
+        "detail": "every target was a completed-and-verification-passed issue"
+      },
+      {
+        "id": "ci_gated",
+        "passed": true,
+        "detail": "every merged PR had green CI before the merge"
+      },
+      {
+        "id": "failures_not_rounded",
+        "passed": true,
+        "detail": "no blocking failure was recorded"
+      }
+    ]
+  },
+  "summary_markdown": "## 対象と結論\nguarded merge（承認あり）を Kewton/CommandMate で実行: success（完了, stop=completed）。\n\n## eligible（verification pass 済み）\n- #201, #200\n\n## target\n- #201: merged / PR#201 / CI=green\n- #200: merged / PR#200 / CI=green\n\n## preflight\n- cli_available: ok\n- repo_access: ok\n- base_resolvable: ok\n\n## 未解決と next action\n- なし。全 eligible を処理した。"
+}

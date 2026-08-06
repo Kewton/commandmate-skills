@@ -1,0 +1,26 @@
+{
+  "description": "dispatch-report.json が途中で切れている run。dispatch phase だけが「読取不能」として落ち、plan / merge / uat は通常どおり表示される（1つの壊れた artifact で全体が消えない）。読取不能は unreadable[] と次アクションに記録され、成功にも失敗にも丸められない。",
+  "expect": {
+    "exit": 0,
+    "latest_phase": "uat",
+    "phase_states": { "plan": "ok", "dispatch": "unreadable", "merge": "ok", "uat": "ok" },
+    "unreadable_paths": ["dispatch/dispatch-report.json"],
+    "schema_unvalidatable": ["dispatch/dispatch-report.json"],
+    "issues": [200, 201],
+    "issue_states": {
+      "200": { "plan": "ok", "dispatch": "unreadable", "merge": "ok", "uat": "ok" },
+      "201": { "plan": "ok", "dispatch": "unreadable", "merge": "ok", "uat": "ok" }
+    },
+    "plan": { "200": { "wave": 1, "depends_on": [201] } },
+    "merge": { "200": { "pr_number": 200, "merged": true, "ci_verdict": "green" } },
+    "uat": { "200": { "verdict": "pass", "fix_attempts": 0 } },
+    "run_next": ["dispatch/unreadable/unreadable"],
+    "issue_next": { "200": [], "201": [] },
+    "hints_include": { "unreadable": "該当 phase を再実行して証跡を作り直す" },
+    "text_includes": [
+      "| dispatch | dispatch/dispatch-report.json         | 読取不能",
+      "is not valid JSON",
+      "PR#200 merged CI=green"
+    ]
+  }
+}

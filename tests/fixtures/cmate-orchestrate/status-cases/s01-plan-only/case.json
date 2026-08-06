@@ -1,0 +1,25 @@
+{
+  "description": "plan だけの run。dispatch / merge / uat は artifact が無いので「未実行」と表示され、run 全体の次アクションは「plan を承認して dispatch する」1件だけになる（後続 phase まで並べない）。",
+  "expect": {
+    "exit": 0,
+    "latest_phase": "plan",
+    "phase_states": { "plan": "ok", "dispatch": "not_run", "merge": "not_run", "uat": "not_run" },
+    "unreadable_paths": [],
+    "issues": [200, 201],
+    "issue_states": {
+      "200": { "plan": "ok", "dispatch": "not_run", "merge": "not_run", "uat": "not_run" },
+      "201": { "plan": "ok", "dispatch": "not_run", "merge": "not_run", "uat": "not_run" }
+    },
+    "plan": {
+      "200": { "wave": 1, "depends_on": [201], "branch_includes": "feature/issue-200" },
+      "201": { "wave": 0, "depends_on": [], "branch_includes": "feature/issue-201" }
+    },
+    "run_next": ["dispatch/not_run/not_run"],
+    "issue_next": { "200": [], "201": [] },
+    "hints_include": { "not_run": "dispatch.mjs --plan" },
+    "text_includes": [
+      "| #200  | W1 dep:#201 | 未実行",
+      "plan 承認待ち or dispatch 未実行"
+    ]
+  }
+}

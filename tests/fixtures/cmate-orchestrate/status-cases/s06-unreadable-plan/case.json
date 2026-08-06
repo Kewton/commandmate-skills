@@ -1,0 +1,23 @@
+{
+  "description": "plan.json 自体が読めない run。plan phase だけが「読取不能」になり、Issue 集合は下流の artifact（dispatch の worker と merge の eligible）から復元され、run_id と profile も下流のコピーから埋まる。plan を入力に取る uat の次アクションは「先に証跡を作り直す」に落ちる。",
+  "expect": {
+    "exit": 0,
+    "latest_phase": "merge",
+    "phase_states": { "plan": "unreadable", "dispatch": "ok", "merge": "ok", "uat": "not_run" },
+    "unreadable_paths": ["plan.json"],
+    "schema_unvalidatable": ["plan.json"],
+    "issues": [200, 201],
+    "run_id": "plan",
+    "profile_id": "node-fake",
+    "issue_states": {
+      "200": { "plan": "unreadable", "dispatch": "ok", "merge": "ok", "uat": "not_run" },
+      "201": { "plan": "unreadable", "dispatch": "ok", "merge": "ok", "uat": "not_run" }
+    },
+    "dispatch": { "200": { "worker_state": "completed", "verification_outcome": "pass" } },
+    "merge": { "201": { "pr_number": 201, "merged": true, "outcomes": ["merge_prs:merged"] } },
+    "run_next": ["plan/unreadable/unreadable", "uat/not_run/not_run"],
+    "issue_next": { "200": [], "201": [] },
+    "hints_include": { "not_run": "plan の artifact が読めない" },
+    "text_includes": ["| plan     | plan.json", "読取不能", "run_id    : plan"]
+  }
+}
