@@ -236,14 +236,16 @@ function baseBranchName(base) {
 
 // One structured call to an external CLI. Never throws: a non-zero exit or a
 // missing binary comes back as { ok: false } so the caller decides what it means.
-// NOT shared with dispatch/uat: those take an extra options bag (cwd, env) that
-// this runner never needs, and spread it into execFileSync.
-function runCli(bin, args) {
+// `extra` is spread into execFileSync (as in dispatch/uat) so the change-evidence
+// probe can run `git diff` INSIDE an issue's worktree; a cwd that no longer
+// exists surfaces as { ok: false }, which the caller reports rather than hides.
+function runCli(bin, args, extra = {}) {
   try {
     const stdout = execFileSync(bin, args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 8 * 1024 * 1024,
+      ...extra,
     });
     return { ok: true, stdout, stderr: '', status: 0 };
   } catch (error) {
@@ -277,15 +279,327 @@ function preflight(inputs, plan) {
 }
 
 // =============================================================================
-// PR body (self-contained, drawn only from the plan)
+// Verification evidence (Issue #97)
 // =============================================================================
+//
+// The PR body is the only place most reviewers ever look. Until #97 its
+// Verification section was one sentence — "dispatched and verified against the
+// profile baseline" — that read identically whatever had actually happened: the
+// gates that judged the branch, their verdicts and their exit codes were sitting
+// in the dispatch report this runner already loads, and never reached a human.
+// Nor did the other half of the question a reviewer asks: the issue declared how
+// far it was allowed to reach (`scope.allow`), so what did the branch actually
+// touch?
+//
+// Everything below is TRANSCRIBED, never asserted. Values come from a file this
+// runner did not write (the dispatch report) or from a subprocess (`git diff`),
+// so each one goes through redact() on the way in — an upstream document is not
+// assumed to have been redacted already. When a value cannot be read, the body
+// says so; "we could not measure this" is never rendered as a pass.
+
+// gh rejects a pull-request body over 65536 characters. A worker with a long gate
+// list must not push `Resolves #n` out of the body — or fail the create outright
+// — so every transcribed list is capped. The cap is always STATED in the body:
+// a silently shortened evidence list reads as complete evidence, which is exactly
+// the failure this whole section exists to remove.
+const PR_BODY_LIMIT = 65536;
+const MAX_BODY_GATES = 30;
+const MAX_BODY_CHECKS = 15;
+const MAX_BODY_PATHS = 50;
+const MAX_BODY_CELL = 200;
 
 function bullets(items, fallback) {
   if (!Array.isArray(items) || items.length === 0) return `- ${fallback}`;
   return items.map((item) => `- ${redact(String(item))}`).join('\n');
 }
 
-function buildPrBody(plan, issue, autoCloseNote) {
+// One markdown table cell: redacted, flattened to a single line, `|` escaped so a
+// transcribed value cannot forge a column, and bounded so one long line cannot
+// dominate the body.
+function cell(value, limit = MAX_BODY_CELL) {
+  const text = redact(String(value)).replace(/\s+/g, ' ').trim().replace(/\|/g, '\\|');
+  if (text === '') return '(empty)';
+  return text.length <= limit ? text : `${text.slice(0, limit)}…`;
+}
+
+// Split a list into what the body shows and how many it had to drop.
+function capped(items, max) {
+  const list = Array.isArray(items) ? items : [];
+  return { shown: list.slice(0, max), dropped: Math.max(0, list.length - max) };
+}
+
+function droppedNote(dropped, what) {
+  return `_Not listed here: ${dropped} further ${what}. The list was cut to keep this body under GitHub's ${PR_BODY_LIMIT}-character limit._`;
+}
+
+// The worker record the dispatch report holds for this issue. The LAST one wins:
+// an issue re-dispatched in a later wave appears more than once, and the newest
+// verdict is the one that judged the branch being delivered.
+function workerRecordOf(dispatch, number) {
+  let found = null;
+  for (const wave of dispatch.waves ?? []) {
+    for (const worker of wave.workers ?? []) {
+      if (worker && worker.issue === number) found = worker;
+    }
+  }
+  return found;
+}
+
+// The exit code a recorded line carries — `… → exit 20 (…)`, `gate lint: failed
+// (exit 2)`. Null when the line names none, which is rendered as "—" rather than
+// filled in with a plausible zero.
+function exitCodeOf(text) {
+  const match = /\bexit\s+(-?\d+)\b/.exec(String(text));
+  return match ? match[1] : null;
+}
+
+// The exit code recorded for ONE gate, when a check line is about that gate.
+// dispatch writes those lines as `gate <id>: <status> (exit <n>)`.
+function gateExitCode(checks, gateId) {
+  for (const check of Array.isArray(checks) ? checks : []) {
+    const text = String(check);
+    if (!text.toLowerCase().startsWith(`gate ${gateId.toLowerCase()}:`)) continue;
+    const code = exitCodeOf(text);
+    if (code !== null) return code;
+  }
+  return null;
+}
+
+// The verdict half of the evidence: what judged this issue, and how it ruled.
+function verificationLines(worker) {
+  const lines = [];
+  const verification = worker && worker.verification ? worker.verification : null;
+  if (verification === null) {
+    lines.push(
+      'The dispatch report holds **no verification record for this issue**, so this PR carries no evidence that anything judged it. Do not read this as a pass.',
+    );
+    return lines;
+  }
+
+  lines.push('Transcribed from the dispatch report for this issue — the verdict that actually judged this branch, not a statement of intent.');
+  lines.push('');
+  lines.push(`- Verdict: **${cell(verification.outcome ?? 'unknown')}**`);
+  if (verification.ran === false) {
+    lines.push(
+      '- **The verification did not run** (`ran: false`): no gate and no command was executed for this issue, so the verdict above is not backed by a run. Treat this branch as unverified.',
+    );
+  }
+
+  const gates = capped(verification.gates, MAX_BODY_GATES);
+  if (gates.shown.length === 0) {
+    lines.push('- Gates: **none recorded** — the run named no gate, so the checks below are all this verdict can point at.');
+  } else {
+    lines.push('');
+    lines.push('**Gates**');
+    lines.push('');
+    lines.push('| Gate | Verdict | Exit |');
+    lines.push('| --- | --- | --- |');
+    for (const gate of gates.shown) {
+      const id = cell(gate && gate.id != null ? gate.id : 'unknown');
+      const verdict = cell(gate && gate.verdict != null ? gate.verdict : 'unknown');
+      lines.push(`| ${id} | ${verdict} | ${gateExitCode(verification.checks, id) ?? '—'} |`);
+    }
+    if (gates.dropped > 0) {
+      lines.push('');
+      lines.push(droppedNote(gates.dropped, 'gate(s)'));
+    }
+  }
+
+  const checks = capped(verification.checks, MAX_BODY_CHECKS);
+  lines.push('');
+  lines.push('**Checks**');
+  lines.push('');
+  if (checks.shown.length === 0) {
+    lines.push('_The run recorded no check line._');
+  } else {
+    lines.push('| # | Check (as recorded) | Exit |');
+    lines.push('| --- | --- | --- |');
+    checks.shown.forEach((check, index) => {
+      lines.push(`| ${index + 1} | ${cell(check)} | ${exitCodeOf(check) ?? '—'} |`);
+    });
+    if (checks.dropped > 0) {
+      lines.push('');
+      lines.push(droppedNote(checks.dropped, 'check(s)'));
+    }
+  }
+  return lines;
+}
+
+// The scope the plan declared for this issue. `suspected_files` is exactly what
+// the dispatch runner turns into the execution contract's `scope.allow`, so this
+// is the permission the worker was actually given — reported, not re-derived.
+function declaredScope(issue) {
+  const files = Array.isArray(issue.suspected_files) ? issue.suspected_files : [];
+  const cleaned = files
+    .filter((file) => typeof file === 'string' && file.trim() !== '')
+    .map((file) => redact(file.trim()));
+  return [...new Set(cleaned)].sort();
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Is a changed path inside one declared scope entry? Entries are normally plain
+// repository paths, but the contract accepts patterns, so `*` (within a segment)
+// and `**` (across segments) are honored. Treating a pattern as a literal would
+// report an in-scope change as a violation — the one thing this comparison must
+// not get wrong, since it is the human-readable half of `requireScopeClean`.
+function scopeMatches(pattern, path) {
+  if (pattern === path) return true;
+  if (!pattern.includes('*')) return false;
+  const source = pattern
+    .split('**')
+    .map((part) => part.split('*').map(escapeRegExp).join('[^/]*'))
+    .join('.*');
+  try {
+    return new RegExp(`^${source}$`).test(path);
+  } catch {
+    return false;
+  }
+}
+
+function inDeclaredScope(scope, path) {
+  return scope.some((pattern) => scopeMatches(pattern, path));
+}
+
+// `git diff --numstat` is parsed rather than `--shortstat`: the numeric form is
+// machine-readable and locale-independent. A binary file reports `-` for both
+// counts and is counted as a file without inventing line numbers for it.
+function parseNumstat(stdout) {
+  let files = 0;
+  let added = 0;
+  let deleted = 0;
+  let binary = 0;
+  for (const line of String(stdout).split('\n')) {
+    const parts = line.split('\t');
+    if (parts.length < 3) continue;
+    files += 1;
+    if (parts[0] === '-' || parts[1] === '-') {
+      binary += 1;
+      continue;
+    }
+    added += Number.parseInt(parts[0], 10) || 0;
+    deleted += Number.parseInt(parts[1], 10) || 0;
+  }
+  return { files, added, deleted, binary };
+}
+
+// What the branch ACTUALLY changed, read from the issue's own worktree. Read-only
+// and never fatal: a worktree that has already been cleaned up makes the evidence
+// unavailable, which is reported as unavailable — never as "nothing changed" and
+// never as "the branch stayed in scope".
+function changeEvidence(inputs, plan, issue) {
+  const branch = safeBranch(issue.branch);
+  const worktree = typeof issue.worktree === 'string' && issue.worktree !== '' ? issue.worktree : null;
+  const range = branch === null ? null : `${plan.profile.base}...${branch}`;
+  if (branch === null || worktree === null) {
+    return { ok: false, range, reason: 'the plan names no worktree or no safe branch for this issue', files: [], stat: null };
+  }
+
+  const names = runCli(inputs.git, ['diff', '--name-only', range], { cwd: worktree });
+  if (!names.ok) {
+    return {
+      ok: false,
+      range,
+      reason: excerpt(names.stderr || names.stdout || 'git diff --name-only failed', 200) || 'git diff --name-only failed',
+      files: [],
+      stat: null,
+    };
+  }
+  // The WHOLE change set, not the part the body has room for: the out-of-scope
+  // count is computed from this list, and counting only the first page of it
+  // would report a clean branch that is not one. Capping happens at render time.
+  const files = names.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => redact(line));
+
+  const numstat = runCli(inputs.git, ['diff', '--numstat', range], { cwd: worktree });
+  const stat = numstat.ok ? parseNumstat(numstat.stdout) : null;
+  return { ok: true, range, reason: '', files, stat };
+}
+
+// The scope half of the evidence: what the issue was allowed to touch, beside what
+// the branch touched, so a reviewer can see the out-of-scope count without
+// re-running the diff themselves.
+function scopeLines(issue, change) {
+  const scope = declaredScope(issue);
+  const lines = ['**Declared scope vs. actual changes**', ''];
+
+  if (!change.ok) {
+    lines.push(
+      `The branch's actual change set could NOT be read (\`git diff --name-only ${change.range ?? '<range>'}\`: ${cell(change.reason)}), so this section cannot show what changed. **This is not evidence that the branch stayed in scope.**`,
+    );
+    lines.push('');
+    lines.push(`- Declared scope (\`scope.allow\`, ${scope.length} entr${scope.length === 1 ? 'y' : 'ies'}):`);
+    const listed = capped(scope, MAX_BODY_PATHS);
+    if (listed.shown.length === 0) lines.push('  - (the plan declares no target file for this issue)');
+    for (const path of listed.shown) lines.push(`  - \`${cell(path)}\``);
+    if (listed.dropped > 0) lines.push('', droppedNote(listed.dropped, 'scope entr(y/ies)'));
+    return lines;
+  }
+
+  const outOfScope = change.files.filter((path) => !inDeclaredScope(scope, path));
+  const stat = change.stat;
+  const total = change.files.length;
+
+  lines.push(`Declared scope (\`scope.allow\`, from the plan's target files) against \`git diff --name-only ${change.range}\`, run in this issue's worktree.`);
+  lines.push('');
+  if (outOfScope.length === 0) {
+    lines.push(`- Out-of-scope changes: **0** — every one of the ${total} changed file(s) is inside the declared scope.`);
+  } else {
+    // The COUNT is over the whole change set; only the naming is bounded, and a
+    // bounded naming says how many it did not name.
+    const named = capped(outOfScope, MAX_BODY_PATHS);
+    const suffix = named.dropped > 0 ? ` (+${named.dropped} more not listed here)` : '';
+    lines.push(`- Out-of-scope changes: **${outOfScope.length}** — changed but NOT declared: ${named.shown.map((path) => `\`${cell(path)}\``).join(', ')}${suffix}.`);
+  }
+  lines.push(
+    stat === null
+      ? `- Diff size: **${total} file(s) changed** (line counts unavailable: \`git diff --numstat\` did not answer).`
+      : `- Diff size: **${stat.files} file(s) changed, +${stat.added} / -${stat.deleted} line(s)**${stat.binary > 0 ? ` (${stat.binary} binary file(s) counted without line numbers)` : ''}.`,
+  );
+  lines.push('');
+
+  const rows = capped([...new Set([...scope, ...change.files])].sort(), MAX_BODY_PATHS);
+  if (rows.shown.length === 0) {
+    lines.push('_The plan declares no target file and the branch changed none._');
+    return lines;
+  }
+  lines.push('| Path | Declared (`scope.allow`) | Changed |');
+  lines.push('| --- | --- | --- |');
+  for (const path of rows.shown) {
+    lines.push(`| \`${cell(path)}\` | ${inDeclaredScope(scope, path) ? 'yes' : '**no**'} | ${change.files.includes(path) ? 'yes' : 'no'} |`);
+  }
+  if (rows.dropped > 0) {
+    lines.push('');
+    lines.push(droppedNote(rows.dropped, 'path(s)'));
+  }
+  return lines;
+}
+
+// =============================================================================
+// PR body (plan + the run's measured evidence)
+// =============================================================================
+
+// Last-resort guard. Every list above is capped, but a plan with a very long
+// objective or acceptance-criteria list could still exceed what gh accepts.
+// Truncating beats a create that fails — but a truncated body must SAY it was
+// truncated, so the marker is part of the truncation, not an optional extra.
+function fitPrBody(body) {
+  if (body.length <= PR_BODY_LIMIT) return body;
+  const marker = `\n\n_This body was truncated to fit GitHub's ${PR_BODY_LIMIT}-character limit; the complete evidence is in the run's merge artifacts._\n`;
+  let head = body.slice(0, PR_BODY_LIMIT - marker.length);
+  // Never end on half of a surrogate pair: an emoji cut down the middle would be
+  // written out as a replacement character.
+  const last = head.charCodeAt(head.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1);
+  return `${head}${marker}`;
+}
+
+function buildPrBody(plan, issue, autoCloseNote, evidence) {
   const lines = [
     `## Summary`,
     redact(issue.objective ?? issue.title ?? `Resolve issue #${issue.number}.`),
@@ -294,13 +608,14 @@ function buildPrBody(plan, issue, autoCloseNote) {
     bullets(issue.acceptance_criteria, 'See the issue.'),
     '',
     '## Verification',
-    `Dispatched by cmate-orchestrate and verified against the profile baseline before this PR was opened.`,
-    bullets(plan.profile.baseline, 'repository baseline'),
+    ...verificationLines(evidence.worker),
+    '',
+    ...scopeLines(issue, evidence.change),
     '',
     `Resolves #${issue.number}.`,
   ];
   if (autoCloseNote) lines.push('', autoCloseNote);
-  return lines.join('\n');
+  return fitPrBody(lines.join('\n'));
 }
 
 // =============================================================================
@@ -458,7 +773,34 @@ function newTarget(issue, branch, action) {
 // Phases
 // =============================================================================
 
-function runCreatePrs(inputs, plan, eligible, outDir, report) {
+// What the PR body says about the evidence, said again in the report — the two
+// must never disagree. Neither of these stops the phase (the verification gate
+// already ran upstream and passed); they are the "did not stop it, but you need
+// to know" channel, so a reviewer who reads only merge-report.json still sees
+// that a body could not show its diff, or showed a change outside the scope the
+// plan declared.
+const EVIDENCE_UNAVAILABLE_CODE = 'change_evidence_unavailable';
+const SCOPE_EXCEEDED_CODE = 'branch_changed_outside_declared_scope';
+
+function recordEvidenceLimitations(report, number, issue, evidence) {
+  if (!evidence.change.ok) {
+    report.limitations.push({
+      code: EVIDENCE_UNAVAILABLE_CODE,
+      detail: `#${number}: the branch's actual change set could not be read (${redact(evidence.change.reason)}); the PR body reports it as unread rather than claiming the change stayed in scope`,
+    });
+    return;
+  }
+  const scope = declaredScope(issue);
+  const outOfScope = evidence.change.files.filter((path) => !inDeclaredScope(scope, path));
+  if (outOfScope.length > 0) {
+    report.limitations.push({
+      code: SCOPE_EXCEEDED_CODE,
+      detail: `#${number}: ${outOfScope.length} changed file(s) are outside the scope the plan declared for this issue (${outOfScope.slice(0, 10).map((path) => redact(path)).join(', ')}); the PR body names them`,
+    });
+  }
+}
+
+function runCreatePrs(inputs, plan, dispatch, eligible, outDir, report) {
   const bodyDir = join(outDir, 'pr-bodies');
   mkdirSync(bodyDir, { recursive: true });
 
@@ -486,8 +828,13 @@ function runCreatePrs(inputs, plan, eligible, outDir, report) {
       continue;
     }
 
+    // The measured half of the PR body (Issue #97). Both probes are read-only and
+    // neither can stop the phase: what they cannot read is reported as unread.
+    const evidence = { worker: workerRecordOf(dispatch, number), change: changeEvidence(inputs, plan, issue) };
+    recordEvidenceLimitations(report, number, issue, evidence);
+
     const bodyFile = join(bodyDir, `issue-${number}.md`);
-    writeFileSync(bodyFile, `${buildPrBody(plan, issue, autoCloseNote)}\n`, 'utf8');
+    writeFileSync(bodyFile, `${buildPrBody(plan, issue, autoCloseNote, evidence)}\n`, 'utf8');
 
     if (!inputs.approve) {
       target.outcome = 'previewed';
@@ -769,7 +1116,7 @@ function runMerge(inputs, plan, dispatch, outDir) {
   }
 
   if (inputs.phase === 'create_prs') {
-    runCreatePrs(inputs, plan, eligible, outDir, report);
+    runCreatePrs(inputs, plan, dispatch, eligible, outDir, report);
   } else {
     runMergePrs(inputs, plan, eligible, report);
   }

@@ -1,0 +1,49 @@
+{
+  "description": "Issue #97: merge runner は dispatch report を **入力**として扱い、その中身を無条件に信用しない。`dispatch_report_patch` で 2 つの形を注入する: (1) #201 は verdict が pass なのに `ran: false`（何も走っていない）— 本文は「検証は走っていない」と明示し、旧来の定型文で pass を匂わせない。(2) #200 の check 行には token と絶対 path が生で入っている — 転記は既存の redact() を通るので、生の値は PR 本文に一切現れない。",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "dispatch_report_patch": {
+    "201": { "ran": false, "gates": [], "checks": [] },
+    "200": {
+      "checks": ["baseline ran from /Users/runner/work/repo with GH_TOKEN=ghp_FAKEtokenNOTAREALSECRET00 → exit 0"]
+    }
+  },
+  "merge_args": ["--approve"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "create": "ok" },
+      "201": { "create": "ok" }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "pr_created", "200": "pr_created" },
+    "completion_passed": true,
+    "redaction_token": "ghp_FAKEtokenNOTAREALSECRET00",
+    "pr_bodies_contain": {
+      "201": [
+        "- **The verification did not run** (`ran: false`)",
+        "_The run recorded no check line._"
+      ],
+      "200": [
+        "[REDACTED-TOKEN]",
+        "[REDACTED-PATH]"
+      ]
+    },
+    "pr_bodies_absent": {
+      "201": ["verified against the profile baseline"],
+      "200": ["ghp_FAKEtokenNOTAREALSECRET00", "/Users/runner/work/repo"]
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "description": "Issue #97 のサイズ上限: profile baseline が 20 コマンドある（= verification.checks が 20 件ある）Issue の PR 本文は、checks を上限件数で打ち切り、**打ち切った事実を本文に明記する**。黙って落とすと「これが全部の検証だ」と読めてしまうためである。gh の 65536 字上限も超えない。この経路は契約なしの fallback（baseline 再実行）なので gate は1つも記録されておらず、本文はそれも「none recorded」と明示する。",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "profile_json": "node-fake-many-checks.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--approve"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "create": "ok" },
+      "201": { "create": "ok" }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "pr_created", "200": "pr_created" },
+    "completion_passed": true,
+    "pr_bodies_contain": {
+      "201": [
+        "- Verdict: **pass**",
+        "- Gates: **none recorded**",
+        "| 1 | cat cmate-verify-ok | — |",
+        "| 15 | echo baseline-check-15 | — |",
+        "_Not listed here: 5 further check(s). The list was cut to keep this body under GitHub's 65536-character limit._"
+      ]
+    },
+    "pr_bodies_absent": {
+      "201": ["echo baseline-check-16", "echo baseline-check-20"]
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "description": "Issue #97: 実行契約経路（`wait --verify`）で pass した Issue の PR 本文には、定型文ではなく **実測証拠**が載る。dispatch report の当該 worker の verification から outcome・gate 名・合否・exit code を転記し、契約の scope.allow と branch の実変更ファイル（worktree で `git diff --name-only <base>...<branch>`）を対比して scope 外変更 0 件を読み取れる形にし、diff 規模を1行載せる。以前の定型文（profile baseline で検証した、という無条件の1文）は本文から消えている。",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "dispatch_scenario": {
+    "cli_available": true,
+    "cli_contract": true,
+    "git": { "branch": "feature/integration", "dirty": false },
+    "gh": { "repo_access": true },
+    "workers": {
+      "201": { "state": "completed", "verify_exits": [0] },
+      "200": { "state": "completed", "verify_exits": [0] }
+    }
+  },
+  "merge_args": ["--approve"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "create": "ok" },
+      "201": { "create": "ok" }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "pr_created", "200": "pr_created" },
+    "pr_create_calls": 2,
+    "completion_passed": true,
+    "pr_bodies_contain": {
+      "201": [
+        "## Verification",
+        "- Verdict: **pass**",
+        "| Gate | Verdict | Exit |",
+        "| work-evidence | pass | — |",
+        "| baseline | pass | — |",
+        "| 1 | commandmate wait --verify → exit 0 (every declared gate passed) | 0 |",
+        "**Declared scope vs. actual changes**",
+        "git diff --name-only origin/develop...feature/issue-201-feat-add-base-configuration-loader",
+        "- Out-of-scope changes: **0** — every one of the 1 changed file(s) is inside the declared scope.",
+        "- Diff size: **1 file(s) changed, +10 / -1 line(s)**.",
+        "| `src/base.ts` | yes | yes |",
+        "Resolves #201."
+      ],
+      "200": [
+        "- Verdict: **pass**",
+        "| work-evidence | pass | — |",
+        "- Out-of-scope changes: **0**",
+        "| `src/store.ts` | yes | yes |"
+      ]
+    },
+    "pr_bodies_absent": {
+      "201": ["verified against the profile baseline"]
+    },
+    "absent_limitation_codes": ["change_evidence_unavailable", "branch_changed_outside_declared_scope"]
+  }
+}

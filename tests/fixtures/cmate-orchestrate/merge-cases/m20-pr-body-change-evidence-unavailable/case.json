@@ -1,0 +1,45 @@
+{
+  "description": "Issue #97 の劣化経路: #201 の worktree で `git diff` が答えない（worktree が既に片付いている／range が解決できない）。読めなかったものを「変更なし」や「scope 内に収まっていた」と書いてはならないので、PR 本文は読めなかった事実とその理由を書き、宣言 scope だけを示す。merge-report にも `change_evidence_unavailable` を limitation として残す。phase 自体は止まらない（検証ゲートは上流で既に通っている）。#200 は読めているので通常どおり対比が載る。",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--approve"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "create": "ok" },
+      "201": { "create": "ok" }
+    },
+    "diff": {
+      "201": "fail"
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "pr_created", "200": "pr_created" },
+    "completion_passed": true,
+    "limitation_codes": ["change_evidence_unavailable"],
+    "pr_bodies_contain": {
+      "201": [
+        "The branch's actual change set could NOT be read",
+        "**This is not evidence that the branch stayed in scope.**",
+        "- Declared scope (`scope.allow`, 1 entry):\n  - `src/base.ts`"
+      ],
+      "200": [
+        "- Out-of-scope changes: **0** — every one of the 1 changed file(s) is inside the declared scope."
+      ]
+    },
+    "pr_bodies_absent": {
+      "201": ["- Out-of-scope changes: **0**", "- Diff size:"]
+    }
+  }
+}

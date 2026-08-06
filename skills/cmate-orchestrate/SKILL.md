@@ -170,6 +170,34 @@ merge.mjs --plan <plan.json> --dispatch <dispatch-report.json> (--create-prs | -
 merge するのは CI checks が**すべて green** のときだけで、failure は `ci_failed`、
 pending・check 0 件は `ci_pending` として **merge を拒否**する。
 
+#### PR 本文は「検証証拠の提出」である
+
+`create_prs` が書く PR 本文（`<out>/pr-bodies/issue-<n>.md`）の Verification 節は、
+**定型文ではなくこの Issue の実測値**である。人間が見るのは PR だけなので、証拠が
+run ディレクトリの JSON の中にしか無い状態を残さない。
+
+| 載せるもの | 出どころ |
+|---|---|
+| verdict（`verification.outcome`）と、走っていない場合（`ran: false`）の明示 | dispatch report の当該 worker |
+| gate 名・合否・exit code の表 | 同 `verification.gates` / `checks`（`gate <id>: … (exit n)` から exit を拾う） |
+| 宣言 scope（`scope.allow` = plan の対象 file）と実変更 file の対比表、**scope 外変更の件数** | plan の `suspected_files` と、worktree で実行した `git diff --name-only <base>...<branch>` |
+| diff 規模（file 数・追加/削除行数）1行 | 同 worktree の `git diff --numstat` |
+
+規則:
+
+- **転記であって主張ではない。** 値は全て `redact()` を通す（dispatch report は入力であり、
+  redact 済みだと仮定しない）。
+- **読めなかったものを pass に丸めない。** worktree が既に片付いていて diff が読めなければ
+  「読めなかった」と本文に書き、limitation `change_evidence_unavailable` を記録する。
+  `ran: false` の verdict も同様に「検証は走っていない」と明示する。
+- **黙って切り詰めない。** gh の本文上限（65536 字）に収めるため gates/checks/path の一覧は
+  上限件数で打ち切るが、**打ち切った件数を本文に明記する**。
+- 実変更が宣言 scope の外に出ていれば本文でその path を名指しし、limitation
+  `branch_changed_outside_declared_scope` を記録する（契約ゲート `requireScopeClean` の
+  人間可読版。phase は止めない）。
+
+merge-report.json / merge-summary.md の構造は変わらない。
+
 ### 3.4 uat（受入テストと回数上限つき修正ループ）
 
 ```
@@ -273,6 +301,8 @@ mutating runner は `<out>/` にも report と summary markdown を書く。
 | `drift_<check>` | dispatch | 非 blocking な drift（`integration_clean` / `worktrees_present`）を記録して続行した |
 | `issue_autoclose_not_default_branch` | merge | base がデフォルトブランチでないため `Resolves #n` が効かない。**merge 後に手動クローズが要る** |
 | `unsafe_branch` | merge | branch 名が safe-ref guard に弾かれた |
+| `change_evidence_unavailable` | merge | branch の実変更 file を読めなかった（worktree 不在など）。PR 本文もそう書く。**scope 内に収まっていた証拠ではない** |
+| `branch_changed_outside_declared_scope` | merge | 実変更に宣言 scope（`scope.allow`）外の file がある。PR 本文が違反 path を名指しする |
 | `acceptance_not_run` | uat | 意味ゲートが verdict を出せず、baseline のみで裁定した |
 | `no_eligible_issues` | merge / uat | dispatch report に completed かつ verification pass の Issue が無い |
 | `completion_check_failed` | dispatch / merge / uat | completion check のどれかが passed でない |
