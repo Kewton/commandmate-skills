@@ -190,8 +190,8 @@ files:
     executable: true
     script: true
   - path: scripts/lib.mjs
-    sha256: 0d72b41aa87b8ad4e2aa1391813fdd0124fefaa428d101f16d91476137407980
-    size: 13117
+    sha256: fac7dc5f064db0ca99e655c94b812f5725fd3bf35c754f64ab33cbab2d5ac0c0
+    size: 13566
     kind: script
     executable: false
     script: true
