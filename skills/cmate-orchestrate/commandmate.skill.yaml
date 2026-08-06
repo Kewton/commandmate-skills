@@ -111,6 +111,12 @@ files:
     kind: skill_md
     executable: false
     script: false
+  - path: references/adr-issue-acceptance-gates.md
+    sha256: 153e1a0cdb069abf35713cb3b73db01015d9d0d77564c10df0f690d95679a0ff
+    size: 38349
+    kind: instruction
+    executable: false
+    script: false
   - path: references/agent-compatibility.md
     sha256: d67db3ffbd98003cb0c0240926d0f238adb34a47f77660f8025801654dbcc4bf
     size: 3166
