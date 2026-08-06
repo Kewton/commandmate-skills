@@ -112,9 +112,27 @@ function registeredPathFor(issue, pathOverrides) {
   return pathOverrides[issue.number] ?? pathOverrides[String(issue.number)] ?? issue.worktree;
 }
 
-// The `ls --json` rows the runner resolves worktree ids from, one per plan issue.
-function planToWorktrees(plan, pathOverrides = {}) {
-  return plan.issues.map((issue) => ({
+// Issues CommandMate does not know about (Issue #90). Two shapes, because the
+// runner must treat them differently:
+//
+//   unregistered_worktrees — nothing exists: no `ls` row and no `git worktree
+//     list` entry. The blocking drift re-check fails, so the pre-flight refuses
+//     the run BEFORE the out directory is created.
+//   git_only_worktrees — the directory is a registered git worktree, but
+//     CommandMate has no row for it. `worktrees_present` is satisfied by the
+//     `git worktree list` fallback, so the pre-flight passes and the missing id
+//     only surfaces when the wave tries to resolve a send target.
+//
+// Both are hidden from `commandmate ls --json`; only the first is hidden from
+// `git worktree list` (and never created on disk).
+function hiddenFromLs(scenario) {
+  return [...(scenario.unregistered_worktrees ?? []), ...(scenario.git_only_worktrees ?? [])].map(Number);
+}
+
+// The `ls --json` rows the runner resolves worktree ids from, one per plan issue
+// CommandMate knows about.
+function planToWorktrees(plan, pathOverrides = {}, hidden = []) {
+  return plan.issues.filter((issue) => !hidden.includes(Number(issue.number))).map((issue) => ({
     id: worktreeIdFor(plan.profile.repository, issue.branch),
     name: issue.branch,
     branch: issue.branch,
@@ -128,10 +146,13 @@ function planToWorktrees(plan, pathOverrides = {}) {
 // the plan template) so a runner that cwd's into the template path instead finds
 // nothing — the #1473 regression. Returns the integration directory the runner
 // should be spawned in.
-function setupWorktrees(plan, work, markerFor, pathOverrides = {}) {
+function setupWorktrees(plan, work, markerFor, pathOverrides = {}, absent = []) {
   const integration = join(work, 'integration');
   mkdirSync(integration, { recursive: true });
   for (const issue of plan.issues) {
+    // An `unregistered_worktrees` issue has no worktree at all — not creating the
+    // directory is the fixture's whole point (Issue #90).
+    if (absent.includes(Number(issue.number))) continue;
     const dir = join(work, basename(registeredPathFor(issue, pathOverrides)));
     mkdirSync(dir, { recursive: true });
     if (markerFor(issue.number)) writeFileSync(join(dir, 'cmate-verify-ok'), 'ok');
@@ -157,8 +178,19 @@ function workerVerifyPasses(scenario, number) {
 function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, logPath, opts = {}) {
   const plan = readPlan(planPath);
   const pathOverrides = scenarioObject.worktree_paths ?? {};
-  const scenario = { ...scenarioObject, worktrees: planToWorktrees(plan, pathOverrides) };
-  const integration = setupWorktrees(plan, work, (n) => workerVerifyPasses(scenario, n), pathOverrides);
+  const absent = (scenarioObject.unregistered_worktrees ?? []).map(Number);
+  const scenario = { ...scenarioObject, worktrees: planToWorktrees(plan, pathOverrides, hiddenFromLs(scenarioObject)) };
+  // A `git_only_worktrees` issue must still appear in `git worktree list`, which
+  // the fake otherwise derives from the (now shorter) `ls` rows.
+  if ((scenarioObject.git_only_worktrees ?? []).length > 0) {
+    scenario.git = {
+      ...(scenarioObject.git ?? {}),
+      worktrees: plan.issues
+        .filter((issue) => !absent.includes(Number(issue.number)))
+        .map((issue) => registeredPathFor(issue, pathOverrides)),
+    };
+  }
+  const integration = setupWorktrees(plan, work, (n) => workerVerifyPasses(scenario, n), pathOverrides, absent);
   const scenarioPath = join(work, 'dispatch-scenario.json');
   writeFileSync(scenarioPath, `${JSON.stringify(scenario, null, 2)}\n`);
   const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_STATE: work, ...(opts.env ?? {}) };
@@ -647,6 +679,50 @@ function runDispatchCase(caseId) {
   }
   if (expect.waves_count !== undefined) {
     check(report.waves.length === expect.waves_count, `waves ${report.waves.length} !== ${expect.waves_count}`);
+  }
+
+  // Issue #90: a refusal that happens BEFORE the first wave must not consume the
+  // output directory. `--out` is the one input an operator cannot repeat once it
+  // exists (`out_exists`), so a run directory left behind by a stop that
+  // dispatched nothing turns a one-line fix (create the worktree) into "invent a
+  // new --out". The report says the same thing with `out_dir: null`.
+  if (expect.out_dir_created !== undefined) {
+    check(existsSync(outDir) === expect.out_dir_created,
+      `outDir ${existsSync(outDir) ? 'was created' : 'was not created'}, expected created=${expect.out_dir_created}`);
+    if (expect.out_dir_created === false) {
+      check(report.out_dir === null, `report.out_dir should be null when nothing was written, got ${JSON.stringify(report.out_dir)}`);
+    }
+  }
+  // The empty-truth guard (Issue #90 item 6): a run that dispatched nobody must
+  // not self-report a passed completion check just because every invariant it
+  // checks is vacuously true.
+  if (expect.completion_check_passed !== undefined) {
+    check(report.completion_check.passed === expect.completion_check_passed,
+      `completion_check.passed ${report.completion_check.passed} !== ${expect.completion_check_passed}`);
+  }
+  // The re-run the refusal is supposed to leave possible: the SAME command, the
+  // same `--out`, with every worktree now registered. It must run to completion
+  // instead of dying on `out_exists`.
+  if (expect.rerun_when_registered) {
+    const rerunScenario = { ...scenarioObject };
+    delete rerunScenario.unregistered_worktrees;
+    delete rerunScenario.git_only_worktrees;
+    const rerun = runDispatchRunner(planPath, rerunScenario, work, outDir, spec.dispatch_args ?? [], null);
+    check(rerun.exit === expect.rerun_when_registered.exit,
+      `re-run with the same --out exited ${rerun.exit} !== ${expect.rerun_when_registered.exit}`);
+    let rerunReport = null;
+    try {
+      rerunReport = JSON.parse(rerun.stdout);
+    } catch {
+      check(false, `re-run stdout is not valid JSON: ${rerun.stdout.slice(0, 200)}`);
+    }
+    if (rerunReport) {
+      check(rerunReport.status === expect.rerun_when_registered.status,
+        `re-run status "${rerunReport.status}" !== "${expect.rerun_when_registered.status}"`);
+      check(!rerunReport.blocking_reasons.some((entry) => entry.code === 'out_exists'),
+        'the re-run was refused with out_exists: the first run consumed --out');
+      check(existsSync(join(outDir, 'dispatch-report.json')), 'the re-run wrote no dispatch-report.json');
+    }
   }
 
   // max_parallel is never exceeded in any dispatched wave — the core guarantee.
