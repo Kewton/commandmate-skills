@@ -38,7 +38,7 @@ node tests/fixtures/cmate-orchestrate/run_tests.mjs
 
 - exit code と `status` が期待どおりであること
 - result envelope が `orchestrate-result.v1.json` に適合すること
-- 成功時、plan が `execution-plan.v1.json` に適合すること
+- 成功時、plan が `execution-plan.v2.json` に適合すること
 - Wave・merge 順・依存 kind・classification・risk が期待どおりであること
 - どの Wave も `max_parallel` を超えず、file 重複 pair を含まないこと
 - **同じ入力から同じ plan が出ること**（2回実行して byte 一致）
@@ -198,7 +198,7 @@ worktree 作成・fix dispatch・再merge が呼ばれていないこと、修�
 ある（`status.mjs` は読まないフィールドであり、他人の host path を repo に入れないため）。
 
 checked-in artifact が古い形のまま緑になり続けることを防ぐため、harness は **view を見る前に
-各 artifact を同梱 schema（`execution-plan.v1` / `dispatch-report.v1` / `merge-report.v1` /
+各 artifact を同梱 schema（`execution-plan.v2` / `dispatch-report.v1` / `merge-report.v1` /
 `uat-report.v1`）で検証する**。意図的に壊した artifact だけが `schema_unvalidatable` で免除される。
 さらに全 case で次を無条件に確かめる: artifact が無い phase は Issue 行でも必ず「未実行」、
 全 artifact が読めない phase は必ず「読取不能」、その2つは text 表にも必ず現れる、`--json` は

@@ -72,7 +72,7 @@ import {
 } from './lib.mjs';
 
 const DISPATCH_SCHEMA_VERSION = 1;
-const SUPPORTED_PLAN_SCHEMA_VERSION = 1;
+const SUPPORTED_PLAN_SCHEMA_VERSIONS = [1, 2];
 
 const MAX_PARALLEL_MAX = 3;
 
@@ -442,10 +442,10 @@ function validatePlan(plan) {
   if (plan === null || typeof plan !== 'object' || Array.isArray(plan)) {
     throw new SkillError('plan_invalid', 'plan must be a JSON object', 3);
   }
-  if (plan.plan_schema_version !== SUPPORTED_PLAN_SCHEMA_VERSION) {
+  if (!SUPPORTED_PLAN_SCHEMA_VERSIONS.includes(plan.plan_schema_version)) {
     throw new SkillError(
       'plan_invalid',
-      `unsupported plan_schema_version ${plan.plan_schema_version}; this runner understands ${SUPPORTED_PLAN_SCHEMA_VERSION}`,
+      `unsupported plan_schema_version ${plan.plan_schema_version}; this runner understands ${SUPPORTED_PLAN_SCHEMA_VERSIONS.join(' or ')}`,
       3,
     );
   }

@@ -2,7 +2,7 @@
 
 `cmate-orchestrate` が dry-run で生成する **execution plan** の定義である。
 機械検証用の正本は
-[../schemas/execution-plan.v1.json](../schemas/execution-plan.v1.json)（plan 本体）と
+[../schemas/execution-plan.v2.json](../schemas/execution-plan.v2.json)（plan 本体）と
 [../schemas/orchestrate-result.v1.json](../schemas/orchestrate-result.v1.json)（result envelope）
 であり、この文書はその読み方と、schema では表現できない規則を述べる。
 
@@ -15,6 +15,24 @@ required field として足された。理由と、それが残す差分は
 [adr-issue-acceptance-gates.md](./adr-issue-acceptance-gates.md) 第 12.1 節にある。
 **次に plan の field を触るときに `plan_schema_version` を 2 へ上げること**
 （plan を読む 4 runner — dispatch / merge / uat / status — の pin を同じ commit で上げる）。
+
+
+## plan_schema_version
+
+planner が出すのは **2** である（`acceptance_gates` を載せるため。#100 / #114）。
+
+**consumer（dispatch / merge / uat / status）は 1 と 2 の両方を受理する。**
+v1 の plan は「受入ゲートを1つも宣言していない plan」として正しく読めるので、
+拒否する理由が無い。とくに `status.mjs` は**過去の run の artifact を読む view** であり、
+0.18.0 で作った run を読めなくなるのは、この runner が存在する理由そのものの後退である。
+
+守りたい向きは逆で、**古い runner が新しい plan を拒否すること**である。0.18.0 以前の
+runner は 1 に固定されているので、`acceptance_gates` を載せた plan を渡すと `plan_invalid`
+で止まる。ゲートが黙って無視されることはない。
+
+schema は両方を同梱する（[../schemas/execution-plan.v2.json](../schemas/execution-plan.v2.json) が
+planner の出力、[../schemas/execution-plan.v1.json](../schemas/execution-plan.v1.json) は
+過去 run の artifact を読むためのもの）。fixture の検査は plan が申告した版の schema で行う。
 
 ## 1. 決定性（Claude/Codex parity）
 

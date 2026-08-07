@@ -27,7 +27,7 @@ import { join } from 'node:path';
 
 import { REDACTIONS, SKILL_ID, SKILL_VERSION, SkillError } from './lib.mjs';
 
-const PLAN_SCHEMA_VERSION = 1;
+const PLAN_SCHEMA_VERSION = 2;
 const RESULT_SCHEMA_VERSION = 1;
 
 // The permissions the full orchestration would require, mirrored from the
