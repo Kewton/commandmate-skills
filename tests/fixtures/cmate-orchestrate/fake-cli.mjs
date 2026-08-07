@@ -20,6 +20,13 @@
 // subcommand. `wait` signals state by EXIT CODE (0 completed, 10 prompt, 124
 // timeout), printing prompt JSON to stdout on a prompt.
 //
+// Worktree registration (Issue #91): `commandmate sync` re-scans repositories and
+// registers their worktrees with the server (CommandMate 0.21.0+). It creates no
+// worktree, so it fixes only "on disk but never scanned". A scenario models that
+// with `sync_worktrees` — rows `ls` hides until a sync has run — and opts out of
+// the subcommand entirely with `cli_sync: false`, which is what an older binary
+// does (`error: unknown command 'sync'`, exit 1).
+//
 // Worker lifecycle (Issue #1468): a real Claude worker runs one TURN per message
 // and then goes idle waiting for input — `wait` returns exit 0 on that idle, which
 // is NOT task completion. The runners' ground truth for completion is a new commit
@@ -77,7 +84,7 @@ const sub = argv[0] ?? '';
 const VERIFY_MARKER = 'cmate-verify-ok';
 
 // commandmate subcommands this fake emulates. Only these are contract-checked.
-const COMMANDMATE_SUBS = new Set(['ls', 'send', 'wait', 'capture', 'respond', 'verify']);
+const COMMANDMATE_SUBS = new Set(['ls', 'send', 'wait', 'capture', 'respond', 'verify', 'sync']);
 
 // The flags a pre-0.17.0 commandmate does not have. A scenario without
 // `cli_contract: true` refuses them and hides them from --help, so the runner's
@@ -94,6 +101,7 @@ const HELP_FLAGS = {
   respond: ['--agent', '--instance', '--token'],
   ls: ['--json', '--quiet', '--branch', '--id', '--token'],
   verify: ['--instance', '--gates', '--json', '--timeout', '--token'],
+  sync: ['--json', '--token'],
 };
 
 // wait exit codes (mirror the real CLI's WaitExitCode).
@@ -232,6 +240,28 @@ function bumpSends(issue) {
   }
 }
 
+// `commandmate sync` (CommandMate 0.21.0+) re-scans repositories and registers
+// their worktrees with the server; it creates nothing. The fake models exactly
+// that: a scenario's `sync_worktrees` rows are worktrees that exist on disk but
+// that the server has not scanned, so `ls` hides them until a sync has run. The
+// marker is what carries "a sync has run" across this stateless per-process fake.
+function syncMarkerPath() {
+  const dir = process.env.CMATE_FAKE_STATE;
+  return dir ? join(dir, 'synced') : null;
+}
+function syncHasRun() {
+  const marker = syncMarkerPath();
+  return Boolean(marker && existsSync(marker));
+}
+// The rows `commandmate ls` reports right now: the always-registered ones, plus
+// the sync-only ones once the server has been told to re-scan.
+function visibleWorktrees(spec) {
+  const rows = spec.worktrees ?? [];
+  const pending = spec.sync_worktrees ?? [];
+  if (pending.length === 0 || !syncHasRun()) return rows;
+  return [...rows, ...pending];
+}
+
 // The issue an in-worktree git call is about, recovered from the process cwd
 // (…/repo-issue-<n>[-uat-fix-<a>]). The runners cwd into the worktree to run the
 // baseline and to read HEAD, so the fake can look the worker's spec back up.
@@ -311,6 +341,9 @@ function main() {
   if (COMMANDMATE_SUBS.has(sub) && argv.includes('--help')) {
     if (sub === 'verify' && !contractCapable(spec)) {
       fail(`error: unknown command 'verify'`, 1);
+    }
+    if (sub === 'sync' && spec.cli_sync === false) {
+      fail(`error: unknown command 'sync'`, 1);
     }
     process.stdout.write(`${helpFor(sub, spec)}\n`);
     process.exit(0);
@@ -483,14 +516,31 @@ function main() {
   // --- commandmate worktree/worker lifecycle ------------------------------
   if (sub === 'ls') {
     // `commandmate ls --json` — the dispatch-time worktree-id resolver. Returns
-    // the worktrees the harness injected from the plan's branches.
+    // the worktrees the harness injected from the plan's branches, plus any
+    // `sync_worktrees` row once a `commandmate sync` has registered it (#91).
+    const rows = visibleWorktrees(spec);
     if (argv.includes('--json')) {
-      const rows = spec.worktrees ?? [];
       process.stdout.write(`${JSON.stringify(rows)}\n`);
       process.exit(0);
     }
-    const rows = spec.worktrees ?? [];
     process.stdout.write(`${rows.map((w) => w.id).join('\n')}\n`);
+    process.exit(0);
+  }
+  if (sub === 'sync') {
+    // `commandmate sync` — the server-side worktree re-scan. `cli_sync: false`
+    // models a CommandMate older than 0.21.0, which has no such subcommand: the
+    // call fails and nothing becomes visible, which is the world the runner's
+    // "sync failed, the branch stays unresolved" path is judged against.
+    if (spec.cli_sync === false) fail(`error: unknown command 'sync'`, 1);
+    const marker = syncMarkerPath();
+    if (marker) {
+      try {
+        writeFileSync(marker, 'synced');
+      } catch {
+        // best effort; a sync-only row simply stays invisible if we cannot record it
+      }
+    }
+    process.stdout.write(`Synced ${(spec.sync_worktrees ?? []).length} worktree(s)\n`);
     process.exit(0);
   }
   if (sub === 'send') {
@@ -510,7 +560,7 @@ function main() {
       // The real CLI resolves --contract relative to the worktree root and exits
       // 2 when the file is not there. Checking it here is what proves the runner
       // actually placed the contract in the worktree it dispatched to.
-      const row = (spec.worktrees ?? []).find((entry) => entry.id === worktreeId);
+      const row = visibleWorktrees(spec).find((entry) => entry.id === worktreeId);
       const absolute = resolve(process.cwd(), row?.path ?? '.', contractPath);
       if (!existsSync(absolute)) {
         fail(`Error: invalid task contract:\n  - ${contractPath}: contract file not found in the worktree`, 2);

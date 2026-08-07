@@ -85,7 +85,12 @@ commit を要求する（下流の PR 作成は commit を必要とする）。
   どちらのモードでも repository-local な worker Skill を必須依存にせず、worker が読む本文は
   `<out>/prompts/issue-<n>.md` に artifact として残す（[SKILL.md](../SKILL.md) 第2部）。
 - worktree-id は plan の `worktree_id`（valid なら）→ 無ければ `commandmate ls --json` を Issue の
-  `branch` で突き合わせて解決する（`commandmate sync` は存在しない）。**git 操作（commit 検出・baseline
+  `branch` で突き合わせて解決する（id の一次ソースは `ls`）。`ls` が行を返したのに branch が一致しない
+  場合だけ、`commandmate sync`（CommandMate 0.21.0+ に実在する server 側の worktree 再スキャン。
+  worktree は**作らない**）を run 全体で **1度だけ** 実行して `ls` を読み直す。sync が失敗しても
+  （0.21.0 未満は subcommand 自体が無い）それ自体では run を止めず、従来どおり未解決として扱う
+  （未解決なら #90 の `worktree_unresolved` で停止する）。sync の試行と結果は `limitations`
+  （`worktree_sync_ran` / `worktree_sync_unavailable`）と worker の `note` に残す。**git 操作（commit 検出・baseline
   検証）の cwd となる worktree path も、この `ls` で解決した行の実 `path` フィールドから取る**（#1473）。
   plan の `worktree_template` 由来 path は `ls` が path を返せない場合の fallback に留める。こうして
   `send`/`wait`/`capture`（id 解決）と git 操作（path 解決）が **同一の worktree を指す**。登録 path が

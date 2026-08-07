@@ -1,7 +1,7 @@
 {
   "description": "The commandmate CLI subcommands and options the cmate-orchestrate runners are allowed to use, transcribed verbatim from `commandmate <cmd> --help` (CommandMate 0.17.0). The fake CLI enforces this surface and the contract-parity test asserts the runners only ever call subcommands/flags listed here — so a runner that reaches for a non-existent flag (the #1467 regression) fails the suite instead of only failing in production. When a real `commandmate` binary is on PATH the parity test additionally checks these flags are a subset of the live `--help`.",
-  "source": "commandmate 0.17.0 --help",
-  "version_gating": "`since` marks a subcommand, and `since_flags` marks individual flags, that a specific CommandMate version introduced (Issue #1588: the execution contract and the contract verdict both arrived in 0.17.0). The live `--help` parity check skips those entries when the installed binary predates them, and says out loud which ones it skipped — an older CLI legitimately does not list them, and asserting anyway would report a supported fallback as a contract drift. Entries with no `since` are asserted against every version.",
+  "source": "commandmate 0.17.0 --help; `sync` from commandmate 0.21.x --help",
+  "version_gating": "`since` marks a subcommand, and `since_flags` marks individual flags, that a specific CommandMate version introduced (Issue #1588: the execution contract and the contract verdict both arrived in 0.17.0; Issue #91: `sync`, the server-side worktree re-scan, arrived in 0.21.0). The live `--help` parity check skips those entries when the installed binary predates them, and says out loud which ones it skipped — an older CLI legitimately does not list them, and asserting anyway would report a supported fallback as a contract drift. Entries with no `since` are asserted against every version.",
   "subcommands": {
     "send": {
       "positionals": "1-2",
@@ -29,6 +29,11 @@
       "positionals": "1",
       "flags": ["--instance", "--gates", "--json", "--timeout", "--token", "--help"],
       "since": "0.17.0"
+    },
+    "sync": {
+      "positionals": "0",
+      "flags": ["--json", "--token", "--help"],
+      "since": "0.21.0"
     }
   }
 }

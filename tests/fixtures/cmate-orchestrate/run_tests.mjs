@@ -126,11 +126,19 @@ function registeredPathFor(issue, pathOverrides) {
 //     CommandMate has no row for it. `worktrees_present` is satisfied by the
 //     `git worktree list` fallback, so the pre-flight passes and the missing id
 //     only surfaces when the wave tries to resolve a send target.
+//   sync_only_worktrees (Issue #91) — same world as git_only, but the server has
+//     simply not re-scanned since the worktree was created: a `commandmate sync`
+//     registers it and the retried `ls` resolves it. With `cli_sync: false` (a
+//     CommandMate older than 0.21.0) the sync fails and it stays a git_only case.
 //
-// Both are hidden from `commandmate ls --json`; only the first is hidden from
+// All three are hidden from `commandmate ls --json`; only the first is hidden from
 // `git worktree list` (and never created on disk).
 function hiddenFromLs(scenario) {
-  return [...(scenario.unregistered_worktrees ?? []), ...(scenario.git_only_worktrees ?? [])].map(Number);
+  return [
+    ...(scenario.unregistered_worktrees ?? []),
+    ...(scenario.git_only_worktrees ?? []),
+    ...(scenario.sync_only_worktrees ?? []),
+  ].map(Number);
 }
 
 // The `ls --json` rows the runner resolves worktree ids from, one per plan issue
@@ -183,10 +191,19 @@ function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, lo
   const plan = readPlan(planPath);
   const pathOverrides = scenarioObject.worktree_paths ?? {};
   const absent = (scenarioObject.unregistered_worktrees ?? []).map(Number);
+  const syncOnly = (scenarioObject.sync_only_worktrees ?? []).map(Number);
   const scenario = { ...scenarioObject, worktrees: planToWorktrees(plan, pathOverrides, hiddenFromLs(scenarioObject)) };
-  // A `git_only_worktrees` issue must still appear in `git worktree list`, which
-  // the fake otherwise derives from the (now shorter) `ls` rows.
-  if ((scenarioObject.git_only_worktrees ?? []).length > 0) {
+  // The rows a `commandmate sync` makes visible (Issue #91): hidden from the
+  // initial `ls`, handed to the fake separately so it can return them once the
+  // server has been told to re-scan.
+  if (syncOnly.length > 0) {
+    const hiddenFromSync = plan.issues.map((issue) => Number(issue.number)).filter((n) => !syncOnly.includes(n));
+    scenario.sync_worktrees = planToWorktrees(plan, pathOverrides, hiddenFromSync);
+  }
+  // A `git_only_worktrees` (or not-yet-synced) issue must still appear in `git
+  // worktree list`: the worktree IS on disk, and the fake otherwise derives that
+  // list from the (now shorter) `ls` rows.
+  if ((scenarioObject.git_only_worktrees ?? []).length > 0 || syncOnly.length > 0) {
     scenario.git = {
       ...(scenarioObject.git ?? {}),
       worktrees: plan.issues
@@ -714,6 +731,7 @@ function runDispatchCase(caseId) {
     const rerunScenario = { ...scenarioObject };
     delete rerunScenario.unregistered_worktrees;
     delete rerunScenario.git_only_worktrees;
+    delete rerunScenario.sync_only_worktrees;
     const rerun = runDispatchRunner(planPath, rerunScenario, work, outDir, spec.dispatch_args ?? [], null);
     check(rerun.exit === expect.rerun_when_registered.exit,
       `re-run with the same --out exited ${rerun.exit} !== ${expect.rerun_when_registered.exit}`);
@@ -741,6 +759,17 @@ function runDispatchCase(caseId) {
   const cliLog = readCliLog(logPath);
   const sent = sentIssuesFromLog(cliLog);
   const respondCount = cliLog.filter((entry) => entry.sub === 'respond').length;
+
+  // How many times a given commandmate subcommand was reached for. This is the
+  // only place `commandmate sync` is visible at all: whether the worktree registry
+  // was re-scanned — and that it was re-scanned exactly ONCE per run rather than
+  // once per unresolved branch — cannot be read off the report (Issue #91).
+  if (expect.cli_subcommand_counts) {
+    for (const [name, count] of Object.entries(expect.cli_subcommand_counts)) {
+      const actual = cliLog.filter((entry) => entry.sub === name).length;
+      check(actual === count, `commandmate ${name} was called ${actual} time(s) !== ${count}`);
+    }
+  }
 
   if (expect.no_respond) check(respondCount === 0, `respond was called ${respondCount} time(s) on a no-auto-response path`);
   if (expect.expect_respond) check(respondCount >= 1, 'respond was never called on the auto-yes path');
@@ -1768,7 +1797,7 @@ function runStatusCase(caseId) {
 // is itself a subset of the live `--help`. The fake CLI additionally rejects any
 // off-contract flag at call time, so every fixture case is a parity check too.
 
-const COMMANDMATE_SUBS = ['ls', 'send', 'wait', 'capture', 'respond', 'verify'];
+const COMMANDMATE_SUBS = ['ls', 'send', 'wait', 'capture', 'respond', 'verify', 'sync'];
 
 function resolveRealCli() {
   const bin = process.env.CMATE_REAL_CLI || 'commandmate';
@@ -1839,12 +1868,14 @@ function parityTest() {
   const subs = contract.subcommands ?? {};
   check(COMMANDMATE_SUBS.every((s) => subs[s]), 'the CLI contract is missing a commandmate subcommand the runners use');
 
-  // (B) Runner ⊆ contract. Two runs are needed to reach the whole surface:
+  // (B) Runner ⊆ contract. Three runs are needed to reach the whole surface:
   //   1. a legacy --auto-yes prompt run: ls -> send -> wait (prompt) -> capture
   //      -> respond -> wait;
   //   2. a contract run whose verdict is 20: send --help / wait --help (the
-  //      version gate) -> send --contract -> wait --verify -> verify --json.
-  // Both logs are unioned, so a flag that only the contract path uses is still
+  //      version gate) -> send --contract -> wait --verify -> verify --json;
+  //   3. a run whose worktree is registered only after a re-scan: ls -> sync ->
+  //      ls (Issue #91).
+  // The logs are unioned, so a flag that only one path uses is still
   // parity-checked (Issue #1588).
   const runsDir = mkdtempSync(join(tmpdir(), 'cmate-parity-plan-'));
   const spec = { plan: { issues_fixture: 'cases/02-explicit-dependency/issues.json', orchestrate_args: ['200', '201', '--max-parallel', '3', '--run-id', 'plan'] } };
@@ -1878,7 +1909,20 @@ function parityTest() {
     },
   }, contractWork, join(contractWork, 'dispatch'), ['--max-turns', '1'], contractLog);
 
-  const calls = [...readCliLog(logPath), ...readCliLog(contractLog)].filter((entry) => COMMANDMATE_SUBS.includes(entry.sub));
+  const syncWork = mkdtempSync(join(tmpdir(), 'cmate-parity-sync-'));
+  const syncLog = join(syncWork, 'cli.log');
+  runDispatchRunner(planPath, {
+    cli_available: true,
+    git: { branch: 'feature/integration', dirty: false },
+    gh: { repo_access: true },
+    sync_only_worktrees: [201],
+    workers: {
+      201: { state: 'completed', verify: 'pass' },
+      200: { state: 'completed', verify: 'pass' },
+    },
+  }, syncWork, join(syncWork, 'dispatch'), [], syncLog);
+
+  const calls = [...readCliLog(logPath), ...readCliLog(contractLog), ...readCliLog(syncLog)].filter((entry) => COMMANDMATE_SUBS.includes(entry.sub));
   const used = new Set(calls.map((entry) => entry.sub));
   for (const sub of COMMANDMATE_SUBS) {
     check(used.has(sub), `the runner never exercised commandmate ${sub}, so its parity is untested`);

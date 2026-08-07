@@ -70,6 +70,11 @@ worktree path・baseline は **profile から解決**し、`develop`/`npm`/`carg
 （片方だけ既定 profile で走らせると branch がずれ、`commandmate ls` の branch 一致で解決できない）。
 解決できない Issue があると、dispatch は**最初の Wave の前に停止する**: `worktree_unresolved` で
 1人も dispatch せず、`--out` も作らない（第5節。worktree を作って同じコマンドを再実行すればよい）。
+なお `commandmate ls` が解決できなかったとき、dispatch は run 全体で1度だけ
+`commandmate sync`（CommandMate 0.21.0+ の server 側 worktree 再スキャン）を試して `ls` を読み直す。
+**sync は worktree を作らない**ので「未作成」は解決しないが、「**disk には在るが server 未登録**」
+（server 起動後に `git worktree add` した等）はこれで解決する。試行結果は `limitations` に残り、
+それでも未解決なら上記の停止になる。
 
 **別途導入が必要な Skill: `cmate-acceptance-test`**（uat の意味ゲートを使う場合のみ）。
 
@@ -416,6 +421,8 @@ limitation は個々の report の語彙で、status runner はそれらを phas
 | `auto_yes_used` | dispatch | `--auto-yes` で prompt を自動応答した |
 | `parallelism_truncated` | dispatch | wave が `max_parallel` より広かったので上限で切った |
 | `unsafe_worktree_target` | dispatch | worktree path が path-escape guard に弾かれた |
+| `worktree_sync_ran` | dispatch | `ls` で解決できず `commandmate sync` を1度実行して `ls` を読み直した（解決した branch / なお未解決の branch を detail に列挙） |
+| `worktree_sync_unavailable` | dispatch | `commandmate sync` が失敗した（0.21.0 未満には subcommand が無い）。**この失敗自体では停止しない**が、server 未登録の worktree は登録し直せていない |
 | `verification_unrecorded` | dispatch | completed した worker に裁定が1つも記録されなかった（runner 側の欠陥。`verification_recorded` completion check も落ちる） |
 | `verification_gates_unrecorded` | dispatch | verification は pass だが `GATE` 行を読めず、pass の根拠となった gate を report が名指しできない |
 | `drift_<check>` | dispatch | 非 blocking な drift（`integration_clean` / `worktrees_present`）を記録して続行した |
@@ -458,7 +465,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | plan `profile_repository_mismatch` | cwd の origin と profile の対象リポジトリが違う | `--profile` / `--profile-json` / `--repo` のどれかを渡して意図を明示する |
 | dispatch `open_questions` + `human_required` | 未回答の question を持つ Issue がある | blocking reason に**質問の本文**が出ている。Issue 本文に回答を書いて re-plan する |
 | dispatch `drift` | plan 承認後に branch / HEAD / 権限が動いた | drift の内容を確認し、必要なら re-plan する。**drift の上に dispatch しない** |
-| dispatch `worktree_unresolved`（`stop_reason: drift`） | 対象 Issue の worktree が `commandmate ls` で解決できない。**worker は1人も起動していない**（`task_id: null`・worker ログ無し） | **`cmate-worktree-setup` で worktree を作成し、同じコマンドで再実行する**（最初の Wave 前で止まった場合、`--out` は消費されていない）。plan と同じ profile（同じ `branch_template`）を使う。**Issue の分割や re-plan は不要** |
+| dispatch `worktree_unresolved`（`stop_reason: drift`） | 対象 Issue の worktree が `commandmate ls` で解決できない（runner は `commandmate sync` を1度試したうえでの結論。`limitations` の `worktree_sync_ran` / `worktree_sync_unavailable` を見る）。**worker は1人も起動していない**（`task_id: null`・worker ログ無し） | **`cmate-worktree-setup` で worktree を作成し、同じコマンドで再実行する**（最初の Wave 前で止まった場合、`--out` は消費されていない）。plan と同じ profile（同じ `branch_template`）を使う。**Issue の分割や re-plan は不要** |
 | dispatch exit 10（prompt 検出） | worker が人間の判断を求めている | `capture` の内容が report に出ている。**自分で判断して答える。** runner は自動応答しない |
 | dispatch `verification_not_judged`（exit 99） | run が error / cancelled で**誰も判定していない** | **再 dispatch では解けない。** CommandMate 側のログを見る。判定していないものを worker に直させない |
 | dispatch `worker_failed`（`--max-turns` 到達で未 commit） | worker が起動したが commit まで到達しなかった（worktree 未解決はこの code に落ちない。上の行） | prompt / worker ログを読む。指示が過大なら Issue を分割して re-plan する |
