@@ -1,0 +1,26 @@
+{
+  "description": "Issue #93、d32 と同じ「呼べない」のもう一方の形: `--worktree-setup` は渡されているが、その launcher が存在しない（未 install の環境で install 先の path をそのまま渡した形）。spawn 自体が失敗する（exit code が無い）ので、これは「provider が判定して失敗した」ではなく「provider に届いていない」であり、`worktree_setup_failed` ではなく `worktree_setup_unavailable` になる。両者を同じ code に丸めると、operator は「install する」と「provider の出力を読む」のどちらをすべきか report から決められない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration", "--prepare-worktrees", "--worktree-setup", "/nonexistent/cmate-worktree-setup-provider"],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "waves_count": 0,
+    "never_sent": [200, 201],
+    "no_respond": true,
+    "cli_subcommand_counts": { "worktree-setup": 0 },
+    "blocking_codes": ["worktree_setup_unavailable", "worktree_unresolved"],
+    "absent_blocking_codes": ["worktree_setup_failed", "worker_failed"],
+    "absent_limitation_codes": ["worktree_prepared", "worktree_setup_ran"],
+    "blocking_details_include": ["provider could not be run"],
+    "summary_includes": ["## worktree 準備", "worktree_setup_unavailable"],
+    "out_dir_created": false,
+    "completion_check_passed": false
+  }
+}

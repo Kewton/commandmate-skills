@@ -1,0 +1,31 @@
+{
+  "description": "Issue #93 の profile 同一性ゲート: provider は worktree を作ったが、plan とは違う profile を解決したため branch が `feature/wrong-201-branch` になった。この状態は放っておくと「`commandmate ls` が branch を解決できない」＝ worktree 未作成と同じ症状に見えるが、原因も直し方もまったく違う（作り直すのではなく profile を揃える）。dispatch は branch の不一致を検出してそこで停止し、`worktree_profile_mismatch` に両方の branch を書く。**照合するのは branch であって `branch_template` の文字列ではない**（placeholder の綴りは2つの Skill で標準化されていないので、文字列比較は同じ branch を作る template を不一致と誤判定する）。作ってしまった worktree は削除しない（後始末の owner は human / cmate-worktree-cleanup）ので、強制 sync も再 pre-flight もせずに止まる。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration", "--prepare-worktrees", "--worktree-setup", "FAKE_CLI worktree-setup"],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "waves_count": 0,
+    "never_sent": [200, 201],
+    "no_respond": true,
+    "cli_subcommand_counts": { "worktree-setup": 1, "sync": 1 },
+    "blocking_codes": ["worktree_profile_mismatch", "worktree_unresolved"],
+    "absent_blocking_codes": ["worker_failed", "worktree_setup_unavailable"],
+    "limitation_codes": ["worktree_setup_ran"],
+    "absent_limitation_codes": ["worktree_prepared", "worktree_sync_rescanned"],
+    "blocking_details_include": [
+      "#201: cmate-worktree-setup created branch feature/wrong-201-branch",
+      "the plan dispatches into feature/issue-201-",
+      "different branch_template"
+    ],
+    "summary_includes": ["## worktree 準備", "worktree_profile_mismatch", "branch_template"],
+    "out_dir_created": false,
+    "completion_check_passed": false
+  }
+}

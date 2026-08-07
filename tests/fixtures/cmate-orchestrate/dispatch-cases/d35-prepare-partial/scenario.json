@@ -1,0 +1,11 @@
+{
+  "cli_available": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "prepare_worktrees": [100, 101],
+  "worktree_setup": { "create": [100] },
+  "workers": {
+    "100": { "state": "completed", "verify": "pass" },
+    "101": { "state": "completed", "verify": "pass" }
+  }
+}
