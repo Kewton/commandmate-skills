@@ -1,0 +1,27 @@
+{
+  "description": "A uv-managed python project: the slug comes from [project.urls], the checks from the tool tables, and the managed-environment prefix is flagged rather than assumed.",
+  "args": [],
+  "expect": {
+    "status": "partial",
+    "sources": {
+      "id": "derived",
+      "repository": "detected",
+      "base": "default",
+      "branch_template": "default",
+      "worktree_template": "default",
+      "baseline": "detected",
+      "verified": "fixed"
+    },
+    "todos": [
+      "base_undetermined",
+      "branch_template_undetermined",
+      "worktree_template_undetermined",
+      "baseline_env_prefix"
+    ],
+    "warnings": [],
+    "evidence_files": {
+      "repository": ["pyproject.toml"],
+      "baseline": ["uv.lock", "pyproject.toml", "pyproject.toml", "pyproject.toml"]
+    }
+  }
+}

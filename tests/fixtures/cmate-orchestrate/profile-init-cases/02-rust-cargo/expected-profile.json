@@ -1,0 +1,13 @@
+{
+  "id": "rust-gadget",
+  "repository": "Acme/gadget",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": [
+    "cargo fmt --check",
+    "cargo clippy --all-targets -- -D warnings",
+    "cargo test"
+  ],
+  "verified": false
+}

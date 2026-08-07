@@ -15,6 +15,9 @@ merge-cases/<id>/case.json      plan/dispatch 生成・merge scenario・merge �
 uat-cases/<id>/case.json        plan/dispatch 生成・uat scenario・UAT/修正ループ 期待値（scenario は inline）
 status-cases/<id>/case.json     status view の期待値（phase 状態・Issue ごとの値・次アクション）
 status-cases/<id>/run/          checked-in の run directory。実 runner の出力をそのまま置いた status の入力
+profile-init-cases/<id>/repo/   profile-init に読ませる小さな fixture リポジトリ
+profile-init-cases/<id>/case.json           provenance source・todo/warning code の期待値
+profile-init-cases/<id>/expected-profile.json  golden な draft profile。byte 一致で照合
 fake-cli.mjs                    commandmate/git/gh を模した stub（failure injection）
 profiles/                       独自 profile の例（unverified）
 run_tests.mjs                   fixture test harness（Node stdlib のみ）
@@ -191,6 +194,39 @@ checked-in artifact が古い形のまま緑になり続けることを防ぐた
 | `s06-unreadable-plan` | plan.json が読めないとき Issue 集合と run_id を下流 artifact から復元し、plan phase だけを落とすか |
 | `s07-blocking-hints` | blocking/limitation の code を §5 対処表にマップし、Issue を名指しした reason だけをその行に出し、未登録 code を推測しないか |
 | `s08-uat-blocked` | 上限到達の blocked と Issue ごとの fix attempt 数、未承認 merge の `previewed` を丸めずに出すか |
+## profile-init case 一覧
+
+`profile-init-cases/<id>/repo/` は、`profile-init.mjs` に読ませる**小さな本物のリポジトリ**である
+（`package.json` / `Cargo.toml` / workflow / CONTRIBUTING 等を実 file として置く）。harness は
+その tree に対して起案を回し、`expected-profile.json` と **byte 一致**するかを見る。
+起案 runner は network も subprocess も clock も使わないので、golden は tree の純粋関数である。
+
+各 case について確かめるのは次のとおりである。
+
+- `--emit profile` の stdout と `--out` が書く bytes が、どちらも golden と一致すること
+- 2 回実行して **stdout が byte 一致**すること（Claude/Codex parity）
+- `verified` が常に `false` で、envelope が `draft: true` を宣言すること
+- provenance の `source` が case.json の宣言どおりであること（`detected` / `default` / `flag` / `derived` / `fixed`）
+- **`source: default` の field には必ず対の TODO があり、evidence を主張しないこと**
+  （「材料が無くて雛形を置いた」が「読み取った」に化けないこと。この feature の要点）
+- provenance の evidence が実在する file を指し、**その行番号の行が引用文を実際に含む**こと
+- todo code 列・warning code 列が期待と完全一致すること
+- `--out` が既存 file を上書きせず `out_exists`（exit 4）で拒否すること
+- 起案した profile を `orchestrate.mjs --profile-json` に渡して **plan が通り**、
+  そこでも `verified: false` と risk factor `unverified_profile` が保たれること
+
+| case | 何を見るための case か |
+|---|---|
+| `01-node-npm` | 全部宣言してある node repo で、slug/base/branch/worktree/baseline を全部 evidence つきで読めるか（TODO ゼロ = status success が到達可能か） |
+| `02-rust-cargo` | clippy を「証跡があるときだけ」入れるか。CI が2 branch を挙げるとき、選択を `base_ambiguous` として明示するか |
+| `03-no-material` | 何も宣言していない repo で例外を投げず、全 field が安全側の雛形 + 明示 TODO になるか。**baseline の placeholder が実際に exit 0 しない**か（fail-closed） |
+| `04-python-uv` | `[project.urls]` から slug を、tool table から検査 command を読み、uv 管理下であることを `baseline_env_prefix` として申告するか |
+| `05-polyglot` | lockfile 2つ・toolchain 2つの曖昧さを黙って解決せず warning に出すか。branch prefix が `feature` 決め打ちでなく README の `feat/` を読めるか |
+
+引数と失敗系（`profile-init input handling`）も別に見る: 存在しない `--repo-root`（`load_error`）、
+未知の `--emit`（`invalid_input`）、slug 形でない `--repo`、token 形でない `--id` が、
+それぞれ machine code つきの failure envelope になること。`--repo` / `--id` を渡したときは
+推定を上書きし、その事実が provenance に `source: flag` として残ること。
 
 ## Claude/Codex parity の確認
 

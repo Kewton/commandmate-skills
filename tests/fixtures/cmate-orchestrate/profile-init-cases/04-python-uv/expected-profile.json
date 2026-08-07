@@ -1,0 +1,14 @@
+{
+  "id": "python-sprocket",
+  "repository": "Acme/sprocket",
+  "base": "origin/main",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": [
+    "uv sync --frozen",
+    "ruff check .",
+    "mypy .",
+    "pytest"
+  ],
+  "verified": false
+}

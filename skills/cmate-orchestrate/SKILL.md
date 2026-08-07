@@ -30,14 +30,17 @@ runner は決定的なので、この文書が述べるのは「いつ使うか�
 | merge | `scripts/merge.mjs` | 検証 pass した Issue を PR 作成 / guarded merge する | あり（承認時） | [merge-contract.md](./references/merge-contract.md) |
 | uat | `scripts/uat.mjs` | 受入テストと、不合格時の回数上限つき修正ループ | あり（承認時） | [uat-contract.md](./references/uat-contract.md) |
 
-これに、**mutation を一切しない5つめの runner**が付く。phase の一部ではなく、
-上の4つが残した artifact を読むだけの view である。
+これに、**mutation を一切しない read-only の view runner** が付く。phase の一部ではなく、
+上の4つが残した artifact を読むだけである。
 
 | runner | script | 役割 | mutation |
 |---|---|---|---|
 | status | `scripts/status.mjs` | run directory の artifact を突き合わせ、phase × Issue のマトリクスを出す | **なし（read-only）** |
 
-`scripts/lib.mjs` は5 runner の共有ヘルパーで、単体では起動しない。
+`scripts/lib.mjs` は共有ヘルパーで、単体では起動しない。
+`scripts/profile-init.mjs` は phase ではなく、**最初に1回だけ使う準備 runner** である
+（内蔵 profile 以外のリポジトリ向けに profile draft を起案する。第3.5節・
+[profile-contract.md](./references/profile-contract.md) 第7節）。
 
 ## 1. いつ使うか / 使わないか
 
@@ -56,7 +59,9 @@ CI pass の gate 無しに mutation を行わない。
 `filesystem_read` / `filesystem_write` / `process_execution` / `network_access` で、これは
 orchestration 全体が要求する集合である（plan にも同じ集合を提示する）。base branch・branch 名・
 worktree path・baseline は **profile から解決**し、`develop`/`npm`/`cargo` を hardcode しない
-（[profile-contract.md](./references/profile-contract.md)）。
+（[profile-contract.md](./references/profile-contract.md)）。内蔵 profile
+（`node-commandmate` / `rust-commandagent`）以外のリポジトリで使うなら、まず
+`scripts/profile-init.mjs` で profile draft を起案する（第3.5節）。
 
 **worktree**: dispatch は worktree を**作らない**。dispatch 対象 Issue の worktree が事前に存在し、
 `commandmate ls` で解決できること。無ければ
@@ -225,7 +230,48 @@ document を検証して合成するだけである**（runner 内で LLM 判定
 ならない。**生成できなかったこと自体が記録すべき事実**である（runner が `acceptance_not_run`
 として記録する）。
 
-### 3.5 status（run の横断ビュー。read-only）
+### 3.5 profile-init（profile draft の起案。plan の前に1回だけ）
+
+```
+profile-init.mjs [--repo-root <path>] [--out <path>] [--emit envelope|profile] [--repo <owner/name>] [--id <id>]
+```
+
+内蔵 profile 以外のリポジトリで使うときの **最初の一歩**である。対象リポジトリの
+`package.json` / `Cargo.toml` / `pyproject.toml` / `go.mod` / `Makefile` /
+`.github/workflows/*.yml` / CONTRIBUTING 等 / git config を読み、profile JSON の
+**draft** を起案する。read-only で、**network も subprocess も clock も使わない**ので、
+同じ tree からは byte 単位で同じ draft が出る。
+
+| flag | 既定 | 効果 |
+|---|---|---|
+| `--repo-root <path>` | cwd | 調べるリポジトリ |
+| `--out <path>` | — | draft profile JSON の書き出し先。**既存なら `out_exists`（exit 4）** |
+| `--emit <mode>` | `envelope` | stdout に出すもの。`profile` なら draft JSON そのもの |
+| `--repo <owner/name>` / `--id <id>` | 推定 / 導出 | 推定させずに宣言する |
+
+```bash
+node scripts/profile-init.mjs --repo-root . --out .commandmate/profile.json
+# draft を読んで TODO を埋めてから
+node scripts/orchestrate.mjs 123 --profile-json .commandmate/profile.json --allow-unverified
+```
+
+押さえるべき点は3つである（正本は
+[profile-contract.md](./references/profile-contract.md) 第7節）。
+
+1. **出力は draft であって profile ではない。** `verified` は常に `false` で、この runner が
+   それを変えることはない。plan に渡すには `--allow-unverified` が要り、risk に
+   `unverified_profile` が載る。**何を確認したら `verified: true` にしてよいかは
+   [profile-contract.md](./references/profile-contract.md) 第8節の7項目**である。
+2. **「読み取った」と「材料が無かった」が出力上で区別される。** stdout の envelope は
+   field ごとに `provenance[]`（`source` と、file・行番号・行本文の `evidence[]`）を持ち、
+   材料が無かった field は安全側の雛形 + `todos[]` の明示項目になる。**黙って埋めない。**
+   provenance を profile JSON 側に入れないのは、planner が契約外の field を `load_error` で
+   拒否するからである（注釈入り profile は使えない）。
+3. **推定できなかった baseline は fail-closed の placeholder になる。** 空配列にすると
+   「検証すべき gate が無いから pass」に化けうるので、必ず落ちる command を置く。
+   **埋めずに dispatch すれば止まる**、が正しい壊れ方である。
+
+### 3.6 status（run の横断ビュー。read-only）
 
 ```
 status.mjs --run <run-dir> [--json]
@@ -280,9 +326,13 @@ status.mjs --run <run-dir> [--json]
 ## 4. 出力の読み方
 
 4 runner とも、機械可読な envelope / report を **stdout** に、進捗 notice を **stderr** に出す。
-mutating runner は `<out>/` にも report と summary markdown を書く。
+mutating runner は `<out>/` にも report と summary markdown を書く。準備 runner の
+profile-init も同じ規約で、status は `success`（全 field に根拠がある）/ `partial`
+（雛形か warning がある）/ `failure`、exit は成功時 0、`invalid_input` 3 /
+`out_exists` 4 / `load_error` 6 である（`--emit profile` のときだけ stdout は
+draft JSON そのものになる。失敗時は常に envelope が出る）。
 
-**まず run 全体を見るなら `status.mjs --run <run-dir>`**（第3.5節）。以下の status / code /
+**まず run 全体を見るなら `status.mjs --run <run-dir>`**（第3.6節）。以下の status / code /
 limitation は個々の report の語彙で、status runner はそれらを phase × Issue のマトリクスに
 並べ、code を第5節の対処表へマップして見せる。
 
@@ -365,7 +415,7 @@ report/artifact に残さない（redaction）。
 **runner が止まったら、それは「押し通す」合図ではなく「読む」合図である。**
 `blocking_reasons` の code と `summary_markdown` を読み、次の対応を取る。
 
-`status.mjs --run <run-dir>`（第3.5節）は**この表を機械的に引いた結果**を、どの Issue の話かを
+`status.mjs --run <run-dir>`（第3.6節）は**この表を機械的に引いた結果**を、どの Issue の話かを
 添えて出す。JSON を自分で突き合わせる前に、まずこれを読めばよい。表がこの節の正本であり、
 status runner はそれを引くだけなので、**ここに無い code は status runner も推測しない**
 （「detail と `summary_markdown` を読む」に落ちる）。
@@ -407,4 +457,4 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 [uat-report.v1](./schemas/uat-report.v1.json)。意味ゲートの入力は
 [acceptance-result.v1](../cmate-acceptance-test/schemas/acceptance-result.v1.json)（別 package）。
 status runner の `--json` は artifact ではなく view なので（何も書かない）`schemas/` に対応する
-file を持たない。field は第3.5節が正本である。
+file を持たない。field は第3.6節が正本である。
