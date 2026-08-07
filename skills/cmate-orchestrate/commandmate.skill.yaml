@@ -118,6 +118,12 @@ files:
     kind: instruction
     executable: false
     script: false
+  - path: references/adr-unattended-mode.md
+    sha256: 4eb39c5fd07f08e29ca225c7684ab4936faf091f004d1672dd39007121c8bf88
+    size: 46620
+    kind: instruction
+    executable: false
+    script: false
   - path: references/adr-worktree-preparation.md
     sha256: 148673d030b71bb8b44ee91ca4758e65924b7eff6920ba182cba2777490ed5b1
     size: 18549
