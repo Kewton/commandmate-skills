@@ -60,21 +60,25 @@
       "201": [
         {
           "id": "work-evidence",
-          "verdict": "pass"
+          "verdict": "pass",
+          "origin": "repo"
         },
         {
           "id": "baseline",
-          "verdict": "pass"
+          "verdict": "pass",
+          "origin": "repo"
         }
       ],
       "200": [
         {
           "id": "work-evidence",
-          "verdict": "pass"
+          "verdict": "pass",
+          "origin": "repo"
         },
         {
           "id": "baseline",
-          "verdict": "pass"
+          "verdict": "pass",
+          "origin": "repo"
         }
       ]
     },

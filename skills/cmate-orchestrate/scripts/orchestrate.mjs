@@ -888,6 +888,173 @@ function extractTestExpectations(text, binaries) {
   return out;
 }
 
+// =============================================================================
+// Acceptance gates — the machine-readable acceptance block (Issue #114)
+// =============================================================================
+//
+// The notation's 正本 is references/acceptance-gates-notation.md; this parser and
+// that document must be changed in the same commit. Everything here is SYNTAX
+// only: the planner never opens the target repository, so it cannot know which
+// gate ids exist. Resolving them against `.commandmate/verify.yaml` is dispatch's
+// job (ADR §3.4).
+//
+// The one invariant: ONLY an explicitly marked block reaches the contract.
+// Nothing is inferred from prose, bullet lists or tables — see the ADR §2.3 and
+// `extractTestExpectations` below, whose output is advisory for exactly this
+// reason. A gate nobody wrote down is a gate nobody approved.
+const ACCEPTANCE_GATES_INFO = 'acceptance-gates';
+const ACCEPTANCE_GATES_VERSION = 1;
+
+// The opening fence, counted on its own so "two blocks" is detected even when the
+// second one is malformed. `m` makes `^`/`$` line anchors; the info string must be
+// the whole word, so ```acceptance-gates-v2 is not this block.
+const ACCEPTANCE_GATES_OPEN_RE = /^```acceptance-gates[ \t]*$/gm;
+// A complete block. Non-greedy to the first closing fence at a line start.
+const ACCEPTANCE_GATES_BLOCK_RE = /^```acceptance-gates[ \t]*\r?\n([\s\S]*?)^```[ \t]*(?:\r?\n|$)/gm;
+
+// Mirrors CommandMate's GATE_ID_PATTERN (lib/verification/verify-config) and
+// dispatch.mjs GATE_ID_RE. An id this rejects is one `send --contract` would
+// reject, so accepting it here would only move the failure later.
+const ACCEPTANCE_GATE_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+// Same bound as the contract's verify.gates list (dispatch.mjs MAX_GATE_IDS).
+const MAX_ACCEPTANCE_GATE_IDS = 32;
+
+// Removing the block before the prose extractors run is NOT tidiness — it is a
+// correctness fix measured on the current regexes (ADR §10 item 3). The fence
+// pattern in `extractTestExpectations` is /```[a-zA-Z]*\n([\s\S]*?)```/g, which
+// cannot match `acceptance-gates` as an INFO STRING (the hyphen is outside
+// [a-zA-Z]) — but it happily matches this block's CLOSING fence as an opening
+// one, pairs it with the next block's opening fence, and thereby swallows the
+// following ```bash block whole. Measured: a body with one acceptance-gates
+// block followed by a bash block dropped 2 of its 3 test_expectations. Stripping
+// restores the extraction byte for byte.
+//
+// The same strip is applied to every prose extractor, not just that one: the
+// block is a machine contract, and reading `  - verify-selftest` inside it as an
+// acceptance-criteria bullet or a path candidate is the Issue #54 category error
+// (position and explicit marking decide intent) pointed the other way.
+function stripAcceptanceGateBlocks(text) {
+  return String(text).replace(ACCEPTANCE_GATES_BLOCK_RE, '');
+}
+
+function countAcceptanceGateBlocks(text) {
+  return [...String(text).matchAll(ACCEPTANCE_GATES_OPEN_RE)].length;
+}
+
+// The YAML subset the block is written in — the same one `.commandmate/verify.yaml`
+// uses: 2-space indent, single-line scalars, comments only at column 0, no
+// anchors, no flow collections, no multi-line strings. Deliberately NOT
+// best-effort: a block this cannot read becomes an open question, never a guess
+// (ADR §2.4). Returns {ok, value} or {ok:false, code, reason}.
+function parseAcceptanceGatesBlock(raw) {
+  const bad = (code, reason) => ({ ok: false, code, reason });
+  const lines = String(raw).split(/\r?\n/);
+  const value = { version: ACCEPTANCE_GATES_VERSION, require: [] };
+  const seenKeys = new Set();
+  let sawVersion = false;
+  let section = null; // null | 'require'
+
+  for (const line of lines) {
+    if (line.includes('\t')) return bad('acceptance_gate_block_invalid', 'a tab character is not allowed; the block is indented with 2 spaces');
+    if (line.trim() === '') continue;
+    // 行頭 `#` のみコメント: a `#` anywhere else is part of the value, so a
+    // trailing "# note" is a syntax error rather than something silently dropped.
+    if (line.startsWith('#')) continue;
+    if (line === '---' || line === '...') return bad('acceptance_gate_block_invalid', 'YAML document markers are not part of the subset');
+
+    const indent = line.length - line.trimStart().length;
+    const content = line.slice(indent);
+
+    if (indent === 0) {
+      section = null;
+      const match = /^([a-zA-Z][a-zA-Z0-9_]*):[ \t]*(.*)$/.exec(content);
+      if (match === null) return bad('acceptance_gate_block_invalid', `"${content}" is not a "key: value" line at the top level`);
+      const [, key, rest] = match;
+      if (seenKeys.has(key)) return bad('acceptance_gate_block_invalid', `duplicate key "${key}"`);
+      seenKeys.add(key);
+      if (!sawVersion && key !== 'version') {
+        return bad('acceptance_gate_block_invalid', '"version: 1" must be the first key of the block');
+      }
+      if (key === 'version') {
+        sawVersion = true;
+        if (rest !== String(ACCEPTANCE_GATES_VERSION)) {
+          // Not rounded forward: an unknown version means the block was written
+          // against a notation this runner does not implement, and reading it as
+          // v1 would enforce something other than what the author wrote.
+          return bad('acceptance_gate_block_invalid', `version must be exactly ${ACCEPTANCE_GATES_VERSION} (got "${rest}")`);
+        }
+        continue;
+      }
+      if (key === 'require') {
+        if (rest !== '') return bad('acceptance_gate_block_invalid', '"require:" takes a block sequence on the following lines, not an inline value');
+        section = 'require';
+        continue;
+      }
+      if (key === 'gates') {
+        // Valid notation, not yet enforceable. `gates:` declares NEW commands,
+        // which means writing them into the worktree's verify.yaml — ADR §3.5
+        // stage 2, whose preconditions are unresolved (measured: an uncommitted
+        // .commandmate/verify.yaml DOES count towards work-evidence, so a
+        // worktree that only received a gate definition reports uncommitted=1 and
+        // exit 21 stops meaning "nothing was done"). Accepting the key and then
+        // not enforcing it would be the silent-drop this whole feature exists to
+        // prevent, so it stops the run instead.
+        return bad('acceptance_gate_block_unsupported', '"gates:" (new command gates) is stage 2 of the ADR and is not enforced by this release; use "require:" with gate ids that already exist in .commandmate/verify.yaml, or keep the condition out of the block and state it for UAT');
+      }
+      return bad('acceptance_gate_block_invalid', `unknown key "${key}" (the v1 block accepts only version, require, gates)`);
+    }
+
+    if (indent !== 2) return bad('acceptance_gate_block_invalid', `unexpected indentation of ${indent} space(s); list items are indented by exactly 2`);
+    if (section !== 'require') return bad('acceptance_gate_block_invalid', `"${content}" is indented but no list is open above it`);
+    const item = /^-[ \t]+(.*)$/.exec(content);
+    if (item === null) return bad('acceptance_gate_block_invalid', `"${content}" is not a "- <gate-id>" list item`);
+    const id = item[1];
+    if (!ACCEPTANCE_GATE_ID_RE.test(id)) {
+      return bad('acceptance_gate_block_invalid', `"${id}" is not a valid gate id (${ACCEPTANCE_GATE_ID_RE.source}); quoting, inline comments and flow syntax are not part of the subset`);
+    }
+    if (value.require.includes(id)) return bad('acceptance_gate_block_invalid', `duplicate gate id "${id}"`);
+    value.require.push(id);
+    if (value.require.length > MAX_ACCEPTANCE_GATE_IDS) {
+      return bad('acceptance_gate_block_invalid', `at most ${MAX_ACCEPTANCE_GATE_IDS} gate ids may be required`);
+    }
+  }
+
+  if (!sawVersion) return bad('acceptance_gate_block_invalid', 'the block declares no "version: 1"');
+  // An empty block is the same contract error as `verify.gates: []`: it declares
+  // a requirement set and then names nothing, which reads as "no requirement"
+  // exactly where the author meant to state one.
+  if (value.require.length === 0) return bad('acceptance_gate_block_invalid', 'the block requires no gate; remove it, or name at least one gate id under "require:"');
+  return { ok: true, value };
+}
+
+// The whole block reading for one issue body. Returns
+// {gates, error} — `gates` is the plan field (null when there is no block),
+// `error` is the open question (null when there is nothing to say). The two are
+// never both set: "no block" and "broken block" are different states and the
+// second must never be rounded to the first (ADR §2.4).
+function readAcceptanceGates(body) {
+  const text = String(body ?? '');
+  const opens = countAcceptanceGateBlocks(text);
+  if (opens === 0) return { gates: null, error: null };
+  const invalid = (code, reason) => ({
+    gates: null,
+    error: {
+      code,
+      text: `The \`${ACCEPTANCE_GATES_INFO}\` block could not be read: ${reason}. `
+        + 'It is NOT treated as absent: fix the block or remove it, then re-plan. '
+        + 'The planner never guesses acceptance gates from prose.',
+    },
+  });
+  if (opens > 1) {
+    return invalid('acceptance_gate_block_invalid', `the body carries ${opens} blocks and exactly one is allowed (they are not merged, and the first does not win)`);
+  }
+  const blocks = [...text.matchAll(ACCEPTANCE_GATES_BLOCK_RE)];
+  if (blocks.length !== 1) return invalid('acceptance_gate_block_invalid', 'the block is never closed by a ``` fence at the start of a line');
+  const parsed = parseAcceptanceGatesBlock(blocks[0][1]);
+  if (!parsed.ok) return invalid(parsed.code, parsed.reason);
+  return { gates: parsed.value, error: null };
+}
+
 // Topic tokens power the inferred-dependency heuristic. Short and stopword-like
 // tokens carry no domain signal, so they are dropped.
 const STOPWORDS = new Set([
@@ -896,9 +1063,9 @@ const STOPWORDS = new Set([
   'tests', 'plan', 'phase', 'part',
 ]);
 
-function topicTokens(issue) {
+function topicTokens(text) {
   const tokens = new Set();
-  for (const match of `${issue.title} ${issue.body}`.toLowerCase().matchAll(/[a-z][a-z0-9]{3,}/g)) {
+  for (const match of String(text).toLowerCase().matchAll(/[a-z][a-z0-9]{3,}/g)) {
     const token = match[0];
     if (!STOPWORDS.has(token)) tokens.add(token);
   }
@@ -909,9 +1076,19 @@ const PRODUCER_RE = /(schema|contract|interface|protocol|type\s*def|定義|ス�
 const CONSUMER_RE = /(implement|integrat|consume|connect|wire|apply|利用|連携|接続|適用|参照|使用)/i;
 
 function analyzeIssue(issue, profile, binaries) {
-  const text = `${issue.title}\n\n${issue.body}`;
-  const objective = redact(firstNonEmptyLine(issue.body) || issue.title);
-  const acceptance = extractAcceptanceCriteria(issue.body).map(redact);
+  // The machine-readable block is read from the RAW body, and every prose
+  // extractor below reads the body with the block removed. Both halves matter:
+  // reading the block from the stripped text would find nothing, and running the
+  // prose extractors over the raw text mis-pairs the fences (see
+  // stripAcceptanceGateBlocks) and reads gate ids as acceptance-criteria bullets.
+  // With no block in the body, `body`/`text` are the raw strings unchanged, so a
+  // plan for such an issue is byte-identical to the one this runner produced
+  // before acceptance gates existed (ADR §7).
+  const acceptanceGates = readAcceptanceGates(issue.body);
+  const body = stripAcceptanceGateBlocks(issue.body);
+  const text = `${issue.title}\n\n${body}`;
+  const objective = redact(firstNonEmptyLine(body) || issue.title);
+  const acceptance = extractAcceptanceCriteria(body).map(redact);
   const extraction = extractFileCandidates(text);
   const { suspected, references } = classifyFileCandidates(
     extraction.paths,
@@ -927,6 +1104,10 @@ function analyzeIssue(issue, profile, binaries) {
   // disagree about what is missing (Issue #52). `questions` stays a string list —
   // that is the plan schema — and the codes stay private to the planner.
   const openQuestions = [];
+  // Raised FIRST: a body whose acceptance block is broken is a body whose author
+  // did write acceptance conditions, so this question is the one to read before
+  // `no_acceptance_criteria`.
+  if (acceptanceGates.error !== null) openQuestions.push(acceptanceGates.error);
   if (acceptance.length === 0) {
     openQuestions.push({
       code: 'no_acceptance_criteria',
@@ -957,6 +1138,11 @@ function analyzeIssue(issue, profile, binaries) {
     title: redact(issue.title),
     objective,
     acceptance_criteria: acceptance,
+    // Null when the issue declares no block AND when it declares a broken one:
+    // the difference is carried by the open question above, never by pretending
+    // a requirement was read. `require` is transcribed in the author's order —
+    // the contract is a COPY of what the issue wrote, not a re-encoding of it.
+    acceptance_gates: acceptanceGates.gates,
     suspected_files: suspected,
     scope_defaults: scopeDefaults,
     reference_files: references,
@@ -977,8 +1163,8 @@ function analyzeIssue(issue, profile, binaries) {
     // Producer/consumer signals feed the inferred-dependency rule below.
     _producer: PRODUCER_RE.test(text),
     _consumer: CONSUMER_RE.test(text),
-    _topics: topicTokens(issue),
-    _rawBody: issue.body,
+    _topics: topicTokens(`${issue.title} ${body}`),
+    _rawBody: body,
     // `found` rather than `paths`: a candidate dropped as a partial was still
     // recognised, so it must not be re-reported as an unknown extension.
     _unrecognizedPaths: extractUnrecognizedPaths(text, extraction.found),
@@ -1422,6 +1608,7 @@ function issueForPlan(analysis, analyses, edges) {
     title: analysis.title,
     objective: analysis.objective,
     acceptance_criteria: analysis.acceptance_criteria,
+    acceptance_gates: analysis.acceptance_gates,
     suspected_files: analysis.suspected_files,
     scope_defaults: analysis.scope_defaults,
     reference_files: analysis.reference_files,

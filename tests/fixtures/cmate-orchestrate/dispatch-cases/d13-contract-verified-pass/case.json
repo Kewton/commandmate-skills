@@ -49,21 +49,25 @@
       "211": [
         {
           "id": "work-evidence",
-          "verdict": "pass"
+          "verdict": "pass",
+          "origin": "repo"
         },
         {
           "id": "baseline",
-          "verdict": "pass"
+          "verdict": "pass",
+          "origin": "repo"
         }
       ],
       "210": [
         {
           "id": "work-evidence",
-          "verdict": "pass"
+          "verdict": "pass",
+          "origin": "repo"
         },
         {
           "id": "baseline",
-          "verdict": "pass"
+          "verdict": "pass",
+          "origin": "repo"
         }
       ]
     },

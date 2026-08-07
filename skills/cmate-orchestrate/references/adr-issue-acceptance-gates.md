@@ -1,6 +1,11 @@
 # ADR: Issue 受入条件の機械ゲート化（[#100](https://github.com/Kewton/commandmate-skills/issues/100)）
 
-status: **proposed**（人間のレビュー待ち。この文書が承認されるまで実装に入らない）
+status: **accepted / 段 1〜6 実装済み**（Issue [#114](https://github.com/Kewton/commandmate-skills/issues/114)）。
+段階 2（`gates:` ＝新規コマンドゲート）と生産側のミラーは未着手で、別 Issue である。
+
+**記法の正本は [acceptance-gates-notation.md](./acceptance-gates-notation.md) に移った。**
+本書は裁定の記録として読むこと。実装前に測った未決事項の結果は第 11 節、
+実装で本書と形が変わった点とその理由は第 12 節にある。
 
 ビジョンは Issue を「何をもって完了とするのか・どのように検証するのか」まで含む
 **実行可能な開発契約**と定義する。本 ADR は、その「どのように検証するのか」を
@@ -510,3 +515,153 @@ worker を落とす形で表面化する。
 4. **`GATE <id> PASS|FAIL` 行に由来が出るか。** 出ないなら `origin` は
    dispatch 側が「自分が契約に書いた id か」で決めるしかない（決定的に決まるので実装可能だが、
    `require` されていないが verify.yaml に在るゲートは `repo` になる — その扱いを固定すること）。
+
+---
+
+## 11. Phase 0 の実測結果（Issue [#114](https://github.com/Kewton/commandmate-skills/issues/114)）
+
+第 10 節の未決事項 4 点を、実装に入る前に測った。測定環境: **CommandMate 0.22.0**
+（`/opt/homebrew/lib/node_modules/commandmate`。gate-runner と verify-config は
+`.next/server/chunks/` の bundle を読み、git 側は実リポジトリで同じコマンド列を再現した）。
+
+**結論: 段階 1（`require:` のみ）の裁定は 4 点とも成り立つ。** 段階 2 を本 Issue から
+外した判断も、(2) の実測によって裏付けられた。
+
+### 11.1 (1) scope 判定の基準点 — **merge-base**。ただし `.commandmate/` は元から除外
+
+scope ゲートは
+
+```
+git merge-base <baseRef> HEAD                       → base
+git diff --name-only -z --no-renames <base> HEAD    ∪  git status --porcelain -z --untracked-files=all
+```
+
+の和集合を判定対象にする。**基準点は task 開始時 SHA ではなく merge-base である。**
+したがって「dispatch 前に追記を置くだけ」では第 3.5 節 (2) の問題は回避できない。
+
+一方で、違反判定そのものが次の形をしている（`ScopeMatcher.isViolation`）:
+
+```
+deny にマッチ → 違反
+それ以外 → path が ".commandmate/" で始まらず、契約 path でもなく、allow にマッチしないとき違反
+```
+
+**`.commandmate/` 配下は `deny:` に書かれない限り scope 違反にならない。**
+よって `.commandmate/verify.yaml` への追記が scope ゲートで worker を落とすことはない。
+第 3.5 節 (2) は scope と work-evidence を一括りにしていたが、**両者の扱いは違う**。
+上流依頼が要るのは work-evidence 側だけである。
+
+### 11.2 (2) work-evidence の計数 — **`.commandmate/verify.yaml` は計上される**
+
+work-evidence ゲートの除外は `.commandmate/tasks/` **だけ**である。
+
+```
+commits      = git rev-list --count <merge-base>..HEAD -- :(top) :(exclude,top).commandmate/tasks/
+uncommitted  = git status --porcelain -z --untracked-files=all のエントリのうち、
+               「全 path が .commandmate/tasks/ 配下」でないものの件数
+```
+
+実測（新規 repo・作業ゼロの worktree に契約と verify.yaml だけを置いた状態）:
+
+```
+mergeBase=0aa6b16…
+commits (tasks 除外)      → 0
+status --porcelain        → ?? .commandmate/tasks/issue-1.yaml
+                             ?? .commandmate/verify.yaml
+計上される uncommitted     → 1  （.commandmate/verify.yaml）
+```
+
+**第 3.5 節 (2) の懸念はそのまま成立する。** 契約を置いただけの worktree が `uncommitted=1` に
+なり、exit 21（NOT_STARTED）が「worker は何もしていない」を意味しなくなる。
+`gates:` を本 Issue から外した判断は妥当であり、着手前に上流の除外拡張が要る。
+
+### 11.3 (3) fence 抽出との干渉 — **実在する。strip で解消**
+
+`extractTestExpectations()` の fence 正規表現 ``/```[a-zA-Z]*\n([\s\S]*?)```/g`` に対し、
+`acceptance-gates` ブロック → 空行 → ```` ```bash ```` ブロックの本文で測った:
+
+| 本文 | `test_expectations` |
+|---|---|
+| ブロック無し | `["pytest -q", "python3 scripts/validate.py", "node tests/…/run_tests.mjs"]` |
+| ブロック有り | `["pytest -q"]` |
+| ブロックを strip | ブロック無しと **byte 一致** |
+
+原因は第 10 節 (3) の推測どおり: 開始 fence には一致しないが、**本ブロックの終了 fence が
+後続 fence の開始として拾われ**、`bash` ブロックを丸ごと飲み込む。
+
+対処は「ブロックを取り除いた本文を散文抽出に渡す」。同じ strip を
+`extractAcceptanceCriteria` / `extractFileCandidates` / topic token にも適用した —
+ブロック内の `  - verify-selftest` が受入条件の箇条書きや path 候補として読まれるのは、
+Issue #54（位置と明示マークだけが意図を決める）を裏返しにした同じ category error である。
+fixture: `cases/28-acceptance-gates-block`（ブロック有無の双子で全 field を突き合わせる）。
+
+### 11.4 (4) `GATE` 行の由来 — **出ない。dispatch 側で決める**
+
+`verify-runner` の `formatGateLine` が印字するのは
+
+```
+GATE <id> <LABEL>            … detail が空のとき
+GATE <id> <LABEL> (<detail>) … detail は exit=/経過秒、work-evidence だけ commits=/uncommitted=
+```
+
+だけで、**由来は含まれない**。よって `origin` は読み取れない。第 10 節 (4) の代替どおり
+dispatch が「自分が契約に運んだ id か」で決める。固定した扱い:
+
+- `require` された id → `issue`
+- verify.yaml に在るが `require` されていない id → `repo`
+- 記録が無い（旧 runner / fallback baseline 経路）→ **field 欠落**。`repo` に丸めない
+
+---
+
+## 12. 実装で変えたこと（Issue #114。第 9 節 段 1〜6）
+
+本 ADR の運用規約に従い、実装で形が変わった点と理由を記録する。正本は
+[acceptance-gates-notation.md](./acceptance-gates-notation.md)（記法）・
+[plan-contract.md](./plan-contract.md)（plan）・[dispatch-contract.md](./dispatch-contract.md)（契約）である。
+
+### 12.1 `plan_schema_version` は **1 のまま**（第 7 節からの逸脱）
+
+第 7 節は「`plan.issues[]` に受入ゲートを載せるには `plan_schema_version` を 2 に上げる」と
+裁定していた。**この実装では 1 のままとし、`acceptance_gates` を closed schema の required
+field として追加した。**
+
+理由は実装の scope 制約である。plan を読むランナーは ADR が数えた 3 つ（dispatch / merge / uat）
+ではなく **4 つ**で、`status.mjs` も `plan_schema_version === 1` を厳密等価で要求している
+（実測）。version を 2 に上げるには 4 runner の pin を同時に上げる必要があるが、本 Issue の
+実行契約は `orchestrate.mjs` と `dispatch.mjs` の 2 本しか変更を許していない。
+merge / uat / status を触ると scope ゲートに落ち、触らなければ 46 件の既存 fixture が
+`plan_invalid` で赤になる。
+
+**残る差分と、それが何を意味するか:**
+
+- 意図した fail-closed（v2 plan を旧 runner が `plan_invalid` で拒否する）が効かない。
+  受入ゲートを載せた plan を **0.18.0 以前の dispatch** が読むと、ゲートは黙って無視される。
+- 本リリース内では問題にならない（plan を作る runner と読む runner が同一版で出荷される）。
+  危険なのは **版をまたいだ plan の再利用**だけである。
+
+**後続作業（別 Issue / 統合時）:** 4 runner の pin と `PLAN_SCHEMA_VERSION` を同一 commit で 2 に
+上げる。差分は 5 行で、fixture の追随は不要（plan は毎回生成される）。
+
+### 12.2 `gates:` は「無視」ではなく **停止**
+
+第 2.1 節は `gates:` を記法に含め「段階 2 で有効化する」とだけ書いていた。planner が
+これを受理して dispatch が実行しないと、**宣言された条件が黙って消えた緑の run** になる —
+第 2.4 節がまさに禁じている状態である。そこで新コード `acceptance_gate_block_unsupported` を
+足し、open question + warning で停止させる。第 8.1 節の human_required 相当リストに、
+`acceptance_gate_block_invalid` / `acceptance_gate_id_unknown` と並べてこれも加えること。
+
+### 12.3 実行契約が無い run の扱い（ADR に無かった穴）
+
+`--contract-mode off`、あるいは契約非対応 CLI で fallback した run には `verify.gates` も
+`wait --verify` も無く、裁定は profile baseline の再実行になる。**そこに gate id を伝える口が無い。**
+本 ADR はこの組み合わせを裁定していなかった。fail-closed の一貫した読みとして、
+`require:` を宣言した Issue はこの経路では **dispatch しない**（`acceptance_gates_not_enforceable`）。
+`contract_scope_unknown` と同じ形である: 境界（ここでは裁定条件）が宣言できないなら、
+その Issue に対しては何も走らせない。
+
+### 12.4 `env-clean` は `require` できない
+
+`require` の解決集合を CommandMate 自身の契約検証と同一にした結果
+（`{work-evidence, scope} ∪ verify.yaml の宣言 id`）、built-in ゲートのうち `env-clean` だけは
+`require` できない。上流の契約パーサがその id を `verify.gates` に受け付けないためであり、
+受理して `send --contract` の exit 2 に落とすより、`send` 前に名指しで止めるほうが解ける。

@@ -11,6 +11,7 @@ dispatch-cases/<id>/case.json   plan 生成引数・scenario・dispatch 期待�
 dispatch-cases/<id>/scenario.json  fake CLI に注入する worker/verify/drift の挙動
 dispatch-cases/<id>/contracts/  （契約 case のみ）生成された実行契約の golden。byte 一致で照合
 dispatch-cases/issues-multifile.json  複数 file を保有する Issue fixture（契約決定性の case 用）
+dispatch-cases/issues-acceptance-gates*.json  受入ゲート case の Issue fixture（ブロック有り / 無し / 未知 id）
 merge-cases/<id>/case.json      plan/dispatch 生成・merge scenario・merge 期待値（scenario は inline）
 uat-cases/<id>/case.json        plan/dispatch 生成・uat scenario・UAT/修正ループ 期待値（scenario は inline）
 status-cases/<id>/case.json     status view の期待値（phase 状態・Issue ごとの値・次アクション）
@@ -72,6 +73,9 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 | `12-default-profile-cwd-not-git` | cwd が git リポジトリでないとき照合をスキップして success のままか（#36） |
 | `13-repo-override-unverified` | `--repo` が `verified` を降格させ、確認なしでは拒否するか（#36） |
 | `14-repo-override-allow-unverified` | `--allow-unverified` 時に降格が plan（verified/risk/warning）に見えるか（#36） |
+| `28-acceptance-gates-block` | ```acceptance-gates ブロックが `acceptance_gates` に載るか。ブロック有無の**双子 Issue**で `test_expectations` が byte 一致するか（#114 Phase 0-3: strip しないと本ブロックの終了 fence が後続 ```bash の開始として拾われ、3件が1件に落ちる） |
+| `29-acceptance-gates-invalid` | 2個・未知 version・不正 id・空ブロックを `acceptance_gate_block_invalid` として open question にし、**「ブロックが無かった」に丸めない**か |
+| `30-acceptance-gates-unsupported` | `gates:`（段階2の新規コマンドゲート）を黙って無視せず `acceptance_gate_block_unsupported` で止めるか |
 
 ## dispatch case 一覧
 
@@ -89,7 +93,17 @@ JSONL で記録するので、`respond` が呼ばれていないことや `send`
 false（既定）の scenario は逆にそれらを**拒否**し `--help` からも隠すので、runner のバージョンゲートと
 フォールバックが実際に効いているかを試せる。契約経路の裁定は `verify_exits`（ターンごとに消費する
 exit code の列。`0` / `20` / `21` / `99`）で、`failed_gates` が `commandmate verify --json` の
-失敗ゲートになる。契約 case では生成された契約を `contracts/` の golden と byte 比較し、さらに
+失敗ゲートになる。
+
+**受入ゲート（#114）**: `verify_exits` は「fake がこう答えろと言われた」でしかないので、
+**受入ゲートが何かを測っている証拠にはならない** — 成果物が壊れていようがいまいが 20 を返す。
+そこで受入ゲートの case だけは `run_declared_gates: true` を使う。この scenario では fake が
+本物と同じことをする: worktree の `.commandmate/verify.yaml` を読み、各ゲートの command を
+その worktree で `sh -c` で**実際に実行し**、exit status から PASS/FAIL と run の verdict を
+導く（契約が `verify.gates` を宣言していればその id だけを走らせる）。worktree の中身は
+scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
+これで**二点測定の差分が成果物そのものになる**: 緑 run と赤 run は同じ Issue・同じ契約・
+同じ verify.yaml で、違うのは worktree に成果物があるかどうかだけである（ADR 第4節 (2)）。契約 case では生成された契約を `contracts/` の golden と byte 比較し、さらに
 **同じ plan で 2 回目の dispatch を回して byte 一致**を確かめる（決定性）。1 file しか持たない Issue では
 並びを崩す変異を検出できないため、決定性の case は `issues-multifile.json`（1 Issue に 3 file）を使う。
 
@@ -115,6 +129,13 @@ exit code の列。`0` / `20` / `21` / `99`）で、`failed_gates` が `commandm
 | `d18-contract-fallback-unsupported` | 契約非対応 CLI で明示メッセージつきに baseline 裁定へフォールバックするか（黙って劣化しない） |
 | `d19-contract-required-refuses` | `--contract-mode require` がフォールバックを拒否し、1件も dispatch せず failure で止まるか |
 | `d20-contract-mode-off` | 契約対応 CLI でも `--contract-mode off` で従来裁定を選べ、その選択を limitation に残すか |
+| `d37-acceptance-gate-pass` | 受入ゲートの**適合側（緑）**。`require` した id が実在し、fake CLI が worktree の verify.yaml のゲートを**実際に実行**して通る。契約に `verify:` key は書かれず、由来は `origin: issue` / `repo` に分かれる |
+| `d38-acceptance-gate-mutation` | 同じ**変異側（赤）**。d37 と Issue も契約も verify.yaml も同一で、違いは worktree から成果物が消えていることだけ。赤の理由も固定する（exit 20 であり、失敗ゲートに当該 id が名指しで含まれ、その exit は 1） |
+| `d39-acceptance-gate-id-unknown` | `require` した id が verify.yaml に無い Issue を **`send` の前に**拒否し、実在する id を列挙して止めるか |
+| `d40-acceptance-gate-absent-non-regression` | ブロックを持たない Issue の契約が従来どおりか。d37 と同じ worktree・同じ deliverable で本文からブロックだけ抜いた双子（golden が byte で固定） |
+| `d41-acceptance-gate-command-missing` | ゲートのコマンドが起動不能（binary 不在→exit 127）のとき赤になり、report がその事実を名指しするか。**この case を d38 の変異側に流用してはならない**（打ち間違えた偽ゲートは成果物が正しくても 127 で赤くなる） |
+| `d42-acceptance-gate-union` | `--verify-gates` と Issue の `require:` の**和集合**（sort + 重複除去）を契約に書くか。素朴な書き出しは lint を止め、operator の列挙をそのまま使うと Issue の要求が落ちる |
+| `d43-acceptance-gates-not-enforceable` | 実行契約の無い run（`--contract-mode off`）で受入ゲートを宣言した Issue を dispatch しないか（裁定に運ぶ口が無いので fail-closed） |
 
 ## merge case 一覧
 

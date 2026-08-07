@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 350,
+      "title": "feat: declare a new command gate",
+      "body": "A gate this repository does not have yet.\n\n## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\nrequire:\n  - selftest\ngates:\n  - id: adr-present\n    command: \"test -f docs/adr.md\"\n    timeoutSec: 120\n```\n",
+      "labels": []
+    }
+  ]
+}

@@ -10,6 +10,12 @@
 値の追加は version を上げて行う。**未知の field を足さないこと。** 受け手は
 schema にない field を無視せず、契約違反として扱う。
 
+例外が 1 つある: `issues[].acceptance_gates`（第 10 節）は version を据え置いたまま
+required field として足された。理由と、それが残す差分は
+[adr-issue-acceptance-gates.md](./adr-issue-acceptance-gates.md) 第 12.1 節にある。
+**次に plan の field を触るときに `plan_schema_version` を 2 へ上げること**
+（plan を読む 4 runner — dispatch / merge / uat / status — の pin を同じ commit で上げる）。
+
 ## 1. 決定性（Claude/Codex parity）
 
 plan は入力の純粋関数である。同じ入力からは byte 単位で同じ plan が出る。
@@ -164,6 +170,46 @@ result envelope は5つの check を自己申告する。
 
 `passed` は5件すべて true のときだけ true。`status` が `failure` のときは
 `passed` は false で、`errors` に理由を持つ。
+
+## 10. 受入ゲート（`issues[].acceptance_gates`）
+
+Issue 本文の ```acceptance-gates ブロックの転記である。**記法の正本は
+[acceptance-gates-notation.md](./acceptance-gates-notation.md)**、裁定の記録は
+[adr-issue-acceptance-gates.md](./adr-issue-acceptance-gates.md) にある。
+
+```json
+"acceptance_gates": { "version": 1, "require": ["orchestrate-fixtures"] }
+```
+
+- **planner が見るのは構文だけである。** plan は対象リポジトリを開かない read-only の
+  分析器なので、id が実在するかは判断できない。実在確認は dispatch が worktree の
+  `.commandmate/verify.yaml` に対して行う（[dispatch-contract.md](./dispatch-contract.md) 第 2.9 節）。
+- `require` は**著者が書いた順のまま**である。契約は Issue の写しであって再エンコードではない。
+- **`null` は「ブロックが無かった」を意味しない。** ブロックが 0 個のときも、ブロックが
+  壊れていて読めなかったときも `null` になる。区別は warning が持つ:
+  `acceptance_gate_block_invalid`（記法違反）/ `acceptance_gate_block_unsupported`（`gates:` は
+  段階 2 で未実装）。どちらも open question なので run は `partial` に落ち、dispatch は
+  `--allow-questions` 無しではその Issue を送らない。
+- 壊れたブロックを「無かったこと」に丸めない理由は `unrecognized_file_extension`（Issue #43）と
+  同じである: **黙って捨てると、書いたはずの受入条件が消えた run が緑で終わる。**
+
+### 10.1 散文抽出との関係
+
+ブロックは**散文抽出の入力から取り除かれてから** `acceptance_criteria` /
+`suspected_files` / `test_expectations` / topic token が計算される。
+
+理由は 2 つあり、どちらも実測に基づく。
+
+1. `extractTestExpectations()` の fence 正規表現 ``/```[a-zA-Z]*\n([\s\S]*?)```/g`` は、
+   `acceptance-gates` を info string としては拾わない（ハイフンが `[a-zA-Z]` の外）が、
+   **本ブロックの終了 fence を後続 fence の開始として拾い**、次の ```bash ブロックを
+   丸ごと飲み込む。測定値は ADR 第 11.3 節。
+2. ブロック内の `  - verify-selftest` は箇条書きの形をしているので、strip しなければ
+   `acceptance_criteria` の項目や path 候補として読まれる。位置と明示マークだけが意図を
+   決める（Issue #54）を裏返しにした同じ誤りである。
+
+`test_expectations` は依然として**助言的**であり、裁定には使われない。裁定へ運ばれるのは
+明示ブロックだけである（[acceptance-gates-notation.md](./acceptance-gates-notation.md) 第 5 節）。
 
 ## 9. version 運用
 

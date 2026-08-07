@@ -1,0 +1,76 @@
+{
+  "description": "ADR §4 (6) / §7: ブロックを持たない Issue は従来どおり repo 共通ゲートだけで判定される。d37 と **同じ worktree・同じ verify.yaml・同じ deliverable** で、Issue 本文からブロックだけを取り除いた双子。契約には受入ゲート節も `verify:` key も現れず（golden が byte で固定する）、report のゲートは全部 origin=repo になる。受入ゲートを持ち込んだことが、持ち込んでいない Issue の挙動を一切変えていないことの証明。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-acceptance-gates-none.json",
+    "orchestrate_args": [
+      "310",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      310
+    ],
+    "send_counts": {
+      "310": 1
+    },
+    "worker_states": {
+      "310": "completed"
+    },
+    "verification_outcomes": {
+      "310": "pass"
+    },
+    "verification_gates": {
+      "310": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "adr-present",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "lint",
+          "verdict": "pass",
+          "origin": "repo"
+        }
+      ]
+    },
+    "contract_issues": [
+      310
+    ],
+    "contract_absent": {
+      "310": [
+        "Acceptance gates this issue declared",
+        "verify:"
+      ]
+    },
+    "absent_limitation_codes": [
+      "acceptance_gate_id_unknown",
+      "acceptance_gates_not_enforceable",
+      "acceptance_gate_block_invalid"
+    ]
+  }
+}

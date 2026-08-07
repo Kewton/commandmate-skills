@@ -1,0 +1,71 @@
+{
+  "description": "Issue #114: a body carrying one well-formed ```acceptance-gates block puts its `require:` ids on `plan.issues[].acceptance_gates`, transcribed in the author's order. #331 is the SAME body with the block deleted, which pins the two halves of the ADR's Phase 0 item 3 at once: the block never becomes acceptance_criteria bullets or path candidates, and `test_expectations` is byte-identical with and without it. Without the strip the block's CLOSING fence pairs with the ```bash block's OPENING fence and swallows it whole — measured: 3 commands drop to 1.",
+  "args": [
+    "330",
+    "331",
+    "--profile",
+    "node-commandmate",
+    "--max-parallel",
+    "3",
+    "--run-id",
+    "fixture",
+    "--no-infer"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "acceptance_gates": {
+      "330": {
+        "version": 1,
+        "require": [
+          "verify-selftest",
+          "orchestrate-fixtures"
+        ]
+      },
+      "331": null
+    },
+    "test_expectations": {
+      "330": [
+        "pytest -q",
+        "python3 scripts/validate.py",
+        "node tests/fixtures/cmate-orchestrate/run_tests.mjs"
+      ],
+      "331": [
+        "pytest -q",
+        "python3 scripts/validate.py",
+        "node tests/fixtures/cmate-orchestrate/run_tests.mjs"
+      ]
+    },
+    "suspected_files": {
+      "330": [
+        "src/gates.ts",
+        "scripts/validate.py",
+        "tests/fixtures/cmate-orchestrate/run_tests.mjs"
+      ],
+      "331": [
+        "src/gates.ts",
+        "scripts/validate.py",
+        "tests/fixtures/cmate-orchestrate/run_tests.mjs"
+      ]
+    },
+    "classifications": {
+      "330": "conflicting",
+      "331": "conflicting"
+    },
+    "waves": [
+      [
+        330
+      ],
+      [
+        331
+      ]
+    ],
+    "merge_order": [
+      330,
+      331
+    ],
+    "dependencies": [],
+    "risk_level": "moderate"
+  }
+}

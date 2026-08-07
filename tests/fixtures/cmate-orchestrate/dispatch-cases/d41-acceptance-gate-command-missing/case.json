@@ -1,0 +1,74 @@
+{
+  "description": "ADR §4 (4): 起動不能を「効いている証拠」に数えない。この case は要求されたゲートのコマンド自体が存在しない（binary 不在 → exit 127）。赤になることと、report がその事実を **名指しで** 記録することを assert する。**この case を条 (1) の変異 run として流用してはならない** — 打ち間違えた偽ゲートは成果物が正しくても 127 で赤くなるので、二点測定だけならこれを「ゲートが効いている」と誤読する。docs/adr.md は worktree に置いてある（成果物は正しい）のに赤い、というのがその読み違いを見えるようにしている。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-acceptance-gates.json",
+    "orchestrate_args": [
+      "310",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "2"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "verification_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      310
+    ],
+    "worker_states": {
+      "310": "completed"
+    },
+    "verification_outcomes": {
+      "310": "fail"
+    },
+    "verification_gates": {
+      "310": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "adr-present",
+          "verdict": "fail",
+          "origin": "issue"
+        },
+        {
+          "id": "lint",
+          "verdict": "pass",
+          "origin": "repo"
+        }
+      ]
+    },
+    "verification_checks_include": {
+      "310": [
+        "gate adr-present: failed (exit 127)"
+      ]
+    },
+    "completed_but_unverified": [
+      310
+    ],
+    "contract_issues": [
+      310
+    ],
+    "verify_calls": 2,
+    "wait_verify_calls_min": 1
+  }
+}
