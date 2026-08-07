@@ -87,6 +87,27 @@ MONITOR_HOOKS_BASE=origin/main \
 - 全 worker が COMPLETE になると `monitor: all N worker(s) complete` を出して exit 0。
   `--max-polls N` は N ポーリングで抜ける停止条件で、判定ロジックには一切関与しない。
 
+### 2.5 監視が生きているかを外から見る（CommandMate #1728）
+
+**「静かなのは健全だから」と「静かなのは監視が死んだから」を区別できること。** 2026-08-06 に、
+起動行 1 行だけを出した監視が約 25 分後に exit 144 で沈黙終了し、その間ワーカー 2 本は正常稼働の
+まま**無監視**だった。判定ロジックは一切変えずに、次の 3 つを足してある。
+
+| 何が出るか | どこへ | いつ |
+|---|---|---|
+| `monitor: alive (poll=<n>, complete=<d>/<total>)` | stdout | `--heartbeat N` ポーリングごと（既定 10、`0` で無効） |
+| `monitor: ERROR caught SIG<name> (signal <n>) on poll round <r> — monitoring stops here` | stderr | HUP / INT / QUIT / PIPE / TERM 受信時。exit は `128+n` |
+| `monitor: WARN caught SIGURG on poll round <r> — ignored, monitoring continues` | stderr | SIGURG 受信時（**致死化しない**。既定動作が無視なので、届いたことだけを見えるようにする） |
+| `monitor: ERROR exiting on poll round <r> with <d>/<n> worker(s) complete (rc=<rc>) — the rest are now UNMONITORED` | stderr | 正常終了（全 COMPLETE / `--max-polls` 到達）**以外**の全ての終了 |
+
+最後の 1 行は EXIT trap にぶら下がっているので、**個別に trap していない死に方でも出る**のが要点
+である。引数検証で落ちる経路（不正な id・`--hooks` のファイル欠落）は trap 設置より前なので
+従来どおり 1 行のまま。144 = 128 + 16 で macOS の signal 16 は SIGURG だが、SIGURG は既定で無視
+されるため `monitor.sh` 自身が受けて死んだとは限らない（`cmd | grep …` の `$?` は **grep の終了
+コード**である点にも注意）。再現条件は未特定のまま、次に起きたときに原因がログへ残る形にしてある。
+
+既定の stdout（介入・終局判定）は heartbeat を除いて byte 単位で従来どおりである。
+
 ### 2.2 判定コアだけを使う（Agent が自分でループを回す場合）
 
 ```bash
@@ -221,8 +242,34 @@ Enter は tmux ペインへ直接送るので **CommandMate サーバの承認�
   まま監視を始めると、その古い裁定を読む。
 - **`git` が答えられなかった場合と、worker が本当に何も書いていない場合は別物である**
   （CommandMate #1614）。前者は原因ごとに **worker あたり 1 行**を stderr へ出す
-  （`monitor hooks: [<wid>] …`）。この行が出ていたら `commits=` / `uncommitted=` の 0 は
-  「測れなかった」であって「作業ゼロ」ではない。
+  （`monitor hooks ERROR: [<wid>] …` / `monitor hooks WARN: [<wid>] …`）。この行が出ていたら
+  `commits=` / `uncommitted=` の 0 は「測れなかった」であって「作業ゼロ」ではない。
+  `ERROR` = その worker については**何も測れていない**（両カウンタが答えの代わりに 0）、
+  `WARN` = 片方のカウンタだけが劣化し、もう片方は実測値。
+
+#### worktree-id の突合順（CommandMate #1728）
+
+`hooks-git.sh` は worktree-id を `git worktree list --porcelain` から実 checkout へ解決する。
+突合は次の順で行い、**1 が最優先**である。
+
+| # | 突合対象 | 由来 |
+|---|---|---|
+| 1 | `slug(basename(<checkout path>))` | **現行**。`deriveWorktreeId()`（CommandMate #1621）＝ ディレクトリ名。初回登録時に一度だけ確定するので、ブランチを切り替えても id は変わらない |
+| 2 | `slug("<repo>-<branch>")` | 旧 `generateWorktreeId()`。`<repo>` はメイン worktree のディレクトリ名 |
+| 3 | `slug("<branch>")` | 同上（repo 名なし） |
+
+**1 が欠けていたのが CommandMate #1728 の本体である。** 2・3 しか無い状態では、ディレクトリを
+ブランチ名ではなく Issue 番号で採番するリポジトリ（`commandmate-issue-1728` / `fix/1728-…`）では
+**1 件も**——**メイン worktree すら**——解決できず、すでにコミット済みの worker まで
+`commits=0 uncommitted=0` と報告されていた。#1614 が塞いだのは「git が失敗する」経路で、これは
+**git は成功して突合が外れる**別経路である。`verify-completion.sh` は `commits=0 && uncommitted=0`
+を「タスクが composer から出ていない」の署名として読むので、STARTED ガードは**誰も測っていない
+数字**で裁定していたことになる。
+
+1 を先に見るのは、稼働中のサーバが配る id が 1 だからである（2 と 3 が別 checkout に当たったときは
+1 が勝つ）。1 は `branch` レコードを持たない detached HEAD にも効く。ディレクトリ名が衝突している
+2 つの checkout は区別できないので、最初の 1 件を数えたうえで `WARN` を出す（別の checkout を
+数えたいときは `MONITOR_WORKTREE_ROOT` を指定する）。
 
 **arm する前に、フックが実値を返すことを対照実験で確かめること。**
 

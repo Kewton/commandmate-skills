@@ -103,6 +103,40 @@ ANSI を剥がした fixture を持ち込むと、この検査が落ちる。
 7. **参照フック** — 実 git worktree を作り、`hooks-git.sh` が commit 数と
    未 commit 数を実測どおり返すこと、解決できない id で 0 を返すこと、
    base ref が解決できないときに警告すること、そしてループを COMPLETE まで駆動すること。
+8. **id の突合と監視の生存**（CommandMate #1728）— 次節。
+
+## worktree-id の突合と監視の生存（CommandMate #1728）
+
+`hooks-git.sh resolves the ids CommandMate actually mints` /
+`monitor.sh liveness: heartbeat, signals, exit report` の 2 セクション。
+
+**この穴は fixture の作り方そのものが隠していた。** 既存の repo は `myrepo` / `myrepo-x` /
+`feature/x` / id `myrepo-feature-x` ＝ **旧（ブランチ由来）規則そのもの**で組まれており、
+ブランチ突合しか無い resolver でも全件緑になる。したがって新しい repo は
+**directory 名 ≠ branch 名**で作る（`commandmate` / `commandmate-issue-1728` /
+`fix/1728-monitor-git-hooks`）。固定するのは次の点である。
+
+- directory 由来 id（`deriveWorktreeId()`、CommandMate #1621）で解決すること。
+  **メイン worktree**（`<repo>-<branch>` 形を持たない）と **detached HEAD**（`branch`
+  レコードを持たない）を含む — どちらも旧規則では原理的に解決できない
+- 旧規則の id（`<repo>-<branch>` / 素の `<branch>`）が**引き続き**解決すること（後方互換）
+- 両方式が**別の checkout に当たったとき directory 由来が勝つ**こと
+  （`alpha-feature-x` という directory と、`feature/x` ブランチの `beta` を同居させる）
+- directory 名が衝突する 2 checkout では、最初の 1 件を数えたうえで `WARN` を出すこと
+- 診断行が `ERROR` / `WARN` を含み、**Issue に書かれた grep パターンそのもの**
+  （`grep -Ei "STALL|IDLE|ERROR|FAIL"`）を生き延びること
+- `--heartbeat` の既定値（10）・間隔・`0` での無効化。既定 heartbeat が
+  **運用ストリームを汚さない**ことは、既定 stdout を byte 単位で固定した回帰 8 のテストが対照
+- シグナル報告（SIGTERM → 143 / SIGHUP → 129）と、**SIGURG が致死化しない**こと
+- 正常終端（全 COMPLETE / `--max-polls` 到達）と引数検証エラーには**何も足さない**こと
+
+**シグナルは必ず PID 指定で送る。** パターン一致の kill は同じ機械の他の監視に当たる。
+また `sig_finish` には**締切と PID 指定の SIGKILL** が入っている: 修正前の `monitor.sh` は
+`trap cleanup EXIT INT TERM` で**ハンドラを走らせたあと監視を続ける**ため、締切が無いと
+「trap を全戻しする」変異でテストが赤くならず**ハングする**。
+SIGINT / SIGQUIT は**意図的に試験していない** — 非対話 shell の非同期子プロセスでは bash が
+両者を `SIG_IGN` にし、entry 時に無視されたシグナルは trap できないため、背後で測ることに
+なるのは bash であって この script ではない。
 
 ## タスク状態を一次ソースにする経路（Issue #1589）
 
@@ -208,6 +242,22 @@ delivered / undelivered の 2 本を同じ fixture・同じ hooks で並べ、
 | 保留の報告を毎ポーリングにする | 1 件（`reported once, not once per poll`） |
 | `held=` を常に出す | 9 件（`held=` を持たない COMPLETE 行を固定している既存テスト） |
 | `--no-auto-approve` を無視する | 2 件 |
+
+`CommandMate#1728` 分（2026-08-07 実測、それぞれ **suite exit 1**。ベースラインは 294/294 green）。
+
+| 変異 | 落ちるテスト |
+|---|---|
+| `hooks-git.sh` の basename 突合を削除（#1728 以前の resolver） | **14 件**（directory 由来 id・メイン worktree・detached HEAD・突合順・衝突 WARN・end-to-end） |
+| 突合順を branch 優先へ反転 | 2 件（両方式が別 checkout に当たるケース） |
+| レベル語を `monitor hooks:` へ戻す | 6 件（`ERROR` / `WARN` の別 ＋ 運用 grep の通過 ＋ base-ref 警告） |
+| ディレクトリ名衝突の `WARN` を削除 | 3 件 |
+| `monitor.sh` のシグナル / EXIT trap を #1728 以前へ全戻し | 9 件（SIGTERM・SIGHUP の文言と exit code、SIGURG、EXIT 報告） |
+| heartbeat を毎ポーリング発火に | 6 件（うち **2 件は既定 stdout を byte 単位で固定した回帰 8 のテスト**＝ 既定 heartbeat が運用ストリームを汚していないことの対照） |
+| EXIT 報告を正常終端でも出す | 3 件（`--max-polls` 終端・全 COMPLETE 終端・フック run の stderr） |
+| SIGURG を致死 trap に | 4 件（exit code が 143 ではなく 144 になる） |
+
+**「監視が死んだ」を検知するテストは、監視が死んでも緑になりうる。** だから SIGURG のケースは
+「SIGURG では死なず、**後続の SIGTERM で死ぬ**」ことを exit code で固定してある。
 
 **「一律保留」の変異が赤くなることが、この節でいちばん重要である**: 型で切る実装は
 一見安全側に見えて、実機の権限プロンプトを 1 件も承認しなくなる。

@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-orchestrate-monitor
 name: cmate-orchestrate-monitor
-version: 0.6.1
+version: 0.7.0
 summary: commandmate wait が見ない停滞（プロンプト待ち・rate limit・リトライ枯渇死）を capture の 1 フレームから検知して回収し、介入と判定の全件を機械可読なログに残す監視レシピ。契約付き dispatch の一次監督は cmate-orchestrate の wait ループで、本 Skill はその回収と可観測性のサイドカーである。
 description: >-
   tmux セッション上で走る worker（coding CLI）を監督するための、実運用で検証済みの監視レシピである。
@@ -45,9 +45,9 @@ capabilities:
   - プロンプトへの Enter を promptData で判定し、デフォルトが承認である二択だけ承認して、契約 autoYes ポリシーの保留・デフォルト無しの選択・promptData 無しのフレームは送らずに理由つきで報告する（--no-auto-approve で全件保留）
   - 介入の宛先を capture ペイロードの cliToolId と `<worktree-id>@<instance-id>` 指定から導出し、分類したペインと入力するペインを一致させる（固定 prefix を連結しない。instance 指定は capture 側にも効く）
   - 送信前に tmux has-session で完全一致指定の存在を検証し、配信できなかった介入を握り潰さず報告する（承認カウンタと再送予算は配信時のみ進む）
-  - フォールバック時は生成アンカーの観測有無と実 commit / uncommitted 数で STARTED ガード付きの完了判定を下す
+  - フォールバック時は生成アンカーの観測有無と実 commit / uncommitted 数で STARTED ガード付きの完了判定を下す（worktree-id は現行のディレクトリ由来 id を第 1 候補に、ブランチ由来の旧 2 規則を後方互換として突合するので、メイン worktree・detached HEAD・ブランチ名と一致しない id も実測できる）
   - タスク状態と完了カウンタを差し替え可能なフックとして供給し、指定 file が無ければ黙って続行せず失敗する
-  - 1 ポーリング 1 行の固定フォーマットで判定とその入力を機械可読に残し、品質ゲートと依存コマンド（capture / 状態分類 / 完了判定 / git）を exit code の実測で判定して、失敗を「作業ゼロ」や「判定なし」と取り違えず原因ごとに worker 1 回だけ報告する
+  - 1 ポーリング 1 行の固定フォーマットで判定とその入力を機械可読に残し、依存コマンド（capture / 状態分類 / 完了判定 / git）を exit code で判定して失敗を「作業ゼロ」と取り違えず worker 1 回だけ ERROR / WARN 付きで報告し、監視自身の生存も heartbeat とシグナル・EXIT 報告として残す
 expected_outcomes:
   - 検証ゲート不合格の worker が COMPLETE と報告されず、マージ候補に混ざらない
   - 完了判定がサーバ側の裁定か推定かをログから区別でき、タスク状態を参照できない環境で黙って推定へ劣化することがない
@@ -55,10 +55,10 @@ expected_outcomes:
   - 介入がプロンプト・usage limit・枯渇後の再送に限られ、健全な worker へ入力が注入されない
   - 実行契約が autoYes ポリシーで保留させたプロンプトや、Enter がデフォルト選択肢の確定になる選択が、監視ループのキー送出で意図せず確定されない
   - 介入が空振りのまま「送った」と記録されることがなく、claude / codex 混在でも非既定 instance でもフラグ無しで正しいペインへ届く
-  - 未起動 worker や作業の痕跡が無い worker が COMPLETE と誤報されない
+  - 未起動 worker や作業の痕跡が無い worker が COMPLETE と誤報されず、ディレクトリ名で採番された worktree でもカウンタが恒久 0 に沈まない
   - 完了フック未配線のまま「全 worker 完了」と報告されることがなく、NOT_STARTED として露見する
-  - 総ポーリング数・状態分類の分布・介入と保留の全件・完了判定の根拠（started / streak / commits / uncommitted / task）が監視ログから機械的に取り出せる
-  - 品質ゲートや依存コマンドの非 0 終了が「テスト緑」「作業ゼロ」の見た目に隠されない（git が答えられなかった worker が NOT_STARTED と誤報されず、判定器が落ちたポーリングが無言で素通りしない）
+  - 総ポーリング数・状態分類の分布・介入と保留の全件・完了判定の根拠（started / streak / commits / uncommitted / task）が監視ログから機械的に取り出せ、監視が沈黙したときそれが健全な沈黙か監視の死かを区別できる
+  - 品質ゲートや依存コマンドの非 0 終了が「テスト緑」「作業ゼロ」の見た目に隠されない（git が答えられなかった worker が NOT_STARTED と誤報されず、判定器が落ちたポーリングが無言で素通りせず、その報告がオペレータの grep で消えない）
 provider:
   name: CommandMate
   url: https://github.com/Kewton/CommandMate
@@ -114,8 +114,8 @@ risk_rationale: >-
   mutates a repo.
 files:
   - path: SKILL.md
-    sha256: a77d858db38faf1b8da1aa5d02257cc7eda664f416685ae799cb338b87d0c627
-    size: 19817
+    sha256: f4a29e4f8d096d5244879761592399e00df7d81bbc9732f5a3d0503dc6b5c1e6
+    size: 24003
     kind: skill_md
     executable: false
     script: false
@@ -126,20 +126,20 @@ files:
     executable: false
     script: false
   - path: references/evidence.md
-    sha256: 38aee3110ce0f79fb47418849ab6127bf6d14fb3035651b8803db1a6dd177cc2
-    size: 18517
+    sha256: cf919ac1f500130107115526ba7304d7940b505de96d4feff846ffd4fef9a0bf
+    size: 23169
     kind: instruction
     executable: false
     script: false
   - path: references/monitor-contract.md
-    sha256: 3508874ca448a387241966c36a67bc9d9ef68919ffdf154f02a7ab9bd8c59661
-    size: 20645
+    sha256: 924af3e078f18b980617aa0ec051c5a74cad51b1bde144b455cd8ae29876b33e
+    size: 25240
     kind: instruction
     executable: false
     script: false
   - path: references/recipe-rationale.md
-    sha256: 21ea81d86ef9d2d26e1bcf68e07bab4da6eebd045d40eae72e6666ae60b91d3d
-    size: 18715
+    sha256: 2208d0994c974dbaabd86138b31e2753db0c604f4ad5ecdee2d27b0c69393ea9
+    size: 24375
     kind: instruction
     executable: false
     script: false
@@ -150,8 +150,8 @@ files:
     executable: true
     script: true
   - path: scripts/hooks-git.sh
-    sha256: 95ab137739f0d809d603ac489ac1d0f0116a9c9651f36b2a0a332723c4b63240
-    size: 9807
+    sha256: 21d3b4ac18222c0e67272a49c6aa5131eedea4c6025e78b12ffeecae5f4f92fd
+    size: 14189
     kind: script
     executable: true
     script: true
@@ -168,8 +168,8 @@ files:
     executable: true
     script: true
   - path: scripts/monitor.sh
-    sha256: 9217c3398770f563ac477e13f93f41b3e7155704a4eb8ae6f220ed35e8d91b92
-    size: 29317
+    sha256: 57025a2d18762c6fa131cc010f5b57b835214397fc175d0090c0576521af657c
+    size: 33204
     kind: script
     executable: true
     script: true

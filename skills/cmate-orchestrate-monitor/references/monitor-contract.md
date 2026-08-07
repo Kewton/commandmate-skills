@@ -94,6 +94,7 @@ log 行の key も `<id>@<instance>` になる。`<worktree-id>` は
 | `--resend-message <s>` | `continue` | リトライ枯渇後に送る文字列 |
 | `--max-resends <n>` | `2` | 再送の上限。使い切ったらエスカレーション |
 | `--max-polls <n>` | `0` | N ポーリングで exit 0。`0` は全 worker COMPLETE まで回る |
+| `--heartbeat <n>` | `10` | N ポーリングごとに `monitor: alive (…)` を stdout へ出す。`0` で無効（CommandMate #1728） |
 | `--verbose` | off | 1 ポーリング 1 行の状態ログを **追加**する（既定出力は不変） |
 | `--no-auto-approve` | off | プロンプトへ Enter を一切送らず、全件を保留して報告する。契約付き dispatch を監督するときの既定形（Issue #59） |
 | `--hooks <file>` | `$MONITOR_HOOKS` | フックを source する。**繰り返し指定可**（左から順）。1 つでも与えると `MONITOR_HOOKS` は捨てられる |
@@ -107,6 +108,21 @@ log 行の key も `<id>@<instance>` になる。`<worktree-id>` は
 |---|---|
 | `0` | 全 worker COMPLETE、または `--max-polls` 到達 |
 | `2` | 引数不正（worktree-id 無し・未知のフラグ・不正な id / instance id）、`--hooks` の file が無い |
+| `128+n` | シグナル `n` を受けて終了（HUP 129 / INT 130 / QUIT 131 / PIPE 141 / TERM 143）。**SIGURG は含まない**（致死化しない。CommandMate #1728） |
+
+### 生存報告（CommandMate #1728）
+
+**健全な沈黙と、死んだ監視の沈黙を区別するための 3 つ**である。判定ロジックには一切関与しない。
+
+| 行 | ストリーム | 条件 |
+|---|---|---|
+| `monitor: alive (poll=<n>, complete=<d>/<total>)` | stdout | `--heartbeat` ポーリングごと（既定 10、`0` で無効）。停止条件の**前**に出すので、ログの最後は常に「ループがどこまで進んだか」になる |
+| `monitor: ERROR caught SIG<name> (signal <n>) on poll round <r> — monitoring stops here` | stderr | HUP / INT / QUIT / PIPE / TERM。報告後 `128+n` で終了する |
+| `monitor: WARN caught SIGURG on poll round <r> — ignored, monitoring continues` | stderr | SIGURG。**致死化しない**（既定動作が無視なので、届いたことだけを可視化する）。番号は出さない — SIGURG は macOS で 16、Linux で 23 |
+| `monitor: ERROR exiting on poll round <r> with <d>/<n> worker(s) complete (rc=<rc>) — the rest are now UNMONITORED` | stderr | **正常終端（全 COMPLETE / `--max-polls` 到達）以外の全ての終了**。EXIT trap にぶら下げてあるので、個別に trap していない死に方でも出る |
+
+trap を張るのは**引数検証を通り、ループへ入る直前**である。したがって不正な id・未知のフラグ・
+`--hooks` の file 欠落で落ちる経路は 1 行のままで、従来と byte 一致である。
 
 ### 送信先セッションの導出（Issue #1602）
 
@@ -164,7 +180,7 @@ instance suffix は `deriveSessionSuffix` と同じで、`<tool>-` を剥がし�
 | `monitor[<lbl>]: capture failed, skipping poll` | capture が非 0。**idle streak を進めない** |
 | `monitor[<lbl>]: classify-state failed (exit N), skipping poll` | `classify-state.sh` が非 0、または空を返した。capture 失敗と同じ扱い（**idle streak を進めない**）。空 state を完了判定へ渡さないためのガード（CommandMate #1614） |
 | `monitor[<lbl>]: verify-completion failed (exit N), no verdict this poll (state=… started=… streak=… commits=… uncommitted=… task=…)` | `verify-completion.sh` が非 0、または空を返した。判定なしでそのポーリングを捨てる。入力を併記するのは手で再現できるようにするため（CommandMate #1614） |
-| `monitor hooks: [<wid>] …` （stderr） | `hooks-git.sh` の `git` 呼び出しが失敗した／worktree-id が checkout へ解決できなかった。**原因ごとに worker 1 回**。カウンタは 0 だが「測れなかった 0」であることを示す（CommandMate #1614） |
+| `monitor hooks ERROR: [<wid>] …` / `monitor hooks WARN: [<wid>] …` （stderr） | `hooks-git.sh` の `git` 呼び出しが失敗した／worktree-id が checkout へ解決できなかった／ディレクトリ名が衝突していた。**原因ごとに worker 1 回**。カウンタは 0 だが「測れなかった 0」であることを示す（CommandMate #1614）。レベル語は CommandMate #1728 で追加した。`ERROR` = 両カウンタとも測れていない、`WARN` = 片方だけ劣化（もう片方は実測値） |
 | `monitor[<lbl>]: rate limit -> sent 'a' to <session>` | RATE_LIMIT 分類時、**かつ配信できたとき** |
 | `monitor[<lbl>]: terminal API error at an idle prompt -> resent to <session> (n/N)` | 再送条件成立、**かつ配信できたとき** |
 | `monitor[<lbl>]: terminal API error and resend budget spent (N) — operator needed` | 再送上限到達 |
@@ -174,6 +190,7 @@ instance suffix は `deriveSessionSuffix` と同じで、`<tool>-` を剥がし�
 | `monitor[<lbl>]: COMPLETE (approvals=<n>[ held=<n>])` | 完了判定。`held=` は **1 件以上保留したときだけ**付く（`task=` と同じ方針） |
 | `monitor[<lbl>]: VERIFY_FAILED — contract gates failed; do not merge. …` | タスクが `failed` / `cancelled`。COMPLETE と同じく終局（ループを抜ける） |
 | `monitor[<lbl>]: NOT_STARTED — idle with no work; check the composer / Enter` | NOT_STARTED かつ idle 閾値到達 |
+| `monitor: alive (poll=<n>, complete=<d>/<total>)` | `--heartbeat` ポーリングごと（既定 10、`0` で無効。前節） |
 | `monitor: reached --max-polls (N) after N poll round(s); stopping` | `--max-polls` 到達 |
 | `monitor: all N worker(s) complete` | 正常終了 |
 
@@ -201,7 +218,14 @@ instance suffix は `deriveSessionSuffix` と同じで、`<tool>-` を剥がし�
 | 完了判定の根拠 | COMPLETE した poll 行の `started= / streak= / commits= / uncommitted= / task=` |
 | capture 失敗 | `grep -c 'capture failed' monitor.log`（poll 行は出ないので別に数える） |
 | helper 失敗（CommandMate #1614） | `grep -cE 'classify-state failed\|verify-completion failed' monitor.log`。いずれもそのポーリングを捨てる（poll 行は出ない）。**0 でなければ判定を下せなかったポーリングがある** |
-| カウンタが信用できないポーリング | `grep 'monitor hooks: \[' monitor.log`（worker あたり 1 行。出ていれば `commits=` / `uncommitted=` の 0 は「測れなかった」であって「作業ゼロ」ではない） |
+| カウンタが信用できないポーリング | `grep -E 'monitor hooks (ERROR\|WARN):' monitor.log`（worker あたり 1 行。出ていれば `commits=` / `uncommitted=` の 0 は「測れなかった」であって「作業ゼロ」ではない。`ERROR` は両カウンタ、`WARN` は片方だけ） |
+| 監視が最後まで生きていたか | `grep -E 'monitor: (alive\|ERROR\|WARN)' monitor.log`（`alive` が途切れた所が最後に生きていたポーリング。終端に `caught SIG…` / `exiting on poll round` があれば異常終了） |
+
+**ログを `grep` で絞るときは `ERROR|WARN|alive` を必ずパターンに含めること。** レベル語が無かった
+0.6.1 以前の `monitor hooks: …` は、運用でよく使う
+`monitor.sh … 2>&1 | grep -Ei "STALL|IDLE|…|ERROR|FAIL"` で**1 行残らず消えていた**
+（CommandMate #1728）。「この 0 は測定値ではない」と言う唯一の行が、ログの中で最も消えやすい形を
+していたことになる。
 
 worker 横断の状態（streak / started / approvals / held / resends）は `mktemp -d` した temp
 directory 配下の file に持つ。EXIT / INT / TERM で削除される
@@ -261,16 +285,29 @@ count_uncommitted() { echo <n>; }       # git status --porcelain 相当の行数
 |---|---|---|
 | `MONITOR_HOOKS_BASE` | `origin/develop` | commit を数える base ref |
 | `MONITOR_HOOKS_REPO` | `.` | `git worktree list` を引くリポジトリ |
-| `MONITOR_WORKTREE_ROOT` | 空 | worktree-id と同名の directory を持つ親。git 探索より先に試す |
+| `MONITOR_WORKTREE_ROOT` | 空 | worktree-id と同名の directory を持つ親。git 探索より先に試す。CommandMate #1728 以降は **escape hatch** であって既定の配線ではない（git 探索がディレクトリ由来 id を自力で解決する）。`git worktree list` に出ない checkout や、path digest で曖昧性を解いた id では依然これが答えである |
 
-worktree-id は `<repo>-<branch>` を slug 化したもの（lowercase、`[a-z0-9-]` 以外を `-`、
-連続を畳み、前後の `-` を落とす）。`<repo>` はメイン worktree の directory 名である。
-`git worktree list --porcelain` の各レコードから同じ規則で id を組み立てて突き合わせる。
+slug 化の規則は 3 方式に共通で、`sanitizeIdSegment()` と同じ（lowercase、`[a-z0-9-]` 以外を `-`、
+連続を畳み、前後の `-` を落とす）。`git worktree list --porcelain` の各レコードから同じ規則で
+id を組み立てて突き合わせる。**突合順は仕様である**（CommandMate #1728）:
 
-- 解決できない id は **エラーではなく 0** を返す（監視ループを落とさないため）。
-- `MONITOR_HOOKS_BASE` が解決できない場合、source 時に stderr へ警告する。
-  黙って 0 を返すと、全部 commit 済みの worker が `uncommitted=0` と合わさって
-  最後に `NOT_STARTED` と誤報される。
+| # | 突合対象 | 由来 |
+|---|---|---|
+| 1 | `slug(basename(<checkout path>))` | **現行**。`deriveWorktreeId()`（CommandMate #1621）。初回登録時に一度だけ確定するので、ブランチを切り替えても id は変わらない。`branch` レコードを持たない detached HEAD にも効く |
+| 2 | `slug("<repo>-<branch>")` | 旧 `generateWorktreeId()`。`<repo>` はメイン worktree の directory 名（git が最初に出すレコード） |
+| 3 | `slug("<branch>")` | 同上（repo 名なし） |
+
+1 を先に見るのは、稼働中のサーバが配る id が 1 だからである。2 と 3 が別 checkout に当たったとき
+でも **1 が勝つ**（レコードの出力順に依存しない）。2・3 は後方互換のために残してある。
+
+- 解決できない id は **エラーではなく 0** を返す（監視ループを落とさないため）。ただし黙らない:
+  `monitor hooks ERROR: [<wid>] no checkout resolved …` を worker あたり 1 回出す。
+- ディレクトリ名が衝突する 2 つの checkout は、この走査では区別できない（CommandMate 側は mint 時に
+  `<base>-<sha256[0:8]>` で解決している）。**最初の 1 件を数えたうえで `WARN` を出す** — 答えない
+  と両カウンタが 0 へ沈むためで、別の checkout を数えたいときは `MONITOR_WORKTREE_ROOT` を指定する。
+- `MONITOR_HOOKS_BASE` が解決できない場合、source 時に stderr へ警告する
+  （`monitor hooks WARN: base ref …`）。黙って 0 を返すと、全部 commit 済みの worker が
+  `uncommitted=0` と合わさって最後に `NOT_STARTED` と誤報される。
 
 **base ref が違うリポジトリでは `MONITOR_HOOKS_BASE` を必ず指定すること。**
 既定値 `origin/develop` は由来（CommandMate）の慣習であって、汎用の既定ではない。
