@@ -124,6 +124,12 @@ files:
     kind: instruction
     executable: false
     script: false
+  - path: references/adr-worker-development-skill.md
+    sha256: 9067f07845acf2e81983baff5b758d5bc964cb360c83a7e204ba670beb0c15ae
+    size: 56790
+    kind: instruction
+    executable: false
+    script: false
   - path: references/adr-worktree-preparation.md
     sha256: 148673d030b71bb8b44ee91ca4758e65924b7eff6920ba182cba2777490ed5b1
     size: 18549
