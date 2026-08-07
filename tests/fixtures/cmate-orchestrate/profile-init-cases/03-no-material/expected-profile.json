@@ -1,0 +1,11 @@
+{
+  "id": "custom-repo",
+  "repository": "OWNER/REPO",
+  "base": "origin/main",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": [
+    "false # TODO: replace with this repository's verification commands"
+  ],
+  "verified": false
+}

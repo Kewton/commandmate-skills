@@ -1,0 +1,34 @@
+{
+  "description": "A repository that declares nothing: every field falls back to a safe template and every fallback carries a TODO. Never raises.",
+  "args": [],
+  "expect": {
+    "status": "partial",
+    "sources": {
+      "id": "derived",
+      "repository": "default",
+      "base": "default",
+      "branch_template": "default",
+      "worktree_template": "default",
+      "baseline": "default",
+      "verified": "fixed"
+    },
+    "todos": [
+      "id_derived_from_placeholder",
+      "repository_undetermined",
+      "base_undetermined",
+      "branch_template_undetermined",
+      "worktree_template_undetermined",
+      "baseline_undetermined"
+    ],
+    "warnings": [],
+    "evidence_files": {
+      "id": [],
+      "repository": [],
+      "base": [],
+      "branch_template": [],
+      "worktree_template": [],
+      "baseline": []
+    },
+    "baseline_fails_closed": true
+  }
+}
