@@ -34,6 +34,8 @@ CommandMate の exit code へ移しただけで、report 上の表現（field �
 | `--git <path>` | 任意 | `git` | drift 確認に使う git |
 | `--gh <path>` | 任意 | `gh` | repo 到達性確認に使う gh |
 | `--auto-yes` | 任意 | off | worker prompt を自動応答する。既定 off（prompt で停止し human へ提示） |
+| `--prepare-worktrees` | 任意 | **off** | pre-flight で未解決だった worktree を `cmate-worktree-setup` provider に作らせてから dispatch する（第3.0.1節）。既定 off＝従来どおり停止する |
+| `--worktree-setup <launcher>` | 任意（`--prepare-worktrees` 指定時は実質必須） | なし | 上記 provider のランチャー（`--cli` と同じ argv 規約・同じ guard。シェルは経由しない）。`--prepare-worktrees` 無しに渡すと `invalid_input` |
 | `--contract-mode <m>` | 任意 | `auto` | `auto` / `require` / `off`。契約非対応 CLI での挙動を決める（第2.7節） |
 | `--verify-gates <ids>` | 任意 | なし | 契約の `verify.gates` に載せる gate id（comma 区切り）。既定は省略＝全ゲート |
 | `--expect-branch <name>` | 任意 | なし | plan 承認時の統合 branch。dispatch 時に不一致なら drift |
@@ -293,6 +295,51 @@ pre-flight が確定した最初の Wave の worktree 解決と drift 結果は*
 世界の状態に依存しないので、その場合 pre-flight は世界を probe しない — 答えが何も変えられない
 probe は副作用でしかない。この停止は従来どおり `--out` を作り、artifact も書く。
 
+### 3.0.1 worktree 準備段（`--prepare-worktrees`。既定 off）
+
+pre-flight が `worktree_unresolved` で止まるとき、**その理由だけで止まっている場合に限り**、
+worktree を用意してから続ける段を挟める（[#93](https://github.com/Kewton/commandmate-skills/issues/93)。
+裁定の記録は [adr-worktree-preparation.md](./adr-worktree-preparation.md)）。
+
+**dispatch は worktree を作らない。** collision 検査・作成直前の base SHA 再確認・
+proportional baseline は [cmate-worktree-setup](../../cmate-worktree-setup/) の責務であり、
+この runner はそれを**合成する**だけである（`git worktree add` 相当をこの runner が呼ぶことは無い）。
+
+手順は次のとおりで、`--prepare-worktrees` が無ければ**1つも実行されない**（provider も呼ばない）。
+
+1. **対象を決める** — pre-flight が未解決とした Issue（＝**最初の Wave** の Issue）だけ。
+   2つ目以降の Wave の worktree はこの段の対象外で、従来どおり当該 Wave で止まる。
+2. **provider を1回呼ぶ** — `<launcher> --issues <n[,n...]> --profile <plan の profile id> --base <plan の base>`。
+   Issue 集合・profile・base は **plan が正本**であり、`--worktree-setup` の argv に
+   `--profile` / `--profile-json` / `--base` / `--repo` / `--issues` / `--issue-numbers` が
+   含まれていれば `invalid_input` で拒否する（二重指定の禁止）。
+3. **result を検証する** — stdout が
+   [`worktree-setup.result.v1`](../../cmate-worktree-setup/schemas/worktree-setup.result.v1.json)
+   であること。**exit code は文書が読めなかったときだけ見る**（作成済みで baseline が落ちた
+   `partial` を「何もしていない」に丸めないため）。
+4. **profile の同一性を branch で照合する** — `worktrees[].branch` が plan の当該 Issue の
+   `branch` と一致しない場合は `worktree_profile_mismatch` で停止する。**`branch_template` の
+   文字列では照合しない**（placeholder の綴りは2つの Skill で標準化されていないため、
+   同じ branch を作る template を不一致と誤判定する）。
+5. **registry を再スキャンする** — `commandmate sync` を**強制的にもう1度**実行する。
+   run 中の1回目の sync は worktree が存在する前に走っているので、その答えは新しい worktree に
+   ついて何も言っていない。この2回目は `worktree_sync_rescanned` に記録する。
+6. **pre-flight をやり直す** — 判定は同じ check が行う。解決しなかった Issue が残れば、
+   第3.0節の停止（`worktree_unresolved`・`--out` 未作成）にそのまま落ちる。
+
+| 状況 | 扱い |
+|---|---|
+| provider が渡されていない / 起動できない | `blocking_reasons` の `worktree_setup_unavailable` で停止。**`limitations` に落として続行しない**（準備できなければ dispatch 対象が存在しないので、劣化して続行する意味が無い） |
+| provider の出力が result contract でない / 1件も作られなかった | `worktree_setup_failed` で停止 |
+| branch が plan と一致しない | `worktree_profile_mismatch` で停止（Issue ごとに1件） |
+| 一部だけ作れた | **成功分だけを dispatch しない。** 作れた分は `worktree_prepared`、作れなかった分は `worktree_setup_partial` に記録し、未解決 Issue について第3.0節の停止に落ちる |
+| 失敗しても、作ってしまった worktree | **削除しない。** 後始末の owner は human で、手段は [cmate-worktree-cleanup](../../cmate-worktree-cleanup/) である |
+
+証跡は `dispatch_schema_version` を上げずに運ぶ（field を足さない。第7節）:
+`limitations` の `worktree_setup_ran` / `worktree_prepared`（Issue・branch・base SHA・baseline 合否）/
+`worktree_setup_partial` / `worktree_setup_skipped`、`summary_markdown` の「worktree 準備」節、
+そして run が進んだ場合のみ `<out>/worktree-setup/prepared.json`（redaction 済みの転記）。
+
 ### 3.1 Wave ループ
 
 各 Wave について、plan の順に次を行う。
@@ -382,7 +429,7 @@ worktree の場合である。この停止は既に dispatch した Wave があ�
 |---|---|---|
 | `success` | 全 Wave dispatch、全 worker completed、全 verification pass、prompt なし | 0 |
 | `partial` | 途中停止（worker 失敗・timeout・verification 失敗・prompt・drift） | 7 |
-| `failure` | 1件も dispatch できない（plan 不正・最初の Wave 前 drift（worktree 未解決を含む）・CLI 不在・`--contract-mode require` で契約非対応） | 1 |
+| `failure` | 1件も dispatch できない（plan 不正・最初の Wave 前 drift（worktree 未解決を含む）・CLI 不在・`--contract-mode require` で契約非対応・`--prepare-worktrees` の準備段が worktree を用意できなかった） | 1 |
 
 失敗時も stdout に `status: failure` の report を出す。実行結果を推測で埋めない。
 pre-flight（第3.0節）で停止した failure は artifact を書かないので `out_dir` は `null` である
@@ -395,6 +442,9 @@ pre-flight（第3.0節）で停止した failure は artifact を書かないの
 | `dispatch_error` | `open_questions` | plan の Issue に未回答の planner question があり、`--allow-questions` も無かった |
 | `dispatch_error` | `contract_unsupported` | CLI に実行契約が無く、`--contract-mode require` がフォールバックを拒否した |
 | `dispatch_error` | `verification_not_judged` | 検証が exit 99（run が error/cancelled）で、どのゲートも判定に到達しなかった |
+| `dispatch_error` | `worktree_setup_unavailable` | `--prepare-worktrees` を指定したが `cmate-worktree-setup` provider を呼べなかった（未指定・未 install・起動不能）。第3.0.1節 |
+| `dispatch_error` | `worktree_setup_failed` | provider は動いたが result contract を返さなかった、または1件も作らなかった |
+| `dispatch_error` | `worktree_profile_mismatch` | provider が作った branch が plan の branch と違う（profile 不一致）。**未解決 Issue ごとに1件** |
 | `dispatch_error` | `not_dispatched` | runner が起動を拒否した（scope 未宣言・unsafe worktree target 等） |
 | `dispatch_error` | `wave_not_advanced` | 上のどれでもない理由で Wave が advance しなかった（防御的な既定） |
 | `drift` | `worktree_unresolved` | 対象 Issue の worktree が解決できない。**未解決 Issue ごとに1件**出る（第3.1節） |

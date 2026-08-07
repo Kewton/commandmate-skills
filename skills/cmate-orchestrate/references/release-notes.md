@@ -238,6 +238,39 @@ completion check `verification_recorded` の失敗と limitation `verification_u
 `dispatch_schema_version` は **1 のまま**（additive: completion check 1件の追加。正本
 [dispatch-contract.md](./dispatch-contract.md) 第7節）。
 
+### #93 — worktree を作る段だけが手作業で、入口が1つになっていなかった
+
+#90 の fail-fast は正しく止まるが、止まった後に人が別 Skill（`cmate-worktree-setup`）を
+手で呼んで戻ってくる必要があった。plan → worktree 準備 → dispatch のうち、
+**真ん中だけが自動化の外**にあった。
+
+→ `--prepare-worktrees`（**既定 off**）を足し、pre-flight が `worktree_unresolved` だけを理由に
+止まるときに `cmate-worktree-setup` provider を1回呼んでから pre-flight をやり直す。
+選択肢は「dispatch 内で `git worktree add` 相当を実装する」と「別 Skill を合成する」だったが、
+collision 検査・作成直前の base SHA 再確認・baseline は既に `cmate-worktree-setup` にあり、
+**二重実装は片方だけが直る未来を作る**ので合成を採った。dispatch は
+(a) 誰について作らせるか、(b) result（`worktree-setup.result.v1`）が plan と整合するか、
+(c) registry に載ったか、の3つだけを持つ。uat の意味ゲートと同じ形である。
+
+4つの裁定（正本は [adr-worktree-preparation.md](./adr-worktree-preparation.md)）:
+
+- **部分成功では走らせない。** 1つの wave は「この集合を並列に走らせる」約束なので、集合を黙って
+  縮めると barrier の意味が run ごとに変わる。停止は新しい形ではなく #90 のままに落とす。
+- **作ってしまった worktree は消さない。** provider 自身が baseline 失敗でも保持する
+  （`safety.md` 第5節）ものを呼び出し側が消すのは、呼び出し先の裁定の無効化である。破壊は
+  `cmate-worktree-cleanup` の責務で、後始末の owner は human。
+- **未導入なら停止する**（`worktree_setup_unavailable`）。`acceptance_not_run` と同じ
+  「黙って劣化しない」型だが、結果は逆になる: 意味ゲートは無くても機械ゲートで裁定できるのに対し、
+  worktree が無ければ **dispatch する対象が存在しない**ので、続行に意味が無い。
+- **profile の同一性は branch で照合する。** `branch_template` の placeholder の綴りは2つの Skill で
+  標準化されていないため、文字列比較は同じ branch を作る template を不一致と誤判定する。
+  照合すべきは規約ではなく生成物である。
+
+`commandmate sync` はこのとき **run 中に2回**走る（#91 の1回目は worktree が存在する前に走って
+いるので、新しい worktree について何も言っていない）。2回目は `worktree_sync_rescanned` に記録する。
+`dispatch_schema_version` は **1 のまま**で、証跡は `limitations` と
+`<out>/worktree-setup/prepared.json` と summary が運ぶ（field を足さない）。
+
 ### CommandMate #1678 B-2 / #1683 — scope ゲート不合格の再指示に、違反 path が載っていなかった
 
 → exit 20 で scope ゲートが落ちていたら、その logTail から**違反 path を転記**し、

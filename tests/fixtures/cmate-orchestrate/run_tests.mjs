@@ -130,14 +130,22 @@ function registeredPathFor(issue, pathOverrides) {
 //     simply not re-scanned since the worktree was created: a `commandmate sync`
 //     registers it and the retried `ls` resolves it. With `cli_sync: false` (a
 //     CommandMate older than 0.21.0) the sync fails and it stays a git_only case.
+//   prepare_worktrees (Issue #93) — nothing exists either, exactly like
+//     unregistered_worktrees, but the `worktree-setup` provider CAN create it
+//     during the run: the row is handed to the fake as `prepared_worktrees`, which
+//     it reveals to `git worktree list` once the provider created it and to
+//     `commandmate ls` once a sync has re-scanned. Without --prepare-worktrees the
+//     world is indistinguishable from unregistered_worktrees, which is what makes
+//     the backward-compatibility case a real comparison.
 //
-// All three are hidden from `commandmate ls --json`; only the first is hidden from
-// `git worktree list` (and never created on disk).
+// All four are hidden from `commandmate ls --json`; the first and the last are
+// hidden from `git worktree list` too (and never created on disk up front).
 function hiddenFromLs(scenario) {
   return [
     ...(scenario.unregistered_worktrees ?? []),
     ...(scenario.git_only_worktrees ?? []),
     ...(scenario.sync_only_worktrees ?? []),
+    ...(scenario.prepare_worktrees ?? []),
   ].map(Number);
 }
 
@@ -190,9 +198,19 @@ function workerVerifyPasses(scenario, number) {
 function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, logPath, opts = {}) {
   const plan = readPlan(planPath);
   const pathOverrides = scenarioObject.worktree_paths ?? {};
-  const absent = (scenarioObject.unregistered_worktrees ?? []).map(Number);
+  const toPrepare = (scenarioObject.prepare_worktrees ?? []).map(Number);
+  // A to-be-prepared worktree does not exist yet either: not creating the
+  // directory up front is what makes "the provider created it" observable.
+  const absent = [...(scenarioObject.unregistered_worktrees ?? []).map(Number), ...toPrepare];
   const syncOnly = (scenarioObject.sync_only_worktrees ?? []).map(Number);
   const scenario = { ...scenarioObject, worktrees: planToWorktrees(plan, pathOverrides, hiddenFromLs(scenarioObject)) };
+  // The rows the `worktree-setup` provider may create (Issue #93). Handed to the
+  // fake separately: it reveals them only once it has created them, and only to
+  // `commandmate ls` once a sync has re-scanned.
+  if (toPrepare.length > 0) {
+    const hiddenFromPrepare = plan.issues.map((issue) => Number(issue.number)).filter((n) => !toPrepare.includes(n));
+    scenario.prepared_worktrees = planToWorktrees(plan, pathOverrides, hiddenFromPrepare);
+  }
   // The rows a `commandmate sync` makes visible (Issue #91): hidden from the
   // initial `ls`, handed to the fake separately so it can return them once the
   // server has been told to re-scan.
@@ -217,13 +235,17 @@ function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, lo
   const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_STATE: work, ...(opts.env ?? {}) };
   if (logPath) env.CMATE_FAKE_LOG = logPath;
   const launcher = 'launcher' in opts ? opts.launcher : FAKE_CLI;
+  // A case's dispatch_args may need the fake's own path (the `--worktree-setup`
+  // provider is this same script under another subcommand), and a fixture cannot
+  // know where the checkout lives. `FAKE_CLI` in an argument is that path.
+  const resolvedExtra = extraArgs.map((arg) => String(arg).replace(/FAKE_CLI/g, FAKE_CLI));
   const args = [
     DISPATCH_RUNNER,
     '--plan', planPath,
     ...(launcher === null ? [] : ['--cli', launcher]),
     '--git', FAKE_CLI, '--gh', FAKE_CLI,
     '--out', outDir,
-    ...extraArgs,
+    ...resolvedExtra,
   ];
   try {
     const stdout = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env, cwd: integration });
@@ -732,6 +754,7 @@ function runDispatchCase(caseId) {
     delete rerunScenario.unregistered_worktrees;
     delete rerunScenario.git_only_worktrees;
     delete rerunScenario.sync_only_worktrees;
+    delete rerunScenario.prepare_worktrees;
     const rerun = runDispatchRunner(planPath, rerunScenario, work, outDir, spec.dispatch_args ?? [], null);
     check(rerun.exit === expect.rerun_when_registered.exit,
       `re-run with the same --out exited ${rerun.exit} !== ${expect.rerun_when_registered.exit}`);
@@ -889,6 +912,54 @@ function runDispatchCase(caseId) {
   for (const code of expect.limitation_codes ?? []) {
     check(report.limitations.some((entry) => entry.code === code), `limitation "${code}" was expected but not recorded`);
   }
+  // A limitation's DETAIL is where the worktree-preparation evidence lives
+  // (Issue #93): which branch, from which base SHA, with which baseline verdict.
+  // A code alone would prove the stage ran, not what it produced.
+  if (expect.limitation_details_include) {
+    const details = report.limitations.map((entry) => entry.detail);
+    for (const needle of expect.limitation_details_include) {
+      check(details.some((detail) => detail.includes(needle)), `no limitation detail contains "${needle}"; details: ${JSON.stringify(details)}`);
+    }
+  }
+  // The arguments a composed step was actually invoked with. "Pass the same
+  // profile to both" means the plan's profile and base reach the worktree-setup
+  // provider, and no field of the report can show that (Issue #93).
+  if (expect.cli_args_include) {
+    for (const [name, needles] of Object.entries(expect.cli_args_include)) {
+      const calls = cliLog.filter((entry) => entry.sub === name).map((entry) => entry.args.map(String));
+      check(
+        calls.some((args) => needles.every((needle) => args.includes(needle))),
+        `no "${name}" invocation carried all of ${JSON.stringify(needles)}; calls: ${JSON.stringify(calls)}`,
+      );
+    }
+  }
+  // The structured preparation evidence written beside the report (Issue #93).
+  if (expect.prepared_artifact) {
+    const artifactPath = join(outDir, 'worktree-setup', 'prepared.json');
+    if (check(existsSync(artifactPath), 'no <out>/worktree-setup/prepared.json was written')) {
+      let artifact = null;
+      try {
+        artifact = JSON.parse(readFileSync(artifactPath, 'utf8'));
+      } catch {
+        check(false, 'prepared.json is not valid JSON');
+      }
+      if (artifact) {
+        for (const key of ['requested', 'prepared', 'missing']) {
+          if (expect.prepared_artifact[key] === undefined) continue;
+          check(deepEqual(artifact[key], expect.prepared_artifact[key]),
+            `prepared.json ${key} ${JSON.stringify(artifact[key])} !== ${JSON.stringify(expect.prepared_artifact[key])}`);
+        }
+        for (const expected of expect.prepared_artifact.worktrees ?? []) {
+          const row = (artifact.worktrees ?? []).find((entry) => entry.issue === expected.issue);
+          if (check(row !== undefined, `prepared.json has no worktree entry for #${expected.issue}`)) {
+            for (const [key, value] of Object.entries(expected)) {
+              check(deepEqual(row[key], value), `prepared.json #${expected.issue} ${key} ${JSON.stringify(row[key])} !== ${JSON.stringify(value)}`);
+            }
+          }
+        }
+      }
+    }
+  }
   for (const code of expect.blocking_codes ?? []) {
     check(report.blocking_reasons.some((entry) => entry.code === code), `blocking reason "${code}" was expected but not recorded`);
   }
@@ -910,6 +981,26 @@ function runDispatchCase(caseId) {
       check(report.summary_markdown.includes(needle), `dispatch summary does not contain "${needle}"`);
     }
   }
+  // An opt-in stage that was not opted into must leave no trace: a section about
+  // worktree preparation in a run that never prepared anything would be the
+  // report claiming work nobody asked for (Issue #93).
+  if (expect.summary_excludes) {
+    for (const needle of expect.summary_excludes) {
+      check(!report.summary_markdown.includes(needle), `dispatch summary should not contain "${needle}"`);
+    }
+  }
+
+  // ---- #93 invariant, asserted on EVERY dispatch case -----------------------
+  //
+  // The dispatch runner composes cmate-worktree-setup; it never creates a
+  // worktree itself. Collision detection, the base-SHA re-confirmation and the
+  // baseline all live in that Skill, and a second implementation here is one that
+  // only gets fixed in one place. Asserted unconditionally, including on the
+  // --prepare-worktrees cases where a worktree really does appear mid-run: there,
+  // the `git worktree add` belongs to the provider process, never to this runner.
+  const worktreeAdds = cliLog.filter((entry) => entry.sub === 'worktree' && entry.args[0] === 'add');
+  check(worktreeAdds.length === 0,
+    `dispatch called git worktree add ${worktreeAdds.length} time(s); creating worktrees belongs to cmate-worktree-setup`);
 
   // ---- #83 invariants, asserted on EVERY dispatch case ----------------------
   //
@@ -1988,6 +2079,47 @@ function launcherReport(result) {
   }
 }
 
+// The worktree-setup provider's ARGUMENT contract (Issue #93). These four
+// refusals never reach a world, so they are checked here rather than as dispatch
+// cases: what is being asserted is that a misconfiguration is refused up front,
+// with a message about the flag the operator actually typed.
+//
+// The `--profile` / `--base` refusals are the "same profile on both sides" rule
+// made mechanical. A provider handed a second profile resolves a second
+// `branch_template` and creates branches the plan does not name; the symptom is
+// "no registered worktree matches branch …", which reads as a missing worktree
+// and is really a disagreement between two profiles.
+function worktreeSetupInputTest() {
+  log('  worktree-setup input (#93)');
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-wtsetup-plan-'));
+  const spec = { plan: { issues_fixture: 'cases/02-explicit-dependency/issues.json', orchestrate_args: ['200', '201', '--max-parallel', '3', '--run-id', 'plan'] } };
+  const planPath = generatePlan(spec, runsDir);
+  if (!check(existsSync(planPath), 'worktree-setup: plan.json was not generated')) return;
+
+  const refusals = [
+    ['a provider with no --prepare-worktrees', ['--worktree-setup', `${FAKE_CLI} worktree-setup`], 'needs --prepare-worktrees'],
+    ['a second profile on the provider', ['--prepare-worktrees', '--worktree-setup', `${FAKE_CLI} worktree-setup --profile rust`], 'must not carry --profile'],
+    ['a second base on the provider', ['--prepare-worktrees', '--worktree-setup', `${FAKE_CLI} worktree-setup --base origin/main`], 'must not carry --base'],
+    ['a second issue set on the provider', ['--prepare-worktrees', '--worktree-setup', `${FAKE_CLI} worktree-setup --issues 9999`], 'must not carry --issues'],
+    ['shell syntax in --worktree-setup', ['--prepare-worktrees', '--worktree-setup', `${FAKE_CLI} | tee /tmp/x`], 'contains shell syntax'],
+  ];
+  for (const [label, args, needle] of refusals) {
+    const work = mkdtempSync(join(tmpdir(), 'cmate-wtsetup-'));
+    const outDir = join(work, 'dispatch');
+    const result = runDispatchRunner(planPath, LAUNCHER_SCENARIO, work, outDir, args, null);
+    const report = launcherReport(result);
+    const detail = (report?.blocking_reasons ?? []).map((entry) => `${entry.code} ${entry.detail}`).join(' ');
+    check(result.exit === 3, `${label}: expected exit 3, got ${result.exit}: ${result.stdout.slice(0, 200)}`);
+    check(detail.includes('invalid_input'), `${label}: expected an invalid_input error, got: ${detail.slice(0, 200)}`);
+    check(detail.includes(needle), `${label}: the error should say "${needle}", got: ${detail.slice(0, 300)}`);
+    // The guard is shared with `--cli`; the MESSAGE must not be. An operator who
+    // typed --worktree-setup and is told to fix --cli has been sent to the wrong
+    // flag — both are launchers and both are usually set.
+    check(!detail.includes('--cli '), `${label}: the error names --cli, but the operator typed --worktree-setup: ${detail.slice(0, 300)}`);
+    check(!existsSync(outDir), `${label}: a refused invocation created ${outDir}`);
+  }
+}
+
 function launcherTest() {
   log('  launcher resolution (#37)');
   const runsDir = mkdtempSync(join(tmpdir(), 'cmate-launcher-plan-'));
@@ -2410,12 +2542,15 @@ function main() {
   log('  -- launcher resolution --');
   launcherTest();
 
+  log('  -- worktree-setup input --');
+  worktreeSetupInputTest();
+
   log('');
   if (failures > 0) {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution, worktree-setup input`);
 }
 
 main();

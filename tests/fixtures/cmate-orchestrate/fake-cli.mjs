@@ -27,6 +27,18 @@
 // the subcommand entirely with `cli_sync: false`, which is what an older binary
 // does (`error: unknown command 'sync'`, exit 1).
 //
+// Worktree preparation (Issue #93): `--prepare-worktrees` makes dispatch invoke a
+// cmate-worktree-setup provider for the issues whose worktree it could not
+// resolve. This script doubles as that provider under the `worktree-setup`
+// subcommand: it creates the directory (and the baseline marker), records that it
+// did in CMATE_FAKE_STATE, and prints a worktree-setup.result.v1 document on
+// stdout — the contract dispatch validates. A scenario's `prepared_worktrees`
+// rows are the worktrees it can create; they are hidden from BOTH `commandmate ls`
+// and `git worktree list` until the provider has created them, and hidden from
+// `ls` alone until a sync has re-scanned, which is exactly the world the stage
+// exists for. `worktree_setup` tunes the provider (create only a subset, produce a
+// branch the plan does not name, exit non-zero, emit a non-conformant document).
+//
 // Worker lifecycle (Issue #1468): a real Claude worker runs one TURN per message
 // and then goes idle waiting for input — `wait` returns exit 0 on that idle, which
 // is NOT task completion. The runners' ground truth for completion is a new commit
@@ -253,13 +265,41 @@ function syncHasRun() {
   const marker = syncMarkerPath();
   return Boolean(marker && existsSync(marker));
 }
+// A worktree the `worktree-setup` provider created (Issue #93). Two markers,
+// because the two facts are genuinely separate and the runner depends on the
+// difference: `prepared-<n>` means the worktree now exists on disk (git sees it
+// immediately), `registered-<n>` means a `commandmate sync` re-scanned WHILE it
+// existed and the server therefore knows it. A sync that ran before the worktree
+// was created registers nothing — which is exactly why the preparation stage has
+// to force a second re-scan rather than reuse the run's first one.
+function preparedMarkerPath(issue) {
+  const dir = process.env.CMATE_FAKE_STATE;
+  return dir && issue != null ? join(dir, `prepared-${issue}`) : null;
+}
+function registeredMarkerPath(issue) {
+  const dir = process.env.CMATE_FAKE_STATE;
+  return dir && issue != null ? join(dir, `registered-${issue}`) : null;
+}
+function markerExists(path) {
+  return Boolean(path && existsSync(path));
+}
+// Created on disk: what `git worktree list` reports.
+function preparedRows(spec) {
+  return (spec.prepared_worktrees ?? []).filter((row) => markerExists(preparedMarkerPath(issueFromBranch(row.branch))));
+}
+// Created AND scanned since: what `commandmate ls` reports.
+function registeredPreparedRows(spec) {
+  return (spec.prepared_worktrees ?? []).filter((row) => markerExists(registeredMarkerPath(issueFromBranch(row.branch))));
+}
+
 // The rows `commandmate ls` reports right now: the always-registered ones, plus
-// the sync-only ones once the server has been told to re-scan.
+// the sync-only ones once the server has been told to re-scan, plus the ones the
+// provider created that a re-scan has since picked up.
 function visibleWorktrees(spec) {
-  const rows = spec.worktrees ?? [];
-  const pending = spec.sync_worktrees ?? [];
-  if (pending.length === 0 || !syncHasRun()) return rows;
-  return [...rows, ...pending];
+  const rows = [...(spec.worktrees ?? [])];
+  if (syncHasRun()) rows.push(...(spec.sync_worktrees ?? []));
+  rows.push(...registeredPreparedRows(spec));
+  return rows;
 }
 
 // The issue an in-worktree git call is about, recovered from the process cwd
@@ -285,6 +325,78 @@ function commitsFor(spec, issue) {
 // progress across attempts, not just "changed vs base".
 function headShaFor(spec, issue) {
   return String(commitsFor(spec, issue)).padStart(40, '0');
+}
+
+// The base SHA the provider reports for a worktree it created. The same value
+// `git rev-parse --verify <base>` answers above, so the document and the git
+// probes agree about which commit the branch came from.
+const SETUP_BASE_SHA = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+
+// One worktree-setup.result.v1 document. Every top-level field the contract
+// requires is present — a fixture that omitted one would be testing dispatch's
+// conformance check rather than the preparation it is meant to exercise.
+function setupResultDocument(spec, requested, worktrees, baseline, status) {
+  const created = worktrees.filter((entry) => entry.created).length;
+  return {
+    result_schema_version: 1,
+    skill_id: 'cmate-worktree-setup',
+    skill_version: spec.worktree_setup?.skill_version ?? '0.1.0',
+    generated_at: '2026-01-01T00:00:00Z',
+    status,
+    phase_reached: created > 0 ? 'complete' : 'plan',
+    request: { issue_numbers: requested, max_issues: 5, reuse_existing: false },
+    repository: {
+      slug: 'Kewton/CommandMate',
+      current_branch: (spec.git ?? {}).branch ?? 'feature/integration',
+      integration_branch: 'develop',
+      default_base: 'origin/develop',
+      remote_name: 'origin',
+      dirty: Boolean((spec.git ?? {}).dirty),
+    },
+    profile: {
+      selected: 'node',
+      verified: true,
+      detection_evidence: [{ signal: 'package.json', path: 'package.json' }],
+      base_ref: 'origin/develop',
+      base_sha: SETUP_BASE_SHA,
+      branch_template: 'feature/issue-{N}-{slug}',
+      directory_template: '../{repo}-issue-{N}-{slug}',
+      baseline_command: 'cat cmate-verify-ok',
+    },
+    plan: worktrees.map((entry) => ({
+      issue_number: entry.issue_number,
+      branch: entry.branch,
+      directory: entry.directory,
+      base_ref: 'origin/develop',
+      base_sha: SETUP_BASE_SHA,
+      baseline_command: 'cat cmate-verify-ok',
+      sync_planned: true,
+      blocked_by: entry.created ? [] : ['local_branch'],
+    })),
+    worktrees,
+    baseline,
+    commandmate_sync: {
+      available: spec.cli_sync !== false,
+      attempted: true,
+      worktree_id: null,
+      detail: 'the server was asked to re-scan; the id is resolved by the caller',
+    },
+    collisions: worktrees.filter((entry) => !entry.created).map((entry) => ({
+      issue_number: entry.issue_number,
+      kind: 'local_branch',
+      detail: entry.branch,
+    })),
+    redactions: [],
+    next_actions: [{ action: 'review the created worktrees', owner: 'operator' }],
+    blocking_reasons: created === 0 ? ['every planned target collided with an existing branch'] : [],
+    limitations: [],
+    completion_check: {
+      passed: created > 0,
+      checks: ['input_validated', 'plan_confirmed', 'no_implicit_overwrite', 'base_reconfirmed', 'baseline_reported', 'no_secret_or_abspath']
+        .map((id) => ({ id, passed: created > 0, detail: created > 0 ? 'checked' : 'nothing was created' })),
+    },
+    summary_markdown: '## 対象と結論\nfake provider result\n',
+  };
 }
 
 // Does this scenario's CommandMate speak the execution contract (0.17.0+)?
@@ -409,9 +521,11 @@ function main() {
       process.exit(0);
     }
     // `worktree list --porcelain`. Echo the planned worktree paths (injected by
-    // the harness) so the dispatch `worktrees_present` probe can see them.
+    // the harness) so the dispatch `worktrees_present` probe can see them. A
+    // worktree the provider created counts immediately: git knows it the moment
+    // it exists, and only the CommandMate server needs the sync (Issue #93).
     const git = spec.git ?? {};
-    const paths = git.worktrees ?? (spec.worktrees ?? []).map((w) => w.path).filter(Boolean);
+    const paths = git.worktrees ?? [...(spec.worktrees ?? []), ...preparedRows(spec)].map((w) => w.path).filter(Boolean);
     const lines = (paths.length ? paths : ['<all>']).map((w) => `worktree ${w}`);
     process.stdout.write(`${lines.join('\n')}\n`);
     process.exit(0);
@@ -454,6 +568,66 @@ function main() {
     if (pr.push === 'fail') fail('fatal: failed to push some refs');
     process.stdout.write(`Branch '${branch}' set up to track 'origin/${branch}'.\n`);
     process.exit(0);
+  }
+
+  // --- cmate-worktree-setup provider (Issue #93) ---------------------------
+  if (sub === 'worktree-setup') {
+    // Invoked by dispatch as `<launcher> --issues <n,n> --profile <id> --base <ref>`.
+    // The contract is the STDOUT DOCUMENT (worktree-setup.result.v1); the exit
+    // code only matters when that document is unusable, so a scenario can drive
+    // the two independently.
+    const setup = spec.worktree_setup ?? {};
+    const requested = String(optionValue('--issues') ?? '')
+      .split(',').map((value) => value.trim()).filter(Boolean).map(Number);
+    if (setup.emit === 'not_a_document') {
+      process.stdout.write('worktree-setup: prepared 1 worktree(s)\n');
+      process.exit(setup.exit ?? 0);
+    }
+    const creatable = Array.isArray(setup.create) ? setup.create.map(Number) : requested;
+    const overrides = setup.branch_override ?? {};
+    const worktrees = [];
+    const baseline = [];
+    for (const issue of requested) {
+      const row = (spec.prepared_worktrees ?? []).find((entry) => issueFromBranch(entry.branch) === String(issue));
+      if (!row || !creatable.includes(issue)) {
+        // Planned but not created — the collision shape the Skill records rather
+        // than forcing (created and reused both false).
+        worktrees.push({
+          issue_number: issue,
+          branch: row?.branch ?? `feature/issue-${issue}-unknown`,
+          directory: row?.path ?? `../unknown-issue-${issue}`,
+          base_sha: null,
+          created: false,
+          reused: false,
+          note: 'a branch of this name already exists; not overwritten',
+        });
+        baseline.push({ issue_number: issue, command: 'cat cmate-verify-ok', outcome: 'not_run', exit_code: null, redacted: false, output_excerpt: null });
+        continue;
+      }
+      const marker = preparedMarkerPath(issue);
+      const absDir = resolve(process.cwd(), row.path);
+      try {
+        mkdirSync(absDir, { recursive: true });
+        if (workerSpec(spec, issue).verify === 'pass') writeFileSync(join(absDir, VERIFY_MARKER), 'ok');
+        if (marker) writeFileSync(marker, 'prepared');
+      } catch {
+        // best effort; an uncreated directory surfaces as a baseline failure
+      }
+      worktrees.push({
+        issue_number: issue,
+        branch: overrides[issue] ?? overrides[String(issue)] ?? row.branch,
+        directory: row.path,
+        base_sha: SETUP_BASE_SHA,
+        created: true,
+        reused: false,
+        note: null,
+      });
+      baseline.push({ issue_number: issue, command: 'cat cmate-verify-ok', outcome: 'pass', exit_code: 0, redacted: false, output_excerpt: null });
+    }
+    const created = worktrees.filter((entry) => entry.created).length;
+    const status = setup.status ?? (created === 0 ? 'failure' : created === requested.length ? 'success' : 'partial');
+    process.stdout.write(`${JSON.stringify(setupResultDocument(spec, requested, worktrees, baseline, status))}\n`);
+    process.exit(setup.exit ?? 0);
   }
 
   // --- gh repo access probe ------------------------------------------------
@@ -538,6 +712,16 @@ function main() {
         writeFileSync(marker, 'synced');
       } catch {
         // best effort; a sync-only row simply stays invisible if we cannot record it
+      }
+    }
+    // The re-scan registers what exists AT THIS MOMENT. A worktree created after
+    // this call stays unregistered until the next one (Issue #93).
+    for (const row of preparedRows(spec)) {
+      const registered = registeredMarkerPath(issueFromBranch(row.branch));
+      try {
+        if (registered) writeFileSync(registered, 'registered');
+      } catch {
+        // best effort; the row simply stays invisible to `ls`
       }
     }
     process.stdout.write(`Synced ${(spec.sync_worktrees ?? []).length} worktree(s)\n`);

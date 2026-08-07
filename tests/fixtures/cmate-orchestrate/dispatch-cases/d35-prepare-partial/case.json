@@ -1,0 +1,32 @@
+{
+  "description": "Issue #93 の部分成功: 最初の Wave の #100 / #101 がどちらも未作成で、provider は #100 だけを作り、#101 は collision で作らなかった（created も reused も false）。**作れた分だけを dispatch しない**: 1つの wave は「この集合を並列に走らせる」約束なので、集合を黙って縮めると barrier の意味（全員完了かつ全員 pass）が run ごとに変わる。停止は新しい形ではなく #90 のまま — 強制 sync のあと pre-flight をやり直し、なお未解決な #101 について `worktree_unresolved` で止まり、`--out` も作らない。作れた #100 は **削除しない**（後始末の owner は human）ので、`worktree_prepared` に証跡が残り、再実行時の provider 呼び出しは残りの Issue だけになる。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": ["100", "101", "--profile", "node-commandmate", "--max-parallel", "2", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration", "--prepare-worktrees", "--worktree-setup", "FAKE_CLI worktree-setup"],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "drift",
+    "human_required": false,
+    "waves_count": 0,
+    "never_sent": [100, 101],
+    "no_respond": true,
+    "cli_subcommand_counts": { "worktree-setup": 1, "sync": 2 },
+    "cli_args_include": { "worktree-setup": ["--issues", "100,101"] },
+    "blocking_codes": ["worktree_unresolved"],
+    "absent_blocking_codes": ["worker_failed", "worktree_setup_failed", "worktree_setup_unavailable", "worktree_profile_mismatch"],
+    "limitation_codes": ["worktree_setup_ran", "worktree_prepared", "worktree_setup_partial", "worktree_sync_rescanned"],
+    "limitation_details_include": [
+      "#100: cmate-worktree-setup created branch feature/issue-100-",
+      "prepared #100 but not #101",
+      "the prepared worktrees are kept (nothing is deleted here)"
+    ],
+    "blocking_details_include": ["#101: no registered worktree matches branch"],
+    "summary_includes": ["## worktree 準備", "worktree_setup_partial", "worktree_unresolved"],
+    "out_dir_created": false,
+    "completion_check_passed": false
+  }
+}
