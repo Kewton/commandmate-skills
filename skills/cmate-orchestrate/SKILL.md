@@ -50,6 +50,14 @@ orchestration 全体が要求する集合である（plan にも同じ集合を�
 worktree path・baseline は **profile から解決**し、`develop`/`npm`/`cargo` を hardcode しない
 （[profile-contract.md](./references/profile-contract.md)）。
 
+**worktree**: dispatch は worktree を**作らない**。dispatch 対象 Issue の worktree が事前に存在し、
+`commandmate ls` で解決できること。無ければ
+[cmate-worktree-setup](../cmate-worktree-setup/) で作成する。branch 名を一致させるため、
+**cmate-worktree-setup と本 skill には同じ profile（同じ `branch_template`）を渡す**こと
+（片方だけ既定 profile で走らせると branch がずれ、`commandmate ls` の branch 一致で解決できない）。
+解決できない Issue があると、dispatch は**最初の Wave の前に停止する**: `worktree_unresolved` で
+1人も dispatch せず、`--out` も作らない（第5節。worktree を作って同じコマンドを再実行すればよい）。
+
 **別途導入が必要な Skill: `cmate-acceptance-test`**（uat の意味ゲートを使う場合のみ）。
 
 ```bash
@@ -303,9 +311,10 @@ report/artifact に残さない（redaction）。
 | plan `profile_repository_mismatch` | cwd の origin と profile の対象リポジトリが違う | `--profile` / `--profile-json` / `--repo` のどれかを渡して意図を明示する |
 | dispatch `open_questions` + `human_required` | 未回答の question を持つ Issue がある | blocking reason に**質問の本文**が出ている。Issue 本文に回答を書いて re-plan する |
 | dispatch `drift` | plan 承認後に branch / HEAD / 権限が動いた | drift の内容を確認し、必要なら re-plan する。**drift の上に dispatch しない** |
+| dispatch `worktree_unresolved`（`stop_reason: drift`） | 対象 Issue の worktree が `commandmate ls` で解決できない。**worker は1人も起動していない**（`task_id: null`・worker ログ無し） | **`cmate-worktree-setup` で worktree を作成し、同じコマンドで再実行する**（最初の Wave 前で止まった場合、`--out` は消費されていない）。plan と同じ profile（同じ `branch_template`）を使う。**Issue の分割や re-plan は不要** |
 | dispatch exit 10（prompt 検出） | worker が人間の判断を求めている | `capture` の内容が report に出ている。**自分で判断して答える。** runner は自動応答しない |
 | dispatch `verification_not_judged`（exit 99） | run が error / cancelled で**誰も判定していない** | **再 dispatch では解けない。** CommandMate 側のログを見る。判定していないものを worker に直させない |
-| dispatch `worker_failed`（`--max-turns` 到達で未 commit） | worker が commit まで到達しなかった | prompt / worker ログを読む。指示が過大なら Issue を分割して re-plan する |
+| dispatch `worker_failed`（`--max-turns` 到達で未 commit） | worker が起動したが commit まで到達しなかった（worktree 未解決はこの code に落ちない。上の行） | prompt / worker ログを読む。指示が過大なら Issue を分割して re-plan する |
 | dispatch `contract_unsupported` + `require` | CLI が実行契約に非対応 | CommandMate を 0.17.0 以上に上げるか、弱い裁定を承知のうえで `auto` に落とす |
 | merge `ci_failed` / `ci_pending` | CI が green でない | CI を直す。**green 無しに merge しない** |
 | merge `pr_missing` / `merge_failed` | PR が無い / conflict | PR の状態を確認し、conflict は手で解消する |
