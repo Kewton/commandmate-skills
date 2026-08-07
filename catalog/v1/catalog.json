@@ -662,7 +662,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.18.0",
+      "latest": "0.19.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -1162,6 +1162,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.18.0/cmate-orchestrate-0.18.0.tar.gz",
             "sha256": "3e59370671707210128c3eab693fa9633364e34a475508e24e801e75dbfb02b4",
             "size": 265132,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.19.0",
+          "changelog": "cmate-orchestrate 0.19.0 — 受入条件の機械ゲート化と、無人運転の前提の訂正\n\nIssue の受入条件を実行契約へ運ぶ経路が入った。plan は v2 になり、古い dispatch が新しい\nplan を拒否するようになった。無人運転とワーカー側の開発スキルは ADR まで進み、\nうち無人運転は実測によって前提が2つ覆っている。\n\ndispatch / planner\n- #114 Issue 本文の acceptance-gates ブロックを planner が構文だけ parse して\n  plan.issues[].acceptance_gates に載せ、dispatch が worktree の verify.yaml と突き合わせて\n  send 前に解決し、和集合規則で verify.gates を書き出す。記法の正本は\n  references/acceptance-gates-notation.md。散文からの推測生成はしない（明示マークされた\n  ブロックだけを運ぶ fail-closed）。実装前に未決事項4点を CommandMate 0.22.0 で実測し\n  ADR 第11節に記録した（scope の基準点は merge-base / verify.yaml の未 commit 変更は\n  work-evidence に計上される / fence 抽出の干渉は実在した / GATE 行に由来は出ない）\n- #118 plan_schema_version を 2 へ。planner は 2 を出し、consumer（dispatch / merge / uat /\n  status）は 1 と 2 の両方を受理する。守りたい向きは「古い runner が新しい plan を拒否する」\n  であって逆ではない。status.mjs は過去 run の artifact を読む view なので、以前の版で作った\n  run を読めなくなるのはこの runner が存在する理由そのものの後退である\n\n設計（ADR のみ。実装は後続）\n- #103 ワーカー側の開発スキル。買うのは方法であって権限ではなく、契約と食い違ったら契約が勝つ。\n  呼び出し口は契約 goal の Method 節で skill を名指しする形とし、契約非対応 CLI の\n  フォールバック経路にも同じ節を置く（片方だけだと方法論が黙って消える）\n- #115 unattended の未決事項6件を実測し ADR 第14節に記録。4点で記述を訂正した。\n  gh は対話に落ちない（落ちうるのは git push の資格情報プロンプト）。契約の autoYes mode off は\n  monitor を止めない（サーバ側で効くが、その事実が capture に出るのは Auto-Yes poller が\n  回っているときだけで、unattended では回らない）。cron の再入は排他が要る。\n  uat の再merge は detached HEAD で merged と報告してどこにも残らない\n\nパッケージ\n- SKILL_VERSION と manifest version の一致は #92 のチェックが強制する\n\nテストは 30 plan / 43 dispatch / 5 resume / 20 merge / 17 uat / 9 status / 5 profile-init。",
+          "published_at": "2026-08-07T14:33:46Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.19.0",
+            "commit": "48c73c81ab7d5225e9870e2b03b5ee8b6e1e5625"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.19.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.19.0/cmate-orchestrate-0.19.0.tar.gz",
+            "sha256": "bc85685086e6b3cf527f36b97cfc66c311c8c470986bc5804ca9ea6c2134b9b5",
+            "size": 320292,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
