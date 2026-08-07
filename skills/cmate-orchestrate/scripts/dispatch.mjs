@@ -57,6 +57,7 @@ import { parseArgs, promisify } from 'node:util';
 import { execFile, execFileSync } from 'node:child_process';
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   SKILL_ID,
@@ -198,6 +199,19 @@ Options:
                          could not read acceptance criteria or affected files
                          out of halts the run before anything is dispatched.
                          Setting this records that an operator took the risk.
+  --prepare-worktrees    Prepare the worktrees the pre-flight could not resolve,
+                         by invoking the cmate-worktree-setup provider named by
+                         --worktree-setup, re-scanning the registry and resolving
+                         again before the first wave. OFF by default: without it
+                         an unresolved worktree stops the run exactly as before.
+  --worktree-setup <launcher>
+                         The cmate-worktree-setup provider --prepare-worktrees
+                         invokes: an executable plus fixed leading arguments,
+                         split on whitespace and run WITHOUT a shell. It is called
+                         as "<launcher> --issues <n,n> --profile <id> --base <ref>"
+                         and must print a worktree-setup.result.v1 document on
+                         stdout. Passing --profile/--base/--issues yourself is
+                         refused: all three come from the approved plan.
   --contract-mode <m>    auto (default) | require | off. auto dispatches under an
                          execution contract when the CLI supports one and falls
                          back to the profile baseline with an explicit limitation
@@ -232,6 +246,8 @@ function parseCli(argv) {
         gh: { type: 'string' },
         'auto-yes': { type: 'boolean' },
         'allow-questions': { type: 'boolean' },
+        'prepare-worktrees': { type: 'boolean' },
+        'worktree-setup': { type: 'string' },
         'contract-mode': { type: 'string' },
         'verify-gates': { type: 'string' },
         'expect-branch': { type: 'string' },
@@ -291,6 +307,45 @@ function resolveVerifyGates(raw) {
   return ids;
 }
 
+// Flags the worktree-setup provider must not be handed a second time (Issue #93).
+// The profile, the base and the issue set come from the APPROVED PLAN; a provider
+// invoked with a second, operator-supplied profile resolves a different
+// `branch_template` and creates branches the plan does not name. The symptom of
+// that is "no registered worktree matches branch …" — a message about the
+// registry, for a cause that is a disagreement between two profiles. Refusing the
+// double specification here is what keeps the two sides on one profile.
+const SETUP_RESERVED_FLAGS = ['--profile', '--profile-json', '--base', '--repo', '--issues', '--issue-numbers'];
+
+// The provider launcher. It shares `--cli`'s guards (no shell syntax, no control
+// characters, program first) but NOT its fallbacks: `$CM` names the CommandMate
+// CLI, which is not a worktree-setup provider, and there is no sensible default
+// binary to guess — an unset provider is the "not installed" case (ADR section 5),
+// not something to fill in.
+function resolveSetupLauncher(raw, prepareWorktrees) {
+  if (raw === undefined) return null;
+  if (!prepareWorktrees) {
+    throw new SkillError('invalid_input',
+      '--worktree-setup needs --prepare-worktrees: a provider that is never invoked is a silent no-op', 3);
+  }
+  let argv;
+  try {
+    argv = resolveLauncher(raw, {});
+  } catch (error) {
+    // resolveLauncher names the flag it was written for; this is the same guard
+    // reached through a different flag, so the advice must name that one.
+    throw new SkillError('invalid_input', String(error.detail ?? error.message).replace(/^--cli /, '--worktree-setup '), 3);
+  }
+  for (const token of argv.slice(1)) {
+    const flag = String(token).split('=')[0];
+    if (SETUP_RESERVED_FLAGS.includes(flag)) {
+      throw new SkillError('invalid_input',
+        `--worktree-setup must not carry ${flag}: the profile, the base and the issue set come from the approved plan, ` +
+          'and a second value for them is how the two sides end up creating different branches', 3);
+    }
+  }
+  return argv;
+}
+
 function resolveInputs(parsed) {
   const { values } = parsed;
   if (!values.plan) {
@@ -300,6 +355,7 @@ function resolveInputs(parsed) {
   // tokens and execFileSync takes no shell (Issue #37). `cli` keeps the resolved
   // string for messages; every spawn goes through cliArgv.
   const cliArgv = resolveLauncher(values.cli);
+  const prepareWorktrees = Boolean(values['prepare-worktrees']);
   return {
     planPath: values.plan,
     outDir: values.out ?? null,
@@ -309,6 +365,8 @@ function resolveInputs(parsed) {
     gh: values.gh ?? 'gh',
     autoYes: Boolean(values['auto-yes']),
     allowQuestions: Boolean(values['allow-questions']),
+    prepareWorktrees,
+    worktreeSetupArgv: resolveSetupLauncher(values['worktree-setup'], prepareWorktrees),
     contractMode: resolveContractMode(values['contract-mode']),
     verifyGates: resolveVerifyGates(values['verify-gates']),
     expectBranch: values['expect-branch'] ?? null,
@@ -561,12 +619,21 @@ function preflightDispatch(inputs, plan) {
 // written — the field already means "null when nothing was written", and it is
 // how a reader (and the summary) can tell that the same command may simply be
 // re-run once the drift is fixed.
-function preflightFailureReport(inputs, plan, preflight) {
+function preflightFailureReport(inputs, plan, preflight, preparation = null) {
   const report = emptyReport(inputs, plan, null);
   report.status = 'failure';
-  report.stop_reason = 'drift';
+  // A preparation that could not run is not drift: nothing about branch, base or
+  // permission moved — a conditional dependency was missing, misconfigured or
+  // disagreed with the plan's profile. `dispatch_error` is the pre-dispatch stop
+  // the schema already reserves for that shape (Issue #93).
+  const preparationFailed = preparation !== null && preparation.reasons.length > 0;
+  report.stop_reason = preparationFailed ? 'dispatch_error' : 'drift';
   report.drift_checks = preflight.checks;
-  report.blocking_reasons = preflight.reasons;
+  // The preparation's reasons come first: when the stage was asked for, why it
+  // could not deliver a worktree is the actionable half, and "this issue has no
+  // worktree" is the symptom it explains.
+  report.blocking_reasons = [...(preparation?.reasons ?? []), ...preflight.reasons];
+  recordPreparation(report, preparation);
   // The pre-flight is where a `commandmate sync` is most likely to have run: it is
   // the first thing that resolves worktrees. A refusal must say the registry was
   // re-scanned (or could not be) before it concluded "no registered worktree".
@@ -582,6 +649,331 @@ function preflightFailureReport(inputs, plan, preflight) {
   report.redactions = redactionsList();
   report.summary_markdown = renderSummary(report, false, []);
   return report;
+}
+
+// =============================================================================
+// Worktree preparation — composition of cmate-worktree-setup (Issue #93)
+// =============================================================================
+//
+// `--prepare-worktrees` closes the one hand-off that kept this from being a
+// single entry point: the worktrees a plan dispatches into have to exist before
+// the first wave, and creating them lived in another Skill invoked by hand. If it
+// was forgotten the run stopped at the pre-flight (Issue #90) — correct, but not
+// end to end.
+//
+// What this runner does NOT do is create them itself. Collision detection, the
+// base-SHA re-confirmation immediately before creation, the proportional baseline
+// and the sync all already exist in cmate-worktree-setup; re-implementing them
+// here would be two implementations of one rule, of which only one ever gets
+// fixed. So the stage is a COMPOSITION: an injected provider performs that
+// Skill's procedure, and this runner
+//
+//   1. decides WHO to prepare (the issues the pre-flight could not resolve —
+//      the only side that knows this),
+//   2. checks the result document against the provider's own contract
+//      (worktree-setup.result.v1) and against the plan (branch agreement), and
+//   3. re-scans the registry and resolves again, falling back to #90's unchanged
+//      refusal for anything still unresolved.
+//
+// The shape is the same one the UAT runner uses for its semantic gate: the
+// judgement (what to create / whether acceptance passed) happens outside, the
+// runner validates a contract document and never re-implements the procedure.
+// The full adjudication, including why a partial preparation stops the run and
+// why nothing is ever deleted, is in references/adr-worktree-preparation.md.
+
+const SETUP_SKILL_ID = 'cmate-worktree-setup';
+const SUPPORTED_SETUP_SCHEMA_VERSION = 1;
+
+// The top-level fields worktree-setup.result.v1 requires. A document missing any
+// of them is not the contract, whatever else it contains.
+const SETUP_REQUIRED_FIELDS = [
+  'result_schema_version', 'skill_id', 'skill_version', 'generated_at', 'status', 'phase_reached',
+  'request', 'repository', 'profile', 'plan', 'worktrees', 'baseline', 'commandmate_sync',
+  'collisions', 'redactions', 'next_actions', 'blocking_reasons', 'limitations',
+  'completion_check', 'summary_markdown',
+];
+const SETUP_STATUSES = new Set(['success', 'partial', 'failure']);
+
+// How many of the provider's own blocking reasons are lifted into this report.
+// Enough to act on, bounded so a provider cannot flood a dispatch report.
+const MAX_SETUP_REASONS = 5;
+
+// Where the cmate-worktree-setup package sits when it is installed: next to this
+// one, which is the layout both this repository and the installer produce. The
+// probe only sharpens the message — "not installed" and "installed but nothing
+// was given to invoke it with" are different sentences for the operator — and it
+// never decides the outcome on its own.
+const SETUP_PACKAGE_SKILL_MD = join(dirname(fileURLToPath(import.meta.url)), '..', '..', SETUP_SKILL_ID, 'SKILL.md');
+
+function setupPackageNote() {
+  return existsSync(SETUP_PACKAGE_SKILL_MD)
+    ? `the ${SETUP_SKILL_ID} package is installed next to this skill, but nothing was given to invoke it with`
+    : `the ${SETUP_SKILL_ID} package is not installed next to this skill (commandmate skill install ${SETUP_SKILL_ID})`;
+}
+
+// Conformance against worktree-setup.result.v1, limited to what this composition
+// depends on. Returns null when the document is usable, or the reason it is not.
+function setupNonConformance(doc) {
+  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return 'not a JSON object';
+  for (const field of SETUP_REQUIRED_FIELDS) {
+    if (!(field in doc)) return `missing required field "${field}"`;
+  }
+  if (doc.result_schema_version !== SUPPORTED_SETUP_SCHEMA_VERSION) {
+    return `unsupported result_schema_version ${JSON.stringify(doc.result_schema_version)}; this runner understands ${SUPPORTED_SETUP_SCHEMA_VERSION}`;
+  }
+  if (doc.skill_id !== SETUP_SKILL_ID) return `skill_id is not ${SETUP_SKILL_ID}`;
+  if (typeof doc.skill_version !== 'string' || !/^\d+\.\d+\.\d+$/.test(doc.skill_version)) {
+    return 'skill_version is not a semantic version';
+  }
+  if (!SETUP_STATUSES.has(doc.status)) return `status ${JSON.stringify(doc.status)} is not one of success/partial/failure`;
+  for (const field of ['worktrees', 'baseline', 'blocking_reasons', 'limitations']) {
+    if (!Array.isArray(doc[field])) return `${field} is not an array`;
+  }
+  return null;
+}
+
+// One invocation for the whole unresolved set, not one per issue: the provider's
+// input contract takes `issue_numbers` as a list, and its collision detection and
+// base resolution are repository-wide work that would otherwise be redone N times.
+function runWorktreeSetup(inputs, plan, numbers) {
+  const argv = inputs.worktreeSetupArgv;
+  const args = [
+    ...argv.slice(1),
+    '--issues', numbers.join(','),
+    '--profile', String(plan.profile.id ?? 'unknown'),
+    '--base', String(plan.profile.base),
+  ];
+  return runCli(argv[0], args);
+}
+
+// A 40-hex base SHA, shortened for a human-readable evidence line. Never invented:
+// a provider that recorded no SHA (an entry it did not create) says so.
+function shortSha(value) {
+  return typeof value === 'string' && /^[0-9a-f]{40}$/.test(value) ? value.slice(0, 12) : 'unknown';
+}
+
+function preparationRecord(requested) {
+  return {
+    attempted: true,
+    requested,
+    ok: false,
+    reasons: [],
+    limitations: [],
+    prepared: [],
+    missing: [...requested],
+    artifact: null,
+  };
+}
+
+// `--prepare-worktrees` was set, but the pre-flight was blocked by something a
+// worktree cannot fix. Recorded rather than silently skipped: an operator who
+// asked for the stage must be told it did not run, and why.
+function skippedPreparation(preflight) {
+  const first = preflight.reasons[0];
+  return {
+    attempted: false,
+    requested: [],
+    ok: false,
+    reasons: [],
+    limitations: [{
+      code: 'worktree_setup_skipped',
+      detail: `--prepare-worktrees was set, but the pre-flight was blocked by ${first ? first.code : 'a drift check'} first, so the ${SETUP_SKILL_ID} provider was not invoked: creating worktrees cannot fix branch/base/permission drift`,
+    }],
+    prepared: [],
+    missing: [],
+    artifact: null,
+  };
+}
+
+// The stage itself. `unresolved` is the pre-flight's own list of issues whose
+// worktree neither `commandmate ls` nor `git worktree list` knew about.
+//
+// Returns evidence, never throws: every way it can fail is a named blocking
+// reason the caller renders into the same pre-flight refusal #90 already prints,
+// so a failed preparation still leaves `--out` unconsumed and the same command
+// re-runnable.
+function prepareWorktrees(inputs, plan, unresolved) {
+  const requested = unresolved.map((entry) => entry.number).sort((a, b) => a - b);
+  const evidence = preparationRecord(requested);
+
+  if (inputs.worktreeSetupArgv === null) {
+    evidence.reasons.push({
+      code: 'worktree_setup_unavailable',
+      detail: `--prepare-worktrees was set but no ${SETUP_SKILL_ID} provider was given: pass --worktree-setup <launcher>, which is invoked as \`<launcher> --issues <n,n> --profile <id> --base <ref>\` and must print a worktree-setup.result.v1 document on stdout (${setupPackageNote()}). Nothing was prepared and nothing was dispatched`,
+    });
+    return evidence;
+  }
+
+  const result = runWorktreeSetup(inputs, plan, requested);
+  let doc = null;
+  try {
+    doc = JSON.parse(result.stdout);
+  } catch {
+    doc = null;
+  }
+  // The document is authoritative and the exit code is only consulted when there
+  // is no usable document: a provider that created a worktree whose baseline then
+  // failed reports `partial` and may well exit non-zero, and folding that into
+  // "nothing happened" would lose a worktree that exists on disk.
+  const nonConformance = doc === null ? 'stdout is not valid JSON' : setupNonConformance(doc);
+  if (nonConformance !== null) {
+    const detail = excerpt(result.stderr || result.stdout || 'the provider produced no output');
+    if (result.status === null) {
+      evidence.reasons.push({
+        code: 'worktree_setup_unavailable',
+        detail: `the ${SETUP_SKILL_ID} provider could not be run (${redact(detail ?? 'spawn failed')}); ${setupPackageNote()}. Nothing was prepared and nothing was dispatched`,
+      });
+      return evidence;
+    }
+    evidence.reasons.push({
+      code: 'worktree_setup_failed',
+      detail: `the ${SETUP_SKILL_ID} provider exited ${result.status} and its output is not a worktree-setup.result.v${SUPPORTED_SETUP_SCHEMA_VERSION} document (${nonConformance}): ${redact(detail ?? 'no output')}`,
+    });
+    return evidence;
+  }
+
+  evidence.limitations.push({
+    code: 'worktree_setup_ran',
+    detail: redact(`--prepare-worktrees invoked ${SETUP_SKILL_ID} ${doc.skill_version} once for ${requested.map((n) => `#${n}`).join(', ')} with the plan's profile (${String(plan.profile.id ?? 'unknown')} / base ${plan.profile.base}): status ${doc.status}, phase_reached ${doc.phase_reached}, ${doc.worktrees.length} worktree entr(ies), ${doc.limitations.length} limitation(s) of its own`),
+  });
+
+  const rows = new Map();
+  for (const row of doc.worktrees) {
+    if (row && typeof row === 'object' && Number.isInteger(row.issue_number)) rows.set(row.issue_number, row);
+  }
+  const baselines = new Map();
+  for (const row of doc.baseline) {
+    if (row && typeof row === 'object' && Number.isInteger(row.issue_number)) baselines.set(row.issue_number, row);
+  }
+
+  // Branch agreement is how "the same profile" is actually checked (ADR section 6):
+  // the two `branch_template`s cannot be compared as strings — their placeholder
+  // spellings are not standardised across the two Skills — but the branch they
+  // produce is exactly what `commandmate ls` matches on, so that is what is
+  // asserted. A mismatch is a profile disagreement, not a missing worktree, and
+  // it gets a message that says so.
+  const mismatched = [];
+  const evidenceRows = [];
+  for (const number of requested) {
+    const issue = issueOf(plan, number);
+    const row = rows.get(number);
+    if (!row) continue;
+    const made = row.created === true || row.reused === true;
+    const branch = typeof issue.branch === 'string' ? issue.branch : null;
+    if (made && branch !== null && row.branch !== branch) {
+      mismatched.push({ number, planned: branch, produced: String(row.branch) });
+      continue;
+    }
+    if (!made) continue;
+    const baseline = baselines.get(number) ?? null;
+    const outcome = baseline && typeof baseline.outcome === 'string' ? baseline.outcome : 'not_run';
+    const exitCode = baseline && Number.isInteger(baseline.exit_code) ? baseline.exit_code : null;
+    evidence.prepared.push(number);
+    evidenceRows.push({
+      issue: number,
+      branch: redact(String(row.branch)),
+      directory: redact(String(row.directory ?? '')),
+      created: row.created === true,
+      reused: row.reused === true,
+      base_sha: typeof row.base_sha === 'string' ? redact(row.base_sha) : null,
+      baseline_outcome: outcome,
+      baseline_exit_code: exitCode,
+    });
+    evidence.limitations.push({
+      code: 'worktree_prepared',
+      detail: redact(`#${number}: ${SETUP_SKILL_ID} ${row.created === true ? 'created' : 'reused'} branch ${row.branch} at ${row.directory} from base ${shortSha(row.base_sha)}; baseline ${outcome}${exitCode === null ? '' : ` (exit ${exitCode})`}`),
+    });
+  }
+  evidence.missing = requested.filter((number) => !evidence.prepared.includes(number));
+
+  if (mismatched.length > 0) {
+    for (const entry of mismatched) {
+      evidence.reasons.push({
+        code: 'worktree_profile_mismatch',
+        detail: redact(`#${entry.number}: ${SETUP_SKILL_ID} created branch ${entry.produced}, but the plan dispatches into ${entry.planned}. The two sides resolved different profiles (different branch_template), so \`commandmate ls\` can never match the plan's branch. Pass the SAME profile to both`),
+      });
+    }
+    return evidence;
+  }
+
+  if (evidence.prepared.length === 0) {
+    const own = doc.blocking_reasons
+      .slice(0, MAX_SETUP_REASONS)
+      .map((reason) => (typeof reason === 'string' ? reason : JSON.stringify(reason)))
+      .join('; ');
+    evidence.reasons.push({
+      code: 'worktree_setup_failed',
+      detail: redact(`the ${SETUP_SKILL_ID} provider reported status ${doc.status} and created no worktree for ${requested.map((n) => `#${n}`).join(', ')}${own ? `; it blocked on: ${excerpt(own, 400)}` : ' and named no blocking reason'}`),
+    });
+    return evidence;
+  }
+
+  if (evidence.missing.length > 0) {
+    // Partial preparation does not become a partial dispatch (ADR section 3). The
+    // run still stops — through #90's unchanged path, on the issues that are
+    // still unresolved — and what WAS created is kept and named here.
+    evidence.limitations.push({
+      code: 'worktree_setup_partial',
+      detail: `the ${SETUP_SKILL_ID} provider prepared ${evidence.prepared.map((n) => `#${n}`).join(', ')} but not ${evidence.missing.map((n) => `#${n}`).join(', ')}; the prepared worktrees are kept (nothing is deleted here) and the run stops on the ones that are still unresolved`,
+    });
+  }
+
+  // The registry re-scan the created worktrees need. `git worktree add` does not
+  // register anything with the CommandMate server, so a worktree that was just
+  // created has no id to send to until a sync makes it visible. This one is
+  // FORCED: the run's earlier sync (Issue #91) ran before these worktrees
+  // existed, so its answer says nothing about them.
+  const sync = attemptSync(inputs, { force: true });
+  evidence.ok = true;
+  evidence.artifact = {
+    provider: {
+      skill_id: SETUP_SKILL_ID,
+      skill_version: redact(String(doc.skill_version)),
+      status: doc.status,
+      phase_reached: String(doc.phase_reached),
+    },
+    requested,
+    prepared: [...evidence.prepared],
+    missing: [...evidence.missing],
+    worktrees: evidenceRows,
+    provider_sync: {
+      available: doc.commandmate_sync?.available === true,
+      attempted: doc.commandmate_sync?.attempted === true,
+    },
+    dispatch_sync: { ran: true, ok: sync.ok, detail: redact(sync.detail) },
+  };
+  return evidence;
+}
+
+// The evidence, in the report. No new field: `dispatch_schema_version` stays 1
+// because merge and uat refuse any other version, and what they read
+// (`worker_state`, `verification.outcome`) has not changed — so the preparation
+// travels the same way #91's sync attempt does, through `limitations` (ADR section 7).
+function recordPreparation(report, preparation) {
+  if (preparation === null) return;
+  report.limitations.push(...preparation.limitations);
+}
+
+// The structured half of the same evidence. Written only once the run has an
+// output directory, which means only when the preparation let the run proceed:
+// a refusal writes nothing at all (#90), so its evidence lives in the report.
+function writePreparationArtifact(outDir, preparation) {
+  if (preparation === null || preparation.artifact === null) return;
+  const dir = join(outDir, 'worktree-setup');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'prepared.json'), `${JSON.stringify(preparation.artifact, null, 2)}\n`, 'utf8');
+}
+
+// Is this pre-flight refusal one the preparation stage can address? Only when
+// every blocking reason is a missing worktree. `driftChecks` reports the FIRST
+// blocking failure, so a run blocked on `cli_available` / `repo_access` /
+// `base_resolvable` / `branch_matches` never reaches here — and must not, since
+// creating a worktree on a drifted world is a mutation that cannot help.
+function blockedOnWorktreesOnly(preflight) {
+  return preflight.blocked
+    && preflight.unresolved.length > 0
+    && preflight.reasons.length > 0
+    && preflight.reasons.every((reason) => reason.code === 'worktree_unresolved');
 }
 
 // =============================================================================
@@ -881,17 +1273,26 @@ let syncAttempt = null;
 // finds with the server. It is a SERVER-WIDE rescan, so one call answers for every
 // branch in the run: syncing per branch would re-scan the same registry N times
 // for the same answer. `fresh` says whether this caller is the one that ran it.
-function attemptSync(inputs) {
-  const fresh = syncAttempt === null;
+//
+// `force` is the one thing that buys a SECOND re-scan, and only the worktree
+// preparation stage sets it (Issue #93): once worktrees have been created, the
+// world the earlier sync answered about no longer exists, so "we already asked"
+// stops being a reason not to ask again. Anything the earlier attempt could not
+// resolve is dropped from the tally for the same reason — it was measured against
+// a registry that predates the new worktrees.
+function attemptSync(inputs, { force = false } = {}) {
+  const fresh = force || syncAttempt === null;
   if (fresh) {
+    const previous = syncAttempt;
     const result = runCm(inputs, ['sync']);
     syncAttempt = {
+      runs: (previous?.runs ?? 0) + 1,
       ok: result.ok,
       detail: result.ok
         ? 'the server re-scanned its repositories'
         : excerpt(result.stderr || result.stdout || 'commandmate sync failed'),
-      resolved: [],
-      unresolved: [],
+      resolved: previous?.resolved ?? [],
+      unresolved: force ? [] : (previous?.unresolved ?? []),
     };
   }
   return { fresh, ok: syncAttempt.ok, detail: syncAttempt.detail };
@@ -955,10 +1356,23 @@ function recordSyncAttempt(report) {
   if (syncAttempt === null) return;
   const resolved = syncAttempt.resolved.length > 0 ? syncAttempt.resolved.join(', ') : 'none';
   const unresolved = syncAttempt.unresolved.length > 0 ? syncAttempt.unresolved.join(', ') : 'none';
+  // More than one re-scan means the preparation stage forced a second one after
+  // creating worktrees (Issue #93). Stated, because "sync ran once per run" is a
+  // property the report has always asserted and this is the one exception to it.
+  if (syncAttempt.runs > 1) {
+    report.limitations.push({
+      code: 'worktree_sync_rescanned',
+      detail: `commandmate sync ran ${syncAttempt.runs} times in this run: once while resolving worktrees and once more after --prepare-worktrees created worktrees the earlier re-scan could not have seen`,
+    });
+  }
+  // "run once" is the ordinary case and stays worded that way; a preparation run
+  // says how many times instead, so this sentence never contradicts the
+  // `worktree_sync_rescanned` one above it.
+  const howOften = syncAttempt.runs > 1 ? `was run ${syncAttempt.runs} times` : 'was run once';
   report.limitations.push(syncAttempt.ok
     ? {
       code: 'worktree_sync_ran',
-      detail: `commandmate ls resolved no worktree for a planned branch, so commandmate sync was run once and ls was retried: ${syncAttempt.detail}; resolved after the re-scan: ${resolved}; still unresolved: ${unresolved}`,
+      detail: `commandmate ls resolved no worktree for a planned branch, so commandmate sync ${howOften} and ls was retried: ${syncAttempt.detail}; resolved after the re-scan: ${resolved}; still unresolved: ${unresolved}`,
     }
     : {
       code: 'worktree_sync_unavailable',
@@ -1591,7 +2005,7 @@ function emptyReport(inputs, plan, outDir) {
 // (Issue #90), or null when the run will refuse before any wave for a reason
 // that does not depend on the state of the world (an unanswered planner
 // question). The loop reuses it for wave 0 instead of probing the CLI twice.
-async function runDispatch(inputs, plan, outDir, preflight = null) {
+async function runDispatch(inputs, plan, outDir, preflight = null, preparation = null) {
   const promptsDir = join(outDir, 'prompts');
   mkdirSync(promptsDir, { recursive: true });
 
@@ -1600,6 +2014,12 @@ async function runDispatch(inputs, plan, outDir, preflight = null) {
   // stops before the first wave for an unrelated reason: it was really checked,
   // so it is really recorded.
   if (preflight) report.drift_checks.push(...preflight.checks);
+  // Same for the worktree preparation (Issue #93): the worktrees this run
+  // dispatches into may have been created minutes ago by another Skill, and what
+  // was created, from which base, with which baseline verdict, is evidence this
+  // report owns rather than points at.
+  recordPreparation(report, preparation);
+  writePreparationArtifact(outDir, preparation);
 
   // Loop-wide facts the completion check is derived from.
   let parallelismBounded = true;
@@ -2014,10 +2434,18 @@ function buildCompletionCheck({ planApproved, driftReconfirmed, parallelismBound
 // Summary
 // =============================================================================
 
+// The preparation stage's own vocabulary (Issue #93). The summary is rendered
+// from the REPORT rather than from the stage's return value so the two cannot
+// disagree: every sentence below is a code that is also in the JSON.
+const PREPARATION_LIMITATION_CODES = ['worktree_setup_ran', 'worktree_prepared', 'worktree_setup_partial', 'worktree_setup_skipped'];
+const PREPARATION_BLOCKING_CODES = ['worktree_setup_unavailable', 'worktree_setup_failed', 'worktree_profile_mismatch'];
+
 function renderSummary(report, contractMode = false, openQuestions = []) {
   const lines = [];
   const haltedOnQuestions = report.blocking_reasons.some((reason) => reason.code === 'open_questions');
   const worktreeUnresolved = report.blocking_reasons.some((reason) => reason.code === 'worktree_unresolved');
+  const preparationLimitations = report.limitations.filter((entry) => PREPARATION_LIMITATION_CODES.includes(entry.code));
+  const preparationBlocking = report.blocking_reasons.filter((entry) => PREPARATION_BLOCKING_CODES.includes(entry.code));
   lines.push('## 対象と結論');
   const verb = report.status === 'success' ? '完了' : report.status === 'partial' ? '途中停止' : '未実行';
   lines.push(`plan ${report.plan_run_id} を ${report.profile.repository} に dispatch: ${report.status}（${verb}, stop=${report.stop_reason}）。`);
@@ -2051,6 +2479,17 @@ function renderSummary(report, contractMode = false, openQuestions = []) {
     }
     lines.push('');
   }
+  // The preparation stage, when it was asked for. Placed before the waves
+  // because it happened before them, and because a run that stopped here never
+  // had a wave to report (Issue #93).
+  if (preparationLimitations.length > 0 || preparationBlocking.length > 0) {
+    lines.push('## worktree 準備');
+    lines.push('- `--prepare-worktrees` 指定。pre-flight で未解決だった Issue の worktree は `cmate-worktree-setup` に作らせる（dispatch 自身は worktree を作らない）。');
+    for (const entry of preparationBlocking) lines.push(`- 停止: ${entry.code} — ${entry.detail}`);
+    for (const entry of preparationLimitations) lines.push(`- ${entry.code}: ${entry.detail}`);
+    lines.push('');
+  }
+
   lines.push('## Wave');
   if (report.waves.length === 0) {
     lines.push('- dispatch 前に停止（wave なし）。');
@@ -2110,13 +2549,25 @@ function renderSummary(report, contractMode = false, openQuestions = []) {
       lines.push('- next: `commandmate sync` が使えない CLI だったため、server 未登録の worktree を登録し直せていない。worktree が disk に実在するなら CommandMate を 0.21.0 以上へ更新して再実行する（owner: operator）。');
     }
     if (report.stop_reason === 'verification_failed') lines.push('- next: verification 失敗の worktree を診断し、修正後に再 dispatch する（owner: operator）。');
+    // The conditional dependency, named (Issue #93). A stage the operator asked
+    // for and that could not run must say what to install and what to pass —
+    // "worktree を作成して再実行" is the answer to a different question.
+    if (report.blocking_reasons.some((reason) => reason.code === 'worktree_setup_unavailable')) {
+      lines.push('- next: `cmate-worktree-setup` を install し、`--worktree-setup <launcher>` でその呼び出し口を渡して再実行する。`--prepare-worktrees` を外せば従来どおり「worktree を自分で作ってから dispatch」になる（owner: operator）。');
+    }
+    if (report.blocking_reasons.some((reason) => reason.code === 'worktree_setup_failed')) {
+      lines.push('- next: `cmate-worktree-setup` provider の出力（blocking reason）を読んで原因を直し、同じコマンドで再実行する。**作成済みの worktree は削除していない**ので、再実行の対象は残りの Issue だけになる（owner: operator）。');
+    }
+    if (report.blocking_reasons.some((reason) => reason.code === 'worktree_profile_mismatch')) {
+      lines.push('- next: plan と `cmate-worktree-setup` に**同じ profile（同じ `branch_template`）**を渡す。branch が一致しないと `commandmate ls` の branch 一致では解決できない。既に作られた branch を使いたいなら、その branch を作る profile で plan を作り直す（owner: operator）。');
+    }
     // The worktree case names the fix (Issue #90). "drift を解消して再開" is true
     // but useless here: nothing about branch/base/permission moved — a worktree
     // was never created. The `--out` sentence matters because it is the whole
     // reason the pre-flight runs before the run directory: the operator can
     // re-run the SAME command, not invent a new output path.
     if (worktreeUnresolved) {
-      lines.push(`- next: cmate-worktree-setup で未解決 Issue の worktree を作成し（plan と同じ profile / 同じ branch_template）、${report.out_dir === null ? '同じコマンドで再実行する（`--out` は消費していない）' : '再 dispatch する'}（owner: operator）。`);
+      lines.push(`- next: cmate-worktree-setup で未解決 Issue の worktree を作成し（plan と同じ profile / 同じ branch_template）、${report.out_dir === null ? '同じコマンドで再実行する（`--out` は消費していない）' : '再 dispatch する'}（owner: operator）。1つのコマンドで通したいなら \`--prepare-worktrees --worktree-setup <launcher>\` を付けて再実行する。`);
     } else if (report.stop_reason === 'drift') {
       lines.push('- next: drift（branch/base/permission）を解消し、plan を再確認して再開する（owner: operator）。');
     }
@@ -2185,16 +2636,31 @@ async function run(argv) {
   // probe is skipped once the run has stopped). That gate still reports from
   // inside runDispatch, so its artifacts are written exactly as before.
   const refusedOnQuestions = !inputs.allowQuestions && collectOpenQuestions(plan).length > 0;
-  const preflight = refusedOnQuestions ? null : preflightDispatch(inputs, plan);
+  let preflight = refusedOnQuestions ? null : preflightDispatch(inputs, plan);
+
+  // The worktree preparation stage (Issue #93), between the refusal and the
+  // refusal's report. It runs ONLY when the operator asked for it and only when
+  // the pre-flight's whole complaint is missing worktrees; when it delivers, the
+  // pre-flight is re-run against the changed world rather than patched — the
+  // decision to dispatch is made by the same check either way, and anything the
+  // preparation did not fix falls through to #90's unchanged refusal.
+  let preparation = null;
+  if (preflight !== null && preflight.blocked && inputs.prepareWorktrees) {
+    preparation = blockedOnWorktreesOnly(preflight)
+      ? prepareWorktrees(inputs, plan, preflight.unresolved)
+      : skippedPreparation(preflight);
+    if (preparation.ok) preflight = preflightDispatch(inputs, plan);
+  }
+
   if (preflight !== null && preflight.blocked) {
-    const report = preflightFailureReport(inputs, plan, preflight);
+    const report = preflightFailureReport(inputs, plan, preflight, preparation);
     process.stderr.write(`nothing was dispatched; ${outDir} was not created, so the same command can be re-run once the drift is fixed\n`);
     return { exitCode: 1, stdout: `${JSON.stringify(report, null, 2)}\n` };
   }
 
   mkdirSync(outDir, { recursive: true });
 
-  const report = await runDispatch(inputs, plan, outDir, preflight);
+  const report = await runDispatch(inputs, plan, outDir, preflight, preparation);
   writeFileSync(join(outDir, 'dispatch-report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   writeFileSync(join(outDir, 'dispatch-summary.md'), `${report.summary_markdown}\n`, 'utf8');
 

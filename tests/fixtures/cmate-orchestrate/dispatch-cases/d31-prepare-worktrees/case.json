@@ -1,0 +1,41 @@
+{
+  "description": "Issue #93: #201 の worktree は存在しない（`commandmate ls` にも `git worktree list` にも無い）。`--prepare-worktrees` 指定時、pre-flight はそこで諦めず、`--worktree-setup` で渡された cmate-worktree-setup provider を **plan と同じ profile / base** で1回だけ呼び、作られた worktree を `commandmate sync` で登録し直してから pre-flight をやり直す。dispatch 自身は `git worktree add` を一切実行せず（provider だけが作る）、run は両 wave を完走する。証跡は黙って消えない: 何を作ったか（branch・base SHA・baseline 合否）が `worktree_prepared` limitation と `<out>/worktree-setup/prepared.json` と summary に残る。sync は「解決時に1回・準備後に強制1回」の計2回で、branch ごとには呼ばれない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration", "--prepare-worktrees", "--worktree-setup", "FAKE_CLI worktree-setup"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "sent": [201, 200],
+    "no_respond": true,
+    "cli_subcommand_counts": { "worktree-setup": 1, "sync": 2 },
+    "cli_args_include": {
+      "worktree-setup": ["--issues", "201", "--profile", "node-fake", "--base", "origin/develop"]
+    },
+    "worker_states": { "201": "completed", "200": "completed" },
+    "limitation_codes": ["worktree_setup_ran", "worktree_prepared", "worktree_sync_rescanned"],
+    "limitation_details_include": [
+      "#201: cmate-worktree-setup created branch feature/issue-201-",
+      "from base deadbeefdead",
+      "baseline pass (exit 0)"
+    ],
+    "absent_limitation_codes": ["worktree_setup_partial", "worktree_setup_skipped"],
+    "absent_blocking_codes": ["worktree_unresolved", "worker_failed", "worktree_setup_unavailable", "worktree_setup_failed", "worktree_profile_mismatch"],
+    "prepared_artifact": {
+      "requested": [201],
+      "prepared": [201],
+      "missing": [],
+      "worktrees": [{ "issue": 201, "created": true, "reused": false, "baseline_outcome": "pass", "baseline_exit_code": 0 }]
+    },
+    "summary_includes": ["## worktree 準備", "worktree_prepared", "cmate-worktree-setup"],
+    "out_dir_created": true,
+    "completion_check_passed": true
+  }
+}

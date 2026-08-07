@@ -1,0 +1,30 @@
+{
+  "description": "Issue #93 の「黙って劣化しない」: `--prepare-worktrees` を指定したのに cmate-worktree-setup の呼び出し口（`--worktree-setup`）が無い。ここで **#90 の fail-fast へ黙って戻らない**（指定した準備段が実行されなかった事実を隠さない）し、`limitations` に落として続行もしない（準備できなければ dispatch 対象が存在しないので、続行に意味が無い。`cmate-acceptance-test` の `acceptance_not_run` が「機械ゲートだけで裁定できる」から続行できるのとは条件が違う）。停止は `blocking_reasons` の `worktree_setup_unavailable` で、message は install するものと渡すものを名指しする。provider は1度も呼ばれず、`--out` も消費しない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration", "--prepare-worktrees"],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "waves_count": 0,
+    "never_sent": [200, 201],
+    "no_respond": true,
+    "cli_subcommand_counts": { "worktree-setup": 0 },
+    "blocking_codes": ["worktree_setup_unavailable", "worktree_unresolved"],
+    "absent_blocking_codes": ["worker_failed", "drift_worktrees_present"],
+    "absent_limitation_codes": ["worktree_prepared", "worktree_setup_ran", "worktree_setup_partial"],
+    "blocking_details_include": [
+      "--worktree-setup <launcher>",
+      "worktree-setup.result.v1",
+      "#201: no registered worktree matches branch"
+    ],
+    "summary_includes": ["## worktree 準備", "worktree_setup_unavailable", "cmate-worktree-setup"],
+    "out_dir_created": false,
+    "completion_check_passed": false
+  }
+}

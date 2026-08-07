@@ -1,0 +1,28 @@
+{
+  "description": "Issue #93 の後方互換: d31 とまったく同じ世界（#201 の worktree は無く、provider を呼べば作れる）で、`--prepare-worktrees` を **付けない**。既定は off なので挙動は #90 のままである: pre-flight で 1人も dispatch せずに `worktree_unresolved` で停止し、`--out` も作らない。**provider は1度も呼ばれない**（副作用のある段を、頼まれてもいないのに実行しない）。report にも summary にも準備段の痕跡は残らない。既定を on にするかは本 Issue の scope 外であり、この case がその境界を固定する。`--out` を消費していないので、worktree を用意した後の同じコマンドの再実行はそのまま success まで通る。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration"],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "drift",
+    "human_required": false,
+    "waves_count": 0,
+    "never_sent": [200, 201],
+    "no_respond": true,
+    "cli_subcommand_counts": { "worktree-setup": 0, "sync": 1 },
+    "blocking_codes": ["worktree_unresolved"],
+    "absent_blocking_codes": ["worker_failed", "drift_worktrees_present", "worktree_setup_unavailable", "worktree_setup_failed", "worktree_profile_mismatch"],
+    "absent_limitation_codes": ["worktree_prepared", "worktree_setup_ran", "worktree_setup_partial", "worktree_setup_skipped", "worktree_sync_rescanned"],
+    "blocking_details_include": ["#201: no registered worktree matches branch"],
+    "summary_includes": ["worktree_unresolved", "cmate-worktree-setup"],
+    "summary_excludes": ["## worktree 準備"],
+    "out_dir_created": false,
+    "completion_check_passed": false,
+    "rerun_when_registered": { "exit": 0, "status": "success" }
+  }
+}
