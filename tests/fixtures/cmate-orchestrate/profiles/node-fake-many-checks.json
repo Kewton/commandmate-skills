@@ -1,0 +1,30 @@
+{
+  "id": "node-fake-many-checks",
+  "repository": "Kewton/CommandMate",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": [
+    "cat cmate-verify-ok",
+    "echo baseline-check-02",
+    "echo baseline-check-03",
+    "echo baseline-check-04",
+    "echo baseline-check-05",
+    "echo baseline-check-06",
+    "echo baseline-check-07",
+    "echo baseline-check-08",
+    "echo baseline-check-09",
+    "echo baseline-check-10",
+    "echo baseline-check-11",
+    "echo baseline-check-12",
+    "echo baseline-check-13",
+    "echo baseline-check-14",
+    "echo baseline-check-15",
+    "echo baseline-check-16",
+    "echo baseline-check-17",
+    "echo baseline-check-18",
+    "echo baseline-check-19",
+    "echo baseline-check-20"
+  ],
+  "verified": true
+}

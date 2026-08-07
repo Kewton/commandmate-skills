@@ -1,0 +1,47 @@
+{
+  "description": "Issue #97 の対比が本物であることの証明: #201 の branch は宣言 scope（`src/base.ts`）の外側の file も変更している。PR 本文は out-of-scope 件数を 1 と数えて違反 path を名指しし、対比表でも `docs/notes.md` を Declared=no と表示する（`- Out-of-scope changes: **0**` は定数ではない）。同じ run の #200 は scope 内のみなので 0 のままで、証拠が Issue ごとに測られていることも示す。merge-report にも limitation として同じ事実が残る。",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--approve"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "create": "ok" },
+      "201": { "create": "ok" }
+    },
+    "diff": {
+      "201": { "files": ["src/base.ts", "docs/notes.md"] }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "pr_created", "200": "pr_created" },
+    "completion_passed": true,
+    "limitation_codes": ["branch_changed_outside_declared_scope"],
+    "pr_bodies_contain": {
+      "201": [
+        "- Out-of-scope changes: **1** — changed but NOT declared: `docs/notes.md`.",
+        "- Diff size: **2 file(s) changed, +30 / -3 line(s)**.",
+        "| `docs/notes.md` | **no** | yes |",
+        "| `src/base.ts` | yes | yes |"
+      ],
+      "200": [
+        "- Out-of-scope changes: **0** — every one of the 1 changed file(s) is inside the declared scope.",
+        "| `src/store.ts` | yes | yes |"
+      ]
+    },
+    "pr_bodies_absent": {
+      "200": ["docs/notes.md"]
+    }
+  }
+}

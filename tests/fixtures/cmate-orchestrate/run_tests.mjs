@@ -557,7 +557,10 @@ function generatePlan(spec, runsDir) {
     if (raw[i] === '--profile' || raw[i] === '--profile-json') { i += 1; continue; }
     args.push(raw[i]);
   }
-  args.push('--profile-json', NODE_FAKE_PROFILE, '--issue-json', issuesPath, '--runs-dir', runsDir);
+  // `plan.profile_json` names a different fixture profile when a case needs one
+  // (e.g. a baseline long enough that the PR body has to cut its check list).
+  const profile = spec.plan.profile_json ? join(PROFILES_DIR, spec.plan.profile_json) : NODE_FAKE_PROFILE;
+  args.push('--profile-json', profile, '--issue-json', issuesPath, '--runs-dir', runsDir);
   runRunner(args); // exit code is irrelevant here; a partial plan is still a plan
   // The run id is pinned to "plan" by every dispatch case's orchestrate_args.
   return join(runsDir, 'plan', 'plan.json');
@@ -1009,7 +1012,12 @@ function generateDispatchReport(planPath, scenarioObject, work) {
   return join(outDir, 'dispatch-report.json');
 }
 
-function runMerge(planPath, dispatchPath, outDir, phaseFlag, extraArgs, env) {
+// The merge runner is spawned in the integration directory the dispatch harness
+// created, exactly as an operator runs it: the plan's worktree paths are relative
+// (`../<repo>-issue-<n>-…`), and since Issue #97 the runner cwd's into them to
+// read each branch's real change set. Spawning it anywhere else would resolve
+// those paths outside the temp world and make every case's evidence unavailable.
+function runMerge(planPath, dispatchPath, outDir, phaseFlag, extraArgs, env, cwd) {
   const args = [
     MERGE_RUNNER,
     '--plan', planPath,
@@ -1020,11 +1028,39 @@ function runMerge(planPath, dispatchPath, outDir, phaseFlag, extraArgs, env) {
     ...extraArgs,
   ];
   try {
-    const stdout = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env });
+    const stdout = execFileSync('node', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env, cwd });
     return { exit: 0, stdout };
   } catch (error) {
     return { exit: error.status ?? 1, stdout: error.stdout ? error.stdout.toString() : '' };
   }
+}
+
+// The merge scenario the fake `git diff` answers from (Issue #97). Every plan
+// issue defaults to "changed exactly its declared scope" — the ordinary
+// scope-clean branch the contract's `requireScopeClean` gate already passed — so
+// only a case that cares about the diff declares one, and a case that declares a
+// diff for #201 does not silently blank #200's.
+function withDiffDefaults(scenario, plan) {
+  const diff = {};
+  for (const issue of plan.issues) diff[issue.number] = { files: [...(issue.suspected_files ?? [])] };
+  return { ...scenario, diff: { ...diff, ...(scenario.diff ?? {}) } };
+}
+
+// A merge case may rewrite the generated dispatch report before merge reads it.
+// The merge runner does not produce that file — it is an INPUT, and one this
+// repository's dispatch runner is not the only possible producer of — so the
+// shapes it must not misread (a verdict recorded with `ran: false`, an unredacted
+// secret in a check line) can only be exercised by handing it such a report.
+// The patch is applied per issue to the worker's `verification` object.
+function patchDispatchReport(dispatchPath, patch) {
+  const report = JSON.parse(readFileSync(dispatchPath, 'utf8'));
+  for (const wave of report.waves ?? []) {
+    for (const worker of wave.workers ?? []) {
+      const entry = patch[worker.issue] ?? patch[String(worker.issue)];
+      if (entry) worker.verification = { ...worker.verification, ...entry };
+    }
+  }
+  writeFileSync(dispatchPath, `${JSON.stringify(report, null, 2)}\n`);
 }
 
 function countCalls(cliLog, sub, action) {
@@ -1044,14 +1080,15 @@ function runMergeCase(caseId) {
   const work = mkdtempSync(join(tmpdir(), 'cmate-merge-'));
   const dispatchPath = generateDispatchReport(planPath, spec.dispatch_scenario ?? DEFAULT_DISPATCH_SCENARIO, work);
   if (!check(existsSync(dispatchPath), `dispatch-report.json was not generated at ${dispatchPath}`)) return;
+  if (spec.dispatch_report_patch) patchDispatchReport(dispatchPath, spec.dispatch_report_patch);
 
   const mergeOut = join(work, 'merge'); // must not pre-exist; merge creates it
   const logPath = join(work, 'gh.log');
-  const scenarioPath = writeScenario(work, 'merge-scenario.json', spec.merge_scenario ?? {});
+  const scenarioPath = writeScenario(work, 'merge-scenario.json', withDiffDefaults(spec.merge_scenario ?? {}, readPlan(planPath)));
   const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath };
 
   const phaseFlag = spec.phase === 'merge-prs' ? '--merge-prs' : '--create-prs';
-  const { exit, stdout } = runMerge(planPath, dispatchPath, mergeOut, phaseFlag, spec.merge_args ?? [], env);
+  const { exit, stdout } = runMerge(planPath, dispatchPath, mergeOut, phaseFlag, spec.merge_args ?? [], env, join(work, 'integration'));
 
   let report;
   try {
@@ -1118,16 +1155,38 @@ function runMergeCase(caseId) {
 
   // The PR body artifact is the operator-facing half of the same finding.
   if (expect.pr_body_contains || expect.pr_body_absent) {
-    const bodyPath = join(mergeOut, 'pr-bodies', `issue-${report.eligible_issues[0]}.md`);
-    if (check(existsSync(bodyPath), `PR body ${bodyPath} was not written`)) {
-      const body = readFileSync(bodyPath, 'utf8');
-      for (const needle of expect.pr_body_contains ?? []) {
-        check(body.includes(needle), `PR body does not mention "${needle}"`);
-      }
-      for (const needle of expect.pr_body_absent ?? []) {
-        check(!body.includes(needle), `PR body should not mention "${needle}"`);
-      }
+    assertPrBody(mergeOut, report.eligible_issues[0], expect.pr_body_contains, expect.pr_body_absent);
+  }
+  // The evidence the body must carry is per issue (Issue #97): one case can hold
+  // a scope-clean issue beside one whose branch reached outside its scope, and a
+  // whole-run assertion could not tell those two bodies apart.
+  for (const [num, needles] of Object.entries(expect.pr_bodies_contain ?? {})) {
+    assertPrBody(mergeOut, Number(num), needles, []);
+  }
+  for (const [num, needles] of Object.entries(expect.pr_bodies_absent ?? {})) {
+    assertPrBody(mergeOut, Number(num), [], needles);
+  }
+  // gh refuses a body over 65536 characters, so a body that grew past it would
+  // fail the create for real. Asserted on every case that writes one.
+  if (expect.pr_body_contains || expect.pr_bodies_contain) {
+    for (const number of report.eligible_issues) {
+      const bodyPath = join(mergeOut, 'pr-bodies', `issue-${number}.md`);
+      if (!existsSync(bodyPath)) continue;
+      const size = readFileSync(bodyPath, 'utf8').length;
+      check(size <= 65536, `PR body for #${number} is ${size} characters, over gh's 65536 limit`);
     }
+  }
+}
+
+function assertPrBody(mergeOut, number, contains, absent) {
+  const bodyPath = join(mergeOut, 'pr-bodies', `issue-${number}.md`);
+  if (!check(existsSync(bodyPath), `PR body ${bodyPath} was not written`)) return;
+  const body = readFileSync(bodyPath, 'utf8');
+  for (const needle of contains ?? []) {
+    check(body.includes(needle), `PR body for #${number} does not mention "${needle}"`);
+  }
+  for (const needle of absent ?? []) {
+    check(!body.includes(needle), `PR body for #${number} should not mention "${needle}"`);
   }
 }
 
