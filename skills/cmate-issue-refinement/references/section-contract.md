@@ -107,6 +107,12 @@ Acceptance criteria (already required for every type) satisfy the other blocking
 question as long as they sit as list items under a heading from the vocabulary in
 the table above. A criteria table is not extracted; a criteria list is.
 
+An `acceptance-gates` block is **not** a criteria list and does not satisfy this
+question: the planner strips the block out of the body before it reads any prose,
+so a section that carries only the block reads as having no criteria at all. The
+block goes beside the list, never instead of it
+([`acceptance-gates.md`](./acceptance-gates.md)).
+
 ## Type resolution
 
 `unknown` is a legitimate outcome. When the type is `unknown`, apply the common

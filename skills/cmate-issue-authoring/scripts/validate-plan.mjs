@@ -1,7 +1,9 @@
 // cmate-issue-authoring — split-plan validator (Node stdlib only, Node >= 18).
 //
 //   node scripts/validate-plan.mjs <plan.json> [--schema <path>] [--json]
+//   node scripts/validate-plan.mjs <plan.json> --checkout <path>
 //   node scripts/validate-plan.mjs <plan.json> --derive-id
+//   node scripts/validate-plan.mjs --render-acceptance-gates <id,id> --checkout <path>
 //
 // Two layers, because one of them is not enough:
 //
@@ -10,9 +12,10 @@
 //     stop being enforced.
 //  2. The rules a JSON Schema cannot state: keys are unique, dependencies form a
 //     DAG, a dry-run plan records no mutating command, a suspected duplicate is
-//     blocked by an open question, and — the one that decides whether this Skill
-//     did its job — every rendered body survives the cmate-orchestrate planner
-//     with zero blocking questions.
+//     blocked by an open question, an `acceptance-gates` block names only gate
+//     ids that exist in a `.commandmate/verify.yaml` this run actually read, and
+//     — the one that decides whether this Skill did its job — every rendered body
+//     survives the cmate-orchestrate planner with zero blocking questions.
 //
 // Exit status: 0 the plan is valid, 1 the plan is invalid, 2 the run itself
 // failed (bad usage, unreadable file). A validator that cannot distinguish "your
@@ -20,7 +23,7 @@
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -33,11 +36,19 @@ const EXIT_ERROR = 2;
 const USAGE = `cmate-issue-authoring split-plan validator
 
   node scripts/validate-plan.mjs <plan.json> [options]
+  node scripts/validate-plan.mjs --render-acceptance-gates <id,id> --checkout <path>
 
-  --schema <path>   Schema to validate against (default: the bundled v1 schema).
-  --derive-id       Print the plan_id the plan's own inputs imply, then exit.
-  --json            Emit findings as JSON instead of one line each.
-  --help            Show this help.
+  --schema <path>     Schema to validate against (default: the bundled v1 schema).
+  --checkout <path>   Root of the target repository's checkout. Required before a
+                      body may declare an \`acceptance-gates\` block: the gate ids
+                      are resolved against <path>/.commandmate/verify.yaml, which
+                      is the file dispatch resolves them against.
+  --render-acceptance-gates <id,id>
+                      Print the canonical block for those gate ids and exit. Needs
+                      --checkout, and every id must exist there.
+  --derive-id         Print the plan_id the plan's own inputs imply, then exit.
+  --json              Emit findings as JSON instead of one line each.
+  --help              Show this help.
 
 Exit: 0 valid, 1 invalid, 2 usage or I/O error.`;
 
@@ -182,6 +193,324 @@ function validateAgainstSchema(value, schema, root, pointer, out) {
       }
     }
   }
+}
+
+// =============================================================================
+// Acceptance gates mirror
+// =============================================================================
+//
+// The `acceptance-gates` block is the one machine-readable thing an Issue body
+// carries: cmate-orchestrate's planner parses it and its dispatch runner turns
+// it into the execution contract's verdict. The notation's 正本 is
+// `skills/cmate-orchestrate/references/acceptance-gates-notation.md`; this
+// package is a MIRROR of it and never extends it
+// ([acceptance-gates.md](../references/acceptance-gates.md)).
+//
+// Two readers are mirrored here, verbatim, comments included:
+//
+//  1. the planner's block reader — so a body can be told, before the Issue
+//     exists, whether the block it carries will be read or will stop the run;
+//  2. dispatch's `.commandmate/verify.yaml` reader — so a `require:` id can be
+//     checked against the file dispatch will check it against, instead of being
+//     guessed. An id that does not exist there stops the run BEFORE `send`
+//     (`acceptance_gate_id_unknown`), which is why this package refuses to write
+//     one it has not seen.
+//
+// As with the planner mirror below, no version number is written here: the
+// invariant is that this mirror changes in the same commit as the code it
+// copies, and the repository's conformance test
+// (`tests/fixtures/cmate-issue-authoring/acceptance-gates-conformance.mjs`)
+// holds the two together — constants byte for byte, function bodies modulo the
+// documented renames, and behaviour over a corpus.
+
+// ---- the block as the planner reads it (verbatim mirror) --------------------
+
+const ACCEPTANCE_GATES_INFO = 'acceptance-gates';
+const ACCEPTANCE_GATES_VERSION = 1;
+
+// The opening fence, counted on its own so "two blocks" is detected even when the
+// second one is malformed. `m` makes `^`/`$` line anchors; the info string must be
+// the whole word, so ```acceptance-gates-v2 is not this block.
+const ACCEPTANCE_GATES_OPEN_RE = /^```acceptance-gates[ \t]*$/gm;
+// A complete block. Non-greedy to the first closing fence at a line start.
+const ACCEPTANCE_GATES_BLOCK_RE = /^```acceptance-gates[ \t]*\r?\n([\s\S]*?)^```[ \t]*(?:\r?\n|$)/gm;
+
+// Mirrors CommandMate's GATE_ID_PATTERN (lib/verification/verify-config) and
+// dispatch.mjs GATE_ID_RE. An id this rejects is one `send --contract` would
+// reject, so accepting it here would only move the failure later.
+const ACCEPTANCE_GATE_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+// Same bound as the contract's verify.gates list (dispatch.mjs MAX_GATE_IDS).
+const MAX_ACCEPTANCE_GATE_IDS = 32;
+
+// Removing the block before the prose extractors run is NOT tidiness — it is a
+// correctness fix measured on the current regexes (ADR §10 item 3). The fence
+// pattern in `extractTestExpectations` is /```[a-zA-Z]*\n([\s\S]*?)```/g, which
+// cannot match `acceptance-gates` as an INFO STRING (the hyphen is outside
+// [a-zA-Z]) — but it happily matches this block's CLOSING fence as an opening
+// one, pairs it with the next block's opening fence, and thereby swallows the
+// following ```bash block whole. Measured: a body with one acceptance-gates
+// block followed by a bash block dropped 2 of its 3 test_expectations. Stripping
+// restores the extraction byte for byte.
+//
+// The same strip is applied to every prose extractor, not just that one: the
+// block is a machine contract, and reading `  - verify-selftest` inside it as an
+// acceptance-criteria bullet or a path candidate is the Issue #54 category error
+// (position and explicit marking decide intent) pointed the other way.
+function plannerStripAcceptanceGateBlocks(text) {
+  return String(text).replace(ACCEPTANCE_GATES_BLOCK_RE, '');
+}
+
+function plannerCountAcceptanceGateBlocks(text) {
+  return [...String(text).matchAll(ACCEPTANCE_GATES_OPEN_RE)].length;
+}
+
+// The YAML subset the block is written in — the same one `.commandmate/verify.yaml`
+// uses: 2-space indent, single-line scalars, comments only at column 0, no
+// anchors, no flow collections, no multi-line strings. Deliberately NOT
+// best-effort: a block this cannot read becomes an open question, never a guess
+// (ADR §2.4). Returns {ok, value} or {ok:false, code, reason}.
+function plannerParseAcceptanceGatesBlock(raw) {
+  const bad = (code, reason) => ({ ok: false, code, reason });
+  const lines = String(raw).split(/\r?\n/);
+  const value = { version: ACCEPTANCE_GATES_VERSION, require: [] };
+  const seenKeys = new Set();
+  let sawVersion = false;
+  let section = null; // null | 'require'
+
+  for (const line of lines) {
+    if (line.includes('\t')) return bad('acceptance_gate_block_invalid', 'a tab character is not allowed; the block is indented with 2 spaces');
+    if (line.trim() === '') continue;
+    // 行頭 `#` のみコメント: a `#` anywhere else is part of the value, so a
+    // trailing "# note" is a syntax error rather than something silently dropped.
+    if (line.startsWith('#')) continue;
+    if (line === '---' || line === '...') return bad('acceptance_gate_block_invalid', 'YAML document markers are not part of the subset');
+
+    const indent = line.length - line.trimStart().length;
+    const content = line.slice(indent);
+
+    if (indent === 0) {
+      section = null;
+      const match = /^([a-zA-Z][a-zA-Z0-9_]*):[ \t]*(.*)$/.exec(content);
+      if (match === null) return bad('acceptance_gate_block_invalid', `"${content}" is not a "key: value" line at the top level`);
+      const [, key, rest] = match;
+      if (seenKeys.has(key)) return bad('acceptance_gate_block_invalid', `duplicate key "${key}"`);
+      seenKeys.add(key);
+      if (!sawVersion && key !== 'version') {
+        return bad('acceptance_gate_block_invalid', '"version: 1" must be the first key of the block');
+      }
+      if (key === 'version') {
+        sawVersion = true;
+        if (rest !== String(ACCEPTANCE_GATES_VERSION)) {
+          // Not rounded forward: an unknown version means the block was written
+          // against a notation this runner does not implement, and reading it as
+          // v1 would enforce something other than what the author wrote.
+          return bad('acceptance_gate_block_invalid', `version must be exactly ${ACCEPTANCE_GATES_VERSION} (got "${rest}")`);
+        }
+        continue;
+      }
+      if (key === 'require') {
+        if (rest !== '') return bad('acceptance_gate_block_invalid', '"require:" takes a block sequence on the following lines, not an inline value');
+        section = 'require';
+        continue;
+      }
+      if (key === 'gates') {
+        // Valid notation, not yet enforceable. `gates:` declares NEW commands,
+        // which means writing them into the worktree's verify.yaml — ADR §3.5
+        // stage 2, whose preconditions are unresolved (measured: an uncommitted
+        // .commandmate/verify.yaml DOES count towards work-evidence, so a
+        // worktree that only received a gate definition reports uncommitted=1 and
+        // exit 21 stops meaning "nothing was done"). Accepting the key and then
+        // not enforcing it would be the silent-drop this whole feature exists to
+        // prevent, so it stops the run instead.
+        return bad('acceptance_gate_block_unsupported', '"gates:" (new command gates) is stage 2 of the ADR and is not enforced by this release; use "require:" with gate ids that already exist in .commandmate/verify.yaml, or keep the condition out of the block and state it for UAT');
+      }
+      return bad('acceptance_gate_block_invalid', `unknown key "${key}" (the v1 block accepts only version, require, gates)`);
+    }
+
+    if (indent !== 2) return bad('acceptance_gate_block_invalid', `unexpected indentation of ${indent} space(s); list items are indented by exactly 2`);
+    if (section !== 'require') return bad('acceptance_gate_block_invalid', `"${content}" is indented but no list is open above it`);
+    const item = /^-[ \t]+(.*)$/.exec(content);
+    if (item === null) return bad('acceptance_gate_block_invalid', `"${content}" is not a "- <gate-id>" list item`);
+    const id = item[1];
+    if (!ACCEPTANCE_GATE_ID_RE.test(id)) {
+      return bad('acceptance_gate_block_invalid', `"${id}" is not a valid gate id (${ACCEPTANCE_GATE_ID_RE.source}); quoting, inline comments and flow syntax are not part of the subset`);
+    }
+    if (value.require.includes(id)) return bad('acceptance_gate_block_invalid', `duplicate gate id "${id}"`);
+    value.require.push(id);
+    if (value.require.length > MAX_ACCEPTANCE_GATE_IDS) {
+      return bad('acceptance_gate_block_invalid', `at most ${MAX_ACCEPTANCE_GATE_IDS} gate ids may be required`);
+    }
+  }
+
+  if (!sawVersion) return bad('acceptance_gate_block_invalid', 'the block declares no "version: 1"');
+  // An empty block is the same contract error as `verify.gates: []`: it declares
+  // a requirement set and then names nothing, which reads as "no requirement"
+  // exactly where the author meant to state one.
+  if (value.require.length === 0) return bad('acceptance_gate_block_invalid', 'the block requires no gate; remove it, or name at least one gate id under "require:"');
+  return { ok: true, value };
+}
+
+// The whole block reading for one issue body. Returns
+// {gates, error} — `gates` is the plan field (null when there is no block),
+// `error` is the open question (null when there is nothing to say). The two are
+// never both set: "no block" and "broken block" are different states and the
+// second must never be rounded to the first (ADR §2.4).
+function plannerReadAcceptanceGates(body) {
+  const text = String(body ?? '');
+  const opens = plannerCountAcceptanceGateBlocks(text);
+  if (opens === 0) return { gates: null, error: null };
+  const invalid = (code, reason) => ({
+    gates: null,
+    error: {
+      code,
+      text: `The \`${ACCEPTANCE_GATES_INFO}\` block could not be read: ${reason}. `
+        + 'It is NOT treated as absent: fix the block or remove it, then re-plan. '
+        + 'The planner never guesses acceptance gates from prose.',
+    },
+  });
+  if (opens > 1) {
+    return invalid('acceptance_gate_block_invalid', `the body carries ${opens} blocks and exactly one is allowed (they are not merged, and the first does not win)`);
+  }
+  const blocks = [...text.matchAll(ACCEPTANCE_GATES_BLOCK_RE)];
+  if (blocks.length !== 1) return invalid('acceptance_gate_block_invalid', 'the block is never closed by a ``` fence at the start of a line');
+  const parsed = plannerParseAcceptanceGatesBlock(blocks[0][1]);
+  if (!parsed.ok) return invalid(parsed.code, parsed.reason);
+  return { gates: parsed.value, error: null };
+}
+
+// ---- the block this package emits -------------------------------------------
+//
+// The one rendering this package produces. It exists so the notation is emitted
+// by code rather than recalled from a document: an author asks for the bytes and
+// gets exactly the shape the 正本 shows, with no room for a trailing comment, a
+// three-space indent or a tab to be introduced by hand. Everything the mirrored
+// reader above accepts is legal in an Issue body; only this shape is legal in a
+// body THIS package wrote, which is what `acceptance_gates_block_is_canonical`
+// enforces and what the conformance test pins against the 正本's own example.
+function renderAcceptanceGatesBlock(ids) {
+  const lines = ['```' + ACCEPTANCE_GATES_INFO, `version: ${ACCEPTANCE_GATES_VERSION}`, 'require:'];
+  for (const id of ids) lines.push(`  - ${id}`);
+  lines.push('```');
+  return `${lines.join('\n')}\n`;
+}
+
+// ---- verify.yaml as dispatch reads it (verbatim mirror) ---------------------
+//
+// Renamed on the way in, and only that: `readWorktreeGateIds` is
+// `checkoutGateIds` here because this package holds a read-only checkout rather
+// than a dispatched worktree, and the planner's `ACCEPTANCE_GATE_ID_RE` is the
+// same pattern dispatch calls `GATE_ID_RE`. The conformance test normalises
+// exactly those renames and requires the rest to be byte-identical.
+
+const VERIFY_CONFIG_RELATIVE = '.commandmate/verify.yaml';
+
+// The ids a contract's `verify.gates` may name WITHOUT them appearing in
+// verify.yaml. Transcribed from CommandMate's own contract-vs-config check,
+// which builds its known set as {work-evidence, scope} ∪ declared gate ids.
+// `env-clean` is a built-in gate but is deliberately NOT in that set, so a
+// `require: [env-clean]` is refused here exactly as `send --contract` would.
+const CONTRACT_BUILT_IN_GATE_IDS = ['work-evidence', 'scope'];
+
+// Gate ids declared in a worktree's `.commandmate/verify.yaml`.
+//
+// The YAML subset is the one cmate-verify's verify-run.sh awk parser accepts —
+// 2-space indent, single-line scalars, comments on their own line, no tabs, no
+// anchors, no flow collections, no block scalars — mirrored here so both readers
+// agree on what the file says. It is read-only and extracts ids only.
+//
+// FAIL-CLOSED: anything the subset cannot read returns an error rather than a
+// partial id set. An unreadable config would otherwise make a required gate look
+// absent (dispatch refused for the wrong reason) or, worse, make the id set look
+// complete when it is not. The file is read ONLY for issues that require a gate,
+// so a repository whose verify.yaml this cannot parse keeps its previous
+// behaviour everywhere else.
+function checkoutGateIds(checkoutPath) {
+  const path = join(checkoutPath, VERIFY_CONFIG_RELATIVE);
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error.code === 'ENOENT'
+        ? `${VERIFY_CONFIG_RELATIVE} does not exist in the checkout, so no gate id can be resolved`
+        : `${VERIFY_CONFIG_RELATIVE} could not be read (${error.code ?? 'error'})`,
+    };
+  }
+  const bad = (reason) => ({ ok: false, reason: `${VERIFY_CONFIG_RELATIVE}: ${reason}` });
+  const ids = [];
+  let section = '';
+  let sawVersion = false;
+  let gateOpen = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/\r$/, '');
+    if (line.includes('\t')) return bad('tab characters are not allowed');
+    if (/^[ ]*$/.test(line)) continue;
+    if (/^[ ]*#/.test(line)) continue;
+    const indent = line.length - line.replace(/^ +/, '').length;
+    if (indent % 2 !== 0) return bad('indentation must be a multiple of 2 spaces');
+    const body = line.slice(indent);
+
+    if (indent === 0) {
+      gateOpen = false;
+      const colon = body.indexOf(':');
+      if (colon <= 0) return bad(`expected "key: value" at the top level, got "${body.slice(0, 40)}"`);
+      const key = body.slice(0, colon).trim();
+      const value = body.slice(colon + 1).trim();
+      if (key === 'version') {
+        sawVersion = true;
+        if (unquoteYaml(value) !== '1') return bad(`version must be 1 (got "${value}")`);
+        section = '';
+      } else if (key === 'gates') {
+        if (value !== '') return bad('gates: must be followed by an indented list');
+        section = 'gates';
+      } else if (key === 'options') {
+        if (value !== '') return bad('options: must be followed by indented keys');
+        section = 'options';
+      } else {
+        return bad(`unknown top-level key "${key}"`);
+      }
+      continue;
+    }
+    // An indented line with nothing open above it is a shape this reader does not
+    // understand, and the sibling awk parser rejects it too. Skipping it would be
+    // the one way a gate id could go unseen, which is the failure mode fail-closed
+    // exists to prevent.
+    if (section === '') return bad('indented line outside of gates: / options:');
+    if (section !== 'gates') continue; // options and their nested keys carry no id
+    if (indent === 2) {
+      if (!body.startsWith('- ')) return bad('gate list items must start with "- "');
+      gateOpen = true;
+      const first = body.slice(2).trim();
+      const colon = first.indexOf(':');
+      if (colon <= 0) return bad('expected "key: value" inside a gate');
+      if (first.slice(0, colon).trim() === 'id') ids.push(unquoteYaml(first.slice(colon + 1).trim()));
+      continue;
+    }
+    if (indent === 4) {
+      if (!gateOpen) return bad('gate field outside of a list item');
+      const colon = body.indexOf(':');
+      if (colon <= 0) return bad('expected "key: value" inside a gate');
+      if (body.slice(0, colon).trim() === 'id') ids.push(unquoteYaml(body.slice(colon + 1).trim()));
+      continue;
+    }
+    return bad(`unexpected indentation (${indent} spaces)`);
+  }
+  if (!sawVersion) return bad('missing top-level "version: 1"');
+  if (ids.length === 0) return bad('no gate is declared');
+  for (const id of ids) {
+    if (!ACCEPTANCE_GATE_ID_RE.test(id)) return bad(`declared gate id "${id}" does not match ${ACCEPTANCE_GATE_ID_RE.source}`);
+  }
+  return { ok: true, ids };
+}
+
+// The single- or double-quoted scalar forms the subset allows. A value with no
+// quotes is returned unchanged.
+function unquoteYaml(value) {
+  if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+    return value.slice(1, -1);
+  }
+  return value;
 }
 
 // =============================================================================
@@ -513,7 +842,14 @@ const DEPENDENCY_PLACEHOLDER_RE = /\{\{issue:([a-z0-9-]+)\}\}/g;
 
 function checkBodies(plan, keys, out) {
   plan.issues.forEach((issue, index) => {
-    const body = String(issue.body ?? '');
+    // Every check below reads the body the PLANNER reads, which is the body with
+    // the acceptance-gates block removed (`analyzeIssue` strips it before every
+    // prose extractor). Reading the raw body here would make this mirror disagree
+    // with the planner exactly where it matters: a block sitting under the 受入条件
+    // heading would make `  - orchestrate-fixtures` look like an acceptance
+    // criterion, and an Issue with no prose criteria at all would be reported
+    // ready while the planner asks its blocking question.
+    const body = plannerStripAcceptanceGateBlocks(String(issue.body ?? ''));
     const pointer = `/issues/${index}`;
 
     if (firstNonEmptyLine(body) !== issue.objective) {
@@ -582,11 +918,158 @@ function checkBodies(plan, keys, out) {
 }
 
 // =============================================================================
+// Acceptance gates — the rules (references/acceptance-gates.md)
+// =============================================================================
+//
+// The discipline these implement is one sentence: **only a condition this run
+// could actually verify becomes a gate.** Everything else stays prose, which is
+// not a lesser outcome — an Issue with no block behaves exactly as it did before
+// this notation existed (notation §7), while an Issue with a guessed gate id
+// stops the run at dispatch, before `send`, with `acceptance_gate_id_unknown`.
+// A helpful guess is strictly worse than saying nothing.
+
+//: Raised when the run cannot decide, as opposed to deciding "invalid". It exits
+//: 2, which is the whole reason the three exit codes exist.
+class RunError extends Error {}
+
+function checkAcceptanceGates(plan, options, out) {
+  // Read once, and only if some issue actually declares a block — the same
+  // laziness dispatch has, so a repository whose verify.yaml this cannot parse
+  // keeps validating exactly as before for plans that declare no gate.
+  let known = null;
+  const knownGateIds = () => {
+    if (known === null) {
+      const result = checkoutGateIds(options.checkout);
+      if (!result.ok) {
+        throw new RunError(
+          `${result.reason}. An issue in this plan declares acceptance gates, and they can only be ` +
+            'checked against the file dispatch checks them against; this run could not look, which is ' +
+            'not the same as the plan being wrong',
+        );
+      }
+      known = new Set([...CONTRACT_BUILT_IN_GATE_IDS, ...result.ids]);
+    }
+    return known;
+  };
+
+  plan.issues.forEach((issue, index) => {
+    const body = String(issue.body ?? '');
+    const pointer = `/issues/${index}/body`;
+    const read = plannerReadAcceptanceGates(body);
+
+    if (read.error !== null) {
+      if (read.error.code === 'acceptance_gate_block_unsupported') {
+        out.add(
+          'acceptance_gates_no_new_commands',
+          pointer,
+          'the block declares `gates:` (new command gates), which the planner refuses with ' +
+            'acceptance_gate_block_unsupported: it is stage 2 of the ADR and no release enforces it yet. ' +
+            'Name an existing gate id under `require:`, or keep the condition out of the block and state ' +
+            'it as prose for UAT',
+        );
+        return;
+      }
+      out.add(
+        'acceptance_gates_block_parses',
+        pointer,
+        `the planner would not read this block and would raise ${read.error.code}: ${read.error.text}`,
+      );
+      return;
+    }
+    // No block is the ordinary case and is never a finding: the notation is
+    // opt-in, and a condition nobody could measure belongs in prose.
+    if (read.gates === null) return;
+
+    const match = [...body.matchAll(ACCEPTANCE_GATES_BLOCK_RE)][0];
+    const written = match[0].endsWith('\n') ? match[0] : `${match[0]}\n`;
+    const canonical = renderAcceptanceGatesBlock(read.gates.require);
+    if (written !== canonical) {
+      out.add(
+        'acceptance_gates_block_is_canonical',
+        pointer,
+        'the block is readable but is not the shape this package emits; render it with ' +
+          `\`--render-acceptance-gates ${read.gates.require.join(',')}\` and paste the result verbatim`,
+      );
+    }
+
+    if (options.checkout === null) {
+      out.add(
+        'acceptance_gates_verify_yaml_read',
+        pointer,
+        'the body declares acceptance gates but this run was given no --checkout, so no ' +
+          `${VERIFY_CONFIG_RELATIVE} was read and nothing here has seen the ids exist. Re-run with ` +
+          '--checkout <path to the target repository>, or remove the block: an id that does not exist ' +
+          'stops the dispatch of this issue before `send`',
+      );
+      return;
+    }
+
+    const ids = knownGateIds();
+    read.gates.require.forEach((id) => {
+      if (ids.has(id)) return;
+      out.add(
+        'acceptance_gates_id_exists',
+        pointer,
+        `\`require: ${id}\` names a gate that ${options.checkout}/${VERIFY_CONFIG_RELATIVE} does not ` +
+          `declare (resolvable ids are ${[...ids].sort().join(', ')}). dispatch refuses this issue with ` +
+          'acceptance_gate_id_unknown before it sends anything, so the block would stop the run rather ' +
+          'than strengthen it',
+      );
+    });
+  });
+}
+
+//: The gate ids of a `--render-acceptance-gates` request, refused rather than
+//: repaired. The emitter is the last place a guessed id could enter a body, so it
+//: is the place that has to be unable to invent one.
+function acceptanceGateIdsFromCli(spec, checkout) {
+  const ids = String(spec).split(',').map((entry) => entry.trim()).filter((entry) => entry !== '');
+  if (ids.length === 0) throw new Error('--render-acceptance-gates needs at least one gate id');
+  if (ids.length > MAX_ACCEPTANCE_GATE_IDS) {
+    throw new Error(`--render-acceptance-gates accepts at most ${MAX_ACCEPTANCE_GATE_IDS} gate ids`);
+  }
+  const seen = new Set();
+  for (const id of ids) {
+    if (!ACCEPTANCE_GATE_ID_RE.test(id)) {
+      throw new Error(`"${id}" is not a valid gate id (${ACCEPTANCE_GATE_ID_RE.source})`);
+    }
+    if (seen.has(id)) throw new Error(`duplicate gate id "${id}"`);
+    seen.add(id);
+  }
+  if (checkout === null) {
+    throw new Error(
+      '--render-acceptance-gates needs --checkout: a block may only name gate ids that were read from ' +
+        `the target repository's ${VERIFY_CONFIG_RELATIVE}`,
+    );
+  }
+  const result = checkoutGateIds(checkout);
+  if (!result.ok) throw new Error(result.reason);
+  const declared = new Set([...CONTRACT_BUILT_IN_GATE_IDS, ...result.ids]);
+  for (const id of ids) {
+    if (!declared.has(id)) {
+      throw new Error(
+        `"${id}" is not declared in ${checkout}/${VERIFY_CONFIG_RELATIVE} ` +
+          `(declared: ${[...declared].sort().join(', ')})`,
+      );
+    }
+  }
+  return ids;
+}
+
+// =============================================================================
 // Entry point
 // =============================================================================
 
 function parseArgs(argv) {
-  const options = { plan: null, schema: DEFAULT_SCHEMA, json: false, deriveId: false, help: false };
+  const options = {
+    plan: null,
+    schema: DEFAULT_SCHEMA,
+    checkout: null,
+    render: null,
+    json: false,
+    deriveId: false,
+    help: false,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--help' || arg === '-h') {
@@ -599,6 +1082,14 @@ function parseArgs(argv) {
       index += 1;
       if (index >= argv.length) throw new Error('--schema needs a path');
       options.schema = argv[index];
+    } else if (arg === '--checkout') {
+      index += 1;
+      if (index >= argv.length) throw new Error('--checkout needs a path');
+      options.checkout = argv[index];
+    } else if (arg === '--render-acceptance-gates') {
+      index += 1;
+      if (index >= argv.length) throw new Error('--render-acceptance-gates needs a gate id list');
+      options.render = argv[index];
     } else if (arg.startsWith('-')) {
       throw new Error(`unknown option: ${arg}`);
     } else if (options.plan === null) {
@@ -607,7 +1098,12 @@ function parseArgs(argv) {
       throw new Error('exactly one plan file is accepted');
     }
   }
-  if (!options.help && options.plan === null) throw new Error('a plan file is required');
+  if (options.render !== null && options.plan !== null) {
+    throw new Error('--render-acceptance-gates prints a block; it does not validate a plan');
+  }
+  if (!options.help && options.render === null && options.plan === null) {
+    throw new Error('a plan file is required');
+  }
   return options;
 }
 
@@ -635,6 +1131,18 @@ function main(argv) {
   }
   if (options.help) {
     process.stdout.write(`${USAGE}\n`);
+    return EXIT_VALID;
+  }
+
+  if (options.render !== null) {
+    let ids;
+    try {
+      ids = acceptanceGateIdsFromCli(options.render, options.checkout);
+    } catch (error) {
+      process.stderr.write(`error: ${error.message}\n`);
+      return EXIT_ERROR;
+    }
+    process.stdout.write(renderAcceptanceGatesBlock(ids));
     return EXIT_VALID;
   }
 
@@ -677,6 +1185,13 @@ function main(argv) {
     checkDuplicateGuard(plan, keys, findings);
     checkEvidence(plan, findings);
     checkBodies(plan, keys, findings);
+    try {
+      checkAcceptanceGates(plan, options, findings);
+    } catch (error) {
+      if (!(error instanceof RunError)) throw error;
+      process.stderr.write(`error: ${error.message}\n`);
+      return EXIT_ERROR;
+    }
   }
 
   if (options.json) {

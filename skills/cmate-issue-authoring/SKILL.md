@@ -119,6 +119,19 @@ checkout の file に当てて確認し、確認した file と行を evidence �
 ある。型を外すと planner が blocking question を立てる。依存は `{{issue:<key>}}` の
 placeholder で書く（まだ番号が無いため。Phase 2 が登録時に `#<番号>` へ置換する）。
 
+受入条件のうち**機械で測れると確信できるもの**があり、それを測るゲートが対象リポジトリの
+`.commandmate/verify.yaml` に**実在することを読んで確かめた**ときに限り、`acceptance-gates`
+ブロックを本文に置く。ブロックは手で書かず renderer に出させる。
+
+```bash
+node scripts/validate-plan.mjs --render-acceptance-gates <id,id> --checkout <checkout>
+```
+
+**測れるか判断できない条件は散文のまま残す。** `verify.yaml` を読めないならブロックを
+出さない。推測した id を書くと dispatch が `send` 前にその Issue を止める。規律・
+出してはならない形・rule の一覧は
+[acceptance-gates](./references/acceptance-gates.md) が正本である。
+
 ### Step 6 — 計画を書き出して機械検証する
 
 `.commandmate/issue-authoring/<plan_id>/plan.json` に
@@ -126,9 +139,13 @@ placeholder で書く（まだ番号が無いため。Phase 2 が登録時に `#
 `plan_id` は自分で決めた値ではなく導出値である。
 
 ```bash
-node scripts/validate-plan.mjs .commandmate/issue-authoring/<plan_id>/plan.json
+node scripts/validate-plan.mjs .commandmate/issue-authoring/<plan_id>/plan.json --checkout <checkout>
 node scripts/validate-plan.mjs <plan.json> --derive-id
 ```
+
+`--checkout` は `acceptance-gates` ブロックを持つ Issue があるときに必須である（ブロックの
+id を `<checkout>/.commandmate/verify.yaml` に突き合わせる）。ブロックが無ければ渡しても
+渡さなくても結果は同じである。
 
 exit 0 でなければ**計画は未完成である**。findings を直してから人間に見せる。検証を通して
 いない計画を承認に回さない。rule の一覧と exit code の意味は
@@ -168,8 +185,8 @@ Phase 2 は receipt（`registration.json`）と、作成された Issue 番号�
 
 ## 7. completion check
 
-報告の前に、completion check の 8 件を 1 件ずつ pass / fail で自己申告する。
-8 件の内容と、各項目が何を要求しているかの正本は
+報告の前に、completion check の 9 件を 1 件ずつ pass / fail で自己申告する。
+9 件の内容と、各項目が何を要求しているかの正本は
 [`references/plan-contract.md`](./references/plan-contract.md) 第 8 節である。
 fail が 1 件でもあれば、その run は success ではない。
 
@@ -184,6 +201,7 @@ fail が 1 件でもあれば、その run は success ではない。
 | File | 何を決めているか |
 |---|---|
 | [`references/issue-body-contract.md`](./references/issue-body-contract.md) | Issue 本文の型と、その根拠になった planner の実測 |
+| [`references/acceptance-gates.md`](./references/acceptance-gates.md) | 受入ゲートのブロックを出す条件、出してはならない形、推測禁止の規律 |
 | [`references/plan-contract.md`](./references/plan-contract.md) | 計画 artifact の読み方、validator の rule と exit code、completion check、語彙対応 |
 | [`references/duplicate-guard.md`](./references/duplicate-guard.md) | 重複検査の手順と、判定を書く形 |
 | [`references/register-contract.md`](./references/register-contract.md) | Phase 2 の承認・順序・相互リンク・部分失敗・二重登録ガード |

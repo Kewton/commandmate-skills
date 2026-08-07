@@ -150,7 +150,21 @@ scope gate に弾かれて構造的に解決不能だった）。
 `{{issue:<key>}}` は Phase 2 が `#<番号>` に置換するので、置換後にこの条件を満たす。
 置換前の本文を planner に渡してはならない（番号が無いので依存が失われる）。
 
-### 2.5 検証コマンド
+### 2.5 受入ゲートのブロック
+
+本文に `acceptance-gates` ブロックが 1 つあると、planner は**それを本文から取り除いてから**
+上の抽出器をすべて走らせる（`analyzeIssue`）。したがって
+
+- ブロックの位置は objective・受入条件・path の抽出結果を変えない。
+- **ブロックの中身は受入条件として読まれない。** `  - validate` は箇条書きに見えるが、
+  剥がされた後に読まれるので拾われない。受入条件の見出しの下にブロックだけを置き、
+  散文の箇条書きを書かない本文は「Acceptance criteria are unclear」で止まる。
+- ブロックの中に書いた path も候補にならない（gate id は path ではないので通常は無関係）。
+
+validator の写しも同じ順で動く。ブロックを出す条件と規律は
+[acceptance-gates.md](./acceptance-gates.md) が正本である。
+
+### 2.6 検証コマンド
 
 backtick か code fence の中にあり、先頭語が `make` `bash` `sh` `pytest` `go` `node`
 `python3` `python` か、対象 profile の baseline command の先頭語であるものが
@@ -164,7 +178,8 @@ backtick か code fence の中にあり、先頭語が `make` `bash` `sh` `pytes
 
 この型を守っているかは、計画 artifact を validator に通せば分かる。
 `planner_ready` と `body_states_objective` と `dependency_link_in_body` の 3 rule が
-上の条件をそのまま実装している（planner の抽出コードの写しである）。
+上の条件をそのまま実装している（planner の抽出コードの写しである）。ブロックを持つ
+本文については `acceptance_gates_*` の 5 rule が加わる（`--checkout` が要る）。
 
 planner 側の抽出が変われば、この文書と validator の写しも**同じ commit で**変える。
 一致はリポジトリの CI が検証する。計画から本文を描画して実物の planner に食わせ

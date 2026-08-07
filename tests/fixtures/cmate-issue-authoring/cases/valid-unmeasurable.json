@@ -1,0 +1,53 @@
+{
+  "plan_schema_version": 1,
+  "skill_id": "cmate-issue-authoring",
+  "skill_version": "0.7.0",
+  "plan_id": "split-1e7ae10b3225",
+  "generated_mode": "dry-run",
+  "repository": "Kewton/commandmate-skills",
+  "source": {
+    "kind": "text",
+    "ref": "Feature description supplied inline by the caller",
+    "digest": "b1a0f9e8d7c6b5a49382716054e3d2c1b0a9f8e7d63c7a1f0e9d8b6a5c4e3d2b"
+  },
+  "issues": [
+    {
+      "key": "error-copy-readability",
+      "title": "fix(cmate-verify): ゲート失敗時のメッセージを読み手に分かる文にする",
+      "objective": "ゲートが落ちたときの出力を、初見の実装者が次の行動を決められる文言にする。",
+      "acceptance_criteria": [
+        "失敗したゲート id と、次に何をすればよいかが 1 画面で読める",
+        "`bash tests/fixtures/cmate-verify/run-tests.sh` が exit 0 で終わる"
+      ],
+      "target_files": ["skills/cmate-verify/scripts/verify-run.sh"],
+      "reference_files": [],
+      "test_expectations": ["bash tests/fixtures/cmate-verify/run-tests.sh"],
+      "depends_on": [],
+      "labels": ["enhancement"],
+      "size": "s",
+      "parallel_safe": "unknown",
+      "evidence": [
+        {
+          "claim": "現在の失敗出力はゲート id と exit code しか出さない",
+          "kind": "file",
+          "ref": "skills/cmate-verify/scripts/verify-run.sh:1"
+        }
+      ],
+      "body": "ゲートが落ちたときの出力を、初見の実装者が次の行動を決められる文言にする。\n\n## 対象ファイル\n\n- `skills/cmate-verify/scripts/verify-run.sh`\n\n## 受入条件\n\n- [ ] 失敗したゲート id と、次に何をすればよいかが 1 画面で読める\n- [ ] `bash tests/fixtures/cmate-verify/run-tests.sh` が exit 0 で終わる\n\n**受入ゲートのブロックは置かない。** 2 件目は既存ゲートが測るが、この Issue が完成したかを\n決めるのは 1 件目であり、「読み手に分かる文言か」を判定するゲートはこのリポジトリに無い。\n測れない条件をブロックに書くと、緑が「読める文言になった」の証拠に見えてしまう。\n人間が読む条件として散文に残し、UAT で確認する。\n\n## 根拠\n\n- skills/cmate-verify/scripts/verify-run.sh:1 — 失敗出力はゲート id と exit code だけである\n"
+    }
+  ],
+  "duplicate_suspicions": [],
+  "open_questions": [],
+  "commands": [
+    {
+      "purpose": "対象リポジトリが宣言しているゲート id を読む",
+      "command": "cat .commandmate/verify.yaml",
+      "mutating": false,
+      "executed": true
+    }
+  ],
+  "warnings": [],
+  "notes": [
+    "verify.yaml は読めており id は分かっているが、この Issue の完了判定に使えるゲートが無いのでブロックを出していない"
+  ]
+}

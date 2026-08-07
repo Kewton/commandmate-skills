@@ -53,7 +53,46 @@ planner の抽出が変われば、ここが落ちる。落ちたら
 `skills/cmate-issue-authoring/references/issue-body-contract.md` と validator の
 `planner_ready` rule を実測に合わせて直すこと（**この suite を緩めない**）。
 
-### 4. planner mirror が乖離していないこと
+### 4. 受入ゲート記法の生産側が正本と一致していること（Issue #124）
+
+`acceptance-gates` ブロックには実装が 3 つある。planner がブロックを読み、dispatch が
+`require:` の id を `.commandmate/verify.yaml` に突き合わせ、**この package が両方を書く側**
+である。生産側は後から入ったので、放っておけば必ず乖離する。
+
+`acceptance-gates-conformance.mjs` が 4 層で固定する。
+
+1. **定数が byte 一致**（`ACCEPTANCE_GATES_*` / `ACCEPTANCE_GATE_ID_RE` /
+   `VERIFY_CONFIG_RELATIVE` / `CONTRACT_BUILT_IN_GATE_IDS`）。名前が違う対
+   （dispatch の `GATE_ID_RE` ↔ mirror の `ACCEPTANCE_GATE_ID_RE`）も突き合わせる。
+2. **関数本体が byte 一致**。comment 行を落とし、file 冒頭に列挙した rename
+   （`planner` prefix、`checkoutGateIds` ↔ `readWorktreeGateIds` 等）だけを正規化して比較する。
+   rename は対ごとにスコープしてある — ブロック側に dispatch の rename を当てると、
+   本物の乖離を書き換えで隠してしまうため。
+3. **corpus で挙動が一致**。正常系と、拒否されるべき 19 形（`gates:` / tab / 3 スペース /
+   行末コメント / 未知 version / 2 個 / 33 件 …）を、**返る code まで**突き合わせる。
+   `acceptance_gate_block_invalid`（直せ）と `acceptance_gate_block_unsupported`
+   （この release では走らない）は著者の行き先が違うので、同じ「拒否」に丸めない。
+4. **出す形が正本の例と byte 一致**。正本 `acceptance-gates-notation.md` の例をその id から
+   renderer で描き直して byte 比較し、生産側 2 package が同梱するブロックも同じ形であること・
+   `gates:` を含まないことを確かめる。各 package に例が 1 つも無ければ **fail** である
+   （比較対象が消えたことを「一致」と読ませない）。
+
+suite 側では、これに加えて次を測っている。
+
+- `cases/valid-acceptance-gates.json` — 実在するゲートを `require:` した計画が通ること。
+  本文のブロックは **renderer の出力そのもの**であることを機械で確認している。
+- `cases/valid-unmeasurable.json` — 測れない受入条件をブロックにしない計画が通ること。
+- `--checkout` **無し**で同じ計画を検証すると `acceptance_gates_verify_yaml_read` で落ちること
+  （「見ていない」を「見て問題なかった」に化けさせない）。`verify.yaml` が無い checkout を
+  渡したときは **exit 2**（＝計画が悪いのではなく検証できていない）。
+- renderer が、checkout に無い id・不正な id・重複・`--checkout` 無しを **exit 2 で拒む**こと。
+- ブロックだけを受入条件の見出しの下に置いた本文が `planner_ready` で落ちること。
+  planner はブロックを剥がしてから散文を読むので、剥がし忘れた mirror はここで赤くなる。
+- `assert-planner-gates.mjs` が、**実物の planner** に食わせた結果の `acceptance_gates` を
+  本文のブロックと突き合わせる（id も順序も）。期待値は第 3 の素朴な reader が本文から
+  取り出す — 実装に自分を確認させても証拠にならないため。
+
+### 5. planner mirror が乖離していないこと
 
 `scripts/validate-plan.mjs` の抽出は cmate-orchestrate planner の**逐語の写し**である。
 写しである以上、放っておけば必ず乖離する。`mirror-conformance.mjs` が 2 層で確かめる。
@@ -76,10 +115,11 @@ planner の抽出が変われば、ここが落ちる。落ちたら
 注入**する。そこの差分がミラーの乖離を隠したり、逆に無いものを作ったりしないためである
 （`SYSTEM_ROOTS` は各 file 自身のものを読むので、この集合の乖離は捕まる）。
 
-単体でも実行できる。
+どちらの conformance テストも単体で実行できる。
 
 ```bash
 node tests/fixtures/cmate-issue-authoring/mirror-conformance.mjs
+node tests/fixtures/cmate-issue-authoring/acceptance-gates-conformance.mjs
 ```
 
 ## file
@@ -89,7 +129,11 @@ node tests/fixtures/cmate-issue-authoring/mirror-conformance.mjs
 | `run_tests.sh` | suite 本体 |
 | `cases/valid-full.json` | 依存・重複疑い・open question を含む適合計画 |
 | `cases/valid-minimal.json` | 最小の適合計画（Issue 1 件） |
+| `cases/valid-acceptance-gates.json` | 実在するゲートを `require:` した適合計画 |
+| `cases/valid-unmeasurable.json` | 測れない受入条件をブロックにしなかった適合計画 |
 | `mutate.mjs` | JSON Pointer で 1 箇所だけ変異させる |
 | `to-issue-json.mjs` | 計画 → cmate-orchestrate の `--issue-json` fixture |
 | `assert-planner-clean.mjs` | execution plan に対する assertion |
+| `assert-planner-gates.mjs` | 本文のブロックと planner が読んだ `acceptance_gates` の突き合わせ |
 | `mirror-conformance.mjs` | planner mirror の定数一致と挙動一致（単体実行可） |
+| `acceptance-gates-conformance.mjs` | 受入ゲート記法の一致（定数・関数本体・corpus・正本の例。単体実行可） |
