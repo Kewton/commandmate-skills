@@ -1,0 +1,10 @@
+{
+  "_comment": "#200 の worktree が直された世界。#201 は既に pass 済みなので resume は触れない。",
+  "cli_available": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "201": { "state": "completed", "verify": "pass" },
+    "200": { "state": "completed", "verify": "pass" }
+  }
+}

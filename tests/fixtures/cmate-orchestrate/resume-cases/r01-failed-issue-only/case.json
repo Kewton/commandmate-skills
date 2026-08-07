@@ -1,0 +1,83 @@
+{
+  "description": "Issue #98 の中心ケース: 3 Issue 中 #102 だけが verification 不合格で attempt 1 が partial 停止する。同じ --out を --resume で渡した attempt 2 は、#100 / #101 を **1件も再 dispatch せず**（send が飛ばない）その verification 記録を新 report に転記し、#102 だけを再実行して success で終わる。resume 後の report を merge runner に渡すと引き継ぎ2件＋再実行 pass 分の3件が eligible になる。attempt 1 の artifact は 1 byte も書き換わっていない。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": ["100", "101", "102", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "attempts": [
+    {
+      "scenario": "attempt-1.json",
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 7,
+        "status": "partial",
+        "stop_reason": "verification_failed",
+        "waves_count": 1,
+        "wave_dispatched": [[100, 101, 102]],
+        "sent": [100, 101, 102],
+        "worker_states": { "100": "completed", "101": "completed", "102": "completed" },
+        "verification_outcomes": { "100": "pass", "101": "pass", "102": "fail" },
+        "absent_limitation_codes": ["resume_attempt", "resume_no_work"],
+        "summary_excludes": ["## resume"],
+        "summary_includes": ["--resume <この run の dispatch ディレクトリ>"],
+        "report_file": "dispatch-report.json",
+        "merge_eligible": [100, 101],
+        "history_length": 1,
+        "history": {
+          "attempt": 1,
+          "kind": "initial",
+          "resumed_from": null,
+          "report": "dispatch-report.json",
+          "carried_over": [],
+          "dispatched": [100, 101, 102]
+        }
+      }
+    },
+    {
+      "scenario": "attempt-2.json",
+      "resume": true,
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 0,
+        "status": "success",
+        "stop_reason": "completed",
+        "completion_check_passed": true,
+        "waves_count": 1,
+        "wave_dispatched": [[102]],
+        "sent": [102],
+        "never_sent": [100, 101],
+        "worker_states": { "100": "completed", "101": "completed", "102": "completed" },
+        "verification_outcomes": { "100": "pass", "101": "pass", "102": "pass" },
+        "verification_checks_include": { "100": ["cmate-verify-ok"] },
+        "worker_notes_include": {
+          "100": ["carried over from attempt 1", "did NOT re-dispatch #100"],
+          "101": ["carried over from attempt 1"]
+        },
+        "limitation_codes": ["resume_attempt"],
+        "absent_limitation_codes": ["resume_no_work", "verification_unrecorded"],
+        "limitation_details_include": [
+          "resumed_from=dispatch-report.json (attempt 1)",
+          "Carried over without re-dispatching (worker completed and verification passed there): #100, #101",
+          "Re-dispatched here: #102"
+        ],
+        "summary_includes": [
+          "## resume",
+          "attempt 2（resumed_from: `dispatch-report.json` / attempt 1）",
+          "引き継ぎ（再 dispatch しない）: #100, #101",
+          "再実行対象: #102"
+        ],
+        "report_file": "resume-attempt-2/dispatch-report.json",
+        "merge_eligible": [100, 101, 102],
+        "history_length": 2,
+        "history": {
+          "attempt": 2,
+          "kind": "resume",
+          "resumed_from": { "attempt": 1, "report": "dispatch-report.json" },
+          "report": "resume-attempt-2/dispatch-report.json",
+          "carried_over": [100, 101],
+          "dispatched": [102]
+        }
+      }
+    }
+  ]
+}

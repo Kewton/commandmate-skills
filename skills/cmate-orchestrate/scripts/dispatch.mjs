@@ -55,7 +55,7 @@
 
 import { parseArgs, promisify } from 'node:util';
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -156,6 +156,22 @@ const DEFAULT_POLL_LIMIT = 120;
 // Reaching the cap with no commit is an honest `failed`, never a false completion.
 const DEFAULT_MAX_TURNS = 8;
 
+// The artifacts a dispatch attempt writes, and where a resume appends the next
+// attempt's copies (Issue #98). Attempt 1 keeps the run directory's root, so
+// every existing reader — merge, uat, the status matrix — finds exactly what it
+// found before; attempt N writes the SAME file names one directory down, under
+// `resume-attempt-<N>/`, and never touches an earlier attempt's bytes.
+const DISPATCH_REPORT_FILE = 'dispatch-report.json';
+const DISPATCH_SUMMARY_FILE = 'dispatch-summary.md';
+const RESUME_ATTEMPT_PREFIX = 'resume-attempt-';
+// The append-only ledger of attempts, at the run directory's root. It is the
+// machine-readable half of the attempt history: which report each attempt wrote,
+// which report it resumed from, what it carried over and what it re-dispatched.
+const ATTEMPT_HISTORY_FILE = 'attempt-history.jsonl';
+// A bound on the attempt search, so a directory somebody filled with
+// `resume-attempt-*` names cannot turn a resume into an unbounded scan.
+const MAX_ATTEMPTS = 99;
+
 // =============================================================================
 // Redaction (SkillError, the pattern list and redact/redactionsList are shared
 // with the merge and uat runners in lib.mjs)
@@ -183,7 +199,19 @@ Usage:
 Options:
   --plan <path>          Approved plan.json from the plan-core runner (required).
   --out <dir>            Where dispatch artifacts are written
-                         (default: <plan-dir>/dispatch).
+                         (default: <plan-dir>/dispatch). Mutually exclusive with
+                         --resume, which appends into the prior run's directory.
+  --resume <dir>         Resume a partially failed dispatch: <dir> is the --out
+                         directory of the run being resumed. The newest report in
+                         it is read, every issue whose worker completed AND whose
+                         verification passed is carried over instead of being
+                         re-dispatched (its verdict is transcribed, not re-run),
+                         and only the rest is dispatched. The wave barrier is
+                         recomputed, so an issue whose dependency already passed
+                         is dispatched without waiting. Artifacts are appended
+                         under <dir>/${RESUME_ATTEMPT_PREFIX}<n>/; nothing is
+                         overwritten. Refused when the report was produced for a
+                         different plan.
   --cli <launcher>       The CommandMate launcher to drive: an executable plus
                          fixed leading arguments, split on whitespace and run
                          WITHOUT a shell — "commandmate" (default),
@@ -241,6 +269,7 @@ function parseCli(argv) {
       options: {
         plan: { type: 'string' },
         out: { type: 'string' },
+        resume: { type: 'string' },
         cli: { type: 'string' },
         git: { type: 'string' },
         gh: { type: 'string' },
@@ -356,9 +385,19 @@ function resolveInputs(parsed) {
   // string for messages; every spawn goes through cliArgv.
   const cliArgv = resolveLauncher(values.cli);
   const prepareWorktrees = Boolean(values['prepare-worktrees']);
+  // `--out` claims a NEW directory (and refuses an existing one); `--resume`
+  // appends into an EXISTING one. Accepting both would mean guessing which of the
+  // two the operator meant, and the wrong guess either overwrites the prior
+  // attempt or writes this attempt somewhere nobody will look for it (Issue #98).
+  if (values.resume !== undefined && values.out !== undefined) {
+    throw new SkillError('invalid_input',
+      '--out and --resume are mutually exclusive: a resume appends into the directory it resumes ' +
+        `(<resume-dir>/${RESUME_ATTEMPT_PREFIX}<n>/), so there is no second output path to choose`, 3);
+  }
   return {
     planPath: values.plan,
     outDir: values.out ?? null,
+    resumeDir: values.resume ?? null,
     cliArgv,
     cli: cliArgv.join(' '),
     git: values.git ?? 'git',
@@ -446,6 +485,287 @@ function validatePlan(plan) {
     throw new SkillError('plan_invalid', 'plan.issues is missing', 3);
   }
   return plan;
+}
+
+// =============================================================================
+// Resume — re-run only what did not finish (Issue #98)
+// =============================================================================
+//
+// A partial failure inside a wave is the normal case in parallel development:
+// one issue of three fails while the other two are finished AND judged. Before
+// this the only way forward was to re-plan and dispatch all three again, which
+// re-runs a worker over a deliverable a gate already passed and throws away the
+// verdict that passed it — the exact opposite of what the verification gate is
+// for. `--resume <prior-out-dir>` splits the plan in two instead:
+//
+//   carried      `worker_state: completed` AND `verification.outcome: pass`.
+//                NOT re-dispatched. Its verification record is TRANSCRIBED into
+//                the new report, because merge and uat read exactly those two
+//                fields and nothing else — a carried issue therefore stays
+//                eligible for delivery without anything being re-judged here.
+//   re-dispatch  everything else: failed, timed out, prompted, never dispatched,
+//                a verdict that was not a pass, or no record at all.
+//
+// The wave barrier is RECOMPUTED, not replayed. A wave whose issues were all
+// carried dispatches nothing and advances immediately, so an issue whose
+// dependency already passed is dispatched at once instead of behind a worker
+// that has nothing left to do. Everything else is the ordinary dispatch path,
+// unchanged and deliberately so: the drift re-check before every mutating wave,
+// the verification gate, the stop conditions, the exit codes, and Auto-Yes
+// staying off. A resume is not a weaker run — it is the same run over a smaller
+// issue set.
+//
+// Artifacts are APPENDED, never overwritten — the shape the UAT fix loop already
+// uses for its attempt history. references/dispatch-contract.md section 8 defines
+// the layout and states which report merge/uat/status must read.
+
+function resumeAttemptDir(outDir, attempt) {
+  return join(outDir, `${RESUME_ATTEMPT_PREFIX}${attempt}`);
+}
+
+// This attempt's report, as a path relative to the run directory. Relative on
+// purpose: it goes into a report field a human reads, and an absolute host path
+// there is redacted to `[REDACTED-PATH]`, which names nothing.
+function attemptReportRelative(attempt) {
+  return attempt === 1 ? DISPATCH_REPORT_FILE : `${RESUME_ATTEMPT_PREFIX}${attempt}/${DISPATCH_REPORT_FILE}`;
+}
+
+function attemptSummaryRelative(attempt) {
+  return attempt === 1 ? DISPATCH_SUMMARY_FILE : `${RESUME_ATTEMPT_PREFIX}${attempt}/${DISPATCH_SUMMARY_FILE}`;
+}
+
+// The attempt this resume becomes: the first number whose directory does not
+// exist yet. Derived from the DIRECTORY rather than from the history ledger, so a
+// missing, truncated or hand-edited ledger can never make a run overwrite an
+// artifact — the one thing the append-only rule exists to prevent.
+function nextAttemptNumber(outDir) {
+  for (let attempt = 2; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    if (!existsSync(resumeAttemptDir(outDir, attempt))) return attempt;
+  }
+  // `out_exists` rather than a resume-specific code: the finding is the one that
+  // code already names — every output location this run could claim is taken.
+  throw new SkillError('out_exists',
+    `${outDir} already holds ${MAX_ATTEMPTS - 1} resume attempts; refusing to append another`, 4);
+}
+
+// The report a resume reads: the NEWEST attempt in the directory. Each attempt
+// re-states what it carried over, so the newest report alone is the whole
+// picture — which is the same rule merge, uat and the status matrix follow.
+function priorReport(outDir) {
+  if (!existsSync(outDir)) {
+    throw new SkillError('load_error',
+      `--resume ${outDir} does not exist; it must be the --out directory of the dispatch being resumed`, 6);
+  }
+  let newest = { path: join(outDir, DISPATCH_REPORT_FILE), attempt: 1 };
+  for (let attempt = 2; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    const candidate = join(resumeAttemptDir(outDir, attempt), DISPATCH_REPORT_FILE);
+    if (!existsSync(candidate)) break;
+    newest = { path: candidate, attempt };
+  }
+  if (!existsSync(newest.path)) {
+    throw new SkillError('load_error',
+      `--resume ${outDir} holds no ${DISPATCH_REPORT_FILE}; there is no dispatch run there to resume`, 6);
+  }
+  return newest;
+}
+
+// Conformance of the report being resumed, limited to what the carry-over
+// depends on. The dispatch report is this runner's OWN artifact, but on the way
+// back in it is an INPUT — possibly hand-edited, possibly from another
+// producer — and a resume turns it into claims about what is finished. So it is
+// checked rather than trusted, and a shape that cannot be checked is refused
+// rather than half-read. Returns null when usable, or the reason it is not.
+function resumeNonConformance(doc) {
+  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) return 'it is not a JSON object';
+  if (doc.dispatch_schema_version !== DISPATCH_SCHEMA_VERSION) {
+    return `its dispatch_schema_version is ${JSON.stringify(doc.dispatch_schema_version)}; this runner understands ${DISPATCH_SCHEMA_VERSION}`;
+  }
+  if (doc.skill_id !== SKILL_ID) return `its skill_id is ${JSON.stringify(doc.skill_id)}, not ${SKILL_ID}`;
+  if (typeof doc.plan_run_id !== 'string' || doc.plan_run_id.length === 0) return 'it carries no plan_run_id';
+  if (doc.profile === null || typeof doc.profile !== 'object' || Array.isArray(doc.profile)) return 'it carries no profile object';
+  if (typeof doc.profile.repository !== 'string' || typeof doc.profile.base !== 'string') {
+    return 'its profile names no repository/base, so it cannot be checked against the plan';
+  }
+  if (!Array.isArray(doc.waves)) return 'its waves is not an array';
+  for (const wave of doc.waves) {
+    if (wave === null || typeof wave !== 'object' || !Array.isArray(wave.workers)) return 'a wave carries no workers array';
+    for (const worker of wave.workers) {
+      if (worker === null || typeof worker !== 'object' || Array.isArray(worker)) return 'a worker record is not an object';
+      if (!Number.isInteger(worker.issue)) return 'a worker record carries no integer issue number';
+      if (typeof worker.worker_state !== 'string') return `#${worker.issue} carries no worker_state`;
+      const verification = worker.verification;
+      if (verification === null || typeof verification !== 'object' || Array.isArray(verification) || typeof verification.outcome !== 'string') {
+        return `#${worker.issue} carries no verification.outcome`;
+      }
+    }
+  }
+  return null;
+}
+
+function loadResumeReport(path, plan) {
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    throw new SkillError('load_error', `cannot read the dispatch report at ${path}: ${redact(error.message)}`, 6);
+  }
+  let doc;
+  try {
+    doc = JSON.parse(text);
+  } catch (error) {
+    throw new SkillError('resume_invalid',
+      `the report at ${path} cannot be resumed: it is not valid JSON (${redact(error.message)}). ` +
+        'A resume carries verification verdicts forward as fact, so a report this runner cannot read is refused rather than partly believed', 3);
+  }
+  const nonConformance = resumeNonConformance(doc);
+  if (nonConformance !== null) {
+    throw new SkillError('resume_invalid',
+      `the report at ${path} is not a dispatch report v${DISPATCH_SCHEMA_VERSION} this runner can resume: ${nonConformance}. ` +
+        'A resume carries verification verdicts forward as fact, so a report whose shape cannot be checked is refused rather than partly believed', 3);
+  }
+  // The plan guard (Issue #98 item 2). run_id is the plan's identity; repository
+  // and base are the two profile fields the report copies out of it, so a report
+  // that agrees on all three was produced FOR THIS PLAN. Refusing the rest is not
+  // pedantry: carrying a foreign report's records over would state that issues of
+  // THIS plan are completed and verified on the strength of work planned
+  // elsewhere, and merge would then open PRs for them.
+  if (doc.plan_run_id !== plan.run_id
+    || doc.profile.repository !== plan.profile.repository
+    || doc.profile.base !== plan.profile.base) {
+    throw new SkillError('resume_plan_mismatch',
+      `the report at ${path} was produced for plan run_id "${redact(String(doc.plan_run_id))}" ` +
+        `(${redact(String(doc.profile.repository))} / ${redact(String(doc.profile.base))}), but --plan is run_id "${plan.run_id}" ` +
+        `(${plan.profile.repository} / ${plan.profile.base}). Refusing to resume a different plan's run: the carried-over records would ` +
+        'claim that issues of THIS plan are completed and verified on the strength of work that was planned somewhere else. ' +
+        "Point --resume at that plan's own dispatch directory, or start a fresh dispatch with --out", 3);
+  }
+  return doc;
+}
+
+// The record each issue carries in the prior report, newest wins — the same
+// "last record wins" rule merge.mjs reads a re-dispatched issue by.
+function priorWorkerRecords(doc) {
+  const latest = new Map();
+  for (const wave of doc.waves) {
+    for (const worker of wave.workers) latest.set(worker.issue, worker);
+  }
+  return latest;
+}
+
+// The one condition that means "do not run this again": the worker finished AND
+// a gate judged it and passed. Exactly the pair merge/uat read, so an issue this
+// returns true for is an issue already on the delivery path.
+function isCarryable(worker) {
+  return worker.worker_state === 'completed'
+    && worker.verification !== null
+    && typeof worker.verification === 'object'
+    && worker.verification.outcome === 'pass';
+}
+
+// A carried worker record for the new report. The verification is TRANSCRIBED,
+// never re-judged: this attempt ran no gate against this issue, so it may only
+// repeat what the attempt that did ran, and it says so in the note. Every field
+// is re-validated on the way through because the source is an input — a
+// hand-edited report must not be able to write a record the dispatch schema
+// rejects, which would make the whole new report unreadable.
+function carriedWorkerRecord(prior, priorAttempt) {
+  const verification = prior.verification;
+  const gates = (Array.isArray(verification.gates) ? verification.gates : [])
+    .filter((gate) => gate !== null && typeof gate === 'object'
+      && typeof gate.id === 'string' && gate.id.length > 0
+      && (gate.verdict === 'pass' || gate.verdict === 'fail'))
+    .slice(0, MAX_REPORTED_GATES)
+    .map((gate) => ({ id: redact(gate.id), verdict: gate.verdict }));
+  const checks = (Array.isArray(verification.checks) ? verification.checks : [])
+    .filter((check) => typeof check === 'string' && check.length > 0)
+    .slice(0, MAX_REPORTED_GATES)
+    .map((check) => redact(check));
+  const worker = {
+    issue: prior.issue,
+    task_id: typeof prior.task_id === 'string' && prior.task_id.length > 0 ? redact(prior.task_id) : null,
+    worker_state: 'completed',
+    verification: {
+      ran: verification.ran === true,
+      report_schema_version: Number.isInteger(verification.report_schema_version) ? verification.report_schema_version : null,
+      outcome: 'pass',
+      gates,
+      checks,
+    },
+    // A carried issue raised no prompt in THIS attempt; a prompt from an earlier
+    // one was either answered or is not what carried it (a prompted worker is
+    // never `completed`). Carrying the flag forward would halt a run for a human
+    // who has nothing left to look at.
+    prompt: { detected: false, excerpt: null },
+    note: redact(typeof prior.note === 'string' ? prior.note : ''),
+  };
+  worker.note = appendNote(worker.note,
+    `carried over from attempt ${priorAttempt}: this attempt did NOT re-dispatch #${prior.issue} — its worker completed and its ` +
+      'verification passed there, and that verdict is transcribed here rather than re-run');
+  return worker;
+}
+
+// The whole resume decision, computed once before anything is probed or written.
+function buildResume(inputs, plan) {
+  const prior = priorReport(inputs.resumeDir);
+  const doc = loadResumeReport(prior.path, plan);
+  const latest = priorWorkerRecords(doc);
+
+  const carried = new Map();
+  // Per plan wave, the issues this attempt still has to dispatch. Not truncated
+  // here: the wave loop applies the max_parallel bound itself, and doing it in
+  // one place is what keeps the bound the same rule on both paths.
+  const waveDispatch = [];
+  for (const wave of plan.waves) {
+    const pending = [];
+    for (const number of wave) {
+      const record = latest.get(number);
+      if (record !== undefined && isCarryable(record)) carried.set(number, carriedWorkerRecord(record, prior.attempt));
+      else pending.push(number);
+    }
+    waveDispatch.push(pending);
+  }
+
+  const attempt = nextAttemptNumber(inputs.resumeDir);
+  return {
+    attempt,
+    attemptDir: resumeAttemptDir(inputs.resumeDir, attempt),
+    priorAttempt: prior.attempt,
+    priorRelative: attemptReportRelative(prior.attempt),
+    carried,
+    carriedIssues: [...carried.keys()].sort((a, b) => a - b),
+    waveDispatch,
+    redispatchIssues: waveDispatch.flat(),
+    firstActiveWave: waveDispatch.findIndex((entries) => entries.length > 0),
+  };
+}
+
+// The `resumed_from` + attempt-number record the Issue asks the report to carry.
+// It lives in `limitations` rather than in a new top-level field on purpose: the
+// dispatch report is a CLOSED schema whose reader set (merge, uat, status) is
+// versioned on it, and the same adjudication was already made for the execution
+// contract (#1588) — a run-specific fact goes into limitations / blocking_reasons
+// / note / summary_markdown, and `dispatch_schema_version` stays 1. The full
+// machine-readable record is the attempt-history ledger beside the report.
+function resumeLimitation(plan, resume) {
+  const list = (numbers) => (numbers.length === 0 ? 'なし' : numbers.map((n) => `#${n}`).join(', '));
+  return {
+    code: 'resume_attempt',
+    detail: `--resume: attempt ${resume.attempt} of plan ${plan.run_id}; resumed_from=${resume.priorRelative} (attempt ${resume.priorAttempt}). `
+      + `Carried over without re-dispatching (worker completed and verification passed there): ${list(resume.carriedIssues)}. `
+      + `Re-dispatched here: ${list(resume.redispatchIssues)}. The carried verification records are transcribed from that report and were NOT re-judged; `
+      + `this attempt's artifacts are under ${RESUME_ATTEMPT_PREFIX}${resume.attempt}/ and no earlier attempt was overwritten`,
+  };
+}
+
+// One line per attempt, appended at the run directory's root. Best effort: the
+// ledger is evidence about the run, never part of deciding it, so a filesystem
+// that will not take the line must not fail a dispatch that already happened.
+function appendAttemptHistory(outDir, entry) {
+  try {
+    appendFileSync(join(outDir, ATTEMPT_HISTORY_FILE), `${JSON.stringify(entry)}\n`, 'utf8');
+  } catch {
+    // ignored on purpose; see above
+  }
 }
 
 // =============================================================================
@@ -603,25 +923,37 @@ function worktreeUnresolvedReasons(entries) {
 // run refused for a missing worktree left a directory behind and the re-run
 // (after `cmate-worktree-setup` created that worktree) died on `out_exists`
 // with the operator's only recourse being to invent a new `--out`.
-function preflightDispatch(inputs, plan) {
-  const resolutions = resolveWave(inputs, plan, plan.waves[0]);
-  const { checks, unresolved } = driftChecks(inputs, plan, 0, resolutions);
+//
+// `waveIndex` / `waveIssues` name the first wave this run will actually
+// dispatch. On an ordinary run that is wave 0 and the whole of it; on a resume
+// (Issue #98) it is the first wave with anything left to do, holding only the
+// issues that were not carried over — a carried issue's worktree may well have
+// been removed after its branch was merged, and demanding it resolve would
+// refuse a run that has no reason to touch it.
+function preflightDispatch(inputs, plan, waveIndex, waveIssues) {
+  const resolutions = resolveWave(inputs, plan, waveIssues);
+  const { checks, unresolved } = driftChecks(inputs, plan, waveIndex, resolutions);
   const blocking = checks.find((check) => check.blocking && !check.ok);
   const reasons = !blocking
     ? []
     : blocking.code === 'worktrees_present' && unresolved.length > 0
       ? worktreeUnresolvedReasons(unresolved)
       : [{ code: `drift_${blocking.code}`, detail: blocking.detail }];
-  return { resolutions, checks, unresolved, blocked: Boolean(blocking), reasons };
+  return { waveIndex, resolutions, checks, unresolved, blocked: Boolean(blocking), reasons };
 }
 
 // The report a blocked pre-flight prints. `out_dir` is null because nothing was
 // written — the field already means "null when nothing was written", and it is
 // how a reader (and the summary) can tell that the same command may simply be
 // re-run once the drift is fixed.
-function preflightFailureReport(inputs, plan, preflight, preparation = null) {
+function preflightFailureReport(inputs, plan, preflight, preparation = null, resume = null) {
   const report = emptyReport(inputs, plan, null);
   report.status = 'failure';
+  // A refused resume still says it WAS a resume, and what it would have carried:
+  // otherwise the reader cannot tell a first attempt that stopped from a fourth
+  // one, and the re-run advice below ("re-run the same command") is only true
+  // because this attempt's directory was never created either (Issue #98).
+  if (resume !== null) report.limitations.push(resumeLimitation(plan, resume));
   // A preparation that could not run is not drift: nothing about branch, base or
   // permission moved — a conditional dependency was missing, misconfigured or
   // disagreed with the plan's profile. `dispatch_error` is the pre-dispatch stop
@@ -647,7 +979,7 @@ function preflightFailureReport(inputs, plan, preflight, preparation = null) {
     reportStatus: 'failure',
   });
   report.redactions = redactionsList();
-  report.summary_markdown = renderSummary(report, false, []);
+  report.summary_markdown = renderSummary(report, false, [], resume);
   return report;
 }
 
@@ -2005,11 +2337,33 @@ function emptyReport(inputs, plan, outDir) {
 // (Issue #90), or null when the run will refuse before any wave for a reason
 // that does not depend on the state of the world (an unanswered planner
 // question). The loop reuses it for wave 0 instead of probing the CLI twice.
-async function runDispatch(inputs, plan, outDir, preflight = null, preparation = null) {
+//
+// `resume` is the carry-over decision (Issue #98) or null on an ordinary run.
+// `outDir` is THIS ATTEMPT's directory — the run directory on attempt 1, and
+// `<run-dir>/resume-attempt-<n>/` on a resume — so every artifact this function
+// writes lands beside the report that describes it and nothing an earlier
+// attempt wrote is touched.
+async function runDispatch(inputs, plan, outDir, preflight = null, preparation = null, resume = null) {
   const promptsDir = join(outDir, 'prompts');
   mkdirSync(promptsDir, { recursive: true });
 
   const report = emptyReport(inputs, plan, outDir);
+  // Stated before anything else the run says: which attempt this is, what it
+  // carried, and what it re-dispatched. Every other line of the report is read
+  // against that.
+  if (resume !== null) report.limitations.push(resumeLimitation(plan, resume));
+  // Nothing is left to dispatch: every issue the plan names was already
+  // completed AND verified. Reported as its own fact rather than as a silent
+  // success, because "the run did nothing" and "the run did everything" produce
+  // the same exit code and must not read the same.
+  const nothingToDispatch = resume !== null && resume.firstActiveWave < 0;
+  if (nothingToDispatch) {
+    report.limitations.push({
+      code: 'resume_no_work',
+      detail: `再実行対象なし: every issue in plan ${plan.run_id} was already completed and verified in a prior attempt, so this attempt dispatched nobody, `
+        + 'started no worker and re-judged nothing. The verification records below are all carried over; this report is the one to hand to merge/uat',
+    });
+  }
   // The pre-flight's drift verdict is part of THIS report even when the run
   // stops before the first wave for an unrelated reason: it was really checked,
   // so it is really recorded.
@@ -2065,7 +2419,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   // Skipped once the open-questions gate has already stopped the run: probing a
   // CLI whose answer can no longer change anything is a side effect for nothing.
   let contractMode = false;
-  if (stopped) {
+  if (stopped || nothingToDispatch) {
     // nothing to decide; no wave will be dispatched
   } else if (inputs.contractMode === 'off') {
     report.limitations.push({
@@ -2099,13 +2453,52 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
 
   for (let waveIndex = 0; waveIndex < plan.waves.length && !stopped; waveIndex += 1) {
     const waveIssues = plan.waves[waveIndex];
-    // Resolve each issue's CommandMate worktree ONCE, up front (see
-    // `resolveWave`). Wave 0 was already resolved and drift-checked by the
-    // pre-flight, whose result is reused here so the CLI is not probed twice.
-    const preflighted = waveIndex === 0 && preflight !== null;
-    const resolutions = preflighted ? preflight.resolutions : resolveWave(inputs, plan, waveIssues);
+    // 0. The resume split (Issue #98), before anything is probed. The issues a
+    //    prior attempt completed AND verified are not dispatched again; their
+    //    records join this wave as they stand, so the barrier below is computed
+    //    over BOTH halves. That is what RECOMPUTES the barrier rather than
+    //    replaying it: a wave whose issues were all carried dispatches nothing
+    //    and advances at once, which is how an issue whose dependency already
+    //    passed reaches a worker without waiting behind one.
+    const carriedWorkers = resume === null
+      ? []
+      : waveIssues.filter((number) => resume.carried.has(number)).map((number) => resume.carried.get(number));
+    const pending = resume === null ? waveIssues : resume.waveDispatch[waveIndex];
 
-    // 1. Drift re-check before this (mutating) wave.
+    // Guarded on `resume` rather than on emptiness alone: validatePlan already
+    // refuses an empty wave, and an ordinary run that somehow reached one must
+    // keep falling through to the barrier (which fails on zero workers) instead
+    // of advancing past a wave nobody dispatched.
+    if (resume !== null && pending.length === 0) {
+      report.waves.push({
+        index: waveIndex,
+        dispatched: [],
+        workers: carriedWorkers,
+        // Every worker of this wave is a carried `completed` + `pass`, so both
+        // halves of the barrier hold and the next wave may dispatch. Nothing was
+        // sent and nothing mutated, which is also why no drift re-check ran for
+        // it: there was no mutation for a drift check to guard.
+        barrier: { all_workers_completed: true, all_verifications_passed: true, advanced: true },
+      });
+      continue;
+    }
+
+    // 1. max_parallel guard (belt-and-braces; validatePlan already refused a
+    //    wider wave, but the runner never dispatches beyond the bound).
+    const toDispatch = pending.slice(0, plan.max_parallel);
+    if (pending.length > plan.max_parallel) {
+      parallelismBounded = false;
+      report.limitations.push({ code: 'parallelism_truncated', detail: `wave ${waveIndex} had ${pending.length} issues; capped at ${plan.max_parallel}` });
+    }
+
+    // Resolve each issue's CommandMate worktree ONCE, up front (see
+    // `resolveWave`). The first dispatching wave was already resolved and
+    // drift-checked by the pre-flight, whose result is reused here so the CLI is
+    // not probed twice.
+    const preflighted = preflight !== null && preflight.waveIndex === waveIndex;
+    const resolutions = preflighted ? preflight.resolutions : resolveWave(inputs, plan, toDispatch);
+
+    // 2. Drift re-check before this (mutating) wave.
     const drift = preflighted ? preflight : driftChecks(inputs, plan, waveIndex, resolutions);
     const checks = drift.checks;
     if (!preflighted) report.drift_checks.push(...checks);
@@ -2116,7 +2509,10 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     }
     const blockingDrift = checks.find((check) => check.blocking && !check.ok);
     if (blockingDrift) {
-      const waveRecord = { index: waveIndex, dispatched: [], workers: [], barrier: { all_workers_completed: false, all_verifications_passed: false, advanced: false } };
+      // The carried workers of this wave are still recorded: they are facts a
+      // prior attempt established, and drift found now does not un-verify work
+      // that was already judged (Issue #98).
+      const waveRecord = { index: waveIndex, dispatched: [], workers: carriedWorkers, barrier: { all_workers_completed: false, all_verifications_passed: false, advanced: false } };
       report.waves.push(waveRecord);
       // Drift before the very first wave means nothing was dispatched at all.
       // (Wave 0 never reaches this: the pre-flight already refused the run
@@ -2129,21 +2525,15 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
       break;
     }
 
-    // 2. max_parallel guard (belt-and-braces; validatePlan already refused a
-    //    wider wave, but the runner never dispatches beyond the bound).
-    const toDispatch = waveIssues.slice(0, plan.max_parallel);
-    if (waveIssues.length > plan.max_parallel) {
-      parallelismBounded = false;
-      report.limitations.push({ code: 'parallelism_truncated', detail: `wave ${waveIndex} had ${waveIssues.length} issues; capped at ${plan.max_parallel}` });
-    }
-
     // 3a. Prepare every issue in the wave (sequential, cheap): build its worker
     //     record, take its already-resolved worktree id/path, and write its prompt
     //     artifact. `worktreePaths` remembers the git path per issue so the
     //     verification gate reuses the exact same worktree the supervisor drove
     //     (Issue #1473). Workers that cannot be dispatched (unsafe target /
     //     unresolved worktree) are recorded terminal here and never supervised.
-    const workers = [];
+    // Seeded with this wave's carried records (empty on an ordinary run), so the
+    // barrier and the verification loop below see one wave, not two halves.
+    const workers = [...carriedWorkers];
     const worktreePaths = new Map();
     const supervisable = [];
     // Issues whose worktree the CLI could not resolve at dispatch time, in wave
@@ -2273,6 +2663,16 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     //    only ever clear it.
     let allVerified = allCompleted;
     for (const worker of workers) {
+      // A carried worker was judged by the attempt that dispatched it, and this
+      // attempt sent it nothing. Re-running the fallback baseline against its
+      // worktree here would be a SECOND, weaker opinion about work a contract
+      // gate already passed — and would fail outright once the branch is merged
+      // and the worktree removed (Issue #98). Its transcribed verdict still
+      // counts towards the barrier, in the `allVerified` line at the bottom.
+      if (resume !== null && resume.carried.has(worker.issue)) {
+        if (worker.verification.outcome !== 'pass') allVerified = false;
+        continue;
+      }
       if (contractMode) {
         // The verdict already exists: it is the exit code CommandMate returned
         // while the worker was supervised. Re-running anything here would be a
@@ -2386,9 +2786,17 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
 
   // Completion self-check. `no_auto_prompt_response` guards the safe default: a
   // prompt is never answered UNLESS --auto-yes was explicitly set.
+  // A resume with nothing left to dispatch mutates nothing, so there is no
+  // mutating wave for a drift re-check to guard. That is a satisfied check, not
+  // a skipped one — but it must SAY so rather than borrow the sentence about a
+  // check that really ran (Issue #98).
+  const driftReconfirmed = report.drift_checks.length > 0 || nothingToDispatch;
   report.completion_check = buildCompletionCheck({
     planApproved: true,
-    driftReconfirmed: report.drift_checks.length > 0,
+    driftReconfirmed,
+    driftDetail: report.drift_checks.length === 0 && nothingToDispatch
+      ? 'nothing was dispatched (every issue was already completed and verified in a prior attempt), so there was no mutating wave to re-check drift before'
+      : null,
     parallelismBounded,
     barrierEnforced,
     noAutoPromptResponse: !autoResponded || inputs.autoYes,
@@ -2401,14 +2809,14 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   }
 
   report.redactions = redactionsList();
-  report.summary_markdown = renderSummary(report, contractMode, openQuestions);
+  report.summary_markdown = renderSummary(report, contractMode, openQuestions, resume);
   return report;
 }
 
-function buildCompletionCheck({ planApproved, driftReconfirmed, parallelismBounded, barrierEnforced, noAutoPromptResponse, verificationRecorded = [], reportStatus }) {
+function buildCompletionCheck({ planApproved, driftReconfirmed, driftDetail = null, parallelismBounded, barrierEnforced, noAutoPromptResponse, verificationRecorded = [], reportStatus }) {
   const checks = [
     { id: 'plan_approved', passed: planApproved, detail: planApproved ? 'an approved plan was loaded and validated' : 'no valid plan was loaded' },
-    { id: 'drift_reconfirmed', passed: driftReconfirmed, detail: driftReconfirmed ? 'drift was re-checked before dispatch' : 'no drift check ran' },
+    { id: 'drift_reconfirmed', passed: driftReconfirmed, detail: driftDetail ?? (driftReconfirmed ? 'drift was re-checked before dispatch' : 'no drift check ran') },
     { id: 'parallelism_bounded', passed: parallelismBounded, detail: parallelismBounded ? 'no wave dispatched more than max_parallel workers' : 'a wave exceeded max_parallel and was truncated' },
     { id: 'barrier_enforced', passed: barrierEnforced, detail: barrierEnforced ? 'the next wave dispatched only after completion AND verification' : 'the wave barrier was not enforced' },
     { id: 'no_auto_prompt_response', passed: noAutoPromptResponse, detail: noAutoPromptResponse ? 'no prompt was answered without explicit --auto-yes' : 'a worker prompt was answered without authorization' },
@@ -2440,7 +2848,7 @@ function buildCompletionCheck({ planApproved, driftReconfirmed, parallelismBound
 const PREPARATION_LIMITATION_CODES = ['worktree_setup_ran', 'worktree_prepared', 'worktree_setup_partial', 'worktree_setup_skipped'];
 const PREPARATION_BLOCKING_CODES = ['worktree_setup_unavailable', 'worktree_setup_failed', 'worktree_profile_mismatch'];
 
-function renderSummary(report, contractMode = false, openQuestions = []) {
+function renderSummary(report, contractMode = false, openQuestions = [], resume = null) {
   const lines = [];
   const haltedOnQuestions = report.blocking_reasons.some((reason) => reason.code === 'open_questions');
   const worktreeUnresolved = report.blocking_reasons.some((reason) => reason.code === 'worktree_unresolved');
@@ -2451,17 +2859,39 @@ function renderSummary(report, contractMode = false, openQuestions = []) {
   lines.push(`plan ${report.plan_run_id} を ${report.profile.repository} に dispatch: ${report.status}（${verb}, stop=${report.stop_reason}）。`);
   // A run that dispatched nobody judged nobody. Naming the adjudication
   // mechanism there states a past-tense fact that never happened (Issue #90).
+  // A resume that had nothing left to dispatch judged nobody either, but it does
+  // hold verdicts — carried ones. Saying "契約で裁定した" there would claim this
+  // attempt ran a gate it never ran (Issue #98).
+  const dispatchedAny = report.waves.some((wave) => wave.dispatched.length > 0);
   lines.push(report.waves.length === 0
     ? '裁定: 1件も dispatch していないため、裁定は行っていない。'
-    : contractMode
-      ? '裁定: 実行契約（`commandmate send --contract` / `wait --verify` の exit code）を一次ソースにした。'
-      : '裁定: 実行契約は使わず、profile baseline を worktree 内で再実行するフォールバックで判定した。');
+    : (resume !== null && !dispatchedAny)
+        ? '裁定: この attempt では 1件も dispatch していない。verification はすべて前回 attempt の記録を引き継いだもので、ここで再判定はしていない。'
+        : contractMode
+          ? '裁定: 実行契約（`commandmate send --contract` / `wait --verify` の exit code）を一次ソースにした。'
+          : '裁定: 実行契約は使わず、profile baseline を worktree 内で再実行するフォールバックで判定した。');
   const notJudged = report.blocking_reasons.find((reason) => reason.code === 'verification_not_judged');
   if (haltedOnQuestions) lines.push('plan の Issue に未回答の open question が残っていたため、worker を 1 人も dispatch せずに停止した。');
   else if (notJudged) lines.push('検証が判定に到達しなかった（exit 99）ため、不合格として再指示せず human 提示で停止した。');
   else if (report.human_required) lines.push('worker が prompt を出したため、自動応答せず human 提示で停止した。');
   else if (worktreeUnresolved) lines.push('対象 Issue の worktree が `commandmate ls` で解決できなかったため、その Issue には worker を dispatch していない（worker の失敗ではない）。');
   lines.push('');
+
+  // The resume section (Issue #98). Placed first because every other section is
+  // read against it: which attempt this is, what was NOT re-run and why, and
+  // what this attempt actually dispatched.
+  if (resume !== null) {
+    lines.push('## resume');
+    lines.push(`- attempt ${resume.attempt}（resumed_from: \`${resume.priorRelative}\` / attempt ${resume.priorAttempt}）。既存 artifact は上書きしていない。この attempt の artifact は \`${RESUME_ATTEMPT_PREFIX}${resume.attempt}/\` 配下。`);
+    lines.push(resume.carriedIssues.length === 0
+      ? '- 引き継ぎ: なし（前回 attempt に「worker completed かつ verification pass」の Issue が無かった）。'
+      : `- 引き継ぎ（再 dispatch しない）: ${resume.carriedIssues.map((n) => `#${n}`).join(', ')} — worker completed かつ verification pass。verification 記録は転記しただけで、ここで再判定はしていない。`);
+    lines.push(resume.redispatchIssues.length === 0
+      ? '- **再実行対象なし**: plan の全 Issue が既に completed かつ verification pass だった。1件も dispatch していない。'
+      : `- 再実行対象: ${resume.redispatchIssues.map((n) => `#${n}`).join(', ')}。`);
+    lines.push('- 引き継ぎ分は Wave barrier 上「完了」として数えるので、依存元が pass 済みの Issue はその Wave を待たずに dispatch される。');
+    lines.push('');
+  }
 
   // The questions themselves, verbatim. A code alone ("open_questions") tells an
   // operator that something is missing but not what to write in the issue, so the
@@ -2548,7 +2978,16 @@ function renderSummary(report, contractMode = false, openQuestions = []) {
     if (report.limitations.some((reason) => reason.code === 'worktree_sync_unavailable')) {
       lines.push('- next: `commandmate sync` が使えない CLI だったため、server 未登録の worktree を登録し直せていない。worktree が disk に実在するなら CommandMate を 0.21.0 以上へ更新して再実行する（owner: operator）。');
     }
+    // The resume next-actions (Issue #98). The point of the whole feature is that
+    // a partial failure now has a one-command answer, so the summary states that
+    // command instead of leaving "再 dispatch する" to be interpreted as re-plan.
+    if (report.limitations.some((entry) => entry.code === 'resume_no_work')) {
+      lines.push('- next: 再実行対象は無い。この attempt の report をそのまま merge / uat に渡す（owner: operator）。');
+    }
     if (report.stop_reason === 'verification_failed') lines.push('- next: verification 失敗の worktree を診断し、修正後に再 dispatch する（owner: operator）。');
+    if (report.status !== 'success' && report.out_dir !== null) {
+      lines.push('- next: 原因を直したら `dispatch.mjs --plan <plan.json> --resume <この run の dispatch ディレクトリ>` で再開する。worker completed かつ verification pass の Issue は再 dispatch されず、その verification 記録だけが引き継がれる（owner: operator）。');
+    }
     // The conditional dependency, named (Issue #93). A stage the operator asked
     // for and that could not run must say what to install and what to pass —
     // "worktree を作成して再実行" is the answer to a different question.
@@ -2624,19 +3063,37 @@ async function run(argv) {
   const rawPlan = loadPlan(inputs.planPath);
   const plan = validatePlan(rawPlan);
 
-  const outDir = inputs.outDir ?? join(dirname(inputs.planPath), 'dispatch');
-  if (existsSync(outDir)) {
+  // The resume decision (Issue #98) is made FIRST: it decides which directory
+  // this attempt writes into, which wave the pre-flight has to probe, and which
+  // issues it may demand a worktree for. It is also where a report from another
+  // plan is refused — before anything is probed, sent or written.
+  const resume = inputs.resumeDir === null ? null : buildResume(inputs, plan);
+  const outDir = resume !== null ? inputs.resumeDir : (inputs.outDir ?? join(dirname(inputs.planPath), 'dispatch'));
+  // `--out` claims a new directory; `--resume` appends into an existing one, and
+  // protects the earlier attempts by writing under a `resume-attempt-<n>/` name
+  // that does not exist yet (nextAttemptNumber) rather than by refusing here.
+  if (resume === null && existsSync(outDir)) {
     throw new SkillError('out_exists', `dispatch directory ${outDir} already exists; refusing to overwrite`, 4);
   }
+  // Where THIS attempt's artifacts go — the run directory on a first dispatch,
+  // `<run-dir>/resume-attempt-<n>/` on a resume.
+  const attemptDir = resume === null ? outDir : resume.attemptDir;
 
-  // Blocking pre-flight, BEFORE the run directory exists (Issue #90). Skipped
-  // when the plan alone already refuses the run: the open-questions gate is a
-  // pure function of the plan, and probing a world whose answer can no longer
-  // change anything is a side effect for nothing (the same reason the contract
-  // probe is skipped once the run has stopped). That gate still reports from
-  // inside runDispatch, so its artifacts are written exactly as before.
+  // Blocking pre-flight, BEFORE the attempt directory exists (Issue #90).
+  // Skipped when the plan alone already refuses the run: the open-questions gate
+  // is a pure function of the plan, and probing a world whose answer can no
+  // longer change anything is a side effect for nothing (the same reason the
+  // contract probe is skipped once the run has stopped). That gate still reports
+  // from inside runDispatch, so its artifacts are written exactly as before.
+  // Skipped too when a resume has nothing left to dispatch: there is no mutating
+  // wave to guard, and a carried issue's worktree may legitimately be gone.
   const refusedOnQuestions = !inputs.allowQuestions && collectOpenQuestions(plan).length > 0;
-  let preflight = refusedOnQuestions ? null : preflightDispatch(inputs, plan);
+  const preflightWave = resume === null ? 0 : resume.firstActiveWave;
+  const preflightIssues = resume === null
+    ? plan.waves[0]
+    : (preflightWave < 0 ? [] : resume.waveDispatch[preflightWave].slice(0, plan.max_parallel));
+  const skipPreflight = refusedOnQuestions || preflightWave < 0;
+  let preflight = skipPreflight ? null : preflightDispatch(inputs, plan, preflightWave, preflightIssues);
 
   // The worktree preparation stage (Issue #93), between the refusal and the
   // refusal's report. It runs ONLY when the operator asked for it and only when
@@ -2649,22 +3106,41 @@ async function run(argv) {
     preparation = blockedOnWorktreesOnly(preflight)
       ? prepareWorktrees(inputs, plan, preflight.unresolved)
       : skippedPreparation(preflight);
-    if (preparation.ok) preflight = preflightDispatch(inputs, plan);
+    if (preparation.ok) preflight = preflightDispatch(inputs, plan, preflightWave, preflightIssues);
   }
 
   if (preflight !== null && preflight.blocked) {
-    const report = preflightFailureReport(inputs, plan, preflight, preparation);
-    process.stderr.write(`nothing was dispatched; ${outDir} was not created, so the same command can be re-run once the drift is fixed\n`);
+    const report = preflightFailureReport(inputs, plan, preflight, preparation, resume);
+    process.stderr.write(`nothing was dispatched; ${attemptDir} was not created, so the same command can be re-run once the drift is fixed\n`);
     return { exitCode: 1, stdout: `${JSON.stringify(report, null, 2)}\n` };
   }
 
-  mkdirSync(outDir, { recursive: true });
+  mkdirSync(attemptDir, { recursive: true });
 
-  const report = await runDispatch(inputs, plan, outDir, preflight, preparation);
-  writeFileSync(join(outDir, 'dispatch-report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-  writeFileSync(join(outDir, 'dispatch-summary.md'), `${report.summary_markdown}\n`, 'utf8');
+  const report = await runDispatch(inputs, plan, attemptDir, preflight, preparation, resume);
+  writeFileSync(join(attemptDir, DISPATCH_REPORT_FILE), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  writeFileSync(join(attemptDir, DISPATCH_SUMMARY_FILE), `${report.summary_markdown}\n`, 'utf8');
 
-  process.stderr.write(`wrote dispatch artifacts to ${outDir}\n`);
+  // The attempt ledger (Issue #98), at the run directory's root and append-only.
+  // It is what makes the history readable by a machine without reopening every
+  // report: which report each attempt wrote, what it resumed from, what it
+  // carried and what it dispatched. Written for the first attempt too, so the
+  // history has no implicit first line.
+  const attempt = resume === null ? 1 : resume.attempt;
+  appendAttemptHistory(outDir, {
+    attempt,
+    kind: resume === null ? 'initial' : 'resume',
+    plan_run_id: plan.run_id,
+    resumed_from: resume === null ? null : { attempt: resume.priorAttempt, report: resume.priorRelative },
+    report: attemptReportRelative(attempt),
+    summary: attemptSummaryRelative(attempt),
+    status: report.status,
+    stop_reason: report.stop_reason,
+    carried_over: resume === null ? [] : resume.carriedIssues,
+    dispatched: report.waves.flatMap((wave) => wave.dispatched),
+  });
+
+  process.stderr.write(`wrote dispatch artifacts to ${attemptDir}\n`);
   const exitCode = report.status === 'success' ? 0 : report.status === 'partial' ? 7 : 1;
   return { exitCode, stdout: `${JSON.stringify(report, null, 2)}\n` };
 }

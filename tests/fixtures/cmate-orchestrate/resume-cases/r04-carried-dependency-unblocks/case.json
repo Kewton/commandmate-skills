@@ -1,0 +1,60 @@
+{
+  "description": "Wave barrier の再計算: #200 は #201 に依存するので plan の wave は [[201],[200]]。attempt 1 では #201 が pass、#200 が verification 不合格で partial 停止する。--resume した attempt 2 では #201 が引き継ぎ済みなので Wave 1 は 1件も dispatch せず即座に advance し、#200 が **その run の最初の send** として飛ぶ（pass 済みの依存元の worker を待たない）。#201 の worktree は再解決すら要求されない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "attempts": [
+    {
+      "scenario": "attempt-1.json",
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 7,
+        "status": "partial",
+        "stop_reason": "verification_failed",
+        "waves_count": 2,
+        "wave_dispatched": [[201], [200]],
+        "sent": [201, 200],
+        "first_sent": 201,
+        "verification_outcomes": { "201": "pass", "200": "fail" },
+        "report_file": "dispatch-report.json",
+        "merge_eligible": [201]
+      }
+    },
+    {
+      "scenario": "attempt-2.json",
+      "resume": true,
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 0,
+        "status": "success",
+        "stop_reason": "completed",
+        "completion_check_passed": true,
+        "waves_count": 2,
+        "wave_dispatched": [[], [200]],
+        "sent": [200],
+        "never_sent": [201],
+        "first_sent": 200,
+        "worker_states": { "201": "completed", "200": "completed" },
+        "verification_outcomes": { "201": "pass", "200": "pass" },
+        "worker_notes_include": { "201": ["carried over from attempt 1"] },
+        "limitation_codes": ["resume_attempt"],
+        "absent_limitation_codes": ["resume_no_work"],
+        "summary_includes": [
+          "引き継ぎ（再 dispatch しない）: #201",
+          "再実行対象: #200",
+          "引き継ぎ分は Wave barrier 上「完了」として数えるので、依存元が pass 済みの Issue はその Wave を待たずに dispatch される。",
+          "Wave 1: dispatch=なし"
+        ],
+        "report_file": "resume-attempt-2/dispatch-report.json",
+        "merge_eligible": [201, 200],
+        "history": {
+          "attempt": 2,
+          "kind": "resume",
+          "carried_over": [201],
+          "dispatched": [200]
+        }
+      }
+    }
+  ]
+}

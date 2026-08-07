@@ -1,0 +1,59 @@
+{
+  "description": "全 Issue が completed かつ verification pass の report に --resume を渡した場合。何も dispatch せず、CLI を 1 回も叩かず（mutation が無い wave に drift 再確認は要らない）、「再実行対象なし」を limitation `resume_no_work` と summary で明示して exit 0 / success で終わる。完了扱いに丸めた黙りではないこと・引き継ぎ分がそのまま merge で eligible になることを併せて検証する。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": ["100", "101", "102", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "attempts": [
+    {
+      "scenario": "all-pass.json",
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 0,
+        "status": "success",
+        "stop_reason": "completed",
+        "waves_count": 1,
+        "wave_dispatched": [[100, 101, 102]],
+        "report_file": "dispatch-report.json",
+        "history_length": 1
+      }
+    },
+    {
+      "scenario": "all-pass.json",
+      "resume": true,
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 0,
+        "status": "success",
+        "stop_reason": "completed",
+        "completion_check_passed": true,
+        "waves_count": 1,
+        "wave_dispatched": [[]],
+        "never_sent": [100, 101, 102],
+        "cli_calls_total": 0,
+        "worker_states": { "100": "completed", "101": "completed", "102": "completed" },
+        "verification_outcomes": { "100": "pass", "101": "pass", "102": "pass" },
+        "limitation_codes": ["resume_attempt", "resume_no_work"],
+        "limitation_details_include": [
+          "再実行対象なし: every issue in plan plan was already completed and verified in a prior attempt",
+          "Re-dispatched here: なし"
+        ],
+        "summary_includes": [
+          "## resume",
+          "**再実行対象なし**",
+          "この attempt では 1件も dispatch していない",
+          "next: 再実行対象は無い。この attempt の report をそのまま merge / uat に渡す"
+        ],
+        "report_file": "resume-attempt-2/dispatch-report.json",
+        "merge_eligible": [100, 101, 102],
+        "history_length": 2,
+        "history": {
+          "attempt": 2,
+          "kind": "resume",
+          "carried_over": [100, 101, 102],
+          "dispatched": []
+        }
+      }
+    }
+  ]
+}
