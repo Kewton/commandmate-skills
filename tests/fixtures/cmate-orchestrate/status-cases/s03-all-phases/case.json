@@ -1,0 +1,30 @@
+{
+  "description": "全 phase 完了した run。create_prs と merge_prs の2つの merge artifact から PR 番号・URL・CI verdict・merge 状態が横断で畳まれ、uat の verdict と fix attempt 数まで1つのマトリクスに出る。停止理由も warning も無いので次アクションは空になる（無いものを作らない）。",
+  "expect": {
+    "exit": 0,
+    "latest_phase": "uat",
+    "phase_states": { "plan": "ok", "dispatch": "ok", "merge": "ok", "uat": "ok" },
+    "unreadable_paths": [],
+    "issues": [200, 201],
+    "issue_states": {
+      "200": { "plan": "ok", "dispatch": "ok", "merge": "ok", "uat": "ok" },
+      "201": { "plan": "ok", "dispatch": "ok", "merge": "ok", "uat": "ok" }
+    },
+    "merge": {
+      "200": { "pr_number": 200, "merged": true, "ci_verdict": "green", "outcomes": ["create_prs:pr_created", "merge_prs:merged"], "pr_url_includes": "/pull/200" },
+      "201": { "pr_number": 201, "merged": true, "ci_verdict": "green", "outcomes": ["create_prs:pr_created", "merge_prs:merged"] }
+    },
+    "uat": {
+      "200": { "verdict": "pass", "outcome": "pass", "fix_attempts": 0, "unresolved": false, "conditional": false },
+      "201": { "verdict": "pass", "outcome": "pass", "fix_attempts": 0, "unresolved": false, "conditional": false }
+    },
+    "run_next": [],
+    "issue_next": { "200": [], "201": [] },
+    "text_includes": [
+      "PR#200 merged CI=green",
+      "証跡の最終 phase : uat",
+      "なし。読めた artifact に停止理由・warning・limitation は記録されていない。"
+    ],
+    "text_absent": ["未実行", "読取不能"]
+  }
+}

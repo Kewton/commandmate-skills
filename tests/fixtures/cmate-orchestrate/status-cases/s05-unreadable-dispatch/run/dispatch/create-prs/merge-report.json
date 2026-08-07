@@ -1,0 +1,115 @@
+{
+  "merge_schema_version": 1,
+  "skill_id": "cmate-orchestrate",
+  "skill_version": "0.13.0",
+  "phase": "create_prs",
+  "status": "success",
+  "stop_reason": "completed",
+  "approved": true,
+  "mutated": true,
+  "merge_method": "squash",
+  "plan_run_id": "plan",
+  "out_dir": "dispatch/create-prs",
+  "profile": {
+    "id": "node-fake",
+    "repository": "Kewton/CommandMate",
+    "base": "origin/develop",
+    "verified": true
+  },
+  "eligible_issues": [
+    201,
+    200
+  ],
+  "preflight": [
+    {
+      "code": "cli_available",
+      "ok": true,
+      "blocking": true,
+      "detail": "gh CLI is runnable"
+    },
+    {
+      "code": "repo_access",
+      "ok": true,
+      "blocking": true,
+      "detail": "repo Kewton/CommandMate is reachable"
+    },
+    {
+      "code": "base_resolvable",
+      "ok": true,
+      "blocking": true,
+      "detail": "base origin/develop resolves"
+    }
+  ],
+  "targets": [
+    {
+      "issue": 201,
+      "branch": "feature/issue-201-feat-add-base-configuration-loader",
+      "eligible": true,
+      "action": "create_pr",
+      "pr_number": 201,
+      "pr_url": "https://github.com/Kewton/CommandMate/pull/201",
+      "pushed": true,
+      "pr_created": true,
+      "ci_checked": false,
+      "ci_passed": false,
+      "ci_summary": "not checked",
+      "ci_checks": [],
+      "merge_attempted": false,
+      "merged": false,
+      "outcome": "pr_created",
+      "note": "opened PR #201"
+    },
+    {
+      "issue": 200,
+      "branch": "feature/issue-200-feat-add-a-session-store",
+      "eligible": true,
+      "action": "create_pr",
+      "pr_number": 200,
+      "pr_url": "https://github.com/Kewton/CommandMate/pull/200",
+      "pushed": true,
+      "pr_created": true,
+      "ci_checked": false,
+      "ci_passed": false,
+      "ci_summary": "not checked",
+      "ci_checks": [],
+      "merge_attempted": false,
+      "merged": false,
+      "outcome": "pr_created",
+      "note": "opened PR #200"
+    }
+  ],
+  "blocking_reasons": [],
+  "limitations": [],
+  "redactions": [],
+  "completion_check": {
+    "passed": true,
+    "checks": [
+      {
+        "id": "single_phase",
+        "passed": true,
+        "detail": "exactly one mutating phase was enabled (create_prs)"
+      },
+      {
+        "id": "approval_enforced",
+        "passed": true,
+        "detail": "a mutation ran and it was explicitly approved"
+      },
+      {
+        "id": "verification_gated",
+        "passed": true,
+        "detail": "every target was a completed-and-verification-passed issue"
+      },
+      {
+        "id": "ci_gated",
+        "passed": true,
+        "detail": "no PR was merged"
+      },
+      {
+        "id": "failures_not_rounded",
+        "passed": true,
+        "detail": "no blocking failure was recorded"
+      }
+    ]
+  },
+  "summary_markdown": "## 対象と結論\nPR 作成（承認あり）を Kewton/CommandMate で実行: success（完了, stop=completed）。\n\n## eligible（verification pass 済み）\n- #201, #200\n\n## target\n- #201: pr_created / PR#201\n- #200: pr_created / PR#200\n\n## preflight\n- cli_available: ok\n- repo_access: ok\n- base_resolvable: ok\n\n## 未解決と next action\n- なし。全 eligible を処理した。"
+}

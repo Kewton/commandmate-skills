@@ -1,0 +1,3 @@
+This fixture repository declares nothing about itself on purpose: no toolchain
+manifest, no CI workflow, no contributing guide, no remote. It exists to prove
+that profile-init drafts a safe template with explicit TODOs instead of raising.

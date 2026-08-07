@@ -1,0 +1,14 @@
+{
+  "id": "node-widget",
+  "repository": "Acme/widget",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": [
+    "npm ci",
+    "npm run build",
+    "npm run lint",
+    "npm test"
+  ],
+  "verified": false
+}

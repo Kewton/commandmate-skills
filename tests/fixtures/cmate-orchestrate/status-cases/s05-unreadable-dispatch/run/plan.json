@@ -1,19 +1,17 @@
 {
   "plan_schema_version": 1,
   "skill_id": "cmate-orchestrate",
-  "skill_version": "0.17.0",
-  "run_id": "fixture",
+  "skill_version": "0.13.0",
+  "run_id": "plan",
   "generated_mode": "dry-run",
   "profile": {
-    "id": "node-commandmate",
+    "id": "node-fake",
     "repository": "Kewton/CommandMate",
     "base": "origin/develop",
     "branch_template": "feature/issue-{number}-{slug}",
     "worktree_template": "../{repo}-issue-{number}-{slug}",
     "baseline": [
-      "npm ci",
-      "npm run build",
-      "npm test"
+      "cat cmate-verify-ok"
     ],
     "verified": true
   },
@@ -23,7 +21,7 @@
       201
     ],
     "base": "origin/develop",
-    "profile_id": "node-commandmate",
+    "profile_id": "node-fake",
     "max_parallel": 3,
     "phase": "plan",
     "infer": true,
@@ -134,19 +132,7 @@
     },
     {
       "phase": "verify",
-      "command": "npm ci",
-      "mutating": false,
-      "executed": false
-    },
-    {
-      "phase": "verify",
-      "command": "npm run build",
-      "mutating": false,
-      "executed": false
-    },
-    {
-      "phase": "verify",
-      "command": "npm test",
+      "command": "cat cmate-verify-ok",
       "mutating": false,
       "executed": false
     }
@@ -155,7 +141,7 @@
   "notes": [
     "Dry run: no worktree was created, no worker dispatched, no PR opened or merged.",
     "This plan is executed by the dispatch runner (scripts/dispatch.mjs) once approved; PR, merge and UAT are deferred to CommandMate issues #1455-1456.",
-    "worktree_id is null in the plan: the dispatch runner resolves it from `commandmate ls --json` by branch. A worktree created after the CommandMate server last scanned is not registered yet, so it has no id — register it with `commandmate sync` (CommandMate 0.21.0+, a re-scan that creates no worktree; the dispatch runner also attempts it once).",
+    "worktree_id is null until `commandmate sync` resolves it at dispatch time (optional per ADR #1447).",
     "Issue input is number, title, body and labels only: comments are never read, so a decision recorded only in an issue comment is invisible to this plan and to the execution contract — fold it into the issue body and re-plan."
   ]
 }

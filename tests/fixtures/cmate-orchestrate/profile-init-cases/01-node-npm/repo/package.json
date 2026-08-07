@@ -1,0 +1,15 @@
+{
+  "name": "widget",
+  "version": "1.2.3",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Acme/widget.git"
+  },
+  "scripts": {
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "node --test"
+  }
+}
