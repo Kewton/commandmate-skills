@@ -125,8 +125,8 @@ files:
     executable: false
     script: false
   - path: references/adr-unattended-mode.md
-    sha256: 4eb39c5fd07f08e29ca225c7684ab4936faf091f004d1672dd39007121c8bf88
-    size: 46620
+    sha256: 56b288c02193b8e47cfc07410f83504af2cf751a6c1e2b9e14d48182c25358c4
+    size: 85097
     kind: instruction
     executable: false
     script: false

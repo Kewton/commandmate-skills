@@ -88,8 +88,15 @@ limitation に記録して**続行**する（同 第2.7節）。人間が居れ�
 | uat `--max-attempts` | 既定 2・**ceiling 5**（`uat.mjs` 114〜115行、`positiveInt` で範囲外は拒否） | `blocked`（exit 8）で停止。`max_attempts_reached`。**成功に丸めない** |
 | wave 幅 | plan の `max_parallel`（1〜3） | 超える plan は `plan_invalid` |
 
-**回数の無限ループは構造的に存在しない。** 一方で **時計の上限は無い**
-（wall-clock は `--wait-timeout` × ターン数で暗黙に決まるだけ）。
+**回数の無限ループは構造的に存在しない。** 一方で **時計の上限は無い**。
+
+> **訂正（[#115](https://github.com/Kewton/commandmate-skills/issues/115) の実測。第14.2節）。**
+> 初版はここに「wall-clock は `--wait-timeout` × ターン数で暗黙に決まるだけ」と書いていた。
+> **暗黙にすら決まらない部分がある。** その式が支配するのは worker の監督ループだけで、
+> profile baseline（契約なし経路の検証・UAT の機械ゲート）は `runCli` が `execFileSync` に
+> `timeout` を渡さないまま実行される。`baseline: ["sleep 6"]` の profile を
+> `--wait-timeout 1 --max-turns 1` で回すと run は 12.9 秒かかる —— `--wait-timeout` は
+> この時間に一切効かない。
 
 ### 1.6 したがって、欠けているのはフラグではなく宣言である
 
@@ -236,8 +243,14 @@ runner の無条件 yes とは別物である——この区別を消さない�
 これは dispatch runner が機械的に強制できない（別プロセス・別 Skill・別 install）。
 したがって:
 
-- **契約の `autoYes: mode: off` がサーバ側の最後の砦である。** 第1.3節のコメントが書いている
-  「サーバ側の方針と監督ループが食い違えない」という性質が、ここで効く。
+- ~~**契約の `autoYes: mode: off` がサーバ側の最後の砦である。**~~
+  **訂正（[#115](https://github.com/Kewton/commandmate-skills/issues/115) の実測。第14.6節）:
+  砦は無い。** 契約の `mode: off` はサーバ**自身**の自動応答を確かに止めるが、monitor の Enter は
+  `tmux send-keys` でペインへ直接届くので、その方針の外側にある。さらに、monitor がその方針を
+  読んで手を止められるのは `capture --json` の `autoYes.lastSuppression` が在るときだけで、
+  それが書かれるのは**サーバ側 Auto-Yes が有効なとき**、すなわち unattended が禁じている状態の
+  ときだけである。unattended dispatch が実際に作る payload（`autoYes.enabled: false`）に対して
+  monitor の判定は **`approve`** になることを実測した。
 - **unattended 運転で monitor を併用するなら `--no-auto-approve` は必須**である旨を、
   実装フェーズで [SKILL.md](../SKILL.md) 第3.2節の monitor 境界の記述に足す。
   現在の記述（「併用するなら monitor 側に `--no-auto-approve` を付ける」）を、
@@ -274,6 +287,15 @@ runner の無条件 yes とは別物である——この区別を消さない�
 **時計の上限（wall-clock budget）を本 ADR では作らない。** 作るなら「打ち切ったときの status を
 何にするか」「打ち切りの途中で mutation がどこまで進んだか」を全 runner で定義する必要があり、
 それは回数上限とは別の契約である。cron 二重起動と併せて第13節の未決事項に置く。
+
+> **[#115](https://github.com/Kewton/commandmate-skills/issues/115) の実測（第14.2節）。**
+> 測った結論は「**budget は要る**」である。既定値では dispatch だけで
+> `waves × --max-turns(8) × --wait-timeout(300s)` ＝ wave あたり 40 分（wave 幅は時計に掛からない
+> ことも実測した）だが、決め手はその長さではなく、**profile baseline に時計の上限が
+> 構造的に存在しない**ことである。status / stop_reason / 記録方法の候補は第14.2節にある
+> （要点: `partial` ＋ 既存 enum の `timeout` を再利用し、`blocking_reasons` の自由文字列
+> `wall_clock_budget_exhausted` で名指す ＝ **schema version を上げずに済む**）。
+> **本 ADR の裁定（budget をここで作らない）は変えない** —— 作るのは段階 A の実装 Issue である。
 
 ---
 
@@ -381,7 +403,20 @@ exit 99 と同じ扱い（`human_required` = true）である。
 | merge `--create-prs` | `git push --set-upstream origin <branch>`（`merge.mjs` 695行）→ **remote に branch が出る**。`gh pr create`（同 702行）→ **PR が立つ** | 可逆だが**外部に出る** | `gh pr close <n>` → `git push --delete origin <branch>`。**PR は close であって削除ではない**（履歴・通知は残る） |
 | merge `--merge-prs` | `gh pr merge`（同 743行）→ **base branch が進む** | **実質不可逆** | revert PR を立てる（squash なら `git revert <sha>`、merge commit なら `-m 1`）。**force push で消さない** |
 | uat `fix_uat` | fix worktree / fix branch の作成、fix worker の commit | ローカル可逆 | `cmate-worktree-cleanup` |
-| uat `fix_uat` | `git merge --no-ff --no-edit <fix-branch>`（`uat.mjs` 922行）。**cwd 指定が無い**ので、**invocation cwd の現在の branch** へ merge される | ローカル可逆 | `git reset --hard <merge 前の SHA>` |
+| uat `fix_uat` | `git merge --no-ff --no-edit <fix-branch>`（`uat.mjs` 922行）。**cwd 指定が無い**ので、**invocation cwd の現在の branch** へ merge される | **cwd 次第**（下記）| `git reset --hard <merge 前の SHA>` |
+
+**最後の行の可逆性は cwd の上にしか立たない（[#115](https://github.com/Kewton/commandmate-skills/issues/115)
+の実測。第14.3節）。** 初版はここを「ローカル可逆」と書いていたが、それが正しいのは cwd が
+integration worktree のときだけである。実測した 2 つの例外:
+
+- **cwd が `main`（branch push を受けた CI の既定）なら `main` が進む。** その `main` が push 済みなら
+  **不可逆**であり、この行は 1 つ上の `--merge-prs` の行と同じ危険度になる。PR も CI も review も
+  経ていない点でむしろ悪い。
+- **cwd が detached HEAD（`actions/checkout` が SHA を取った状態）なら merge は exit 0 で成功し、
+  uat は `outcome: merged` と報告するが、merge commit はどの branch からも到達できない。**
+  `remerge_failed` は出ない —— 第6.4節の語彙で捕まらない静かな false success である。
+
+段階 C の前提として invocation cwd を pre-flight で検査することを第8節に足した。
 
 **副作用は git だけではない。** push は対象リポジトリの CI を起動する（実行時間・課金・通知）。
 PR 作成は reviewer に通知を出す。**取り消せるのはリポジトリの状態であって、送られた通知ではない。**
@@ -402,6 +437,21 @@ worktree の HEAD を dispatch 前に読んでいるが（`dispatch.mjs` 1405〜
 - 併せて run 全体で1件の `unattended_mode` を記録する（段階・含意した締め付け・
   拒否した緩和フラグ）。**何を宣言して走ったかが report 単体で読める**ようにするためであり、
   #47 / CommandMate #1678 B-5 の「report 単体で根拠が読める」と同じ規律である。
+
+**但し書き（[#115](https://github.com/Kewton/commandmate-skills/issues/115) の実測。第14.4節）。**
+「branch 名と短縮 SHA で書く。絶対 path は書かない」という上の裁定は実測で裏付けられた ——
+worktree が既に片付いていると `git reset --hard` は exit 128 で使えず、使えるのは
+`git branch -f <branch> <baseline>` だけであり、それには **path ではなく branch 名**が要るからである。
+一方で **baseline が担保するのは worktree branch の 1 段だけ**であり、次の 4 つでは足りない。
+実装段（第12節 段 2）で [SKILL.md](../SKILL.md) 第5節の取り消し手順に持ち込むこと。
+
+1. **untracked file は `git reset --hard` で戻らない**（実測。`.commandmate/tasks/*.yaml` を含む）。
+   完全に戻すには `git clean -fdx` が要るが、それは worker の成果物も消すので別の判断である。
+2. **既に merge / push されていたら戻らない。** 取り消しは上流から順に行う。
+3. **worktree が片付いていたら `git reset` は使えない**（上記）。
+4. **branch も消えて `git gc --prune=now` が走ると object ごと消える。** baseline が base branch から
+   到達可能なら生き残るので、危険なのは **baseline が base から到達できないとき** ——
+   `--prepare-worktrees`（#93）が既存 worktree を再利用した場合などである。
 
 ### 7.3 段階ごとの被害半径
 
@@ -427,7 +477,20 @@ worktree の HEAD を dispatch 前に読んでいるが（`dispatch.mjs` 1405〜
 |---|---|---|---|
 | **A** | `dispatch.mjs` | `--contract-mode require`、pre-flight の scope 検査、`unattended_baseline` の記録 | 無し。**本 Issue の実装範囲** |
 | **B** | + `merge.mjs --create-prs` | `change_evidence_unavailable` の blocking 昇格 | A |
-| **C** | + `merge.mjs --merge-prs`、`uat.mjs --create-uat-fix-worktrees` | `verification_gates_unrecorded` の blocking 昇格、uat は `--require-acceptance` と `--max-attempts` の明示 | B ＋ **#100 段階1**（第9節） |
+| **C** | + `merge.mjs --merge-prs`、`uat.mjs --create-uat-fix-worktrees` | `verification_gates_unrecorded` の blocking 昇格、uat は `--require-acceptance` と `--max-attempts` の明示、**invocation cwd の pre-flight 検査**（下記） | B ＋ **#100 段階1**（第9節）|
+
+**段階 C は invocation cwd を pre-flight で検査する**
+（[#115](https://github.com/Kewton/commandmate-skills/issues/115) の実測で追加した前提。第14.3節）。
+`uat.mjs` の再merge は cwd 指定を持たないので、CI が `main` を checkout していれば **UAT の fix が
+レビューを経ずに main に入り**、detached HEAD なら **「merged」と報告しながらどの branch にも
+残らない**（どちらも実測）。したがって段階 C の uat は、fix worktree を作る前に
+
+- `git symbolic-ref -q HEAD` が空でないこと（**detached でない**）
+- HEAD が期待する integration branch と一致すること
+
+を確かめ、外れていれば **1 つも fix worktree を作らずに停止する**。dispatch が
+`branch_matches` drift check で既に持っている形をそのまま置けばよく、新しい停止語彙は要らない
+（`preflight_failed` 相当で足りる）。
 
 ### 段階 A で dispatch の `--unattended` は何を足すのか
 
@@ -604,3 +667,441 @@ PR は人間が読む場所である——#97 が PR 本文に検証証拠を載
 6. **monitor 併用の実測。** `--no-auto-approve` 無しの monitor が unattended dispatch の
    prompt を実際に消費できるか（契約の `autoYes: mode: off` がサーバ側で止めるか）を
    実機で確かめる。止まるなら第4節の「塞げない穴」は穴ではなく、要件ではなく推奨に留められる。
+
+**この 6 点は [#115](https://github.com/Kewton/commandmate-skills/issues/115) で測った。結果は第14節にある。**
+
+---
+
+## 14. Phase 0 の実測結果（Issue [#115](https://github.com/Kewton/commandmate-skills/issues/115)）
+
+第13節の未決事項 6 点を、実装に入る前に測った。**本節は spike の記録である。`scripts/` は 1 行も
+変えていない。**
+
+測定環境: 本リポジトリ `37914e4` ／ macOS 26.6 ／ node v24.1.0 ／ git 2.49.0 ／ gh 2.86.0 ／
+CommandMate 0.22.0（`/opt/homebrew/lib/node_modules/commandmate` の bundle を**読むだけ**。
+#114 が第11節でやったのと同じやり方である）。**本節の行番号は `37914e4` 時点の実測値**であり、
+第1〜13節の行番号（main = `3105722` 時点）とは別に取り直している。
+
+測り方の原則を 3 つ置いた。
+- runner を動かす測定は `tests/fixtures/cmate-orchestrate/fake-cli.mjs` を `--cli` / `--git` /
+  `--gh` に渡して行い、**実 CommandMate のサーバを 1 度も呼んでいない**。
+- git を要する測定は `mktemp -d` 配下に `git init` した使い捨てリポジトリだけで行い、
+  既存の worktree・branch・remote に触れていない。
+- `gh` は **非破壊**でだけ調べた。PR は 1 つも作っておらず、merge も push もしていない。
+
+稼働中の他ワーカーへの副作用が無いことは tmux セッション数で確認した:
+作業前 `tmux ls | grep -c mcbd-` = **21**、作業後 = **21**（`-L` 付きの専用 socket も含め、
+tmux を触る実験そのものが不要だった。第14.6節は fixture と bundle の読みで足りた）。
+
+各項は **測り方 → 実測値 → 結論** の順で書く。**測っていないことは「未測定」と明記する。**
+
+### 14.0 結論の要約
+
+| # | 未決事項 | 結論 | ADR への影響 |
+|---|---|---|---|
+| 1 | cron の二重起動 | **排他が要る。** 同じ worktree に 2 つの supervisor が交互に `send` する状態を fixture で再現した | 裁定の変更は無い（第13節が「裁定していない」と書いた穴が実在すると確定した）。owner の候補は 14.1 |
+| 2 | wall-clock budget | **要る。** 既定で dispatch だけ wave 数 × 40 分、かつ**時計の上限が構造的に無い経路**が在る | 第1.5節の記述を訂正。第5節に測定への参照を追記 |
+| 3 | uat の再merge 先 | **invocation cwd の branch。main を checkout した CI では main が進む。detached HEAD では「merged」と報告して**どこにも残らない | 第7.1節を訂正。**第8節 段階 C の前提に pre-flight 検査を追加** |
+| 4 | `unattended_baseline` | **不十分。効かない条件が 4 つある**（うち 1 つは第7.2節の裁定が正しかったことの裏付け） | 第7.2節に但し書きを追記 |
+| 5 | `gh` の対話性 | **`gh` は対話に落ちない。** 落ちうるのは `git push` の資格情報プロンプトである | 第6.3節に足すべき停止は**無い**。要求は停止ではなく job 定義側の環境変数 |
+| 6 | monitor 併用 | **契約の `autoYes: mode: off` は monitor を止めない。** 穴は穴のままである | 第4節の「サーバ側の最後の砦」を訂正。`--no-auto-approve` は**要件のまま** |
+
+### 14.1 (1) cron の二重起動 — **排他が要る。穴は第13節の想定より広い**
+
+#### 測り方
+
+`dispatch.mjs` の入口は、`out_exists` を投げる `existsSync(outDir)`（3359〜3360行）と、
+実際にディレクトリを作る `mkdirSync(attemptDir, { recursive: true })`（3402行）が**離れている**。
+あいだに pre-flight（3380行 `preflightDispatch`）と `--prepare-worktrees` の準備段
+（3391〜3393行）が入る。この区間が排他の穴になるかを、2 プロセス同時起動で確かめた。
+
+再現手順（次の実装者が組み直せる形で書く。専用のテストは追加していない）:
+
+1. plan を作る。
+   `node skills/cmate-orchestrate/scripts/orchestrate.mjs 200 201 --max-parallel 3 --run-id plan
+   --profile-json tests/fixtures/cmate-orchestrate/profiles/node-fake.json
+   --issue-json tests/fixtures/cmate-orchestrate/cases/02-explicit-dependency/issues.json
+   --runs-dir <tmp>`
+2. plan の各 issue の `worktree` path にディレクトリを作り、`cmate-verify-ok` を置く
+   （node-fake profile の baseline は `cat cmate-verify-ok` なので、これが「検証 pass」になる）。
+   `run_tests.mjs` の `setupWorktrees()` と同じ世界である。
+3. scenario JSON（`cli_available` / `git.branch` / `gh.repo_access` / `workers` / `worktrees`）を
+   書き、`CMATE_FAKE_SCENARIO` と `CMATE_FAKE_LOG` を渡す。
+4. `dispatch.mjs --plan <plan> --cli <shim> --git <fake-cli> --gh <fake-cli> --out <同じ path>` を
+   **2 本**、700 ms ずらして起動する。
+5. `<shim>` は `fake-cli.mjs` へ素通しするだけの wrapper で、**最初の `ls` と毎回の `wait` に
+   固定の sleep を挟む**。実 CommandMate の `ls` はサーバ往復、`wait` は worker の 1 ターンで、
+   どちらもローカル fake では 0 秒に潰れてしまうためである。`CMATE_FAKE_LOG` は 1 行 1 JSON なので、
+   どちらの run がどの worktree id へ `send` したかが読める。
+
+#### 実測値
+
+| 形 | 結果 |
+|---|---|
+| (a) 逐次（A 完走 → 同じ `--out` で B）| B は **exit 4 / `out_exists` / `out_dir: null`**。**mutex は効く** |
+| (b) 同時（A の pre-flight を 2.5 s 遅らせ、B を +700 ms、同じ `--out`）| **両方 exit 0 / `status: success`。両方が同じ 2 つの worktree id に `send` した** |
+| (c) 同時（`--out` を run ごとに変える。timestamp 付き出力先を使う cron の書き方）| **両方完走。`out_exists` は最初から関与しない** |
+| (d) 窓の長さ | fake CLI（応答 0 秒）で process 起動から `--out` 作成まで **232 / 241 / 237 ms** |
+| (e) `--prepare-worktrees` 付き | **2 本とも `worktree-setup` provider を 1 回ずつ呼んだ**（窓の中で worktree と branch が二重に作られる） |
+| (f) `--resume`（[#98](https://github.com/Kewton/commandmate-skills/issues/98)）| **両方が attempt 2 を取り**、`resume-attempt-2/` に両方が書き、append-only の `attempt-history.jsonl` に `attempt: 2` の行が **2 本**並んだ。worker #200 には 8 + 8 = **16 回** `send` された |
+
+(b) の `send` タイムライン（1 つの時計上に両 run を並べたもの。**交互に届いている**）:
+
+```
++    0ms B send …-issue-201-…
++  832ms B send …-issue-201-…
++ 1667ms B send …-issue-201-…
++ 1722ms A send …-issue-201-…      ← A が同じ worktree に入ってくる
++ 2518ms A send …-issue-201-…
++ 2730ms B send …-issue-200-…
++ 3349ms A send …-issue-201-…
++ 3516ms B send …-issue-200-…
++ 4306ms B send …-issue-200-…
++ 4413ms A send …-issue-200-…
++ 5199ms A send …-issue-200-…
++ 6030ms A send …-issue-200-…
+```
+
+証跡も失われる: `dispatch-report.json` は同じ path に 2 度書かれ、**後の run が前の run の
+report を上書きする**。(f) では append-only を設計思想にしている ledger（`nextAttemptNumber` は
+「ディレクトリが無い最初の番号」で決める。541〜548行）に、同じ attempt 番号の行が 2 本並んだ。
+
+#### 結論
+
+**排他が要る。** `out_exists` が mutex になるのは「先行 run が既に `--out` を作り終えている」
+場合だけで、**pre-flight 実行中・`--out` 可変・`--resume`** の 3 経路では成立しない。
+
+第13節は「pre-flight で**停止した** run は `--out` を作らないので、その経路では mutex にならない」
+と書いていた。実測はそれより広い: **停止しなかった run でも、pre-flight を走っているあいだは
+`--out` が未作成なので窓が開いている。** しかもその窓には `--prepare-worktrees` の準備段
+（worktree と branch を作る mutation）が入っている。
+
+排他の owner の候補（**本 spike は裁定しない**。決めるのは段階 A の実装 Issue である）:
+
+| 候補 | 形 | 効く範囲 | 弱点 |
+|---|---|---|---|
+| **A. runner** | worktree id ごとの lock を **pre-flight の前**に取り、プロセス終了で外す。`mkdirSync` を `recursive` 無しで呼ぶ／`openSync(…, 'wx')` はどちらも EEXIST で原子的に失敗するので、TOCTOU にならない | 同じ機械のすべての起動元（cron・人間・別 job）| kill -9 された run の stale lock の回収規則を決める必要がある。**`--out` を lock に流用してはいけない**（#90 は「pre-flight で止まった run は `--out` を消費しない」と決めている）|
+| **B. job 定義** | GitHub Actions の `concurrency: group:`、cron 側の `flock` | 同じ job から出た run | **人間がローカルで叩いた run と cron の衝突を防げない。** 上の (b) はまさにその形である |
+| **C. サーバ** | CommandMate が live な task を持つ worktree への 2 本目の `send` を拒否する | 全経路 | 上流の変更であり、本リポジトリでは決められない |
+
+粒度は **worktree 単位**が正しい。害は「同じ worktree に 2 人の supervisor」であって
+「同じ plan が 2 回」ではない —— 別の plan が同じ worktree を名指すことは起こりうる。
+
+**未測定:** 実 CommandMate のサーバが、同じ worktree への 2 本目の `send` をどう扱うか
+（候補 C が既に部分的に成立しているか）は測っていない。fixture の fake CLI は素直に受理する。
+
+### 14.2 (2) wall-clock budget — **要る。理由は「長い」ことではなく「上限が無い経路が在る」こと**
+
+#### 測り方
+
+既定値はコードから読み、scaling は fake CLI で測った。
+
+- `dispatch.mjs`: `DEFAULT_WAIT_TIMEOUT_SECONDS = 300`（150行）、`DEFAULT_MAX_TURNS = 8`（157行）、
+  `hardIterations = maxTurns * 4 + 8`（2214行）。`DEFAULT_POLL_LIMIT = 120`（151行）は**死んでいる**
+  （usage 自身が "Retained for compatibility; wait now blocks" と書いている。256行）。
+- `uat.mjs`: 同じ 300 / 8 に加えて `DEFAULT_MAX_ATTEMPTS = 2` / `MAX_ATTEMPTS_CEILING = 5`
+  （114〜115行）。
+- `merge.mjs`: **待ち合わせループを持たない。** `gh pr checks` を 1 回読み、pending なら止まる
+  （936〜939行）。無人 merge に時計の問題は無い。
+- scaling: worker が `--max-turns` 目のターンでしか commit しない scenario を組み、shim が
+  **すべての `wait` で `--wait-timeout` ぶん sleep する**ようにして、
+  `waves × --max-turns × --wait-timeout` と実測を突き合わせた。
+
+#### 実測値
+
+| waves | `--max-turns` | `--wait-timeout` | 式の値 | 実測 | `send` 回数 |
+|---|---|---|---|---|---|
+| 2 | 8 | 1 s | 16 s | **21.2 s** | 16 |
+| 2 | 8 | 2 s | 32 s | **38.3 s** | 16 |
+| 2 | 4 | 1 s | 8 s | **11.4 s** | 8 |
+| 1（**幅 3・並列**）| 8 | 1 s | 8 s | **11.5 s** | 24 |
+
+最後の行が要点である: 1 つの wave に 3 issue を入れると `send` は 24 回に増えるのに、
+**壁時計は 1 人のときと変わらない**（`runCmAsync` で wave 内は同時に監督されるため）。
+**wave 幅は時計に掛からない。** したがって上限は
+
+```
+waves × --max-turns × --wait-timeout  +  ターンあたりのオーバーヘッド（fake CLI で 0.3〜0.4 s。実サーバではもっと大きい）
+```
+
+既定値に入れると: worker 1 人あたり **8 × 300 s = 40 分**、3 wave の plan で **2 時間**、
+`max_parallel 1` の 10 issue plan で **6 時間 40 分**。uat は ceiling 5 を使うと fix worker の
+監督だけで **3 時間 20 分**。
+
+**ただしこの式に入らない経路が在る。** profile baseline（契約なし経路の検証・UAT の機械ゲート・
+準備段の baseline）は `runCli` 経由で `execFileSync` に渡されるが、**`runCli` は `timeout` を
+渡していない**（`dispatch.mjs` 783〜790行 ／ `merge.mjs` 242〜249行 ／ `uat.mjs` 343〜350行 の
+いずれにも `timeout:` が無い。3 runner 通して `timeout:` は 1 箇所も存在しない）。
+
+実測: baseline を `["sleep 6"]` にした profile で `--wait-timeout 1 --max-turns 1
+--contract-mode off` を回すと、run は **12.9 秒**かかった（2 wave × 6 s）。
+**`--wait-timeout` はこの時間に一切効かない。**
+
+#### 結論
+
+**wall-clock budget は要る。** 決め手は「40 分 × wave 数が長すぎる」ことではなく、
+**時計の上限が構造的に存在しない経路（baseline / acceptance コマンド）が在る**ことである。
+第1.5節の「wall-clock は `--wait-timeout` × ターン数で暗黙に決まるだけ」は正しくない ——
+暗黙にすら決まらない部分がある。**該当節を訂正した。**
+
+打ち切り時の扱いの候補（**本 spike は裁定しない**）:
+
+| 論点 | 候補 | 根拠 |
+|---|---|---|
+| status | **`partial`（exit 7）** | 第6.1節の写像を変えない。「途中停止。成功ではない」がそのまま当てはまる |
+| stop_reason | **`timeout` を再利用する。新値を作らない** | enum に既に在る（第6.2節の `worker_timeout` 行）。**新値は schema version を上げる**（第11節）ので、上げずに済むならそうする |
+| 何が起きたかの名指し | `blocking_reasons` に **`wall_clock_budget_exhausted`** を 1 件。`$defs/entry` は `code` / `detail` の 2 key の自由文字列なので additive ですらない | #93 が `worktree_setup_*` で確立した経路（第10節 案 I）と同じ |
+| 打ち切り時点の mutation の記録 | **新しい機構は要らない。** 第7.2節の `unattended_baseline`（開始時 SHA）と、report に既に在る `waves[].workers[].state` が「どこまで進んだか」を持っている | 打ち切りは worker ループの外側で判定できるので、report は通常経路と同じ組み立てで書ける |
+| どの runner が持つか | **dispatch と uat のみ。** merge は待ち合わせループを持たない | 上記の実測 |
+| baseline の無制限 | **budget とは別の穴である。** `runCli` に `timeout` を渡すかどうかは 3 runner 共通の変更で、budget より先に決める必要がある | budget だけ足しても、baseline が固まった run は budget の判定点に到達しない |
+
+最後の行が重要である。**budget を worker ループの回数境界にだけ置くと、無限に走る baseline は
+budget を越えたことにすら気づかれない。** 順序は「まず `runCli` の timeout、次に budget」である。
+
+### 14.3 (3) uat の再merge 先 — **cwd の branch。detached HEAD では「成功」と報告して消える**
+
+#### 測り方
+
+`uat.mjs` **922行**（`grep -n "merge', '--no-ff'" skills/cmate-orchestrate/scripts/uat.mjs` で確認。
+第7.1節・第13節が書いている行番号は `37914e4` 時点でも正しい）は
+
+```js
+const merged = runCli(inputs.git, ['merge', '--no-ff', '--no-edit', branch]);
+```
+
+で、`extra` を渡していないので **cwd は uat プロセスのそれ**である。使い捨てリポジトリ
+（`mktemp -d` + `git init -b main`）に base commit・`integration` branch・
+`feature/issue-1-uat-fix-1` を作り、CI が取りうる 4 つの cwd / HEAD で同じコマンドを撃った。
+
+#### 実測値
+
+| cwd / HEAD | merge exit | 何が起きたか |
+|---|---|---|
+| **`main` を checkout**（branch push を受けた CI の既定）| **0** | **`main` が進んだ。** merge commit が main に載り、`integration` は動かない。PR も CI も review も経ていない |
+| **detached HEAD**（`actions/checkout` が SHA を取ったとき）| **0** | merge commit はできるが**どの branch からも到達できない**。`main` も動かない。`merged.ok` は true なので **uat は `outcome: merged` と報告する** |
+| fix branch がこの checkout に存在しない | 1 | `merge: … - not something we can merge` → `remerge_failed`（**正しい停止**）|
+| cwd が別 branch の linked worktree | 0 | その worktree の branch が進む |
+
+#### 結論
+
+第13節の推測どおり **invocation cwd の現在の branch に入る**。危険は 2 つあり、
+**片方は本 ADR が想定していなかった**。
+
+1. **CI が `main` を checkout した状態で段階 C を回すと、UAT の fix が誰のレビューも経ずに
+   main に入る。** 第7.1節はこの mutation を「ローカル可逆」と評価していたが、その評価は
+   「cwd が integration worktree である」という前提の上にしか立たない。cwd が `main` で、
+   その `main` が push 済みなら**不可逆**である。**第7.1節を訂正した。**
+2. **detached HEAD では「再merge した」と報告しながら、成果物がどの ref にも残らない。**
+   `remerge_failed` は出ない。第6.4節の停止語彙では捕まらない**静かな false success** である。
+   無人運転では、これは「UAT を通した」と報告された run の成果が消えることを意味する。
+
+したがって段階 C の前提として、**invocation cwd が integration branch に居ることの
+pre-flight 検査**が要る。**第8節の段階 C の前提にこれを足した。** 検査は 2 つでよく、
+どちらも dispatch が `branch_matches` drift check（`dispatch.mjs` 876〜881行）で
+既に持っている形をそのまま置ける:
+
+- `git symbolic-ref -q HEAD` が空でないこと（**detached でない**こと）
+- HEAD が期待する integration branch と一致すること
+
+**未測定:** 実際の CI（GitHub Actions）で `actions/checkout` がどちらの形を作るかは、
+リポジトリと trigger の設定次第であり、本 spike では確かめていない。上の裁定はそれに依らない ——
+**どちらの形でも壊れる**ので、検査する側に倒すのが答えである。
+
+### 14.4 (4) `unattended_baseline` — **効かない条件が 4 つある**
+
+#### 測り方
+
+使い捨てリポジトリに worktree を 1 つ作り、`git rev-parse --short HEAD` を baseline として
+控えたうえで、次の 4 条件で `git reset --hard <baseline>` を試した。
+
+(a) worker が 3 commit を積み、untracked file と未 commit の変更を残した ／
+(b) その work が既に integration branch へ merge されている ／
+(c) worktree が既に片付いている（`git worktree remove --force` 済み）／
+(d) worktree も branch も消えたあと `git reflog expire --expire-unreachable=now --all` と
+`git gc --prune=now` が走った。
+
+#### 実測値
+
+| 条件 | `git reset --hard <baseline>` | 残るもの |
+|---|---|---|
+| (a) 複数 commit ＋ 未 commit の変更 | exit 0。HEAD は baseline に戻り、tracked file の変更も消える | **untracked file は残る。** 実測 2 件: `untracked.log` と `.commandmate/tasks/issue-1.yaml` |
+| (b) work が integration に merge 済み | exit 0（worktree の branch は戻る）| **integration 側の commit はそのまま残る** |
+| (c) worktree が片付いている | **exit 128** `cannot change to '…': No such file or directory` | branch は生きている。**`git branch -f <branch> <baseline>` なら exit 0 で戻せる** |
+| (d) worktree も branch も消えて gc 済み | 実行不能 | gc 前は `rev-parse` が解決する。gc 後は **object ごと消える**（`rev-parse` が失敗）|
+
+短縮 SHA そのものについて: git は 4 文字未満の prefix を object 名として扱わない
+（2 文字では `ambiguous argument …: unknown revision`）。4 文字で衝突を作れば
+`error: short object ID 02b0 is ambiguous` になる。`--short` は**記録した時点で一意**な長さを
+選ぶだけで、**記録した文字列は後から伸びない。**
+
+#### 結論
+
+**短縮 SHA だけでは取り消しに十分ではない。効かない条件は 4 つある。**
+
+1. **untracked file は戻らない。** 完全に戻すには `git clean -fdx` が要るが、それは worker が
+   作った成果物も消す —— 取り消し手順としては別の判断であり、無人で機械にやらせるものではない。
+2. **下流に流れた後は戻らない。** merge / push 済みなら worktree の branch を戻しても意味がない
+   （第7.1節の merge 行が既にそう言っている）。**baseline が担保するのは最下流の 1 段だけ**であり、
+   取り消しは上流から順に行う。
+3. **worktree が消えていると `git reset` は使えない。** 使えるのは
+   `git branch -f <branch> <baseline>` である。**第7.2節が「branch 名と短縮 SHA で書く。
+   絶対 path は書かない」と決めたのは、この経路で正しかった** —— path ではなく branch 名だから、
+   worktree が無くても手が届く。実測が裁定を裏付けた例である。
+4. **branch も消えて gc が走ると復元できない。** 常に危険なわけではない: baseline が base branch
+   から到達可能なら object は生き続ける。危険なのは **baseline が base から到達できないとき**、
+   すなわち `--prepare-worktrees` が既存 worktree を再利用した場合（#93）や、
+   前の run の commit の上に baseline が乗っている場合である。
+
+**第7.2節にこの但し書きを追記した。** 第13節は「取り消し手順の但し書きとして SKILL.md 第5節に
+書く」としているが、**SKILL.md は本 spike の変更範囲外**なので、実装段（第12節 段 2）で持ち込むこと。
+
+### 14.5 (5) `gh` の対話性 — **`gh` は対話に落ちない。落ちうるのは `git push` である**
+
+#### 測り方
+
+**すべて非破壊で調べた。PR は 1 つも作っておらず、merge も push もしていない。**
+
+1. 対話に落ちる条件を `gh help environment` ／ `gh pr create --help` ／ `gh pr merge --help` から読む。
+2. runner が実際に何を渡しているかをコードから読む（`merge.mjs` 695行 push ／ 699〜712行
+   `pr create` ／ 743行 `pr merge`）。
+3. **認証切れ**: `GH_TOKEN=<不正な値> gh pr list --repo …`（read-only）と `gh auth status`。
+   `GH_TOKEN` は保存済み資格情報より優先されるので、keyring には触らない。
+4. **非対話の拒否**: **`--title` を渡さない** `gh pr create` を stdin を閉じて実行する
+   （title 無しでは PR を作れないので、成功しえない）。
+5. **`git push` 側**: 実在しない repo への `git ls-remote`（read-only）を
+   `-c credential.helper=` で helper を無効化して実行し、資格情報プロンプトが出るかを見る。
+   pty の有無で 2 度測る。
+
+#### 実測値
+
+- `gh help environment` は **`GH_PROMPT_DISABLED`**（"set to any value to disable interactive
+  prompting in the terminal"）を持つ。`gh config get prompt` は既定で `enabled`。
+- **認証切れ**: `GH_TOKEN=bogus… gh pr list …` → `HTTP 401: Bad credentials` と
+  `Try authenticating with: gh auth login` を**表示して即座に非ゼロ終了**。
+  ログインプロンプトは出ない。`gh auth status` も同様に「invalid」と表示して終わる。
+- **非対話の拒否**: `--title` 無しの `gh pr create` は **exit 1** で
+  ``must provide `--title` and `--body` (or `--fill` …) when not running interactively``。
+  ネットワークに出る前に落ちた。**gh は TTY が無いことを自分で判定し、待たずに落ちる。**
+- **runner の渡し方**: `pr create` には `--repo --base --head --title --body-file` が揃っている
+  （699〜712行）ので、gh が尋ねる 3 つ（push 先・title・body）はすべて塞がっている。
+  `--head` を明示するのは gh の help が
+  "Use `--head` to explicitly skip any forking or pushing behavior" と書く経路そのものである。
+  `pr merge` には `--repo` と `--merge|--squash|--rebase` のいずれかが**必ず**付く（743行）ので、
+  merge 方式の選択プロンプトに落ちる余地が無い。`--delete-branch` は渡していないので、
+  branch 削除の確認も出ない。
+- 3 runner とも `runCli` は **`stdio: ['ignore', 'pipe', 'pipe']`** で子を起動する
+  （`dispatch.mjs` 787行 ／ `merge.mjs` 246行 ／ `uat.mjs` 347行）。**stdin は常に閉じ、
+  stdout は pipe** なので、gh の `CanPrompt()` は必ず false になる。
+- **落ちうるのは `gh` ではなく `git push` である。** git の資格情報プロンプトは stdin ではなく
+  **`/dev/tty`** を読む。制御端末を持たないプロセス（＝CI の runner。本測定の実行環境もそうだった）
+  では `fatal: could not read Username for 'https://github.com': Device not configured` で落ちる。
+  `GIT_TERMINAL_PROMPT=0` を置くと `terminal prompts disabled` という明示的な失敗になる。
+  一方、**同じコマンドを pty の下（`script -q /dev/null …`）で走らせると、git は
+  `Username for 'https://github.com':` を実際に印字した。** すなわち
+  **制御端末を持つ起動元（tmux ペインから起動した cron、人間の shell）では、
+  `stdio: ['ignore', …]` はプロンプトを止めない。**
+
+#### 結論
+
+**`gh pr create` / `gh pr merge` は TTY 非依存で完結する。第6.3節に足すべき停止は無い。**
+認証切れも確認プロンプトも、gh は**待たずに非ゼロで落ち**、既存の `pr_create_failed` /
+`merge_failed` / `preflight_failed` がそれを受ける。第13節が言う「対話に落ちる経路」は
+gh 側には見つからなかった。
+
+足すべきは停止ではなく**入力の衛生**である。無人運転では job 定義側で
+
+- `GH_TOKEN`（または `GH_ENTERPRISE_TOKEN`）
+- `GIT_TERMINAL_PROMPT=0`
+
+を置くこと。runner がこれを検査しないのは第4節の monitor と同じ理由（別プロセスの環境を
+runner は保証できない）だが、**プロンプトが「止まる」ではなく「無言で待つ」に化ける唯一の経路**
+なので、段階 B の実装時に契約文書へ書き残すこと。
+
+**未測定:**
+- 本当の対話端末（入力側が生きた pty）で `git push` が**無限に待つ**ことは確かめていない。
+  測ったのはプロンプトが**印字される**ところまでで、そこでは stdin が EOF だったため失敗した。
+- `gh pr merge` 自身の
+  ``--merge, --rebase or --squash required when not running interactively`` は出していない。
+  実在の PR が要るためである。方式フラグを必ず渡すのでこの分岐に到達しない、というのは
+  **コードの読み**であって実測ではない。なお `gh pr merge` は**repo の解決を先に行う**ことは
+  実測した（存在しない repo を指すと GraphQL の解決エラーで落ちる)。
+
+### 14.6 (6) monitor 併用 — **契約の `mode: off` は monitor を止めない。穴は穴のままである**
+
+#### 測り方
+
+**実 CommandMate のサーバにも `mcbd-*` セッションにも触れていない。**
+
+1. monitor が prompt に Enter を送るかどうかの判定をコードから読む:
+   `monitor.sh` 501〜517行（`AUTO_APPROVE` → `ml_prompt_enter_verdict` → `send_to_pane`）、
+   `monitor-lib.sh` 267〜299行（判定本体）と 204〜206行（`ml_autoyes_suppressed`）。
+   `send_to_pane` の実体は **`tmux send-keys -t mcbd-<cliToolId>-<worktreeId> Enter`**
+   （`monitor.sh` 271〜292行）である。
+2. 判定の入力である `autoYes.lastSuppression` を**誰が書くか**を、インストール済み
+   CommandMate 0.22.0 の bundle を**読んで**確かめた（#114 が第11節でやったのと同じ手）。
+3. `ml_prompt_enter_verdict` を、`tests/fixtures/cmate-orchestrate-monitor/fixtures/
+   prompt-yes-no.json` の `autoYes` ブロックだけ差し替えた 2 つの payload に対して実行した
+   （`bash -c '. skills/cmate-orchestrate-monitor/scripts/monitor-lib.sh;
+   ml_prompt_enter_verdict <file>'`。**fixture 本体は変更していない**）。
+
+#### 実測値
+
+契約の `mode: 'off'` は**サーバ側で確かに効く**。`dist/server/src/lib/polling/auto-yes-resolver.js`
+の `evaluatePolicyAgainstTexts` は `policy.mode === 'off'` なら `{ reason: 'mode-off' }` を返す
+（＝サーバは自動応答しない）。第1.3節のコメントが書いている性質はここまでは正しい。
+
+**しかし、その事実が `capture --json` に出るのは、サーバの Auto-Yes poller が回っているときだけ
+である。** bundle の 3 点をつなぐと:
+
+- `lastSuppression` を記録する `recordPolicySuppression` は
+  `dist/server/src/lib/auto-yes-poller.js` の `detectAndRespondToPrompt` の中に**しか無い**。
+- その poller を起動する `startAutoYesPolling` は
+  `if (!autoYesState?.enabled) return { started: false, reason: 'auto-yes not enabled' }` で始まる。
+- `dist/server/src/lib/session/current-output-builder.js` が payload に載せる
+  `autoYes.lastSuppression` は `getLastPolicySuppression(worktreeId, cliToolId, instanceId)` の
+  戻り値そのものである。
+
+したがって **unattended dispatch が作る世界では `autoYes.lastSuppression` は存在しない**:
+runner は `auto-yes on` を打たず、`--unattended --auto-yes` は第4節で拒否されるので、
+その worktree で Auto-Yes が enabled になることが無い。
+
+monitor の判定（実測）:
+
+| payload の `autoYes` | `ml_prompt_enter_verdict` |
+|---|---|
+| `{ enabled: false }` ＝ **unattended dispatch 中の実際の姿** | **`approve`** |
+| `{ enabled: true, lastSuppression: { reason: 'mode-off', … } }` | `hold:policy`（理由 `mode-off`）|
+
+1 行目の payload は fixture の `realtimeSnippet` が
+`⏺ Bash(rm -rf build/)` / `Do you want to proceed?` であるもの、つまり
+**`rm -rf` の承認プロンプトに Enter を送る**という判定である。
+
+#### 結論
+
+**契約の `autoYes: mode: off` は monitor を止めない。第4節の「塞げない穴」は穴のままである。**
+
+しかも止まる条件が逆立ちしている: monitor が `hold:policy` に落ちるのは `lastSuppression` が
+記録されているときだけで、それが記録されるのは**サーバ側 Auto-Yes が有効なとき**、
+すなわち **unattended が禁じているまさにその状態のとき**だけである。
+
+第4節の「**契約の `autoYes: mode: off` がサーバ側の最後の砦である**」は成り立たないので
+**訂正した**。同節の残り 2 つの帰結（unattended で monitor を併用するなら `--no-auto-approve` は
+**要件**である／runner はこれを検出しない）は**変更しない** —— 実測はむしろ両方を強めている。
+第13節が置いた条件「止まるなら…要件ではなく推奨に留められる」は**満たされなかった。**
+
+**未測定:** 実機で monitor と unattended dispatch を同時に走らせ、monitor の Enter が
+dispatch の `wait --on-prompt agent`（exit 10）より先に届くかという**競争そのもの**は測っていない。
+上の結論はそれに依らない —— **monitor が「Enter を送る」と判定すること自体**が示せれば、
+`--no-auto-approve` を要件に据える根拠として十分だからである。どちらが勝つかは実機が要る。
+
+### 14.7 この spike が測らなかったこと
+
+推測で埋めないために、明示的に残す。
+
+| 未測定 | 何が要るか |
+|---|---|
+| 実 CommandMate サーバが同じ worktree への 2 本目の `send` をどう扱うか（14.1 候補 C）| 実機。稼働中の worker を巻き込まずに測る手順が別途要る |
+| 実 CI（GitHub Actions）の `actions/checkout` がどちらの HEAD を作るか（14.3）| 実 CI。ただし裁定はこれに依らない |
+| 対話端末つきで `git push` が無限に待つこと（14.5）| 入力側が生きた pty。本 spike の実行環境には制御端末が無かった |
+| `gh pr merge` の非対話拒否メッセージ（14.5）| 実在する PR。方式フラグを必ず渡すので到達しない、はコードの読みである |
+| monitor の Enter と dispatch の exit 10 の競争（14.6）| 実機 |
