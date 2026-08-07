@@ -49,9 +49,14 @@ runner は決定的なので、この文書が述べるのは「いつ使うか�
 通したいとき。**走っている / 走り終えた run が今どこにいるかを知りたいとき**（`status.mjs`。
 read-only なので、いつ何回呼んでも run に影響しない）。
 
-**使わない（スコープ外）**: Issue 本文の自動編集。回数無制限のループ。crash 後の resume /
-attempt retry。cross-model review。どの mutating runner も、明示承認・verification pass・
-CI pass の gate 無しに mutation を行わない。
+**使う（続き）**: **Wave 途中で一部の Issue だけが落ちた run を再開したいとき**
+（`dispatch.mjs --resume`。第3.2節。completed かつ verification pass の Issue は再 dispatch せず、
+その verification 記録だけを引き継ぐ）。
+
+**使わない（スコープ外）**: Issue 本文の自動編集。回数無制限のループ。cross-model review。
+どの mutating runner も、明示承認・verification pass・CI pass の gate 無しに mutation を行わない。
+`--resume` も上限つき（`uat` の `--max-attempts` と同じ設計）ではなく**人間が明示的に叩く**もので、
+runner が自分で再試行ループを回すことはない。
 
 ## 2. 前提条件
 
@@ -147,7 +152,8 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 | flag | 既定 | 効果 |
 |---|---|---|
 | `--plan <path>` | **必須** | planner が出した承認済み `plan.json` |
-| `--out <dir>` | `<plan-dir>/dispatch` | artifact の出力先。既存なら `out_exists` |
+| `--out <dir>` | `<plan-dir>/dispatch` | artifact の出力先。既存なら `out_exists`。`--resume` とは排他 |
+| `--resume <dir>` | — | 部分失敗した run の再開。`<dir>` は再開対象の `--out`。**pass 済みは再 dispatch せず記録だけ引き継ぐ**（後述） |
 | `--cli` / `--git` / `--gh <path>` | `commandmate`/`git`/`gh` | 実行する CLI |
 | `--auto-yes` | **off** | worker prompt を自動応答する。既定は停止して human へ提示 |
 | `--allow-questions` | **off** | 未回答 question を持つ Issue を含む plan を dispatch する |
@@ -189,6 +195,31 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 
 規則の正本は [dispatch-contract.md](./references/dispatch-contract.md) 第3.0.1節、
 裁定の記録は [adr-worktree-preparation.md](./references/adr-worktree-preparation.md)。
+
+**部分失敗からの再開（`--resume <前回の --out>`）** — 並列開発では Wave 途中の1 Issue だけが
+落ちるのが常態である。`--resume` は前回 run の**最新 report** を読み、次のように分ける。
+
+- **引き継ぐ**: `worker_state: completed` **かつ** `verification.outcome: pass` の Issue。
+  **再 dispatch しない。** その verification 記録（`ran` / `gates` / `checks`）を新 report に
+  **転記する**（ここで再判定はしない）。merge / uat はこの2 field しか読まないので、
+  引き継いだ Issue はそのまま eligible のままである。
+- **再実行する**: それ以外（`failed` / `timeout` / `prompt` / `not_dispatched` / pass でない
+  verdict / 記録が無い）。
+- **Wave barrier は再計算する。** 全員引き継ぎの Wave は 1件も dispatch せず即座に advance する
+  ので、**依存元が pass 済みの Issue は待たされない**。引き継ぎ Issue の worktree は解決を要求
+  されない（merge 済みで消えていてよい）。
+- **停止条件・裁定規則は通常 dispatch と完全に同一である。** exit 0/7/1、Auto-Yes 既定 off、
+  mutating wave 前の drift 再確認、verification gate — どれも緩めない。
+- **artifact は上書きしない。** attempt 1 は `<out>/dispatch-report.json` のまま、attempt N は
+  `<out>/resume-attempt-N/dispatch-report.json` に append される。`<out>/attempt-history.jsonl`
+  に attempt 1行ずつの台帳が残る。**merge / uat / status には最新 attempt の report を渡す**
+  （引き継ぎ分も再実行分も、その1本に揃っている）。
+- **別 plan の report では resume させない。** `run_id` / repository / base が `--plan` と
+  一致しなければ `resume_plan_mismatch`、report が `dispatch-report.v1` として読めなければ
+  `resume_invalid` で、どちらも**何も dispatch せず・何も書かずに**拒否する。
+- 再実行対象が1件も無ければ、`resume_no_work` を明示して **CLI を1回も叩かずに** exit 0 で終わる。
+
+規則の正本は [dispatch-contract.md](./references/dispatch-contract.md) 第8節。
 
 契約経路では plan だけから **実行契約 yaml** を決定的に生成して worktree に置き、
 `commandmate send <worktree-id> --contract <path>` で dispatch する（**同一 plan → byte-identical
@@ -510,6 +541,10 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | dispatch exit 10（prompt 検出） | worker が人間の判断を求めている | `capture` の内容が report に出ている。**自分で判断して答える。** runner は自動応答しない |
 | dispatch `verification_not_judged`（exit 99） | run が error / cancelled で**誰も判定していない** | **再 dispatch では解けない。** CommandMate 側のログを見る。判定していないものを worker に直させない |
 | dispatch `worker_failed`（`--max-turns` 到達で未 commit） | worker が起動したが commit まで到達しなかった（worktree 未解決はこの code に落ちない。上の行） | prompt / worker ログを読む。指示が過大なら Issue を分割して re-plan する |
+| dispatch `verification_failed` / `worker_failed` / `timeout` で **一部の Issue だけ**落ちた | pass 済みの Issue と落ちた Issue が同じ run に混ざっている | 落ちた分を直したうえで **`dispatch.mjs --plan <plan.json> --resume <その run の dispatch ディレクトリ>`**。pass 済みは再 dispatch されず記録だけ引き継がれる（第3.2節）。**re-plan は不要** |
+| dispatch `resume_plan_mismatch`（`stop_reason: dispatch_error`） | `--resume` 先の report が**別 plan**のものだった（`run_id` / repository / base 不一致） | その plan 自身の dispatch ディレクトリを `--resume` に渡す。新規に走らせるなら `--out` で始める。**何も dispatch していないので、直して同じコマンドを再実行してよい** |
+| dispatch `resume_invalid`（同上） | `--resume` 先の report が `dispatch-report.v1` として読めない（schema version 違い / JSON 破損） | detail が「何がどう合わないか」を名指ししている。報告どおりの report を指すか、`--out` で新規 run にする。**壊れた report を半分だけ信じて引き継がない** |
+| dispatch `resume_no_work`（`status: success`） | 再実行対象が1件も無い（全 Issue が completed かつ pass） | 停止ではない。その attempt の report をそのまま merge / uat に渡す |
 | dispatch `contract_unsupported` + `require` | CLI が実行契約に非対応 | CommandMate を 0.17.0 以上に上げるか、弱い裁定を承知のうえで `auto` に落とす |
 | merge `ci_failed` / `ci_pending` | CI が green でない | CI を直す。**green 無しに merge しない** |
 | merge `pr_missing` / `merge_failed` | PR が無い / conflict | PR の状態を確認し、conflict は手で解消する |
@@ -518,9 +553,10 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | uat `blocked` / `max_attempts_reached` | 上限まで直しても不合格 | `unresolved_issues` と `next_actions` を読む。**success に丸めない** |
 | uat `acceptance_not_run` | 意味ゲートを掛けずに baseline だけで裁定した | cmate-acceptance-test を入れて result を用意し、必要なら `--require-acceptance` で必須にする |
 
-`worktree_setup_unavailable` / `worktree_setup_failed` / `worktree_profile_mismatch` の3つは、
+`worktree_setup_unavailable` / `worktree_setup_failed` / `worktree_profile_mismatch` と
+`resume_attempt` / `resume_no_work` / `resume_invalid` / `resume_plan_mismatch` は、
 この表には在るが **status runner の hint map にはまだ無い**（`status.mjs` は別 Issue で追随する）。
-それまで `status.mjs --run` はこの3件を「detail と `summary_markdown` を読む」に落として表示する。
+それまで `status.mjs --run` はこれらを「detail と `summary_markdown` を読む」に落として表示する。
 **推測で別の対処を出さない**のが status runner の約束なので、これは劣化ではなく既定の振る舞いである。
 dispatch report の `summary_markdown` には上表と同じ next action が出ている。
 

@@ -28,6 +28,7 @@ const PROFILE_INIT_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scri
 const SCHEMA_DIR = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'schemas');
 const CASES_DIR = join(HERE, 'cases');
 const DISPATCH_CASES_DIR = join(HERE, 'dispatch-cases');
+const RESUME_CASES_DIR = join(HERE, 'resume-cases');
 const MERGE_CASES_DIR = join(HERE, 'merge-cases');
 const UAT_CASES_DIR = join(HERE, 'uat-cases');
 const STATUS_CASES_DIR = join(HERE, 'status-cases');
@@ -194,6 +195,13 @@ function workerVerifyPasses(scenario, number) {
 //                  null    -> --cli is omitted entirely, so resolution falls
 //                             through to $CM and then to the bare default
 //   opts.env       extra environment entries (e.g. CM)
+// and for the resume suite (Issue #98):
+//   opts.resumeDir string  -> passed as --resume instead of --out, which is the
+//                             one flag combination dispatch refuses
+//   opts.state     string  -> a per-attempt CMATE_FAKE_STATE, so a second attempt
+//                             starts from a fresh worker turn counter (the world
+//                             it inherits is the worktrees on disk, not the fake's
+//                             memory of how many turns a worker has taken)
 // Every other caller gets the previous behaviour unchanged.
 function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, logPath, opts = {}) {
   const plan = readPlan(planPath);
@@ -232,7 +240,9 @@ function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, lo
   const integration = setupWorktrees(plan, work, (n) => workerVerifyPasses(scenario, n), pathOverrides, absent);
   const scenarioPath = join(work, 'dispatch-scenario.json');
   writeFileSync(scenarioPath, `${JSON.stringify(scenario, null, 2)}\n`);
-  const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_STATE: work, ...(opts.env ?? {}) };
+  const stateDir = opts.state ?? work;
+  mkdirSync(stateDir, { recursive: true });
+  const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_STATE: stateDir, ...(opts.env ?? {}) };
   if (logPath) env.CMATE_FAKE_LOG = logPath;
   const launcher = 'launcher' in opts ? opts.launcher : FAKE_CLI;
   // A case's dispatch_args may need the fake's own path (the `--worktree-setup`
@@ -244,7 +254,7 @@ function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, lo
     '--plan', planPath,
     ...(launcher === null ? [] : ['--cli', launcher]),
     '--git', FAKE_CLI, '--gh', FAKE_CLI,
-    '--out', outDir,
+    ...(opts.resumeDir ? ['--resume', opts.resumeDir] : ['--out', outDir]),
     ...resolvedExtra,
   ];
   try {
@@ -602,7 +612,9 @@ function generatePlan(spec, runsDir) {
   args.push('--profile-json', profile, '--issue-json', issuesPath, '--runs-dir', runsDir);
   runRunner(args); // exit code is irrelevant here; a partial plan is still a plan
   // The run id is pinned to "plan" by every dispatch case's orchestrate_args.
-  return join(runsDir, 'plan', 'plan.json');
+  // A resume case that needs a SECOND, different plan (to prove the run_id guard)
+  // pins a different one and names it here.
+  return join(runsDir, spec.plan.run_dir ?? 'plan', 'plan.json');
 }
 
 function readCliLog(logPath) {
@@ -1104,6 +1116,307 @@ function runDispatchCase(caseId) {
   if (expect.redaction_kind) {
     check(report.redactions.some((entry) => entry.kind === expect.redaction_kind && entry.count >= 1), `redactions did not record kind "${expect.redaction_kind}"`);
   }
+}
+
+// =============================================================================
+// Resume cases: a partial failure, then `--resume` (Issue #98)
+// =============================================================================
+//
+// A resume case is a SEQUENCE of dispatch runs against one plan, one work
+// directory and one output directory: attempt 1 dispatches normally, and every
+// later attempt runs `--resume <out>` against a scenario that models the world
+// after somebody fixed something. That sequence is the fixture — the property
+// under test ("the pass-ed issues are not re-run, and their verdicts survive")
+// cannot be observed from a single run, and a hand-written prior report would
+// only prove that the runner can read a file this repository wrote by hand.
+//
+// Two invariants are asserted on every attempt rather than per case:
+//
+//   1. APPEND-ONLY. Every file that existed in the output directory before an
+//      attempt has byte-identical content after it. That is the whole "既存
+//      artifact を上書きしない" rule, and a per-path expectation would only catch
+//      the paths somebody thought of.
+//   2. The report on stdout IS the report on disk, at the attempt's own path.
+//
+// Each attempt gets its own CMATE_FAKE_STATE, so a later attempt starts from a
+// fresh worker turn counter. What it inherits from the earlier one is the real
+// world: the worktrees on disk, their baseline markers, and the output directory.
+
+// Every file under `dir` as relpath -> bytes, for the append-only comparison.
+function snapshotTree(dir, prefix = '') {
+  const out = new Map();
+  if (!existsSync(dir)) return out;
+  for (const entry of readdirSync(prefix === '' ? dir : join(dir, prefix), { withFileTypes: true })
+    .sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) for (const [key, value] of snapshotTree(dir, relative)) out.set(key, value);
+    else if (entry.isFile()) out.set(relative, readFileSync(join(dir, relative), 'utf8'));
+  }
+  return out;
+}
+
+// The attempt ledger, as parsed lines. Absent is an empty history, not a crash:
+// a run that stopped before writing anything writes no line either.
+function readAttemptHistory(outDir) {
+  const path = join(outDir, 'attempt-history.jsonl');
+  if (!existsSync(path)) return [];
+  return readFileSync(path, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line));
+}
+
+// merge.mjs in preview mode over a given dispatch report. This is the acceptance
+// question "does the resumed report still deliver?" asked of the real consumer
+// rather than of a re-implementation of its eligibility rule.
+function mergeEligibleFor(planPath, dispatchPath, work, label) {
+  const mergeOut = join(work, `merge-${label}`);
+  const scenarioPath = writeScenario(work, `merge-scenario-${label}.json`, withDiffDefaults({
+    cli_available: true,
+    gh: { repo_access: true },
+    git: { base_resolvable: true },
+  }, readPlan(planPath)));
+  const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath };
+  const { exit, stdout } = runMerge(planPath, dispatchPath, mergeOut, '--create-prs', [], env, join(work, 'integration'));
+  try {
+    return { exit, report: JSON.parse(stdout) };
+  } catch {
+    return { exit, report: null };
+  }
+}
+
+function assertResumeAttempt(label, spec, exit, stdout, cliLog, outDir, planPath, work) {
+  const expect = spec.expect;
+  let report;
+  try {
+    report = JSON.parse(stdout);
+  } catch {
+    check(false, `${label}: dispatch stdout is not valid JSON (exit ${exit}): ${stdout.slice(0, 200)}`);
+    return null;
+  }
+
+  check(exit === expect.exit, `${label}: exit ${exit} !== expected ${expect.exit}`);
+  const schemaErrors = validateAgainst(dispatchSchema, report, 'dispatch');
+  check(schemaErrors.length === 0, `${label}: dispatch schema: ${schemaErrors.slice(0, 3).join('; ')}`);
+  check(report.status === expect.status, `${label}: status "${report.status}" !== "${expect.status}"`);
+  check(report.stop_reason === expect.stop_reason, `${label}: stop_reason "${report.stop_reason}" !== "${expect.stop_reason}"`);
+  if (expect.completion_check_passed !== undefined) {
+    check(report.completion_check.passed === expect.completion_check_passed,
+      `${label}: completion_check.passed ${report.completion_check.passed} !== ${expect.completion_check_passed}`);
+  }
+  if (expect.waves_count !== undefined) {
+    check(report.waves.length === expect.waves_count, `${label}: waves ${report.waves.length} !== ${expect.waves_count}`);
+  }
+  // Exactly which issues each wave dispatched. The core claim of a resume — "only
+  // the failed one was re-run" — is this list, and an inclusive check would pass
+  // on a run that re-dispatched everything.
+  if (expect.wave_dispatched) {
+    const actual = report.waves.map((wave) => wave.dispatched);
+    check(deepEqual(actual, expect.wave_dispatched),
+      `${label}: wave dispatched ${JSON.stringify(actual)} !== ${JSON.stringify(expect.wave_dispatched)}`);
+  }
+
+  const sent = sentIssuesFromLog(cliLog);
+  for (const number of expect.sent ?? []) check(sent.includes(number), `${label}: #${number} should have been dispatched`);
+  for (const number of expect.never_sent ?? []) {
+    check(!sent.includes(number), `${label}: #${number} was sent, but it should not have been re-dispatched`);
+  }
+  // "The dependent is dispatched from the FIRST wave" is only observable as an
+  // ordering: with its dependency carried over, nothing precedes it.
+  if (expect.first_sent !== undefined) {
+    check(sent[0] === expect.first_sent,
+      `${label}: the first send was #${sent[0]} !== #${expect.first_sent} (a carried wave must not put a worker in front of it)`);
+  }
+  check(cliLog.filter((entry) => entry.sub === 'respond').length === 0,
+    `${label}: respond was called; Auto-Yes stays off on a resume exactly as on a first dispatch`);
+  // What a resume with nothing to do must NOT do. "Dispatched nobody" is weaker
+  // than what the runner promises: with no mutating wave there is nothing for a
+  // drift re-check to guard, so no CLI is reached for at all.
+  if (expect.cli_calls_total !== undefined) {
+    check(cliLog.length === expect.cli_calls_total,
+      `${label}: ${cliLog.length} CLI call(s) were made !== ${expect.cli_calls_total}: ${JSON.stringify(cliLog.map((entry) => entry.sub))}`);
+  }
+
+  for (const [num, state] of Object.entries(expect.worker_states ?? {})) {
+    const worker = allWorkers(report).find((w) => w.issue === Number(num));
+    if (check(worker !== undefined, `${label}: #${num} has no worker record`)) {
+      check(worker.worker_state === state, `${label}: #${num} worker_state "${worker.worker_state}" !== "${state}"`);
+    }
+  }
+  for (const [num, outcome] of Object.entries(expect.verification_outcomes ?? {})) {
+    const worker = allWorkers(report).find((w) => w.issue === Number(num));
+    if (check(worker !== undefined, `${label}: #${num} has no worker record`)) {
+      check(worker.verification.outcome === outcome, `${label}: #${num} verification.outcome "${worker.verification.outcome}" !== "${outcome}"`);
+    }
+  }
+  // A carried record must carry the EVIDENCE too, not just a passing outcome: a
+  // resume that dropped the checks would hand merge a pass with nothing behind it.
+  for (const [num, needles] of Object.entries(expect.verification_checks_include ?? {})) {
+    const worker = allWorkers(report).find((w) => w.issue === Number(num));
+    if (check(worker !== undefined, `${label}: #${num} has no worker record`)) {
+      const checksText = (worker.verification.checks ?? []).join(' | ');
+      for (const needle of needles) {
+        check(checksText.includes(needle), `${label}: #${num} verification.checks ${JSON.stringify(worker.verification.checks)} does not contain "${needle}"`);
+      }
+    }
+  }
+  for (const [num, needles] of Object.entries(expect.worker_notes_include ?? {})) {
+    const worker = allWorkers(report).find((w) => w.issue === Number(num));
+    if (check(worker !== undefined, `${label}: #${num} has no worker record`)) {
+      for (const needle of needles) {
+        check(String(worker.note ?? '').includes(needle), `${label}: #${num} note ${JSON.stringify(worker.note)} does not contain "${needle}"`);
+      }
+    }
+  }
+  for (const code of expect.limitation_codes ?? []) {
+    check(report.limitations.some((entry) => entry.code === code), `${label}: limitation "${code}" was expected but not recorded`);
+  }
+  for (const code of expect.absent_limitation_codes ?? []) {
+    check(!report.limitations.some((entry) => entry.code === code), `${label}: limitation "${code}" should be absent but was recorded`);
+  }
+  if (expect.limitation_details_include) {
+    const details = report.limitations.map((entry) => entry.detail);
+    for (const needle of expect.limitation_details_include) {
+      check(details.some((detail) => detail.includes(needle)), `${label}: no limitation detail contains "${needle}"; details: ${JSON.stringify(details)}`);
+    }
+  }
+  for (const code of expect.blocking_codes ?? []) {
+    check(report.blocking_reasons.some((entry) => entry.code === code), `${label}: blocking reason "${code}" was expected but not recorded`);
+  }
+  if (expect.blocking_details_include) {
+    const details = report.blocking_reasons.map((entry) => entry.detail);
+    for (const needle of expect.blocking_details_include) {
+      check(details.some((detail) => detail.includes(needle)), `${label}: no blocking detail contains "${needle}"; details: ${JSON.stringify(details)}`);
+    }
+  }
+  for (const needle of expect.summary_includes ?? []) {
+    check(report.summary_markdown.includes(needle), `${label}: the summary does not contain ${JSON.stringify(needle)}`);
+  }
+  for (const needle of expect.summary_excludes ?? []) {
+    check(!report.summary_markdown.includes(needle), `${label}: the summary should not contain ${JSON.stringify(needle)}`);
+  }
+
+  // The #83 invariant, unchanged and asserted here too: the note never claims a
+  // verification result the structured field does not. A carried record is
+  // exactly where that could drift, because its note is transcribed.
+  for (const worker of allWorkers(report)) {
+    const note = String(worker.note ?? '');
+    if (/verification passed/.test(note)) {
+      check(worker.verification.outcome === 'pass',
+        `${label}: #${worker.issue} note claims "verification passed" but outcome is "${worker.verification.outcome}"`);
+    }
+    if (worker.worker_state === 'completed' && worker.verification.ran === false) {
+      const gate = report.completion_check.checks.find((entry) => entry.id === 'verification_recorded');
+      check(gate !== undefined && gate.passed === false,
+        `${label}: #${worker.issue} completed with verification.ran false, but verification_recorded did not fail`);
+    }
+  }
+
+  // The report is on disk where the contract says it is, and it is the same
+  // bytes stdout carried.
+  if (expect.report_file !== undefined) {
+    const path = join(outDir, expect.report_file);
+    if (check(existsSync(path), `${label}: no report was written to <out>/${expect.report_file}`)) {
+      check(JSON.parse(readFileSync(path, 'utf8')).summary_markdown === report.summary_markdown,
+        `${label}: <out>/${expect.report_file} is not the report that was printed`);
+    }
+    const summaryPath = join(outDir, expect.report_file.replace(/dispatch-report\.json$/, 'dispatch-summary.md'));
+    check(existsSync(summaryPath), `${label}: no summary was written beside <out>/${expect.report_file}`);
+  }
+  if (expect.report_file_absent !== undefined) {
+    check(!existsSync(join(outDir, expect.report_file_absent)),
+      `${label}: <out>/${expect.report_file_absent} was created, but this attempt wrote nothing`);
+  }
+
+  // The consumer's answer, from the consumer (merge.mjs), over THIS report.
+  if (expect.merge_eligible) {
+    const dispatchPath = join(outDir, expect.report_file);
+    const merged = mergeEligibleFor(planPath, dispatchPath, work, label.replace(/[^A-Za-z0-9]/g, '-'));
+    if (check(merged.report !== null, `${label}: merge stdout is not valid JSON (exit ${merged.exit})`)) {
+      check(deepEqual(merged.report.eligible_issues, expect.merge_eligible),
+        `${label}: merge eligible ${JSON.stringify(merged.report.eligible_issues)} !== ${JSON.stringify(expect.merge_eligible)}`);
+    }
+  }
+  return report;
+}
+
+function runResumeCase(caseId) {
+  const caseDir = join(RESUME_CASES_DIR, caseId);
+  const spec = JSON.parse(readFileSync(join(caseDir, 'case.json'), 'utf8'));
+  log(`  ${caseId}: ${spec.description}`);
+
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-resume-plan-'));
+  const planPath = generatePlan(spec, runsDir);
+  if (!check(existsSync(planPath), `plan.json was not generated at ${planPath}`)) return;
+
+  // A second plan over the same issues but with its own run id: the input the
+  // run_id guard exists to refuse. Generated rather than hand-written so the
+  // guard is exercised against a real plan, not against a crafted mismatch.
+  let otherPlanPath = null;
+  if (spec.other_plan) {
+    const otherRunsDir = mkdtempSync(join(tmpdir(), 'cmate-resume-other-'));
+    otherPlanPath = generatePlan({ plan: spec.other_plan }, otherRunsDir);
+    if (!check(existsSync(otherPlanPath), `the second plan.json was not generated at ${otherPlanPath}`)) return;
+  }
+
+  const work = mkdtempSync(join(tmpdir(), 'cmate-resume-'));
+  const outDir = join(work, 'dispatch'); // attempt 1 creates it; later attempts append into it
+
+  spec.attempts.forEach((attemptSpec, index) => {
+    const label = `${caseId} attempt ${index + 1}`;
+    const scenarioObject = JSON.parse(readFileSync(join(caseDir, attemptSpec.scenario), 'utf8'));
+    const usePlan = attemptSpec.plan === 'other' ? otherPlanPath : planPath;
+    const logPath = join(work, `cli-${index + 1}.log`);
+
+    // A damaged prior report. The dispatch report is this package's own artifact,
+    // but a resume reads it back as an INPUT that decides what counts as finished,
+    // so the shapes it must refuse can only be exercised by handing it one.
+    // Applied BEFORE the snapshot, so the damage is the attempt's starting world
+    // rather than a violation of the append-only check below.
+    const priorPath = join(outDir, 'dispatch-report.json');
+    if (attemptSpec.prior_report_raw !== undefined) {
+      writeFileSync(priorPath, attemptSpec.prior_report_raw);
+    }
+    if (attemptSpec.prior_report_patch) {
+      const document = JSON.parse(readFileSync(priorPath, 'utf8'));
+      writeFileSync(priorPath, `${JSON.stringify({ ...document, ...attemptSpec.prior_report_patch }, null, 2)}\n`);
+    }
+    const before = snapshotTree(outDir);
+
+    const { exit, stdout } = runDispatchRunner(
+      usePlan, scenarioObject, work, outDir, attemptSpec.dispatch_args ?? [], logPath,
+      attemptSpec.resume ? { resumeDir: outDir, state: join(work, `state-${index + 1}`) } : { state: join(work, `state-${index + 1}`) },
+    );
+
+    assertResumeAttempt(label, attemptSpec, exit, stdout, readCliLog(logPath), outDir, usePlan, work);
+
+    // Invariant 1: append-only. Nothing that was in the output directory before
+    // this attempt has different bytes after it.
+    const after = snapshotTree(outDir);
+    for (const [relative, bytes] of before) {
+      // The ledger is the one append-only FILE (it grows); everything else must
+      // be untouched, ledger included up to its previous content being a prefix.
+      if (relative === 'attempt-history.jsonl') {
+        check(String(after.get(relative) ?? '').startsWith(bytes),
+          `${label}: attempt-history.jsonl was rewritten rather than appended to`);
+        continue;
+      }
+      check(after.get(relative) === bytes, `${label}: <out>/${relative} was overwritten by a later attempt`);
+    }
+
+    // Invariant 2: the ledger says what this attempt was.
+    if (attemptSpec.expect.history) {
+      const history = readAttemptHistory(outDir);
+      const line = history[history.length - 1];
+      if (check(line !== undefined, `${label}: nothing was appended to attempt-history.jsonl`)) {
+        for (const [key, value] of Object.entries(attemptSpec.expect.history)) {
+          check(deepEqual(line[key], value), `${label}: history ${key} ${JSON.stringify(line[key])} !== ${JSON.stringify(value)}`);
+        }
+      }
+    }
+    if (attemptSpec.expect.history_length !== undefined) {
+      const history = readAttemptHistory(outDir);
+      check(history.length === attemptSpec.expect.history_length,
+        `${label}: attempt-history.jsonl has ${history.length} line(s) !== ${attemptSpec.expect.history_length}`);
+    }
+  });
 }
 
 // =============================================================================
@@ -2512,6 +2825,12 @@ function main() {
     : [];
   for (const caseId of dispatchIds) runDispatchCase(caseId);
 
+  log('  -- resume cases --');
+  const resumeIds = existsSync(RESUME_CASES_DIR)
+    ? readdirSync(RESUME_CASES_DIR).filter((name) => existsSync(join(RESUME_CASES_DIR, name, 'case.json'))).sort()
+    : [];
+  for (const caseId of resumeIds) runResumeCase(caseId);
+
   log('  -- merge cases --');
   const mergeIds = existsSync(MERGE_CASES_DIR)
     ? readdirSync(MERGE_CASES_DIR).filter((name) => existsSync(join(MERGE_CASES_DIR, name, 'case.json'))).sort()
@@ -2550,7 +2869,7 @@ function main() {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution, worktree-setup input`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution, worktree-setup input`);
 }
 
 main();

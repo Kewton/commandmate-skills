@@ -1,0 +1,59 @@
+{
+  "description": "整合性ガード（壊れた report）: resume 元 report が dispatch-report.v1 として読めない 2 通り — schema version が違う（未知の版を「たぶん同じ意味」と読まない）と、そもそも JSON として壊れている。どちらも exit 3 / `resume_invalid` で拒否し、何がどう合わないかを名指しし、attempt の artifact を作らない。resume は verification 済みという主張を引き継ぐ操作なので、形の確かめられない report は半分だけ信じない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "attempts": [
+    {
+      "scenario": "all-pass.json",
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 0,
+        "status": "success",
+        "stop_reason": "completed",
+        "report_file": "dispatch-report.json",
+        "history_length": 1
+      }
+    },
+    {
+      "scenario": "all-pass.json",
+      "resume": true,
+      "prior_report_patch": { "dispatch_schema_version": 2 },
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 3,
+        "status": "failure",
+        "stop_reason": "dispatch_error",
+        "waves_count": 0,
+        "never_sent": [200, 201],
+        "cli_calls_total": 0,
+        "blocking_codes": ["resume_invalid"],
+        "blocking_details_include": [
+          "its dispatch_schema_version is 2; this runner understands 1",
+          "refused rather than partly believed"
+        ],
+        "report_file_absent": "resume-attempt-2/dispatch-report.json",
+        "history_length": 1
+      }
+    },
+    {
+      "scenario": "all-pass.json",
+      "resume": true,
+      "prior_report_raw": "{ this is not json",
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 3,
+        "status": "failure",
+        "stop_reason": "dispatch_error",
+        "waves_count": 0,
+        "never_sent": [200, 201],
+        "cli_calls_total": 0,
+        "blocking_codes": ["resume_invalid"],
+        "blocking_details_include": ["it is not valid JSON"],
+        "report_file_absent": "resume-attempt-2/dispatch-report.json",
+        "history_length": 1
+      }
+    }
+  ]
+}

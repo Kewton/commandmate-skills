@@ -1,0 +1,29 @@
+{
+  "description": "Issue #98 の artifact 配置が status matrix と噛み合っていることの証明: attempt 1 は #200 が verification 不合格で停止し、`--resume` した attempt 2 が `dispatch/resume-attempt-2/dispatch-report.json` に書かれている。status は両方を dispatch phase の証跡として並べたうえで、Issue 行には **新しい attempt の記録**（#200 completed/pass）を採る。古い attempt を最新として読んだら #200 は fail のままになる。attempt 1 の blocking はその attempt の事実として残るので、Issue 行の次アクションからは消えない（run の履歴を後から書き換えないため）。",
+  "expect": {
+    "exit": 0,
+    "latest_phase": "dispatch",
+    "run_id": "plan",
+    "phase_states": { "plan": "ok", "dispatch": "ok", "merge": "not_run", "uat": "not_run" },
+    "unreadable_paths": [],
+    "issues": [200, 201],
+    "issue_states": {
+      "200": { "plan": "ok", "dispatch": "ok", "merge": "not_run", "uat": "not_run" },
+      "201": { "plan": "ok", "dispatch": "ok", "merge": "not_run", "uat": "not_run" }
+    },
+    "dispatch": {
+      "200": { "worker_state": "completed", "verification_outcome": "pass", "wave_index": 1 },
+      "201": { "worker_state": "completed", "verification_outcome": "pass", "wave_index": 0 }
+    },
+    "issue_next": {
+      "200": ["dispatch/blocking/verification_failed", "dispatch/limitation/resume_attempt"],
+      "201": ["dispatch/limitation/resume_attempt"]
+    },
+    "text_includes": [
+      "dispatch/dispatch-report.json",
+      "dispatch/resume-attempt-2/dispatch-report.json",
+      "status=partial / stop=verification_failed",
+      "status=success / stop=completed"
+    ]
+  }
+}

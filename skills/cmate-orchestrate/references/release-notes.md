@@ -271,6 +271,52 @@ collision 検査・作成直前の base SHA 再確認・baseline は既に `cmat
 `dispatch_schema_version` は **1 のまま**で、証跡は `limitations` と
 `<out>/worktree-setup/prepared.json` と summary が運ぶ（field を足さない）。
 
+### #98 — 3件中1件が落ちただけで、通った2件にもう一度 worker を走らせていた
+
+Wave 途中の部分失敗は並列開発の常態なのに、そこから進む手が **re-plan して全部やり直す** しか
+なかった。verification gate が pass させた成果物にもう一度 worker を走らせるのは、gate が
+何のためにあるかを捨てている。uat には回数上限つき修正ループ（attempt を既存 artifact に append
+する形）があるのに、dispatch には対応物が無いという非対称でもあった。
+
+→ `--resume <前回の --out>` を足し、前回 run の**最新 attempt の report** を読んで
+「`worker_state: completed` **かつ** `verification.outcome: pass`」の Issue を**再 dispatch せず、
+その verification 記録だけを転記**する。引き継ぎ条件がこの 2 field ちょうどなのは、merge と uat が
+eligible を決めるときに読むのがその2つだけだからである。これより緩くすると、**merge は届けるのに
+dispatch は「まだ終わっていない」と言う**状態が作れてしまう。
+
+裁定:
+
+- **Wave barrier は再生ではなく再計算する。** 引き継ぎ分を「完了かつ pass」として barrier に数える
+  ので、全員引き継ぎの Wave は 1件も dispatch せずに advance し、**依存元が pass 済みの Issue は
+  待たされない**。一方で Wave の index は plan の index のまま保つ（詰めない）: `drift_checks` の
+  `wave_index` と `waves[].index` が同じ番号を指し続けるほうが、番号が 1 から詰まって見えることより
+  価値が高い。
+- **引き継いだ Issue の worktree は解決を要求しない。** branch が merge 済みで worktree が
+  片付いていても正常であり、そこで `worktree_unresolved`（#90）を出すのは「触る予定の無いもの」を
+  理由に run を拒否することになる。pre-flight が見るのは「この attempt が実際に dispatch する
+  最初の Wave」の、引き継がなかった Issue だけである。
+- **緩い run にはしない。** exit 0/7/1、Auto-Yes 既定 off、mutating Wave 前の drift 再確認、
+  exit 99 の扱い、`--max-turns` — すべて通常 dispatch と同一である。resume は「小さい Issue 集合に
+  対する同じ run」であって、別の裁定規則を持つ run ではない。
+- **別 plan / 壊れた report では resume させない。** 引き継ぎは「この Issue はもう完了・検証済みだ」
+  という主張の転記なので、`run_id` / repository / base の不一致は `resume_plan_mismatch`、
+  `dispatch-report.v1` として読めない report は `resume_invalid` で、**何も dispatch せず何も書かずに**
+  拒否する。前回 report は自分の artifact であっても、戻ってくるときは**入力**である。
+- **artifact は上書きしない。** attempt 1 は `<out>/dispatch-report.json` のまま、attempt N は
+  `<out>/resume-attempt-N/dispatch-report.json` に append し、`<out>/attempt-history.jsonl` に
+  1 attempt 1行の台帳を残す。ディレクトリ名を `resume-attempt-` にしたのは飾りではない:
+  `status.mjs` の走査は sorted 順で「後に見つかった artifact が勝つ」ので、`dispatch-report.json`
+  より後にソートされる名前であることが、status の Issue 行が**最新 attempt**を指す条件である。
+  merge / uat には最新 attempt の report を渡す（引き継ぎ分もそこに転記済みなので、1本で足りる）。
+- **`dispatch_schema_version` は 1 のまま。** `resumed_from` と attempt 番号は新しい top-level field
+  ではなく `limitations`（`resume_attempt`）・worker の `note`・`summary_markdown`・台帳に載せた。
+  dispatch report は閉じた schema で、読み手（merge / uat / status）は version で固定されている。
+  変わっていない 2 field を読むだけの3 runner を、変えていないのに読めなくするほうが高くつく
+  （#1588 と同じ裁定。正本: [dispatch-contract.md](./dispatch-contract.md) 第7・8節）。
+
+再実行対象が1件も無い場合は、CLI を**1回も呼ばずに** exit 0 で終わり `resume_no_work` を出す。
+「何もしなかった」と「全部やり切った」は同じ exit code になるので、どちらだったかを report が言う。
+
 ### CommandMate #1678 B-2 / #1683 — scope ゲート不合格の再指示に、違反 path が載っていなかった
 
 → exit 20 で scope ゲートが落ちていたら、その logTail から**違反 path を転記**し、

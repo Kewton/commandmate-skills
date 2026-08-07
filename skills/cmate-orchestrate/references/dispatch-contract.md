@@ -29,7 +29,8 @@ CommandMate の exit code へ移しただけで、report 上の表現（field �
 | 名前 | 必須 | 既定値 | 説明 |
 |---|---|---|---|
 | `--plan <path>` | 必須 | なし | 承認済み `plan.json`（plan-core の出力） |
-| `--out <dir>` | 任意 | `<plan-dir>/dispatch` | dispatch artifact の出力先。既存なら `out_exists` で拒否。**blocking pre-flight（第3節）で停止した場合は作らない**ので、原因を直して同じコマンドを再実行できる |
+| `--out <dir>` | 任意 | `<plan-dir>/dispatch` | dispatch artifact の出力先。既存なら `out_exists` で拒否。**blocking pre-flight（第3節）で停止した場合は作らない**ので、原因を直して同じコマンドを再実行できる。`--resume` とは排他（両方渡すと `invalid_input`） |
+| `--resume <dir>` | 任意 | なし | 部分失敗した run の再開。`<dir>` は再開対象の `--out` ディレクトリ。その**最新 attempt の report** を読み、completed かつ verification pass の Issue を再 dispatch せずに記録だけ引き継ぐ（第8節）。artifact は `<dir>/resume-attempt-<n>/` に append し、既存を上書きしない |
 | `--cli <launcher>` | 任意 | `$CM` → `commandmate` | 実行する public CommandMate ランチャー（第 2.8 節） |
 | `--git <path>` | 任意 | `git` | drift 確認に使う git |
 | `--gh <path>` | 任意 | `gh` | repo 到達性確認に使う gh |
@@ -295,6 +296,14 @@ pre-flight が確定した最初の Wave の worktree 解決と drift 結果は*
 世界の状態に依存しないので、その場合 pre-flight は世界を probe しない — 答えが何も変えられない
 probe は副作用でしかない。この停止は従来どおり `--out` を作り、artifact も書く。
 
+**`--resume` の場合、pre-flight が見るのは「最初の Wave」ではなく「この attempt が実際に
+dispatch する最初の Wave」であり、その Wave のうち引き継がなかった Issue だけである**（第8節）。
+引き継いだ Issue の worktree は解決を要求しない: branch が merge 済みで worktree が片付いていても
+正常であり、そこで `worktree_unresolved` を出すのは「触る予定の無いもの」を理由に run を拒否する
+ことになる。再実行対象が1件も無ければ pre-flight は**まったく走らない**（mutation が無いので
+守るべき mutation も無い）。停止したときに `<dir>/resume-attempt-<n>/` を作らないのは同じで、
+やはり同じコマンドを再実行できる。
+
 ### 3.0.1 worktree 準備段（`--prepare-worktrees`。既定 off）
 
 pre-flight が `worktree_unresolved` で止まるとき、**その理由だけで止まっている場合に限り**、
@@ -343,6 +352,13 @@ proportional baseline は [cmate-worktree-setup](../../cmate-worktree-setup/) �
 ### 3.1 Wave ループ
 
 各 Wave について、plan の順に次を行う。
+
+0. **（`--resume` のときだけ）引き継ぎと再実行の切り分け** — その Wave の Issue を、前回 report で
+   `worker_state: completed` かつ `verification.outcome: pass` だったもの（＝**引き継ぎ**。dispatch
+   しない）と、それ以外（＝**再実行対象**）に分ける。引き継ぎ分の worker record はそのまま
+   この Wave の `workers` に入り、`dispatched` には載らない。**再実行対象が 0 件の Wave は
+   drift 再確認も worktree 解決も行わず、`dispatched: []` で barrier を満たして即座に advance する**
+   （mutation が無い Wave に mutation 前の check は要らない）。詳細は第8節。
 
 1. **drift 再確認（mutation 前）** — `cli_available`・`repo_access`・`base_resolvable`・
    `branch_matches`（`--expect-branch` 指定時）・`integration_clean`・`worktrees_present`
@@ -445,6 +461,8 @@ pre-flight（第3.0節）で停止した failure は artifact を書かないの
 | `dispatch_error` | `worktree_setup_unavailable` | `--prepare-worktrees` を指定したが `cmate-worktree-setup` provider を呼べなかった（未指定・未 install・起動不能）。第3.0.1節 |
 | `dispatch_error` | `worktree_setup_failed` | provider は動いたが result contract を返さなかった、または1件も作らなかった |
 | `dispatch_error` | `worktree_profile_mismatch` | provider が作った branch が plan の branch と違う（profile 不一致）。**未解決 Issue ごとに1件** |
+| `dispatch_error` | `resume_plan_mismatch` | `--resume` 先の report が別 plan のもの（`run_id` / repository / base のいずれかが `--plan` と不一致）。第8節 |
+| `dispatch_error` | `resume_invalid` | `--resume` 先の report が `dispatch-report.v1` として読めない（JSON 破損・schema version 不一致・必要 field 欠落）。第8節 |
 | `dispatch_error` | `not_dispatched` | runner が起動を拒否した（scope 未宣言・unsafe worktree target 等） |
 | `dispatch_error` | `wave_not_advanced` | 上のどれでもない理由で Wave が advance しなかった（防御的な既定） |
 | `drift` | `worktree_unresolved` | 対象 Issue の worktree が解決できない。**未解決 Issue ごとに1件**出る（第3.1節） |
@@ -461,7 +479,7 @@ report は6つの check を自己申告する（0.15.x 以前は `verification_r
 | id | 内容 |
 |---|---|
 | `plan_approved` | 承認済み plan を読み・検証した |
-| `drift_reconfirmed` | mutation 前に drift を再確認した |
+| `drift_reconfirmed` | mutation 前に drift を再確認した。`--resume` で再実行対象が 0 件だった run では **mutation 自体が無い**ので、その事実を `detail` に書いたうえで true（守るべき mutation が無いことは、check を飛ばしたことではない） |
 | `parallelism_bounded` | どの Wave も max_parallel を超えて dispatch していない |
 | `barrier_enforced` | 次 Wave は「全完了 かつ verification pass」でのみ dispatch した |
 | `no_auto_prompt_response` | prompt を自動応答していない（`--auto-yes` 未使用） |
@@ -494,3 +512,150 @@ version を上げると**その2つが変わっていないのに**両 runner �
 （`minItems` は 5 のまま）、`verification` / `gates` / `outcome` の `description` を実挙動に合わせた。
 0.15.x が書いた report は無改変で v1 に適合し続ける。**新しい runner が書く report を旧 runner の
 schema で検証すると落ちる**（schema は package と一緒に動く）ため、report の読み手は同梱 schema を使うこと。
+
+`--resume`（[#98](https://github.com/Kewton/commandmate-skills/issues/98)）は**schema をまったく
+変えずに**入れた。`resumed_from` と attempt 番号は新しい top-level field ではなく、
+`limitations` の `resume_attempt` エントリ・worker の `note`・`summary_markdown`・そして
+report の外にある attempt 台帳（第8.3節）に載る。理由は #1588 のときと同じで、より強い:
+dispatch report は**閉じた schema**（`additionalProperties: false`）であり、その読み手
+（merge / uat / status）は version で固定されている。`worker_state` と `verification.outcome` の
+2 field は何も変わっていないのに version を上げれば、変わっていない2 field を読むだけの3 runner が
+黙って読めなくなる。run 固有の事実は `limitations` / `blocking_reasons` / `note` /
+`summary_markdown` に載せる、という既存の裁定をそのまま適用した。
+
+## 8. resume（部分失敗からの再開）
+
+`--resume <前回の --out>` は、Wave 途中で一部の Issue だけが落ちた run を、**落ちた分だけ**
+やり直す（[#98](https://github.com/Kewton/commandmate-skills/issues/98)）。並列開発では部分失敗が
+常態であり、それに対して「plan から作り直す」しか手が無いというのは、verification gate が
+通したはずの成果物にもう一度 worker を走らせるということである。gate の意味そのものを捨てている。
+
+### 8.1 引き継ぎ規則
+
+`--resume <dir>` は `<dir>` の**最新 attempt の report**（第8.2節）を読み、plan の各 Issue を
+次のどちらかに分類する。
+
+| 分類 | 条件 | この attempt での扱い |
+|---|---|---|
+| **引き継ぎ** | `worker_state === 'completed'` **かつ** `verification.outcome === 'pass'` | **dispatch しない。** 前回の verification 記録（`ran` / `report_schema_version` / `gates` / `checks`）を新 report に**転記**する。**再判定はしない** |
+| **再実行** | それ以外（`failed` / `timeout` / `prompt` / `not_dispatched` / pass でない verdict / そもそも記録が無い） | 通常どおり dispatch する |
+
+同じ Issue の record が複数の Wave にあるときは**最後のものを採る**（merge runner が
+再 dispatch された Issue を読むときの規則と同じ）。
+
+引き継ぎ条件が「completed かつ pass」の**2 field ちょうど**なのは偶然ではない: merge と uat が
+eligible を決めるときに読むのがこの2つだけだからである。引き継ぎ判定をそれより緩くすると、
+**merge が届けるのに dispatch が「まだ終わっていない」と言う**状態が生まれる。
+
+引き継いだ worker record では:
+
+- `worker_state` は `completed`、`verification.outcome` は `pass`（定義上そう）。
+- `prompt` は `{ detected: false, excerpt: null }` に落とす。この attempt では prompt は出ていないし、
+  prompt を出した worker は `completed` にならないので、引き継ぐべき prompt は存在しない。
+- `note` に「attempt N から引き継いだ / この attempt は再 dispatch していない / この verdict は
+  転記であって再実行ではない」を追記する。**note が構造化 field と食い違わない**という #83 の
+  不変条件はここでも保たれる。
+- `gates` / `checks` / `task_id` は read 時に再検証してから転記する。resume にとって前回 report は
+  **入力**であり、手で編集されている可能性がある。新 report が schema 不適合になる record を
+  書かせない。
+
+### 8.2 Wave barrier の再計算
+
+barrier は**再生**ではなく**再計算**する。引き継ぎ分は「完了かつ pass」として barrier に数える
+ので:
+
+- **その Wave の Issue が全部引き継ぎなら、1件も dispatch せずに advance する**
+  （`dispatched: []` / `all_workers_completed: true` / `all_verifications_passed: true` /
+  `advanced: true`）。drift 再確認も worktree 解決も行わない（mutation が無い）。
+- したがって**依存元が pass 済みの Issue は、依存元の Wave を待たずにその attempt の最初の send で
+  飛ぶ**。これが Issue 本文でいう「依存先は最初の Wave から dispatch してよい」である。
+- **Wave の index は plan の index のまま**保つ（詰めない）。`drift_checks[].wave_index` と
+  `waves[].index` が同じ番号を指し続けること、`waves` が「plan 順」という schema の記述どおりで
+  あり続けることのほうが、番号が 1 から詰まって見えることより価値が高い。
+
+停止条件・裁定規則は通常 dispatch と**完全に同一**である: exit 0 / 7 / 1、Auto-Yes 既定 off、
+mutating Wave 前の drift 再確認、exit 99 の扱い、`--max-turns`。resume は「小さい Issue 集合に
+対する同じ run」であって、緩い run ではない。
+
+**再実行対象が 1 件も無い場合**（前回 report の全 Issue が completed かつ pass）は、CLI を
+1回も呼ばずに `status: success` / `stop_reason: completed` / exit 0 で終わり、
+`limitations` に `resume_no_work` を出す。「何もしなかった」と「全部やり切った」は同じ exit code に
+なるので、**どちらだったかを report が明示する**。
+
+### 8.3 artifact の配置（append-only）と、誰がどの report を読むか
+
+既存 artifact は**上書きしない**。attempt 1 は今までと同じ場所のままで、attempt N（N≥2）は
+1つ下のディレクトリに**同じファイル名で**書く。
+
+```
+<out>/
+  dispatch-report.json            attempt 1（従来どおり。以後 1 byte も変わらない）
+  dispatch-summary.md             attempt 1
+  prompts/ contracts/ worktree-setup/
+  attempt-history.jsonl           attempt 台帳（1 attempt 1行、append-only）
+  resume-attempt-2/
+    dispatch-report.json          attempt 2
+    dispatch-summary.md           attempt 2
+    prompts/ contracts/ worktree-setup/
+  resume-attempt-3/ …
+```
+
+attempt 番号は「まだ存在しない `resume-attempt-<n>/`」の最小値として決める。台帳ではなく
+**ディレクトリの実在**から決めるのは、台帳が欠けていても壊れていても既存 artifact を
+上書きさせないためである。
+
+report 側には `out_dir` にその attempt のディレクトリが入り、`limitations` に
+`resume_attempt` が1件出る。ここに `resumed_from`（読んだ report の run 相対 path）と attempt
+番号、引き継いだ Issue、再実行した Issue が入る（schema を変えない理由は第7節）。
+
+`attempt-history.jsonl` の各行:
+
+```json
+{"attempt":2,"kind":"resume","plan_run_id":"plan",
+ "resumed_from":{"attempt":1,"report":"dispatch-report.json"},
+ "report":"resume-attempt-2/dispatch-report.json","summary":"resume-attempt-2/dispatch-summary.md",
+ "status":"success","stop_reason":"completed","carried_over":[100,101],"dispatched":[102]}
+```
+
+path はすべて `<out>` からの相対である（絶対 path を artifact に残さない。第4節）。attempt 1 も
+`kind: "initial"` / `resumed_from: null` で 1行書くので、履歴に暗黙の先頭行は無い。台帳の書き込みは
+**best effort** である: 台帳は run についての証跡であって run の判断材料ではないので、書けなかった
+ことで既に起きた dispatch を失敗にしない。
+
+**誰がどの report を読むか。**
+
+| 読み手 | 読むべき report |
+|---|---|
+| `merge.mjs --dispatch` / `uat.mjs --dispatch` | **最新 attempt の report**。台帳の最終行の `report`、または `resume-attempt-<最大 n>/dispatch-report.json`（無ければ `dispatch-report.json`） |
+| `status.mjs --run` | 指定不要。run 配下を走査して**両方**を証跡として並べ、Issue 行には**後に見つかった artifact の record**を採る。`resume-attempt-<n>/` は `dispatch-report.json` より後に走査されるので、Issue 行は最新 attempt を指す |
+
+**最新 attempt の report 1本で足りる**というのがこの配置の要点である: 引き継いだ Issue の
+verification 記録はその report に転記されているので、merge / uat が複数の attempt を突き合わせる
+必要は無い。逆に古い attempt を渡すと、そこで落ちていた Issue は eligible にならない（記録どおり）。
+
+`status.mjs` は attempt をまたいで `blocking_reasons` を集めるので、**attempt 1 で落ちた理由は
+attempt 2 が直した後も Issue 行の次アクションに残る**。これは run の履歴を後から書き換えないため
+であって、未解決を意味しない。現在の状態は同じ行の `worker_state` / `verification` 側に出る。
+また `resume_*` の code は `status.mjs` の hint map にまだ無いので、「detail と `summary_markdown` を
+読む」に落ちる（SKILL.md 第5節に同じ注記がある。追随は別 Issue）。
+
+### 8.4 整合性ガード
+
+`--resume` は「この Issue はもう完了・検証済みである」という主張を引き継ぐ操作なので、
+**引き継ぎ元が本当にこの plan の run か**を先に確かめる。世界を probe する前・何かを書く前に行う。
+
+| 拒否 | 条件 | exit |
+|---|---|---|
+| `resume_plan_mismatch` | report の `plan_run_id` / `profile.repository` / `profile.base` のいずれかが `--plan` と不一致 | 3 |
+| `resume_invalid` | report が JSON として壊れている / `dispatch_schema_version` が 1 でない / `skill_id` が違う / `waves`・`workers`・`issue`・`worker_state`・`verification.outcome` のいずれかが期待の型でない | 3 |
+| `load_error` | `--resume <dir>` が存在しない / `dispatch-report.json` が無い | 6 |
+
+いずれも **1件も dispatch せず、`resume-attempt-<n>/` も作らず、台帳にも書かない**。
+detail には「何がどう合わないか」（両方の `run_id`、どの field がどう違うか）を書く。
+`plan_run_id` だけでなく repository / base も見るのは、`--run-id` を明示すれば別 plan でも同じ
+run_id を名乗れるためで、profile の2 field は plan からそのまま写した値だからである。
+
+`--out` と `--resume` の同時指定は `invalid_input` で拒否する。前者は新しいディレクトリを
+要求し、後者は既存のディレクトリに append する。両方受け付けると、どちらの意味で言ったのかを
+runner が推測することになり、外すと前回 attempt を上書きするか、誰も見ないところに書くかの
+どちらかになる。

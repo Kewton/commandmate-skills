@@ -1,0 +1,2 @@
+{"attempt":1,"kind":"initial","plan_run_id":"plan","resumed_from":null,"report":"dispatch-report.json","summary":"dispatch-summary.md","status":"partial","stop_reason":"verification_failed","carried_over":[],"dispatched":[201,200]}
+{"attempt":2,"kind":"resume","plan_run_id":"plan","resumed_from":{"attempt":1,"report":"dispatch-report.json"},"report":"resume-attempt-2/dispatch-report.json","summary":"resume-attempt-2/dispatch-summary.md","status":"success","stop_reason":"completed","carried_over":[201],"dispatched":[200]}

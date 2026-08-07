@@ -1,0 +1,48 @@
+{
+  "description": "整合性ガード: 別 plan（同じ Issue 集合だが run_id が違う）の plan.json で、既存 run の dispatch ディレクトリを --resume させる。引き継ぎは「この Issue はもう完了・検証済み」という主張なので、別 plan の記録を流用させてはならない。exit 3 / status failure / blocking `resume_plan_mismatch` で拒否し、両方の run_id を名指しし、attempt 2 の artifact を 1 つも作らない（ledger も伸びない）。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "other_plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "other"],
+    "run_dir": "other"
+  },
+  "attempts": [
+    {
+      "scenario": "all-pass.json",
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 0,
+        "status": "success",
+        "stop_reason": "completed",
+        "waves_count": 2,
+        "report_file": "dispatch-report.json",
+        "history_length": 1
+      }
+    },
+    {
+      "scenario": "all-pass.json",
+      "resume": true,
+      "plan": "other",
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 3,
+        "status": "failure",
+        "stop_reason": "dispatch_error",
+        "waves_count": 0,
+        "never_sent": [200, 201],
+        "cli_calls_total": 0,
+        "blocking_codes": ["resume_plan_mismatch"],
+        "blocking_details_include": [
+          "was produced for plan run_id \"plan\"",
+          "but --plan is run_id \"other\"",
+          "Refusing to resume a different plan's run"
+        ],
+        "report_file_absent": "resume-attempt-2/dispatch-report.json",
+        "history_length": 1
+      }
+    }
+  ]
+}
