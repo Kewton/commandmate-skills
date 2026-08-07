@@ -471,6 +471,10 @@ function runCmAsync(inputs, args, extra = {}) {
 // `commandmate ls`), so `worktrees_present` can judge reachability the same way
 // the supervisor does — by a live branch match — instead of string-matching the
 // plan's template path against `git worktree list` (Issue #1473).
+//
+// Returns the checks AND the resolutions that did not resolve, because the two
+// are one finding: `worktrees_present` counts them, and the caller names each of
+// them in a `worktree_unresolved` blocking reason (Issue #90).
 function driftChecks(inputs, plan, waveIndex, resolutions) {
   const checks = [];
   const add = (code, ok, blocking, detail) =>
@@ -509,9 +513,71 @@ function driftChecks(inputs, plan, waveIndex, resolutions) {
     return !(target && registered.includes(target.replace(/^\.\.\//, '')));
   });
   const present = unresolved.length === 0;
-  add('worktrees_present', present, false, present ? 'planned worktrees resolve (commandmate ls branch match or git worktree list)' : `${unresolved.length} planned worktree(s) neither resolve via commandmate ls nor appear in git worktree list`);
+  // BLOCKING since Issue #90. It used to be a limitation the run continued past,
+  // which is the one shape where continuing cannot help: a worktree the CLI
+  // cannot resolve has no `send` target, so every issue behind it is recorded
+  // `failed` without a single worker having been started. Refusing here is what
+  // makes the report say `worktree_unresolved` instead of `worker_failed`, and
+  // — because the pre-flight runs before the run directory exists — what leaves
+  // the same `--out` free for the re-run after the worktree is created.
+  add('worktrees_present', present, true, present ? 'planned worktrees resolve (commandmate ls branch match or git worktree list)' : `${unresolved.length} planned worktree(s) neither resolve via commandmate ls nor appear in git worktree list`);
 
-  return checks;
+  return { checks, unresolved };
+}
+
+// One blocking reason per unresolved worktree (Issue #90). A single aggregate
+// count ("2 planned worktrees do not resolve") tells an operator that something
+// is missing but not WHICH issue to create a worktree for, and the branch is the
+// only handle `cmate-worktree-setup` takes. `entries` are drift resolutions;
+// `resolved.note` already carries the redacted branch.
+function worktreeUnresolvedReasons(entries) {
+  return entries.map((entry) => ({
+    code: 'worktree_unresolved',
+    detail: redact(`#${entry.number}: ${entry.resolved?.note || 'no registered worktree resolved for this issue'}`),
+  }));
+}
+
+// The blocking pre-flight (Issue #90): the first wave's worktree resolution and
+// its drift re-check, run BEFORE the run directory is created. It is the same
+// check the wave loop performs — the loop reuses this result for wave 0 rather
+// than probing the world twice — moved earlier for one reason: a refusal must
+// not consume `--out`. The old order created `<plan-dir>/dispatch` first, so a
+// run refused for a missing worktree left a directory behind and the re-run
+// (after `cmate-worktree-setup` created that worktree) died on `out_exists`
+// with the operator's only recourse being to invent a new `--out`.
+function preflightDispatch(inputs, plan) {
+  const resolutions = resolveWave(inputs, plan, plan.waves[0]);
+  const { checks, unresolved } = driftChecks(inputs, plan, 0, resolutions);
+  const blocking = checks.find((check) => check.blocking && !check.ok);
+  const reasons = !blocking
+    ? []
+    : blocking.code === 'worktrees_present' && unresolved.length > 0
+      ? worktreeUnresolvedReasons(unresolved)
+      : [{ code: `drift_${blocking.code}`, detail: blocking.detail }];
+  return { resolutions, checks, unresolved, blocked: Boolean(blocking), reasons };
+}
+
+// The report a blocked pre-flight prints. `out_dir` is null because nothing was
+// written — the field already means "null when nothing was written", and it is
+// how a reader (and the summary) can tell that the same command may simply be
+// re-run once the drift is fixed.
+function preflightFailureReport(inputs, plan, preflight) {
+  const report = emptyReport(inputs, plan, null);
+  report.status = 'failure';
+  report.stop_reason = 'drift';
+  report.drift_checks = preflight.checks;
+  report.blocking_reasons = preflight.reasons;
+  report.completion_check = buildCompletionCheck({
+    planApproved: true,
+    driftReconfirmed: preflight.checks.length > 0,
+    parallelismBounded: true,
+    barrierEnforced: true,
+    noAutoPromptResponse: true,
+    reportStatus: 'failure',
+  });
+  report.redactions = redactionsList();
+  report.summary_markdown = renderSummary(report, false, []);
+  return report;
 }
 
 // =============================================================================
@@ -805,6 +871,23 @@ function resolveWorktreeId(inputs, issue) {
   // The plan template stays a fallback for when `ls` omits a path.
   const path = match && typeof match.path === 'string' ? safeWorktreeTarget(match.path) : null;
   return { id, path, note: id ? '' : `no registered worktree matches branch ${redact(branch)}` };
+}
+
+// Resolve every issue of one wave ONCE: its id (what send/wait/capture address),
+// the real `path` `commandmate ls` reports (what git rev-parse and the baseline
+// cwd into), and the plan template path that is the fallback when `ls` omits a
+// path. The drift probe, the supervision loop and the verification gate all read
+// this single resolution, so the id path and the git path can never diverge
+// (Issue #1473). Called once per wave — and, for the first wave, by the
+// pre-flight, whose result the loop reuses rather than resolving twice.
+function resolveWave(inputs, plan, waveIssues) {
+  return waveIssues.map((number) => {
+    const issue = issueOf(plan, number);
+    const templatePath = safeWorktreeTarget(issue.worktree ?? '');
+    const resolved = resolveWorktreeId(inputs, issue);
+    const worktreePath = resolved.path ?? templatePath;
+    return { number, issue, templatePath, resolved, worktreePath };
+  });
 }
 
 // The HEAD commit of a worktree, read INSIDE it (there is no commandmate call for
@@ -1379,11 +1462,12 @@ function formatOpenQuestions(entries) {
 // The supervision loop
 // =============================================================================
 
-async function runDispatch(inputs, plan, outDir) {
-  const promptsDir = join(outDir, 'prompts');
-  mkdirSync(promptsDir, { recursive: true });
-
-  const report = {
+// The report every dispatch starts from — a success envelope the run then
+// contradicts. Shared with the pre-flight refusal (Issue #90) so a run that
+// stops before the first wave reports the same field set as one that dispatched;
+// `outDir` is null there, because nothing was written.
+function emptyReport(inputs, plan, outDir) {
+  return {
     dispatch_schema_version: DISPATCH_SCHEMA_VERSION,
     skill_id: SKILL_ID,
     skill_version: SKILL_VERSION,
@@ -1408,6 +1492,21 @@ async function runDispatch(inputs, plan, outDir) {
     completion_check: { passed: false, checks: [] },
     summary_markdown: '',
   };
+}
+
+// `preflight` is the first wave's already-computed resolution + drift re-check
+// (Issue #90), or null when the run will refuse before any wave for a reason
+// that does not depend on the state of the world (an unanswered planner
+// question). The loop reuses it for wave 0 instead of probing the CLI twice.
+async function runDispatch(inputs, plan, outDir, preflight = null) {
+  const promptsDir = join(outDir, 'prompts');
+  mkdirSync(promptsDir, { recursive: true });
+
+  const report = emptyReport(inputs, plan, outDir);
+  // The pre-flight's drift verdict is part of THIS report even when the run
+  // stops before the first wave for an unrelated reason: it was really checked,
+  // so it is really recorded.
+  if (preflight) report.drift_checks.push(...preflight.checks);
 
   // Loop-wide facts the completion check is derived from.
   let parallelismBounded = true;
@@ -1415,12 +1514,13 @@ async function runDispatch(inputs, plan, outDir) {
   let autoResponded = false;
   let stopped = false;
 
-  const halt = (status, stopReason, code, detail) => {
+  const haltWith = (status, stopReason, reasons) => {
     report.status = status;
     report.stop_reason = stopReason;
-    report.blocking_reasons.push({ code, detail });
+    report.blocking_reasons.push(...reasons);
     stopped = true;
   };
+  const halt = (status, stopReason, code, detail) => haltWith(status, stopReason, [{ code, detail }]);
 
   // The open-questions gate (Issue #52). The planner writes a question for every
   // issue it could not read acceptance criteria or affected files out of. Nothing
@@ -1486,23 +1586,16 @@ async function runDispatch(inputs, plan, outDir) {
 
   for (let waveIndex = 0; waveIndex < plan.waves.length && !stopped; waveIndex += 1) {
     const waveIssues = plan.waves[waveIndex];
-    // Resolve each issue's CommandMate worktree ONCE, up front: its id (what
-    // send/wait/capture address) and the real `path` `commandmate ls` reports
-    // (what git rev-parse and the baseline cwd into). The drift probe, the
-    // supervision loop and the verification gate all read this single resolution,
-    // so the id path and the git path can never diverge (Issue #1473). The plan's
-    // template path is only a fallback for when `ls` omits a path.
-    const resolutions = waveIssues.map((number) => {
-      const issue = issueOf(plan, number);
-      const templatePath = safeWorktreeTarget(issue.worktree ?? '');
-      const resolved = resolveWorktreeId(inputs, issue);
-      const worktreePath = resolved.path ?? templatePath;
-      return { number, issue, templatePath, resolved, worktreePath };
-    });
+    // Resolve each issue's CommandMate worktree ONCE, up front (see
+    // `resolveWave`). Wave 0 was already resolved and drift-checked by the
+    // pre-flight, whose result is reused here so the CLI is not probed twice.
+    const preflighted = waveIndex === 0 && preflight !== null;
+    const resolutions = preflighted ? preflight.resolutions : resolveWave(inputs, plan, waveIssues);
 
     // 1. Drift re-check before this (mutating) wave.
-    const checks = driftChecks(inputs, plan, waveIndex, resolutions);
-    report.drift_checks.push(...checks);
+    const drift = preflighted ? preflight : driftChecks(inputs, plan, waveIndex, resolutions);
+    const checks = drift.checks;
+    if (!preflighted) report.drift_checks.push(...checks);
     for (const check of checks) {
       if (!check.ok && !check.blocking) {
         report.limitations.push({ code: `drift_${check.code}`, detail: check.detail });
@@ -1513,8 +1606,13 @@ async function runDispatch(inputs, plan, outDir) {
       const waveRecord = { index: waveIndex, dispatched: [], workers: [], barrier: { all_workers_completed: false, all_verifications_passed: false, advanced: false } };
       report.waves.push(waveRecord);
       // Drift before the very first wave means nothing was dispatched at all.
+      // (Wave 0 never reaches this: the pre-flight already refused the run
+      // before the run directory existed.)
       const status = waveIndex === 0 ? 'failure' : 'partial';
-      halt(status, 'drift', `drift_${blockingDrift.code}`, blockingDrift.detail);
+      const reasons = blockingDrift.code === 'worktrees_present' && drift.unresolved.length > 0
+        ? worktreeUnresolvedReasons(drift.unresolved)
+        : [{ code: `drift_${blockingDrift.code}`, detail: blockingDrift.detail }];
+      haltWith(status, 'drift', reasons);
       break;
     }
 
@@ -1535,6 +1633,13 @@ async function runDispatch(inputs, plan, outDir) {
     const workers = [];
     const worktreePaths = new Map();
     const supervisable = [];
+    // Issues whose worktree the CLI could not resolve at dispatch time, in wave
+    // order. The drift re-check above passed, so this is the narrow window it
+    // cannot cover: a worktree registered in `git worktree list` but not with
+    // CommandMate, or one that disappeared between the pre-flight and now. Kept
+    // apart from the other failures because the cause and the fix are different
+    // (create the worktree — the worker never started), Issue #90.
+    const unresolvedWorktrees = [];
     for (const number of toDispatch) {
       const res = resolutions.find((r) => r.number === number);
       const worker = {
@@ -1556,6 +1661,7 @@ async function runDispatch(inputs, plan, outDir) {
       if (res.resolved.id === null) {
         worker.worker_state = 'failed';
         worker.note = redact(`worktree unresolved: ${res.resolved.note}`);
+        unresolvedWorktrees.push(res);
         workers.push(worker);
         continue;
       }
@@ -1723,6 +1829,14 @@ async function runDispatch(inputs, plan, outDir) {
         report.human_required = true;
         halt('partial', 'dispatch_error', 'verification_not_judged',
           `#${unjudged.issue}: verification exited ${VERIFY_EXIT_NO_VERDICT} — the run ended error/cancelled, so no gate judged the work. Halted for a human; not re-instructed as a verification failure (exit ${VERIFY_EXIT_FAILED}) and not rounded to a pass`);
+      } else if (unresolvedWorktrees.length > 0) {
+        // Ranked above worker_failed (Issue #90). Both are `worker_state:
+        // 'failed'`, but they are opposite findings: worker_failed means a
+        // worker ran and did not finish (read its log, split the issue), while
+        // this means NO worker was ever started because there was nothing to
+        // send to. Reporting the generic code sent operators to re-plan an issue
+        // whose only defect was a missing worktree.
+        haltWith('partial', 'drift', worktreeUnresolvedReasons(unresolvedWorktrees));
       } else if (workers.some((worker) => worker.worker_state === 'failed')) {
         const failed = workers.find((worker) => worker.worker_state === 'failed');
         halt('partial', 'worker_failed', 'worker_failed', `#${failed.issue} did not complete; the next wave was not dispatched`);
@@ -1805,16 +1919,22 @@ function buildCompletionCheck({ planApproved, driftReconfirmed, parallelismBound
 function renderSummary(report, contractMode = false, openQuestions = []) {
   const lines = [];
   const haltedOnQuestions = report.blocking_reasons.some((reason) => reason.code === 'open_questions');
+  const worktreeUnresolved = report.blocking_reasons.some((reason) => reason.code === 'worktree_unresolved');
   lines.push('## 対象と結論');
   const verb = report.status === 'success' ? '完了' : report.status === 'partial' ? '途中停止' : '未実行';
   lines.push(`plan ${report.plan_run_id} を ${report.profile.repository} に dispatch: ${report.status}（${verb}, stop=${report.stop_reason}）。`);
-  lines.push(contractMode
-    ? '裁定: 実行契約（`commandmate send --contract` / `wait --verify` の exit code）を一次ソースにした。'
-    : '裁定: 実行契約は使わず、profile baseline を worktree 内で再実行するフォールバックで判定した。');
+  // A run that dispatched nobody judged nobody. Naming the adjudication
+  // mechanism there states a past-tense fact that never happened (Issue #90).
+  lines.push(report.waves.length === 0
+    ? '裁定: 1件も dispatch していないため、裁定は行っていない。'
+    : contractMode
+      ? '裁定: 実行契約（`commandmate send --contract` / `wait --verify` の exit code）を一次ソースにした。'
+      : '裁定: 実行契約は使わず、profile baseline を worktree 内で再実行するフォールバックで判定した。');
   const notJudged = report.blocking_reasons.find((reason) => reason.code === 'verification_not_judged');
   if (haltedOnQuestions) lines.push('plan の Issue に未回答の open question が残っていたため、worker を 1 人も dispatch せずに停止した。');
   else if (notJudged) lines.push('検証が判定に到達しなかった（exit 99）ため、不合格として再指示せず human 提示で停止した。');
   else if (report.human_required) lines.push('worker が prompt を出したため、自動応答せず human 提示で停止した。');
+  else if (worktreeUnresolved) lines.push('対象 Issue の worktree が `commandmate ls` で解決できなかったため、その Issue には worker を dispatch していない（worker の失敗ではない）。');
   lines.push('');
 
   // The questions themselves, verbatim. A code alone ("open_questions") tells an
@@ -1886,7 +2006,16 @@ function renderSummary(report, contractMode = false, openQuestions = []) {
       lines.push('- next: 契約非対応の CLI だったため裁定はフォールバック（baseline 再実行）である。契約ゲートで裁定したい場合は CommandMate を 0.17.0 以上へ更新する（owner: operator）。');
     }
     if (report.stop_reason === 'verification_failed') lines.push('- next: verification 失敗の worktree を診断し、修正後に再 dispatch する（owner: operator）。');
-    if (report.stop_reason === 'drift') lines.push('- next: drift（branch/base/permission）を解消し、plan を再確認して再開する（owner: operator）。');
+    // The worktree case names the fix (Issue #90). "drift を解消して再開" is true
+    // but useless here: nothing about branch/base/permission moved — a worktree
+    // was never created. The `--out` sentence matters because it is the whole
+    // reason the pre-flight runs before the run directory: the operator can
+    // re-run the SAME command, not invent a new output path.
+    if (worktreeUnresolved) {
+      lines.push(`- next: cmate-worktree-setup で未解決 Issue の worktree を作成し（plan と同じ profile / 同じ branch_template）、${report.out_dir === null ? '同じコマンドで再実行する（`--out` は消費していない）' : '再 dispatch する'}（owner: operator）。`);
+    } else if (report.stop_reason === 'drift') {
+      lines.push('- next: drift（branch/base/permission）を解消し、plan を再確認して再開する（owner: operator）。');
+    }
   }
   return lines.join('\n');
 }
@@ -1944,9 +2073,24 @@ async function run(argv) {
   if (existsSync(outDir)) {
     throw new SkillError('out_exists', `dispatch directory ${outDir} already exists; refusing to overwrite`, 4);
   }
+
+  // Blocking pre-flight, BEFORE the run directory exists (Issue #90). Skipped
+  // when the plan alone already refuses the run: the open-questions gate is a
+  // pure function of the plan, and probing a world whose answer can no longer
+  // change anything is a side effect for nothing (the same reason the contract
+  // probe is skipped once the run has stopped). That gate still reports from
+  // inside runDispatch, so its artifacts are written exactly as before.
+  const refusedOnQuestions = !inputs.allowQuestions && collectOpenQuestions(plan).length > 0;
+  const preflight = refusedOnQuestions ? null : preflightDispatch(inputs, plan);
+  if (preflight !== null && preflight.blocked) {
+    const report = preflightFailureReport(inputs, plan, preflight);
+    process.stderr.write(`nothing was dispatched; ${outDir} was not created, so the same command can be re-run once the drift is fixed\n`);
+    return { exitCode: 1, stdout: `${JSON.stringify(report, null, 2)}\n` };
+  }
+
   mkdirSync(outDir, { recursive: true });
 
-  const report = await runDispatch(inputs, plan, outDir);
+  const report = await runDispatch(inputs, plan, outDir, preflight);
   writeFileSync(join(outDir, 'dispatch-report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   writeFileSync(join(outDir, 'dispatch-summary.md'), `${report.summary_markdown}\n`, 'utf8');
 

@@ -14,10 +14,12 @@ What it proves, in the order it proves it:
    kind, script flag and executable bit;
 4. nothing in the package is a symlink, a special file or setuid/setgid/sticky;
 5. no known credential shape and no plaintext `http://` link ships;
-6. the artifact the package builds into is accepted by the strict reader;
-7. building it twice produces byte-identical output.
+6. a `SKILL_VERSION` constant shipped in `scripts/lib.mjs` agrees with the
+   manifest version;
+7. the artifact the package builds into is accepted by the strict reader;
+8. building it twice produces byte-identical output.
 
-Exit status is 0 only when every package passes all seven.
+Exit status is 0 only when every package passes all eight.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -42,6 +45,18 @@ CONTRACT_UPSTREAM_REVISION = "22014bb9"
 REPRODUCIBILITY_MISMATCH = "SKILLS_REPRODUCIBILITY_MISMATCH"
 CATALOG_UNREADABLE = "SKILLS_CATALOG_UNREADABLE"
 GOVERNANCE_MISSING = "SKILLS_GOVERNANCE_MISSING"
+VERSION_CONSTANT_MISMATCH = "SKILLS_VERSION_CONSTANT_MISMATCH"
+
+#: The one payload file a package may state its own version in a second time.
+SKILL_LIB_PATH = "scripts/lib.mjs"
+
+#: `export const SKILL_VERSION = '0.17.0';` as it stands in that file. Quotes and
+#: spacing are loose because the constant is authored by hand, but the name is
+#: exact: a `SKILL_VERSION_FALLBACK` must not be mistaken for the declaration.
+SKILL_VERSION_DECLARATION = re.compile(
+    r"^\s*export\s+const\s+SKILL_VERSION\s*=\s*(['\"])(?P<version>[^'\"]*)\1",
+    re.MULTILINE,
+)
 
 #: Files that define who reviews what. Their absence is a process failure that
 #: CI can see, so it is checked here rather than trusted to stay in place.
@@ -107,6 +122,48 @@ def check_reproducible(check, out: list[Finding]) -> bytes | None:
         )
         return None
     return first
+
+
+def check_version_constant(check, out: list[Finding]) -> None:
+    """Require a shipped `SKILL_VERSION` constant to equal the manifest version.
+
+    A package whose runners are Node scripts stamps this constant into the
+    reports it writes, so the constant — not the manifest — is what a bug report
+    is triaged by. Left behind by a release, it names a version the user never
+    installed, and nothing else in the pipeline can see the disagreement: the
+    constant is payload text, and the manifest digest over it is happy either
+    way. Bumping a package therefore has to touch both, and this is what says so.
+
+    The comparison is against `check.manifest`, already parsed under the safe
+    YAML profile, and against `check.payload`, already read as the bytes the
+    build will pack — so neither side can be a file this run never validated.
+
+    A package with no `scripts/lib.mjs`, or one whose `lib.mjs` declares no such
+    constant, has nothing to disagree with and passes silently.
+    """
+    if check.manifest is None or check.payload is None:
+        return
+
+    entry = next((f for f in check.payload if f.path == SKILL_LIB_PATH), None)
+    if entry is None:
+        return
+
+    # Payload bytes are not guaranteed to be UTF-8 here; a byte that is not is
+    # not a version digit either, so it is replaced rather than raised on.
+    match = SKILL_VERSION_DECLARATION.search(entry.data.decode("utf-8", "replace"))
+    if match is None:
+        return
+
+    declared = match.group("version")
+    if declared != check.manifest["version"]:
+        out.append(
+            Finding(
+                VERSION_CONSTANT_MISMATCH,
+                SKILL_LIB_PATH,
+                "SKILL_VERSION does not match the manifest version",
+                {"lib": declared, "manifest": check.manifest["version"]},
+            )
+        )
 
 
 def validate_catalogs(catalog_root: Path) -> tuple[int, int]:
@@ -186,6 +243,7 @@ def main() -> int:
             relative = directory.as_posix()
         check = check_package(directory, repo_root)
         findings = list(check.findings)
+        check_version_constant(check, findings)
 
         artifact = None
         if check.manifest is not None and not findings:

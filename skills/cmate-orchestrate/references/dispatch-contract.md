@@ -29,7 +29,7 @@ CommandMate の exit code へ移しただけで、report 上の表現（field �
 | 名前 | 必須 | 既定値 | 説明 |
 |---|---|---|---|
 | `--plan <path>` | 必須 | なし | 承認済み `plan.json`（plan-core の出力） |
-| `--out <dir>` | 任意 | `<plan-dir>/dispatch` | dispatch artifact の出力先。既存なら `out_exists` で拒否 |
+| `--out <dir>` | 任意 | `<plan-dir>/dispatch` | dispatch artifact の出力先。既存なら `out_exists` で拒否。**blocking pre-flight（第3節）で停止した場合は作らない**ので、原因を直して同じコマンドを再実行できる |
 | `--cli <launcher>` | 任意 | `$CM` → `commandmate` | 実行する public CommandMate ランチャー（第 2.8 節） |
 | `--git <path>` | 任意 | `git` | drift 確認に使う git |
 | `--gh <path>` | 任意 | `gh` | repo 到達性確認に使う gh |
@@ -271,17 +271,46 @@ plan の byte 列は変わらない。dispatch report にも解決結果は載�
 
 ## 3. 監督ループと gate
 
+### 3.0 blocking pre-flight（`--out` を消費する前）
+
+**plan の検証と、最初の Wave の drift 再確認は、出力ディレクトリを作る前に行う**
+（[#90](https://github.com/Kewton/commandmate-skills/issues/90)）。ここで停止した場合:
+
+- **`--out` を作らない**（`out_dir` は `null`）。artifact も書かない。failure report は stdout にだけ出す。
+- exit は failure の規約どおり 1。
+- したがって**原因を直して同じコマンドを再実行できる**。これが目的である: 以前は全チェックより先に
+  `mkdirSync` していたため、1件も dispatch していない停止でも `--out` が消費され、
+  worktree を用意しての再実行が `out_exists` で弾かれた。利用者に `--out` を発明させない。
+
+pre-flight を通過した後の挙動（`--out` 作成・`out_exists` 検査・artifact 書き出し）は変わらない。
+pre-flight が確定した最初の Wave の worktree 解決と drift 結果は**そのまま Wave 1 で再利用**する
+（CLI を二度叩かない）。plan だけで決まる拒否（未回答の planner question。`--allow-questions` 未指定）は
+世界の状態に依存しないので、その場合 pre-flight は世界を probe しない — 答えが何も変えられない
+probe は副作用でしかない。この停止は従来どおり `--out` を作り、artifact も書く。
+
+### 3.1 Wave ループ
+
 各 Wave について、plan の順に次を行う。
 
 1. **drift 再確認（mutation 前）** — `cli_available`・`repo_access`・`base_resolvable`・
    `branch_matches`（`--expect-branch` 指定時）・`integration_clean`・`worktrees_present`
-   を確認する。**blocking** な check（前4つ）が false なら dispatch せず停止する。
-   非 blocking（後2つ）は `limitations` に記録して続行する。`worktrees_present` は、Wave 各 Issue の
+   を確認する。**blocking** な check が false なら dispatch せず停止する。blocking は
+   `integration_clean` **以外の全部**であり、非 blocking は `integration_clean` だけである。
+   非 blocking の失敗は `limitations` に記録して続行する。`worktrees_present` は、Wave 各 Issue の
    branch が `commandmate ls` で登録 worktree に解決できるか（＝supervisor が使うのと同じ到達性）を優先し、
    解決できないものだけ `git worktree list` の template path 一致で補う（#1473）。登録 path が template と
    異なっても branch が一致すれば present とみなし、silent な false-NG で false-failed を覆い隠さない。
-   最初の Wave 前の drift は「何も dispatch していない」ので `failure`、
+   最初の Wave 前の drift は「何も dispatch していない」ので `failure`（第3.0節の pre-flight で停止する）、
    途中の Wave 前の drift は `partial`。stop_reason は `drift`。
+
+   **`worktrees_present` は blocking である**（#90）。解決できない worktree は `send` の宛先が
+   無いということなので、続行しても当該 Issue は worker を1人も起動しないまま `failed` になるだけである。
+   blocking reason は**未解決 Issue ごとに1件**、
+   `{ "code": "worktree_unresolved", "detail": "#<issue>: no registered worktree matches branch <branch>" }`
+   を出す（branch は redaction 済み）。集計値（「N 件が解決しない」）だけでは、どの Issue の worktree を
+   作ればよいかが読めない。この経路では `limitations` に `drift_worktrees_present` は記録せず、
+   **blocking_reasons 側に一本化する**。対処は `cmate-worktree-setup` での worktree 作成であり、
+   Issue の分割でも re-plan でもない。
 2. **max_parallel 遵守** — Wave の幅は plan で `max_parallel`（1〜3）以下に保証済み。
    万一超える plan は `plan_invalid` で拒否し、runner は上限を超えて dispatch しない。
 3. **dispatch と監督ループ（#1468 / #1474）** — Wave の各 Issue を次の監督ループで駆動する。**Wave 内の
@@ -320,9 +349,18 @@ plan の byte 列は変わらない。dispatch report にも解決結果は載�
 `advanced` が true になるのは `all_workers_completed` かつ `all_verifications_passed`
 の両方が true のときだけである。停止時の `stop_reason` の優先順位は
 `human_required` > **`verification_not_judged`（exit 99。`stop_reason` は `dispatch_error`）** >
+**`worktree_unresolved`（`stop_reason` は `drift`）** >
 `worker_failed` > `timeout` > `verification_failed` である
 （`--max-turns` 到達の未 commit は `worker_failed` に含まれる）。99 を先に見るのは、それが
 **再 dispatch では解けない**唯一の停止理由だからである。
+
+`worktree_unresolved` を `worker_failed` より先に見るのは、両者が同じ `worker_state: 'failed'` を
+使いながら**正反対の所見**だからである（#90）。`worker_failed` は「worker は動いたが完遂しなかった」
+（worker ログを読む・Issue を分割する）であり、`worktree_unresolved` は「送る先が無いので worker を
+1人も起動していない」（worktree を作る）である。pre-flight（第3.0節）を通過した後にこれが起きるのは、
+`git worktree list` にはあるが CommandMate に登録されていない worktree、または実行中に消えた
+worktree の場合である。この停止は既に dispatch した Wave があるので `partial` であり、
+`worker_state: 'failed'` と note（`worktree unresolved: …`）は従来どおり記録する。
 
 ## 4. security（path escape / redaction）
 
@@ -339,16 +377,27 @@ plan の byte 列は変わらない。dispatch report にも解決結果は載�
 |---|---|---|
 | `success` | 全 Wave dispatch、全 worker completed、全 verification pass、prompt なし | 0 |
 | `partial` | 途中停止（worker 失敗・timeout・verification 失敗・prompt・drift） | 7 |
-| `failure` | 1件も dispatch できない（plan 不正・最初の Wave 前 drift・CLI 不在・`--contract-mode require` で契約非対応） | 1 |
+| `failure` | 1件も dispatch できない（plan 不正・最初の Wave 前 drift（worktree 未解決を含む）・CLI 不在・`--contract-mode require` で契約非対応） | 1 |
 
 失敗時も stdout に `status: failure` の report を出す。実行結果を推測で埋めない。
+pre-flight（第3.0節）で停止した failure は artifact を書かないので `out_dir` は `null` である
+（「何も書いていない」の意。`--out` はまだ空いている）。
 
-`stop_reason` の `dispatch_error` は2つの停止を含む。どちらかは `blocking_reasons` の code で分かる。
+`stop_reason` は `blocking_reasons` の code と組で読む。同じ `stop_reason` が複数の停止を含む。
 
-| code | 意味 |
-|---|---|
-| `contract_unsupported` | CLI に実行契約が無く、`--contract-mode require` がフォールバックを拒否した |
-| `verification_not_judged` | 検証が exit 99（run が error/cancelled）で、どのゲートも判定に到達しなかった |
+| stop_reason | code | 意味 |
+|---|---|---|
+| `dispatch_error` | `open_questions` | plan の Issue に未回答の planner question があり、`--allow-questions` も無かった |
+| `dispatch_error` | `contract_unsupported` | CLI に実行契約が無く、`--contract-mode require` がフォールバックを拒否した |
+| `dispatch_error` | `verification_not_judged` | 検証が exit 99（run が error/cancelled）で、どのゲートも判定に到達しなかった |
+| `dispatch_error` | `not_dispatched` | runner が起動を拒否した（scope 未宣言・unsafe worktree target 等） |
+| `dispatch_error` | `wave_not_advanced` | 上のどれでもない理由で Wave が advance しなかった（防御的な既定） |
+| `drift` | `worktree_unresolved` | 対象 Issue の worktree が解決できない。**未解決 Issue ごとに1件**出る（第3.1節） |
+| `drift` | `drift_<check>` | それ以外の blocking drift（`drift_cli_available`・`drift_repo_access`・`drift_base_resolvable`・`drift_branch_matches`） |
+| `human_required` | `human_input_required` | worker が prompt を出した（自動応答していない） |
+| `worker_failed` | `worker_failed` | worker が起動したが `--max-turns` までに commit しなかった |
+| `timeout` | `worker_timeout` | `commandmate wait` が timeout した |
+| `verification_failed` | `verification_failed` | completed した worker の裁定が pass でない |
 
 ## 6. completion_check（report）
 
@@ -364,6 +413,11 @@ report は6つの check を自己申告する（0.15.x 以前は `verification_r
 | `verification_recorded` | `completed` の worker はすべて、自分を判定した verdict を保持している（第2.1.1節） |
 
 `passed` は全件 true、かつ status が `failure` でないときだけ true。
+
+status を条件に入れているのがここでは効く（#90）: 1人も dispatch していない run では
+`barrier_enforced` も `verification_recorded` も**空虚に true** になる（守るべき worker がいない）。
+worktree 未解決が `failure` で停止するようになったことで、そのとき `passed` は false になる。
+「何もしていない」を「全部 OK」と report させない。
 
 ## 7. version 運用
 

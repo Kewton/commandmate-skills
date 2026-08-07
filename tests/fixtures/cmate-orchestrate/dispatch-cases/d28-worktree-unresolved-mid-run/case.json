@@ -1,0 +1,27 @@
+{
+  "description": "Issue #90, the window the pre-flight cannot close: #200's directory IS a registered git worktree, so `worktrees_present` is satisfied by the `git worktree list` fallback and the pre-flight passes — but CommandMate has no row for it, so the wave-2 resolution finds no send target. Wave 1 dispatches and advances normally; wave 2 records #200 as failed with the unresolved note and stops as partial with stop_reason drift and a `worktree_unresolved` blocking reason, NOT `worker_failed`: no worker was ever started, so there is no worker log to read and nothing to re-plan.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration"],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "drift",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [true, false],
+    "sent": [201],
+    "never_sent": [200],
+    "no_respond": true,
+    "worker_states": { "201": "completed", "200": "failed" },
+    "worker_notes_include": { "200": ["worktree unresolved: no registered worktree matches branch"] },
+    "blocking_codes": ["worktree_unresolved"],
+    "absent_blocking_codes": ["worker_failed"],
+    "blocking_details_include": ["#200: no registered worktree matches branch"],
+    "summary_includes": ["worktree_unresolved", "cmate-worktree-setup"],
+    "out_dir_created": true
+  }
+}
