@@ -156,6 +156,39 @@
 19. **`sed` は `LC_ALL=C` で回す**: ペイン capture には途中で切れたマルチバイト文字が混じりうる。
     UTF-8 ロケールの BSD sed はそこで `illegal byte sequence` を吐いて停止する。
 
+## 監視自身の可観測性（CommandMate #1728）
+
+20. **id の突合は「サーバが今どう採番しているか」に合わせる**。worktree-id は
+    `deriveWorktreeId()`（CommandMate #1621）＝ **checkout の directory 名**から採番され、
+    初回登録時に一度だけ確定する。0.6.1 までの `hooks-git.sh` は**ブランチ名でしか突合して
+    いなかった**ので、ディレクトリを Issue 番号で採番するリポジトリでは **1 件も**——
+    **メイン worktree すら**——解決できず、両カウンタが恒久 0 になっていた。
+    18（git の失敗を見る）とは別経路である: **git は成功し、突合が外れる**。
+    最も重い影響は STARTED ガードの不活性化で、「未起動 idle を COMPLETE と誤報しない」という
+    ガードが**誰も測っていない数字**で裁定していたことになる。
+    → directory 由来（現行）を第 1 候補にし、branch 由来の旧 2 規則は後方互換として残す。
+    directory 由来を先に見るのは、**両方が別 checkout に当たったとき、稼働中のサーバが配る
+    id のほうを勝たせる**ためである（レコードの出力順に依存させない）。
+    directory 名が衝突する 2 checkout は区別できないので、最初の 1 件を数えて `WARN` を出す。
+
+21. **診断行はオペレータの grep を生き延びる形にする**。20 が 25 分間気付かれなかった直接の
+    理由がこれである: 従来の診断は `monitor hooks: …` で始まり `ERROR` も `WARN` も含まなかった
+    ため、運用で常用する `2>&1 | grep -Ei "STALL|IDLE|…|ERROR|FAIL"` で **1 行残らず消えていた**。
+    「この 0 は測定値ではない」と言う唯一の行が、ログの中で最も消えやすい形をしていた。
+    → レベル語を付ける。`ERROR` = 両カウンタとも測れていない（STARTED ガードが捏造された証拠を
+    読んでいる）／`WARN` = 片方だけ劣化（もう片方は実測値なのでガードには本物の信号が残る）。
+
+22. **監視は黙って死ぬ**。健全な監視も死んだ監視も**どちらも沈黙する**ので、ログだけでは
+    区別できない（実際に exit 144・出力は起動行のみ・ワーカー 2 本は無監視で稼働継続、という
+    事故が起きた）。→ 3 つを足す: (a) 受信シグナルの明示報告（HUP/INT/QUIT/PIPE/TERM は
+    `128+n` で終了、**SIGURG は致死化せず** WARN のみ — 既定動作が無視だから）、
+    (b) **正常終端以外の全終了**を EXIT trap から報告（個別に trap していない死に方でも出る）、
+    (c) `--heartbeat`（既定 10 ポーリング）で `alive` 行。
+    trap はループ直前に張る。引数検証で落ちる経路を従来と byte 一致に保つためである。
+    なお 144 = 128+16 は macOS の SIGURG だが、`cmd | grep …` の `$?` は grep の終了コードでも
+    あるため、**`monitor.sh` 自身が signal 16 で死んだとは断定していない**。再現条件は未特定で、
+    次に起きたときに原因がログへ残るようにしただけである。
+
 ---
 
 ## 回帰一覧（red → green で固定したパターン）
@@ -175,6 +208,9 @@
 | 11 | 台帳が `running` を記録しているが Enter が composer に落ちておらず、短絡すると STARTED ガードが盲目になる | #1589 | 非終局状態はフォールバックへ落とす（短絡しない） |
 | 12 | 一次ソースを引けないまま推定で走り、ログ上は健全な COMPLETE に見える | #1589 | `unavailable` センチネル ＋ worker ごと 1 回の `FALLBACK MODE` 宣言 |
 | 14 | **分類だけで Enter を送り、サーバの autoYes ポリシーを迂回する／multiple_choice のデフォルト選択肢を意図せず確定する** | #59 | `promptData` から承認可否を判定し、承認できない形は保留＋報告＋`held` 加算。`--no-auto-approve` で全件保留 |
+| 15 | **id の突合がブランチ名だけで、現行のディレクトリ由来 id を 1 件も解決できない**（git は成功するので 13 のガードは発火しない。両カウンタが恒久 0 になり、**STARTED ガードが実測値でない数字で裁定する**） | CommandMate #1728 | `mh_worktree_path()` に `slug(basename(<path>))`（＝`deriveWorktreeId`）を第 1 候補として追加。ブランチ由来の旧 2 規則は残す |
+| 16 | **警告が運用の grep で全て消える**（`monitor hooks: …` に `ERROR`/`WARN` が無く、`grep -Ei "…\|ERROR\|FAIL"` で不可視。15 が 25 分間気付かれなかった直接の理由） | CommandMate #1728 | 診断行に `ERROR`（両カウンタ死）/ `WARN`（片方）のレベル語を付与 |
+| 17 | **監視が黙って死に、死んだことに気付けない**（exit 144・出力は起動行のみ・ワーカーは無監視で稼働継続。健全な沈黙と区別不能） | CommandMate #1728 | 受信シグナルの明示報告 ＋ 正常終端以外の EXIT 報告 ＋ `--heartbeat`（既定 10 ポーリング） |
 | 13 | **外部コマンドの終了コードを見ずに次を決める**（`git \| wc -l` が git の失敗を「作業 0」として返し、完走 worker を NOT_STARTED と誤報／`classify-state.sh` が落ちると空 state が完了判定へ渡り、生存ペインとみなされず **稼働中の worker が COMPLETE**／`verify-completion.sh` が落ちると `case` に default が無く **そのポーリングが無言で素通り**） | CommandMate #1614 | `hooks-git.sh` の 3 つの `git` 呼び出しを終了コード判定＋原因ごと worker 1 回の stderr 報告に、`monitor.sh` の `CLASSIFY` / `VERIFY` を `capture`（既存）と同じ扱いに |
 
 いずれも naive 実装で red → ガード実装で green にした。8 は両方向テスト（対照＋変異注入）で
@@ -188,6 +224,17 @@ poll 行の書式を変える / 参照フックの commit 数を 0 固定にす�
 14 は 6 変異で実測した（無条件 Enter へ戻す / ポリシー判定を形の判定より後ろへ移す /
 multiple_choice を一律保留にする / 保留報告を毎ポーリングにする / `held=` を常時出す /
 `--no-auto-approve` を無視する）。
+15〜17 は 8 変異で実測した（`hooks-git.sh`: basename 突合を削除 → **14 件 red** ／
+突合順を branch 優先へ反転 → 2 件 red ／ レベル語を `monitor hooks:` へ戻す → 6 件 red ／
+ディレクトリ名衝突の WARN を削除 → 3 件 red。`monitor.sh`: シグナル trap を全戻し → 9 件 red ／
+heartbeat を毎ポーリング発火に → 6 件 red（うち 2 件は **既定 stdout を byte 単位で固定した
+回帰 8 のテスト**で、既定 heartbeat が運用ストリームを汚していないことの対照でもある）／
+EXIT 報告を正常終端でも出す → 3 件 red ／ SIGURG を致死 trap に → 4 件 red）。
+**「監視が死んだ」を検知するテストは、監視が死んでも緑になりうる**ため、SIGURG のケースだけは
+「SIGURG では死なず、後続の SIGTERM で死ぬ」ことを **exit code**（143 であって 144 でない）で
+固定してある。同じ理由で、シグナル待ちには締切と PID 指定の SIGKILL を置いてある
+（trap を全戻しした `monitor.sh` は**シグナルを受けても走り続ける**ので、締切が無ければ
+テストは赤くならず**ハングする**）。
 
 回帰 fixture と test runner は配布元リポジトリ
 <https://github.com/Kewton/commandmate-skills> の

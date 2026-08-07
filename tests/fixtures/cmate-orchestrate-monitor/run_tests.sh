@@ -28,6 +28,25 @@ HOOKS_GIT="$SCRIPTS/hooks-git.sh"
 WORK=$(mktemp -d -t cmate-monitor-tests.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT INT TERM
 
+# Warning-marker directory for a standalone `. hooks-git.sh`, one per call.
+# Sourced outside monitor.sh the hook defaults to `$TMPDIR/cm-monitor-hooks-$$`,
+# which two things make unsafe here: the suite would leave one directory per case
+# behind in the system temp dir, and a marker left by a RECYCLED pid would
+# suppress the very warning a case is asserting on — a green for the wrong
+# reason. Under monitor.sh the question does not arise: it passes its own
+# STATE_DIR and removes it on exit.
+#
+# The counter is bumped by a call, not by a `$(hooks_state_dir)` substitution:
+# that runs in a subshell and the increment would be discarded, handing every
+# case the same directory — which is the marker-reuse this exists to prevent, and
+# the same subshell trap hooks-git.sh itself is written around.
+HOOKS_STATE_SEQ=0
+HOOKS_STATE_DIR=""
+next_hooks_state() {
+  HOOKS_STATE_SEQ=$((HOOKS_STATE_SEQ + 1))
+  HOOKS_STATE_DIR="$WORK/hooks-state/$HOOKS_STATE_SEQ"
+}
+
 passed=0
 failed=0
 
@@ -884,15 +903,19 @@ printf 'wip\n' > "$WORK/repo/myrepo-x/scratch.txt"
 # generateWorktreeId('feature/x', 'myrepo')
 WID=myrepo-feature-x
 
-counts=$(MONITOR_HOOKS_REPO="$GIT_REPO" MONITOR_HOOKS_BASE=main bash -c \
+next_hooks_state
+counts=$(MONITOR_HOOKS_REPO="$GIT_REPO" MONITOR_HOOKS_BASE=main MONITOR_HOOKS_STATE_DIR="$HOOKS_STATE_DIR" bash -c \
   ". \"$HOOKS_GIT\"; printf '%s %s' \"\$(count_commits $WID)\" \"\$(count_uncommitted $WID)\"" 2>/dev/null)
 check "counts real commits and uncommitted changes for a worktree-id" "1 1" "$counts"
 
-counts=$(MONITOR_HOOKS_REPO="$GIT_REPO" MONITOR_HOOKS_BASE=main bash -c \
+next_hooks_state
+counts=$(MONITOR_HOOKS_REPO="$GIT_REPO" MONITOR_HOOKS_BASE=main MONITOR_HOOKS_STATE_DIR="$HOOKS_STATE_DIR" bash -c \
   ". \"$HOOKS_GIT\"; printf '%s %s' \"\$(count_commits nope-nope)\" \"\$(count_uncommitted nope-nope)\"" 2>/dev/null)
 check "an id that resolves to no worktree counts 0, it does not error" "0 0" "$counts"
 
-warn=$(MONITOR_HOOKS_REPO="$GIT_REPO" MONITOR_HOOKS_BASE=origin/nope bash -c ". \"$HOOKS_GIT\"" 2>&1 >/dev/null)
+next_hooks_state
+warn=$(MONITOR_HOOKS_REPO="$GIT_REPO" MONITOR_HOOKS_BASE=origin/nope MONITOR_HOOKS_STATE_DIR="$HOOKS_STATE_DIR" \
+  bash -c ". \"$HOOKS_GIT\"" 2>&1 >/dev/null)
 check_contains "an unresolvable base ref warns instead of silently counting zero" \
   "base ref 'origin/nope' does not resolve" "$warn"
 
@@ -969,7 +992,9 @@ counts_of() {
   co__repo=$1; co__id=$2; co__shim=${3:-}
   co__path=$PATH
   [ -n "$co__shim" ] && co__path="$co__shim:$PATH"
-  PATH="$co__path" MONITOR_HOOKS_REPO="$co__repo" MONITOR_HOOKS_BASE=main bash -c \
+  next_hooks_state
+  PATH="$co__path" MONITOR_HOOKS_REPO="$co__repo" MONITOR_HOOKS_BASE=main \
+    MONITOR_HOOKS_STATE_DIR="$HOOKS_STATE_DIR" bash -c \
     ". \"$HOOKS_GIT\"; printf '%s %s' \"\$(count_commits $co__id)\" \"\$(count_uncommitted $co__id)\"" \
     > "$WORK/counts-out" 2> "$WORK/counts-stderr"
   COUNTS_OUT=$(cat "$WORK/counts-out")
@@ -1119,6 +1144,297 @@ check "both polls happened" 2 "$LOOP_CAPTURES"
 check "no poll line claims a verdict" 0 \
   "$(printf '%s\n' "$LOOP_STDOUT" | grep -c ' poll [0-9]* -> ' || true)"
 MONITOR=$MONITOR_REAL
+
+echo
+echo "== hooks-git.sh resolves the ids CommandMate actually mints (CommandMate #1728) =="
+# mh_worktree_path() matched worktrees by BRANCH only, while deriveWorktreeId()
+# has minted ids from the checkout's DIRECTORY name since CommandMate #1621. In a
+# repository that numbers its worktree directories after issues, that resolved
+# NOTHING — not one worker, not even the main worktree — so every poll answered
+# `commits=0 uncommitted=0` for workers that had already committed. git succeeds
+# and the match fails, so none of the CommandMate #1614 guards above fire; the
+# STARTED guard in verify-completion.sh was adjudicating on fabricated evidence.
+#
+# The existing fixtures could not see this hole: `myrepo` / `myrepo-x` /
+# `feature/x` / id `myrepo-feature-x` is exactly what the retired branch scheme
+# produces. Every repo below therefore has **directory name != branch name**.
+DIRID="$WORK/dirid"
+mkdir -p "$DIRID"
+git -c init.defaultBranch=main init --quiet "$DIRID/commandmate"
+printf 'base\n' > "$DIRID/commandmate/README.md"
+git -C "$DIRID/commandmate" add . >/dev/null
+git -C "$DIRID/commandmate" -c user.email=t@t -c user.name=t commit --quiet -m base
+# Directory numbered by issue, branch named after the fix: the shape #1728 was
+# reported from, and the shape no branch-derived id can address.
+git -C "$DIRID/commandmate" -c user.email=t@t -c user.name=t \
+  worktree add --quiet -b fix/1728-monitor-git-hooks "$DIRID/commandmate-issue-1728" >/dev/null 2>&1
+printf 'work\n' > "$DIRID/commandmate-issue-1728/README.md"
+git -C "$DIRID/commandmate-issue-1728" -c user.email=t@t -c user.name=t commit --quiet -am work
+printf 'wip\n' > "$DIRID/commandmate-issue-1728/scratch.txt"
+printf 'wip\n' > "$DIRID/commandmate-issue-1728/scratch2.txt"
+# The main worktree has no `<repo>-<branch>` form of its own, so it was
+# unresolvable too — the detail that makes "no worker resolved" literal.
+printf 'dirty\n' > "$DIRID/commandmate/untracked.txt"
+git -C "$DIRID/commandmate" -c user.email=t@t -c user.name=t \
+  worktree add --quiet --detach "$DIRID/commandmate-detached" >/dev/null 2>&1
+printf 'wip\n' > "$DIRID/commandmate-detached/scratch.txt"
+
+counts_of "$DIRID/commandmate" commandmate-issue-1728
+check "a directory-named worktree resolves (1 commit / 2 changes)" "1 2" "$COUNTS_OUT"
+# The control arm: a resolution that worked must stay silent, or the ERROR line
+# below stops meaning anything.
+check "…and reports nothing, because nothing degraded" "" "$COUNTS_STDERR"
+
+counts_of "$DIRID/commandmate" commandmate
+check "the MAIN worktree resolves by its own directory name" "0 1" "$COUNTS_OUT"
+check "…silently, too" "" "$COUNTS_STDERR"
+
+# A detached checkout has no `branch refs/heads/…` record at all, so the retired
+# schemes cannot address it even in principle.
+counts_of "$DIRID/commandmate" commandmate-detached
+check "a detached-HEAD checkout resolves, having no branch record at all" "0 1" "$COUNTS_OUT"
+check "…and it, too, is silent" "" "$COUNTS_STDERR"
+
+# Backwards compatibility: the two branch-derived schemes stay. `$WORK/n3` is the
+# 3-commit / 2-change repo built for the CommandMate #1614 cases above.
+counts_of "$WORK/n3/myrepo" myrepo-feature-x
+check "the retired <repo>-<branch> id still resolves" "3 2" "$COUNTS_OUT"
+counts_of "$WORK/n3/myrepo" feature-x
+check "the retired bare-<branch> id still resolves" "3 2" "$COUNTS_OUT"
+counts_of "$WORK/n3/myrepo" myrepo-x
+check "…and that repo's directory name resolves, which is how it would be minted today" "3 2" "$COUNTS_OUT"
+
+# Order matters when both schemes hit, and they hit DIFFERENT checkouts here:
+# `alpha-feature-x` is a directory name, and it is also `<repo>-<branch>` for the
+# `beta` checkout on branch `feature/x`. A live server hands out the directory id,
+# so the directory match must win rather than whichever record git printed last.
+ORDER="$WORK/order"
+mkdir -p "$ORDER"
+git -c init.defaultBranch=main init --quiet "$ORDER/alpha"
+printf 'base\n' > "$ORDER/alpha/README.md"
+git -C "$ORDER/alpha" add . >/dev/null
+git -C "$ORDER/alpha" -c user.email=t@t -c user.name=t commit --quiet -m base
+git -C "$ORDER/alpha" -c user.email=t@t -c user.name=t \
+  worktree add --quiet -b unrelated "$ORDER/alpha-feature-x" >/dev/null 2>&1
+git -C "$ORDER/alpha" -c user.email=t@t -c user.name=t \
+  worktree add --quiet -b feature/x "$ORDER/beta" >/dev/null 2>&1
+printf 'a\n' > "$ORDER/alpha-feature-x/w1.txt"
+printf 'a\n' > "$ORDER/alpha-feature-x/w2.txt"
+printf 'a\n' > "$ORDER/alpha-feature-x/w3.txt"
+printf 'b\n' > "$ORDER/beta/w1.txt"
+
+next_hooks_state
+resolved=$(MONITOR_HOOKS_REPO="$ORDER/alpha" MONITOR_HOOKS_BASE=main MONITOR_HOOKS_STATE_DIR="$HOOKS_STATE_DIR" bash -c \
+  ". \"$HOOKS_GIT\"; basename \"\$(mh_worktree_path alpha-feature-x)\"" 2>/dev/null)
+check "the directory-derived match wins over the branch-derived one" "alpha-feature-x" "$resolved"
+counts_of "$ORDER/alpha" alpha-feature-x
+check "…so the counts come from the checkout a live server would have meant" "0 3" "$COUNTS_OUT"
+
+# Two checkouts with the same directory name. CommandMate disambiguates at mint
+# time with a path digest, so this scan genuinely cannot tell which one is meant:
+# answer from the first and say so, because refusing would sink both counters.
+DUP="$WORK/dupname"
+mkdir -p "$DUP/one" "$DUP/two"
+git -c init.defaultBranch=main init --quiet "$DUP/repo"
+printf 'base\n' > "$DUP/repo/README.md"
+git -C "$DUP/repo" add . >/dev/null
+git -C "$DUP/repo" -c user.email=t@t -c user.name=t commit --quiet -m base
+git -C "$DUP/repo" -c user.email=t@t -c user.name=t \
+  worktree add --quiet -b b1 "$DUP/one/shared" >/dev/null 2>&1
+git -C "$DUP/repo" -c user.email=t@t -c user.name=t \
+  worktree add --quiet -b b2 "$DUP/two/shared" >/dev/null 2>&1
+printf 'wip\n' > "$DUP/one/shared/wip.txt"
+counts_of "$DUP/repo" shared
+check "an ambiguous directory name still answers, from the first match" "0 1" "$COUNTS_OUT"
+check_contains "…and says the answer may be the wrong checkout" \
+  "more than one worktree has this directory name" "$COUNTS_STDERR"
+check_contains "…at WARN, because the number itself is real" "monitor hooks WARN:" "$COUNTS_STDERR"
+check_contains "…and names the escape hatch" "set MONITOR_WORKTREE_ROOT" "$COUNTS_STDERR"
+
+# The level words. They are in the line for exactly one reason: the supervision
+# pipe operators actually use is `2>&1 | grep -Ei "STALL|IDLE|…|ERROR|FAIL"`, and
+# the level-less `monitor hooks: …` did not survive it. That is why nobody saw
+# the defect above for 25 minutes.
+counts_of "$WORK/n3/myrepo" nope-nope
+check_contains "an unresolvable id is an ERROR: nothing at all was measured" \
+  "monitor hooks ERROR: [nope-nope] no checkout resolved" "$COUNTS_STDERR"
+check "…and it survives the supervision pipe that used to swallow it" 1 \
+  "$(printf '%s\n' "$COUNTS_STDERR" | grep -Ei 'STALL|IDLE|ERROR|FAIL' | grep -c . || true)"
+
+counts_of "$WORK/n3/myrepo" myrepo-feature-x "$(git_shim lg2 log 129)"
+check_contains "a half-measured worker is a WARN" \
+  "monitor hooks WARN: [myrepo-feature-x] 'git" "$COUNTS_STDERR"
+check_lacks "…not an ERROR, because the other counter answered" \
+  "monitor hooks ERROR:" "$COUNTS_STDERR"
+
+counts_of "$WORK/n3/myrepo" myrepo-feature-x "$(git_shim wt3 worktree 128)"
+check_contains "a failing 'git worktree list' is an ERROR: both counters sink together" \
+  "monitor hooks ERROR: [myrepo-feature-x] 'git" "$COUNTS_STDERR"
+
+next_hooks_state
+warn=$(MONITOR_HOOKS_REPO="$GIT_REPO" MONITOR_HOOKS_BASE=origin/nope MONITOR_HOOKS_STATE_DIR="$HOOKS_STATE_DIR" \
+  bash -c ". \"$HOOKS_GIT\"" 2>&1 >/dev/null)
+check_contains "the source-time base-ref warning carries a level word too" \
+  "monitor hooks WARN: base ref 'origin/nope' does not resolve" "$warn"
+
+# End to end, on a repo whose ids only the directory scheme can address: the
+# shipped hook drives the loop to COMPLETE with the counts it measured.
+LOOP_ID=commandmate-issue-1728
+MONITOR_HOOKS_REPO="$DIRID/commandmate" MONITOR_HOOKS_BASE=main \
+  run_loop hooks-git-dirid-e2e 5 live-generating-token.json,live-idle.json --verbose --hooks "$HOOKS_GIT"
+check "a directory-named worktree drives the loop to COMPLETE" \
+  "monitor[commandmate-issue-1728]: poll 2 -> IDLE started=1 streak=1 commits=1 uncommitted=2 verdict=COMPLETE" \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep -E ': poll 2 ')"
+check "…with nothing on stderr claiming the counters were unmeasurable" "" "$LOOP_STDERR"
+LOOP_ID=w1
+
+echo
+echo "== monitor.sh liveness: heartbeat, signals, exit report (CommandMate #1728) =="
+# Silence had two meanings and no way to tell them apart: a monitor watching
+# healthy workers prints nothing, and a monitor that has died prints nothing. A
+# 25-minute run once ended at exit 144 having printed only its startup line while
+# both workers kept going, unwatched.
+
+run_loop heartbeat-default 10 live-idle.json
+check "the default heartbeat fires on round 10" \
+  "monitor: alive (poll=10, complete=0/1)" \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep 'monitor: alive' || true)"
+check "…exactly once in ten rounds" 1 \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep -c 'monitor: alive' || true)"
+check "the heartbeat is part of the operator stream, not a fault" "" \
+  "$(printf '%s\n' "$LOOP_STDERR" | grep 'alive' || true)"
+check_lacks "reaching --max-polls is a documented terminus, not an abnormal exit" \
+  "exiting on poll round" "$LOOP_STDERR"
+
+# The interval is a real interval, not "print it once": nine rounds are below it.
+# The default-stream case at the top of this file is the other half of this pin —
+# it fixes the stock stdout byte-for-byte over 3 rounds, so a heartbeat that
+# fired every poll would break it.
+run_loop heartbeat-below-default 9 live-idle.json
+check "nine rounds stay below the default interval" 0 \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep -c 'monitor: alive' || true)"
+
+run_loop heartbeat-every-two 5 live-idle.json --heartbeat 2
+check "--heartbeat 2 fires on rounds 2 and 4" \
+  "monitor: alive (poll=2, complete=0/1)
+monitor: alive (poll=4, complete=0/1)" \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep 'monitor: alive' || true)"
+
+run_loop heartbeat-off 12 live-idle.json --heartbeat 0
+check "--heartbeat 0 turns it off" 0 \
+  "$(printf '%s\n' "$LOOP_STDOUT" | grep -c 'monitor: alive' || true)"
+
+# The other documented terminus: every worker COMPLETE. Nothing is added there
+# either — the EXIT report exists for the deaths nobody trapped.
+printf 'count_commits() { echo 2; }\ncount_uncommitted() { echo 5; }\n' > "$WORK/hooks-both.sh"
+run_loop liveness-complete 5 live-generating-token.json,live-idle.json --hooks "$WORK/hooks-both.sh"
+check "a run that completes normally adds nothing to stderr" "" "$LOOP_STDERR"
+
+# Pre-loop exits are byte-identical to before: the traps are installed after
+# argument validation, and `run_ended` starts at 1 so the EXIT trap stays quiet
+# until the loop owns the process.
+bad_status=0
+bad_out=$(bash "$MONITOR" --max-polls 1 'w1;rm' 2>&1) || bad_status=$?
+check "an argument-validation exit is still one line and nothing else" \
+  "monitor.sh: invalid worktree id 'w1;rm' (expected [a-zA-Z0-9][a-zA-Z0-9_-]*)" "$bad_out"
+check "…and still exits 2" 2 "$bad_status"
+
+# Signals. The monitor is started in the background and signalled BY ITS PID —
+# never by name or pattern, which would reach every other monitor on the machine.
+SIG_PID=""
+SIG_DIR=""
+SIG_STATUS=""
+SIG_STDERR=""
+
+# wait_for <file> <needle> <max-tenths-of-a-second> -> 0 when it appeared
+wait_for() {
+  wf__n=0
+  while [ "$wf__n" -lt "$3" ]; do
+    grep -q "$2" "$1" 2>/dev/null && return 0
+    wf__n=$((wf__n + 1))
+    sleep 0.1
+  done
+  return 1
+}
+
+# sig_start <case> — a monitor polling one healthy idle worker once a second.
+# Returns once poll 1 is on stdout: the traps are installed immediately before
+# the loop, so a signal delivered after that line cannot race them. SIGINT and
+# SIGQUIT are deliberately NOT exercised here — bash sets both to SIG_IGN in an
+# asynchronous child of a non-interactive shell, and a signal ignored on entry
+# cannot be trapped, so a background test of them would measure bash, not this.
+sig_start() {
+  SIG_DIR="$WORK/sig-$1"
+  mkdir -p "$SIG_DIR"
+  printf '#!/bin/sh\ncat "%s"\n' "$FIXTURES/live-idle.json" > "$SIG_DIR/fake-cm"
+  printf '#!/bin/sh\nexit 0\n' > "$SIG_DIR/tmux"
+  chmod +x "$SIG_DIR/fake-cm" "$SIG_DIR/tmux"
+  : > "$SIG_DIR/stdout"
+  : > "$SIG_DIR/stderr"
+  PATH="$SIG_DIR:$PATH" CM="$SIG_DIR/fake-cm" \
+    bash "$MONITOR" --interval 1 --idle-threshold 99 --heartbeat 0 --verbose w1 \
+    > "$SIG_DIR/stdout" 2> "$SIG_DIR/stderr" &
+  SIG_PID=$!
+  wait_for "$SIG_DIR/stdout" 'poll 1 ->' 100
+}
+
+# sig_finish — reap the monitor, bounded. The pre-#1728 behaviour is not "exit
+# without a word": `trap cleanup EXIT INT TERM` runs the handler and CARRIES ON,
+# so a reverted monitor.sh would hang this suite rather than fail it. The
+# deadline plus a PID-targeted SIGKILL is what turns that into a red.
+sig_finish() {
+  if ! wait_for "$SIG_DIR/stderr" 'exiting on poll round' 100; then
+    kill -s KILL "$SIG_PID" 2>/dev/null || true
+  fi
+  SIG_STATUS=0
+  wait "$SIG_PID" 2>/dev/null || SIG_STATUS=$?
+  SIG_STDERR=$(cat "$SIG_DIR/stderr")
+}
+
+sig_start term
+kill -s TERM "$SIG_PID"
+sig_finish
+check "SIGTERM exits 128+15, the status a supervising shell expects" 143 "$SIG_STATUS"
+check_contains "…naming the signal and the round it stopped on" \
+  "monitor: ERROR caught SIGTERM (signal 15) on poll round" "$SIG_STDERR"
+check_contains "…and reporting who is left unwatched" \
+  "worker(s) complete (rc=143) — the rest are now UNMONITORED" "$SIG_STDERR"
+check_contains "…from the EXIT trap, so untrapped deaths report too" \
+  "monitor: ERROR exiting on poll round" "$SIG_STDERR"
+
+sig_start hup
+kill -s HUP "$SIG_PID"
+sig_finish
+check "SIGHUP exits 128+1" 129 "$SIG_STATUS"
+check_contains "…and is named too" "monitor: ERROR caught SIGHUP (signal 1)" "$SIG_STDERR"
+
+# SIGURG is the one signal that must NOT be fatal. It is ignored by default, and
+# 144 = 128 + 16 is SIGURG on macOS — the number this Issue started from, which
+# the log could not be checked against. Trapping it makes a delivery visible
+# without killing the run.
+#
+# "The monitor survived" is a claim a test can satisfy while the monitor dies, so
+# it is pinned by EXIT CODE: the run must survive the URG and then die of the
+# TERM that follows, i.e. 143 and not 144.
+sig_start urg
+kill -s URG "$SIG_PID"
+wait_for "$SIG_DIR/stderr" 'caught SIGURG' 100
+urg_round=$(sed -n 's/.*caught SIGURG on poll round \([0-9][0-9]*\).*/\1/p' "$SIG_DIR/stderr")
+sleep 2
+kill -s TERM "$SIG_PID"
+sig_finish
+check "SIGURG does not kill the run — the SIGTERM after it does" 143 "$SIG_STATUS"
+check_contains "SIGURG is reported at WARN" \
+  "monitor: WARN caught SIGURG on poll round" "$SIG_STDERR"
+check_contains "…and says the watch is still running" "ignored, monitoring continues" "$SIG_STDERR"
+term_round=$(printf '%s\n' "$SIG_STDERR" | sed -n 's/.*caught SIGTERM.*on poll round \([0-9][0-9]*\).*/\1/p')
+if [ -n "$urg_round" ] && [ -n "$term_round" ] && [ "$term_round" -gt "$urg_round" ]; then
+  passed=$((passed + 1))
+  printf 'ok   the loop kept polling across the SIGURG (round %s -> %s)\n' "$urg_round" "$term_round"
+else
+  failed=$((failed + 1))
+  printf 'FAIL the loop did not advance across the SIGURG (round %s -> %s)\n' "$urg_round" "$term_round"
+fi
 
 echo
 echo "-------------------------------------------"

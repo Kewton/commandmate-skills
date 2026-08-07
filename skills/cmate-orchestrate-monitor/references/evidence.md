@@ -212,6 +212,60 @@ promptData 無し・未知の型）は保留する。
   **1 件も現れなかった**。観測していないフィールドを条件に入れていない。
   危険な picker は `isDefault` の不在で捕まる（上表最終行）。
 
+## 1f. worktree-id の突合と監視の生存（0.7.0 で修正、CommandMate #1728）
+
+**0.6.1 までの `hooks-git.sh` は、現行の採番規則で作られた id を 1 件も解決できなかった。**
+突合はブランチ名だけ（`<repo>-<branch>` / `<branch>`）で、CommandMate が id を採番する規則は
+`deriveWorktreeId()`（#1621）＝ **checkout の directory 名**である。CommandMate 側で実測した
+修正前の解決結果（ディレクトリを Issue 番号で採番しているリポジトリ）:
+
+```
+commandmate-issue-1721 -> ''
+commandmate-issue-1728 -> ''
+mycodebranchdesk       -> ''      # メイン worktree
+```
+
+3 件とも空、すなわち**メイン worktree すら解決できていない**。修正後は 3 件とも解決し、
+`commits=1 uncommitted=8` を返した。
+
+同じ実測を、この配布元リポジトリの実 checkout でも取った（2026-08-07、`git worktree list` に
+**16 件**。ディレクトリは `commandmate-skills-issue-<n>` 形、ブランチは `fix/…` / `docs/…` /
+`linear/…` 形で、**16 件すべてで directory 名 ≠ branch 名**）。
+
+| resolver | 非ゼロのカウントを返した worktree |
+|---|---:|
+| 修正前（ブランチ突合のみ） | **0 / 16**（メイン worktree を含め全件 `commits=0 uncommitted=0` ＋ 解決失敗の報告） |
+| 修正後（directory 由来を第 1 候補に追加） | **16 / 16**（例: 監視対象の 1 件が `commits=0 uncommitted=9`、実 `git status` と一致） |
+
+**この 0/16 が、修正前のカウンタが何を測っていたかの答えである**: 何も測っていない。
+
+| 経路 | 0.6.1 の挙動 | 実害 |
+|---|---|---|
+| id の突合 | ブランチ由来の 2 規則のみ。**git は成功し、突合だけが外れる** | 両カウンタが恒久 0。第1d節の「両カウンタが同時に沈む」と同じ結果に、**#1614 のガードが 1 つも発火しない経路**で到達する |
+| 診断行 | `monitor hooks: …`（レベル語なし） | 運用の `2>&1 \| grep -Ei "STALL\|IDLE\|…\|ERROR\|FAIL"` で**全行が消える**。上の欠陥が 25 分間気付かれなかった直接の理由 |
+| 異常終了 | 何も出さない | exit 144・出力は起動行のみ・ワーカー 2 本は無監視で稼働継続。**健全な沈黙と区別不能** |
+
+最も重い影響は **STARTED ガードの不活性化**である。`verify-completion.sh` は
+`commits=0 && uncommitted=0` を「タスクが composer から出ていない」の署名として読むので、
+恒久 0 のもとでは「未起動 idle を COMPLETE と誤報しない」というガードが、**誰も測っていない
+数字**で裁定していたことになる。第1節の実運用実績（371 ポーリング・誤報 0）は
+`myrepo` / `feature/x` 形の worktree で採ったもので、そこでは旧規則が当たっていた。
+
+**exit 144 の原因は未特定である。** 144 = 128 + 16 で macOS の signal 16 は SIGURG だが、
+SIGURG は既定で無視されるうえ、`cmd | grep …` のパイプラインの `$?` は **grep の終了コード**でも
+ありうる。したがって `monitor.sh` 自身が signal 16 で死んだとは断定していない。今回入れたのは
+**次に起きたときに原因がログへ残る形**であって、原因の修正ではない。
+
+**この節も実運用実績ではない。** 突合 3 方式・レベル語・生存報告は、**directory 名 ≠ branch 名**の
+git リポジトリを実際に作る fixture（メイン worktree・detached HEAD・ディレクトリ名衝突を含む）と、
+シグナルを PID 指定で送る shim テストで固定し、8 変異でそれぞれ赤くなることを確認している
+（内訳は `tests/fixtures/cmate-orchestrate-monitor/README.md`）。**実運用で `alive` が途切れた
+監視を回収した実績は未計測である。**
+
+既存 fixture がこの穴を構造的に検知できなかったことも記録しておく: `myrepo` / `myrepo-x` /
+`feature/x` / id `myrepo-feature-x` は**旧規則そのもの**で組まれており、ブランチ突合だけでも
+全件緑になる。テストが緑であることは、テストが穴を見ていることを意味しない。
+
 ## 2. 測定の限界（この Skill について）
 
 - **修正後の介入経路は fixture / shim テストのみ**。実 worker のペインへ Enter / `a` /
@@ -224,6 +278,9 @@ promptData 無し・未知の型）は保留する。
   `hold:policy` に至っては、**保留を実際に起こす契約（`mode: off` / `denyPatterns`）を
   走らせた測定が無い**（fixture の `lastSuppression` は製品の unit test が固定している形を
   実 capture フレームへ移植したもので、生採取ではない）。
+- **id の突合（3 方式）と生存報告も fixture / shim テストのみ**（第1f節）。実 CommandMate が
+  採番した id を実サーバ越しに解決した実績、および実運用で `alive` の途切れから死んだ監視を
+  回収した実績は **未計測**である。**exit 144 の再現条件も未特定のまま**である。
 - **worker 側 CLI は Claude Code のみ**。同梱の生成中・idle・プロンプトのアンカーは
   その TUI から実際に採取した capture に基づく。他の coding CLI の TUI 文字列は **未計測**である。
 - **rate limit・リトライ枯渇の実地発火は 0 回**。この 2 経路は fixture（実機採取した
