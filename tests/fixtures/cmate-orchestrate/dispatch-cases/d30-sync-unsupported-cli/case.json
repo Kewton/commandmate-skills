@@ -1,0 +1,28 @@
+{
+  "description": "Issue #91, the same world as d29 with one variable changed: the CommandMate binary predates 0.21.0, so `commandmate sync` exits non-zero with `unknown command`. The failed re-scan is NOT what stops the run — it is recorded as a `worktree_sync_unavailable` limitation and the branch is treated exactly as it was before sync existed: unresolved. #90's behaviour is therefore unchanged — #201 is recorded failed with the unresolved note, the run stops partial / drift with a per-issue `worktree_unresolved` blocking reason (never `worker_failed`), and no worker is ever started. The sync is attempted once, not retried.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration"],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "drift",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [false],
+    "never_sent": [200, 201],
+    "no_respond": true,
+    "cli_subcommand_counts": { "sync": 1 },
+    "worker_states": { "201": "failed" },
+    "worker_notes_include": { "201": ["worktree unresolved: no registered worktree matches branch", "commandmate sync could not re-scan the registry"] },
+    "blocking_codes": ["worktree_unresolved"],
+    "absent_blocking_codes": ["worker_failed", "drift_worktrees_present"],
+    "blocking_details_include": ["#201: no registered worktree matches branch"],
+    "limitation_codes": ["worktree_sync_unavailable"],
+    "summary_includes": ["worktree_unresolved", "cmate-worktree-setup", "worktree_sync_unavailable", "0.21.0"],
+    "out_dir_created": true
+  }
+}

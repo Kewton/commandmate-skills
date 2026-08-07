@@ -964,9 +964,13 @@ function analyzeIssue(issue, profile, binaries) {
     labels: issue.labels,
     branch,
     worktree,
-    // worktree_id is resolved by `commandmate sync` at dispatch time. That CLI
-    // is not yet available (ADR #1447), so it is reported as missing here rather
-    // than failing the plan.
+    // worktree_id is resolved at DISPATCH time from `commandmate ls --json` by
+    // branch — `ls` is the source of truth for the id, and the planner is a dry
+    // run that creates nothing, so it reports the id as missing rather than
+    // guessing a slug. `commandmate sync` (CommandMate 0.21.0+) re-scans the
+    // server's worktree registry but creates no worktree; the dispatch runner
+    // calls it when `ls` resolves nothing, which is what registers a worktree
+    // made after the server last scanned.
     worktree_id: null,
     questions,
     _openQuestions: openQuestions,
@@ -1469,7 +1473,7 @@ function buildPlan({ runId, profile, inputs, analyses, edges, waves }) {
     notes: [
       'Dry run: no worktree was created, no worker dispatched, no PR opened or merged.',
       'This plan is executed by the dispatch runner (scripts/dispatch.mjs) once approved; PR, merge and UAT are deferred to CommandMate issues #1455-1456.',
-      'worktree_id is null until `commandmate sync` resolves it at dispatch time (optional per ADR #1447).',
+      'worktree_id is null in the plan: the dispatch runner resolves it from `commandmate ls --json` by branch. A worktree created after the CommandMate server last scanned is not registered yet, so it has no id — register it with `commandmate sync` (CommandMate 0.21.0+, a re-scan that creates no worktree; the dispatch runner also attempts it once).',
       'Issue input is number, title, body and labels only: comments are never read, so a decision recorded only in an issue comment is invisible to this plan and to the execution contract — fold it into the issue body and re-plan.',
     ],
   };

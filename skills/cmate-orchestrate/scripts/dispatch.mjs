@@ -567,6 +567,10 @@ function preflightFailureReport(inputs, plan, preflight) {
   report.stop_reason = 'drift';
   report.drift_checks = preflight.checks;
   report.blocking_reasons = preflight.reasons;
+  // The pre-flight is where a `commandmate sync` is most likely to have run: it is
+  // the first thing that resolves worktrees. A refusal must say the registry was
+  // re-scanned (or could not be) before it concluded "no registered worktree".
+  recordSyncAttempt(report);
   report.completion_check = buildCompletionCheck({
     planApproved: true,
     driftReconfirmed: preflight.checks.length > 0,
@@ -844,22 +848,16 @@ function buildWorkerPrompt(plan, issue) {
 // Supervision primitives
 // =============================================================================
 
-// Resolve the CommandMate worktree id an issue's work lives in, at dispatch time.
-// The public CLI is worktree-id based (`send <id> …`); the id is the one
-// CommandMate assigned, a `<repo>-<branch>` slug we cannot reconstruct reliably.
-// A plan may already carry a resolved `worktree_id`; otherwise we ask the live
-// CLI (`ls --json`) which worktree currently holds the issue's branch. There is
-// no `commandmate sync` — `ls` is the source of truth for the id.
-function resolveWorktreeId(inputs, issue) {
-  if (typeof issue.worktree_id === 'string' && WORKTREE_ID_RE.test(issue.worktree_id)) {
-    return { id: issue.worktree_id, path: null, note: '' };
-  }
-  const branch = typeof issue.branch === 'string' ? issue.branch : null;
-  if (!branch) return { id: null, path: null, note: 'issue has no branch to resolve a worktree from' };
+// One `commandmate ls --json` lookup by branch. `listed` distinguishes the two
+// ways this comes back empty, which the sync retry below has to tell apart: a
+// parsed list that simply holds no matching row (a registry that may be stale)
+// versus an `ls` that produced no list at all (a broken or unreachable CLI, which
+// re-scanning cannot fix).
+function lookupWorktree(inputs, branch) {
   const result = runCm(inputs, ['ls', '--json']);
   const rows = parseCliJson(result);
   if (!Array.isArray(rows)) {
-    return { id: null, path: null, note: excerpt(result.stderr || result.stdout || 'ls returned no worktree list') };
+    return { id: null, path: null, note: excerpt(result.stderr || result.stdout || 'ls returned no worktree list'), listed: false };
   }
   const match = rows.find((row) => row && (row.branch === branch || row.name === branch));
   const id = match && typeof match.id === 'string' && WORKTREE_ID_RE.test(match.id) ? match.id : null;
@@ -870,7 +868,102 @@ function resolveWorktreeId(inputs, issue) {
   // (path-escape checked) so the supervisor cwd's into the registered directory.
   // The plan template stays a fallback for when `ls` omits a path.
   const path = match && typeof match.path === 'string' ? safeWorktreeTarget(match.path) : null;
-  return { id, path, note: id ? '' : `no registered worktree matches branch ${redact(branch)}` };
+  return { id, path, note: id ? '' : `no registered worktree matches branch ${redact(branch)}`, listed: true };
+}
+
+// The one `commandmate sync` a run is allowed, and what came of it. Null until an
+// unresolved branch triggers it; read again when the report is assembled so the
+// attempt is stated in `limitations` rather than changing the run's behaviour in
+// silence (Issue #91).
+let syncAttempt = null;
+
+// `commandmate sync` re-scans every repository and registers the worktrees it
+// finds with the server. It is a SERVER-WIDE rescan, so one call answers for every
+// branch in the run: syncing per branch would re-scan the same registry N times
+// for the same answer. `fresh` says whether this caller is the one that ran it.
+function attemptSync(inputs) {
+  const fresh = syncAttempt === null;
+  if (fresh) {
+    const result = runCm(inputs, ['sync']);
+    syncAttempt = {
+      ok: result.ok,
+      detail: result.ok
+        ? 'the server re-scanned its repositories'
+        : excerpt(result.stderr || result.stdout || 'commandmate sync failed'),
+      resolved: [],
+      unresolved: [],
+    };
+  }
+  return { fresh, ok: syncAttempt.ok, detail: syncAttempt.detail };
+}
+
+// Resolve the CommandMate worktree id an issue's work lives in, at dispatch time.
+// The public CLI is worktree-id based (`send <id> …`); the id is the one
+// CommandMate assigned, a `<repo>-<branch>` slug we cannot reconstruct reliably.
+// A plan may already carry a resolved `worktree_id`; otherwise we ask the live
+// CLI which worktree currently holds the issue's branch — `commandmate ls --json`
+// is the source of truth for the id.
+//
+// `commandmate sync` DOES exist (CommandMate 0.21.0+, Kewton/CommandMate#1680):
+// it re-scans repositories and registers their worktrees with the server. It
+// CREATES nothing, so it cannot conjure a worktree that was never made — but it
+// does close the one gap `ls` alone cannot see: a worktree that exists on disk and
+// was created after the server last scanned is registered nowhere, so it has no
+// id to send to. When `ls` lists rows but none match the branch we therefore sync
+// ONCE and read `ls` again (Issue #91). A CLI too old to have `sync` fails that
+// call; the branch then stays unresolved and the run stops exactly as it did
+// before (Issue #90) — the sync failure itself never stops it.
+function resolveWorktreeId(inputs, issue) {
+  if (typeof issue.worktree_id === 'string' && WORKTREE_ID_RE.test(issue.worktree_id)) {
+    return { id: issue.worktree_id, path: null, note: '' };
+  }
+  const branch = typeof issue.branch === 'string' ? issue.branch : null;
+  if (!branch) return { id: null, path: null, note: 'issue has no branch to resolve a worktree from' };
+  const first = lookupWorktree(inputs, branch);
+  // Resolved, or `ls` did not answer at all: a re-scan is only meaningful against
+  // a registry we could actually read.
+  if (first.id !== null || !first.listed) return { id: first.id, path: first.path, note: first.note };
+
+  const sync = attemptSync(inputs);
+  const stillUnresolved = (note) => {
+    syncAttempt.unresolved.push(redact(branch));
+    return { id: null, path: null, note };
+  };
+  if (!sync.ok) {
+    return stillUnresolved(`${first.note} (commandmate sync could not re-scan the registry: ${sync.detail})`);
+  }
+  if (!sync.fresh) {
+    // The rescan already happened earlier in this run, so the `ls` above already
+    // read the post-sync registry. Re-syncing would ask the same question twice.
+    return stillUnresolved(`${first.note} (commandmate sync had already re-scanned the registry earlier in this run)`);
+  }
+  const retried = lookupWorktree(inputs, branch);
+  if (retried.id !== null) {
+    syncAttempt.resolved.push(redact(branch));
+    return { id: retried.id, path: retried.path, note: '' };
+  }
+  return stillUnresolved(`${retried.note} (commandmate sync re-scanned the registry and ls still resolves no id)`);
+}
+
+// State the sync attempt in the report. Both outcomes are worth a limitation: a
+// successful re-scan means the id an operator reads was NOT the one the plan or a
+// first `ls` produced, and a failed one means an unresolved-worktree stop was
+// judged on a registry that could not be refreshed (a CommandMate older than
+// 0.21.0 has no `sync`). Neither is a blocking reason — the run's outcome is
+// decided by whether the worktree resolved, not by the sync (Issue #91).
+function recordSyncAttempt(report) {
+  if (syncAttempt === null) return;
+  const resolved = syncAttempt.resolved.length > 0 ? syncAttempt.resolved.join(', ') : 'none';
+  const unresolved = syncAttempt.unresolved.length > 0 ? syncAttempt.unresolved.join(', ') : 'none';
+  report.limitations.push(syncAttempt.ok
+    ? {
+      code: 'worktree_sync_ran',
+      detail: `commandmate ls resolved no worktree for a planned branch, so commandmate sync was run once and ls was retried: ${syncAttempt.detail}; resolved after the re-scan: ${resolved}; still unresolved: ${unresolved}`,
+    }
+    : {
+      code: 'worktree_sync_unavailable',
+      detail: `commandmate ls resolved no worktree for a planned branch and commandmate sync failed (${syncAttempt.detail}), so the registry could not be re-scanned and ${unresolved} stayed unresolved; the sync failure alone did not stop the run (a CommandMate older than 0.21.0 has no sync subcommand)`,
+    });
 }
 
 // Resolve every issue of one wave ONCE: its id (what send/wait/capture address),
@@ -1866,6 +1959,11 @@ async function runDispatch(inputs, plan, outDir, preflight = null) {
     report.limitations.push({ code: 'auto_yes_used', detail: 'a worker prompt was auto-answered because --auto-yes was set' });
   }
 
+  // Whether a worktree id came from the first `ls` or from the one after a
+  // `commandmate sync` is a fact about how this run resolved its targets, so it is
+  // recorded whatever the outcome — including on the runs it made succeed.
+  recordSyncAttempt(report);
+
   // Completion self-check. `no_auto_prompt_response` guards the safe default: a
   // prompt is never answered UNLESS --auto-yes was explicitly set.
   report.completion_check = buildCompletionCheck({
@@ -2004,6 +2102,12 @@ function renderSummary(report, contractMode = false, openQuestions = []) {
     }
     if (report.limitations.some((reason) => reason.code === 'contract_unsupported')) {
       lines.push('- next: 契約非対応の CLI だったため裁定はフォールバック（baseline 再実行）である。契約ゲートで裁定したい場合は CommandMate を 0.17.0 以上へ更新する（owner: operator）。');
+    }
+    // `commandmate sync` is the only fix for "the worktree is on disk but the
+    // server never scanned it", so a CLI without it turns a registration gap into
+    // an unresolved worktree the operator would otherwise re-create by hand.
+    if (report.limitations.some((reason) => reason.code === 'worktree_sync_unavailable')) {
+      lines.push('- next: `commandmate sync` が使えない CLI だったため、server 未登録の worktree を登録し直せていない。worktree が disk に実在するなら CommandMate を 0.21.0 以上へ更新して再実行する（owner: operator）。');
     }
     if (report.stop_reason === 'verification_failed') lines.push('- next: verification 失敗の worktree を診断し、修正後に再 dispatch する（owner: operator）。');
     // The worktree case names the fix (Issue #90). "drift を解消して再開" is true

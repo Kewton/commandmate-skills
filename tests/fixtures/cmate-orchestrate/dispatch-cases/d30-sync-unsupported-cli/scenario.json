@@ -1,0 +1,11 @@
+{
+  "cli_available": true,
+  "cli_sync": false,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "sync_only_worktrees": [201],
+  "workers": {
+    "201": { "state": "completed", "verify": "pass" },
+    "200": { "state": "completed", "verify": "pass" }
+  }
+}

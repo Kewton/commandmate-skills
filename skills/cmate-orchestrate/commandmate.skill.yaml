@@ -106,8 +106,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: c9483888c6614759386a795ac30a9b2ced44b42f9ee7a76ee3089db785ed66b2
-    size: 25510
+    sha256: 73d9b700f93ab7ee1cb5134f5dadf13412b27fd9bea4635fb6e7ea7ca5f3aa35
+    size: 26621
     kind: skill_md
     executable: false
     script: false
@@ -118,8 +118,8 @@ files:
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: 1106f16da0fb6bfc64d1fbd5854a0e206cd1051bacea48a9ddd698d74e0958e9
-    size: 37688
+    sha256: d78d62080490975dcadb22c0b4449e32049b608e3ee951ff4be9cdfe8e3c8503
+    size: 38311
     kind: instruction
     executable: false
     script: false
@@ -184,8 +184,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: cb6088d43f861b30d8a39f5eb54d259c6652170e9fe5371eb46798dbea01a844
-    size: 112510
+    sha256: 79991212367993868f2cd9feb5adcaf4617c7f5cdb8c9576ac6da39ce1305787
+    size: 118462
     kind: script
     executable: true
     script: true
@@ -202,8 +202,8 @@ files:
     executable: true
     script: true
   - path: scripts/orchestrate.mjs
-    sha256: abc507b1e8f968ec541d3daf6f74e8d88c66e84c55e91dbb489ef2ed4cb28c1c
-    size: 71184
+    sha256: 2b8564cea0b093e96df196561c7701f4c5070a3a1a49b4fab9e49407de578c49
+    size: 71758
     kind: script
     executable: true
     script: true
