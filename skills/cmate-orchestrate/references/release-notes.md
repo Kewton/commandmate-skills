@@ -238,6 +238,35 @@ completion check `verification_recorded` の失敗と limitation `verification_u
 `dispatch_schema_version` は **1 のまま**（additive: completion check 1件の追加。正本
 [dispatch-contract.md](./dispatch-contract.md) 第7節）。
 
+### #90 — worktree を作り忘れた run が、worker のログを読めと言ってきた
+
+worktree を作らずに dispatch すると、`resolveWorktreeId()` が id を解けず worker は
+`failed` になった。ところが `blocking_reasons` に出るのは汎用の `worker_failed` で、
+SKILL.md 第5節の対処表はそれを「worker が commit まで到達しなかった」へ誘導する。
+**実際には worker は1人も起動しておらず**（`task_id: null`）、読むべき prompt も worker ログも
+存在しない。Issue を分割しても直らない。真の原因は `waves[].workers[].note` に埋もれていた。
+さらに drift check の `worktrees_present` は正しく NG を出していたのに**非 blocking** だったので
+run を消費し、`--out` が作られたせいで **worktree を用意してからの再実行が `out_exists` で弾かれた**。
+
+→ `worktrees_present` を blocking にし、専用 code `worktree_unresolved` を未解決 Issue ごとに
+出す。blocking pre-flight を `outDir` の作成より**前**へ動かしたので、停止しても `--out` を
+消費せず**同じコマンドで再実行できる**。1人も dispatch しなかった run が
+`completion_check.passed: true` を自己申告しないようにした。正本:
+[dispatch-contract.md](./dispatch-contract.md)。上流の報告は CommandMate #1741。
+
+### #91 — 「`commandmate sync` は存在しない」というコメントが事実誤認を再生産していた
+
+`commandmate sync` は CommandMate v0.21.0 以降に**実在する**（CommandMate #1680）。
+にもかかわらず dispatch / planner のコメントは「無い」前提のままで、CommandMate #1741 の
+報告本文はそのコメントを根拠に「sync は存在しない」と誤記した。
+
+sync は worktree を**作らない**（server の再スキャンのみ）ので「未作成」は解決しないが、
+「**ディスクに実在するのに server 未登録**」（server 起動後に `git worktree add` した等）は
+解決できる。`resolveWorktreeId()` は sync を呼んでいなかったため、この場合も落ちていた。
+
+→ コメントと planner note を事実に合わせ、`ls --json` が解けないときに**一度だけ** sync して
+読み直す。sync が失敗（旧 CLI 等）しても run は壊さず、#90 の停止にそのまま落ちる。
+
 ### #93 — worktree を作る段だけが手作業で、入口が1つになっていなかった
 
 #90 の fail-fast は正しく止まるが、止まった後に人が別 Skill（`cmate-worktree-setup`）を
@@ -341,7 +370,72 @@ dispatch は「まだ終わっていない」と言う**状態が作れてしま
 
 ---
 
+### #94 — 独自リポジトリで使うには profile を手書きするしかなかった
+
+内蔵 profile（`node-commandmate` / `rust-commandagent`）以外では profile JSON を手で書いて
+`--allow-unverified` で回す必要があり、これが「導入済みなら誰でも使える」への最大の初期障壁だった
+（CommandMate #1741 の再現環境も手書き profile / `verified: false` だった）。
+
+→ `scripts/profile-init.mjs` を足した。`package.json` / `Cargo.toml` / CI workflow 等を read-only で
+読み、profile の **draft** を起案する。`verified` は false 固定、判定材料の無い項目は安全側の
+雛形と明示 TODO を出す（黙って埋めない）。推定の根拠を provenance として残す。network も
+subprocess も clock も使わないので、同じ tree からは byte 単位で同じ draft が出る。
+正本: [profile-contract.md](./profile-contract.md)。
+
+### #99 — run の状態が、JSON を読める人にしか分からなかった
+
+plan / dispatch / merge / uat の artifact は run directory に散らばっており、「この run は今どの
+phase で、どの Issue が何待ちか」に答えるには複数の JSON を突き合わせる必要があった。
+各 phase の `summary_markdown` は phase 単体の要約で、**run 全体の横断ビューが無かった**。
+
+→ `scripts/status.mjs` を足した。**mutation を一切しない read-only の view** で、network も
+`commandmate` / `git` / `gh` 呼び出しも無い。**証跡が証明する範囲だけ**を見せる — artifact が
+欠けている phase は「未実行」、壊れた JSON は該当 phase だけ「読取不能」とし、
+**証跡に無い状態を推測しない**。`blocking_reasons` を SKILL.md 第5節の対処表の語彙に
+マップした次アクションのヒントを出す。
+
+### #100 — Issue の受入条件は契約に載っているが、誰も測っていなかった
+
+契約 yaml が運ぶ検証情報は `verify.gates` だけで、それも operator が `--verify-gates` で
+名指しした場合に限られる。**Issue 固有の受入条件は機械ゲートに一切変換されず**、意味的な判定は
+UAT の `cmate-acceptance-test`（任意 install）まで、しかも **merge の後**まで持ち越されていた。
+「動いた」（repo 共通ゲート緑）と「完成した」（受入条件充足）を分けるのは中核のはずが、
+その最初の問いが納品後にしか発されない。
+
+調査で分かったのは、散文からコマンドを推測する経路は `extractTestExpectations()` として
+**既に実装済みで、裁定に使わないという判断が既に下されている**ことだった。
+
+→ 実装ではなく [adr-issue-acceptance-gates.md](./adr-issue-acceptance-gates.md) を先に書いた。
+記法（`acceptance-gates` fenced block、**散文からの推測生成は禁止**）・実行場所・空振り防止の
+検証規約・生産側の範囲を裁定してある。実装は ADR のレビュー後。
+
+### #95 — 無人運転を足すと、契約の根幹に例外ができる
+
+「plan → 人間の承認 → dispatch」「runner は次の phase を勝手に始めない」は設計思想の根幹であり、
+CI / cron からの無人運転はそこに例外を作る。フラグ追加で済ませると、止まるべき場面で成功に
+丸める余地が生まれる。
+
+→ 実装ではなく [adr-unattended-mode.md](./adr-unattended-mode.md) を先に書いた。中心の裁定は
+**「`--unattended` は『この invocation に人間は居ない』という入力の宣言であって、mutation の
+権限を与えるフラグではない。含意するのは締め付けだけである」**。緩和フラグとの併用は
+`invalid_input` で拒否し、`--approve` を含意しない。無人でも止まる停止理由を
+[dispatch-contract.md](./dispatch-contract.md) の語彙で網羅列挙してあり、
+**「unattended だけの停止」は1つも足していない**。実装は ADR のレビュー後。
+
 ## merge（`scripts/merge.mjs`）
+
+### #97 — PR 本文が「検証した」と言うだけで、何を通ったのかは JSON の中だった
+
+merge runner は `--dispatch` で dispatch-report.json を必須入力として読んでいたのに、
+eligible 判定にしか使っていなかった。PR 本文の Verification 節は定型文と profile baseline の
+コマンド一覧だけで、**gate 別の合否も exit code も転記されない**。レビュアーは run artifact を
+掘るか、diff を自力で照合するしかなかった。契約が宣言した `scope.allow` に対して
+**実際に何を変更したのか**も PR には現れなかった。
+
+→ Verification 節を実測証拠に置き換えた。gate 名・合否・exit code の表、宣言 scope と実変更
+ファイルの対比（契約ゲート `requireScopeClean` の人間可読版）、diff 規模。`verification.ran` が
+false ならその事実を明示する（定型文で pass を匂わせない）。転記値は既存の `redact()` を通し、
+gh の本文上限に備えて checks は打ち切り、**打ち切った事実を本文に書く**。
 
 ### #39 — 多段ブランチ運用で、PR を merge しても Issue が open のまま残った
 
@@ -392,6 +486,17 @@ fix 回数は `--max-attempts` を超えない。上限到達でなお不合格�
 ---
 
 ## パッケージ
+
+### 0.18.0 — 一気通貫化の第一陣（#90 / #91 / #92 / #93 / #94 / #95 / #97 / #98 / #99 / #100）
+
+worktree の継ぎ目（#90 / #91 / #93）、profile の調達（#94）、証拠の提出（#97）、監督の可視化
+（#99）、部分失敗からの再開（#98）、版の一致（#92）を入れ、無人運転（#95）と受入条件の機械
+ゲート化（#100）は ADR まで進めた。runner は 4 phase ＋ read-only view（`status.mjs`）＋
+準備 runner（`profile-init.mjs`）の構成になった。
+
+`scripts/lib.mjs` の `SKILL_VERSION` が 0.13.0 のまま 0.15.0 / 0.16.0 / 0.17.0 が公開され、
+report の `skill_version` が install した版と食い違っていた（#92）。`scripts/validate.py` に
+manifest との一致チェックを足したので、以後の bump 漏れは CI が止める。
 
 ### 0.14.0 — SKILL.md の再構成と `scripts/lib.mjs` の追加
 
