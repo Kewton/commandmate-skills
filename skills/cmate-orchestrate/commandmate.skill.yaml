@@ -53,6 +53,7 @@ expected_outcomes:
   - PR 作成失敗・CI failure・merge conflict が success に丸められず、blocked/partial として記録される
   - 納品後の UAT 不合格が、回数上限つきの修正ループ（fix worktree→修正→再検証→再merge）で自動修復を試みられる
   - 修正ループが上限で停止したことが blocked として明示され、未解決 Issue と next action が後から検証できる
+  - 「この run は今どの phase で、どの Issue が何待ちか」が、複数の JSON を突き合わせずに1つの表で読める
 provider:
   name: CommandMate
   url: https://github.com/Kewton/CommandMate
@@ -106,8 +107,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: 664c184f3b4cf8b8db8b0b58bca572bf8cdefbb3bf1c38a4b0897b8d835c29b3
-    size: 28979
+    sha256: 8f7b0adc3daaffa2da3a41b2169620306459ea4b5113c2ca3db3c79f3aaae873
+    size: 34134
     kind: skill_md
     executable: false
     script: false
@@ -216,6 +217,12 @@ files:
   - path: scripts/profile-init.mjs
     sha256: 860923b17d6be03562729c062237c245f24799cc1ab03d7d88030dfd24fb8703
     size: 53911
+    kind: script
+    executable: true
+    script: true
+  - path: scripts/status.mjs
+    sha256: 6c8886d9c53937325eb914bf065218d0f81e247497db30c638352915cbc53c62
+    size: 58397
     kind: script
     executable: true
     script: true

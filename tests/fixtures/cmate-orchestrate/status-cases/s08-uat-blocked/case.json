@@ -1,0 +1,31 @@
+{
+  "description": "fix ループが上限に達してなお #200 が不合格の run。uat は blocked のまま表示され（success に丸めない）、fix attempt 数が Issue ごとに数えられ、承認なしで走った create_prs は previewed のまま出る（mutation していないことが見える）。",
+  "expect": {
+    "exit": 0,
+    "latest_phase": "uat",
+    "phase_states": { "plan": "ok", "dispatch": "ok", "merge": "ok", "uat": "ok" },
+    "unreadable_paths": [],
+    "issues": [200, 201],
+    "issue_states": {
+      "200": { "plan": "ok", "dispatch": "ok", "merge": "ok", "uat": "ok" },
+      "201": { "plan": "ok", "dispatch": "ok", "merge": "ok", "uat": "ok" }
+    },
+    "merge": {
+      "200": { "pr_number": null, "merged": false, "ci_verdict": null, "outcomes": ["create_prs:previewed"] },
+      "201": { "pr_number": null, "merged": false, "outcomes": ["create_prs:previewed"] }
+    },
+    "uat": {
+      "200": { "verdict": "fail", "outcome": "fail", "fix_attempts": 2, "unresolved": true, "conditional": false },
+      "201": { "verdict": "pass", "outcome": "pass", "fix_attempts": 0, "unresolved": false }
+    },
+    "run_next": ["uat/stop_reason/max_attempts_reached"],
+    "issue_next": { "200": ["uat/blocking/max_attempts_reached"], "201": [] },
+    "hints_include": { "max_attempts_reached": "success に丸めない" },
+    "text_includes": [
+      "status=blocked / stop=max_attempts_reached",
+      "fail fix2",
+      "previewed",
+      "unresolved（この run の停止時点で不合格）"
+    ]
+  }
+}

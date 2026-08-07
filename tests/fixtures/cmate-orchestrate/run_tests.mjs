@@ -23,12 +23,14 @@ const RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'orches
 const DISPATCH_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'dispatch.mjs');
 const MERGE_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'merge.mjs');
 const UAT_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'uat.mjs');
+const STATUS_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'status.mjs');
 const PROFILE_INIT_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'profile-init.mjs');
 const SCHEMA_DIR = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'schemas');
 const CASES_DIR = join(HERE, 'cases');
 const DISPATCH_CASES_DIR = join(HERE, 'dispatch-cases');
 const MERGE_CASES_DIR = join(HERE, 'merge-cases');
 const UAT_CASES_DIR = join(HERE, 'uat-cases');
+const STATUS_CASES_DIR = join(HERE, 'status-cases');
 const PROFILE_INIT_CASES_DIR = join(HERE, 'profile-init-cases');
 const PROFILES_DIR = join(HERE, 'profiles');
 const FAKE_CLI = join(HERE, 'fake-cli.mjs');
@@ -1421,6 +1423,280 @@ function runUatCase(caseId) {
 }
 
 // =============================================================================
+// Status cases: the read-only run status view (phase × issue matrix)
+// =============================================================================
+//
+// The status runner joins the four artifacts a run leaves behind, so unlike every
+// other suite here its input IS a run directory rather than a scenario to execute.
+// Each case therefore ships `run/` — real output of the real runners, generated
+// once and checked in — and the suite runs status.mjs against it twice.
+//
+// Two properties make checked-in artifacts safe to assert against:
+//
+//   1. Every artifact is validated against the SHIPPED schema before the view is
+//      examined (`schema_unvalidatable` exempts the deliberately corrupt ones), so
+//      a fixture cannot drift into a shape the runners no longer write and quietly
+//      keep the suite green.
+//   2. The two runs must be byte-identical, which is what `--json` promises
+//      (Claude/Codex parity). A view that reached for a clock, a temp path or an
+//      unordered iteration would fail here.
+//
+// The invariants asserted on EVERY case — not per case — are the three the runner
+// exists to hold: a phase with no artifact is 未実行, a phase whose artifact will
+// not parse is 読取不能 and takes nothing else down with it, and neither is ever
+// silently upgraded into a state the artifacts do not prove.
+
+const STATUS_ARTIFACT_SCHEMAS = new Map([
+  ['plan.json', planSchema],
+  ['dispatch-report.json', dispatchSchema],
+  ['merge-report.json', mergeSchema],
+  ['uat-report.json', uatSchema],
+]);
+
+function runStatusRunner(runDir, extraArgs = []) {
+  try {
+    const stdout = execFileSync('node', [STATUS_RUNNER, '--run', runDir, ...extraArgs], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: baseEnv(),
+    });
+    return { exit: 0, stdout };
+  } catch (error) {
+    return { exit: error.status ?? 1, stdout: error.stdout ? error.stdout.toString() : '' };
+  }
+}
+
+// Every file under a case's run/, as run-relative paths in sorted order.
+function statusRunFiles(runDir, prefix = '') {
+  const out = [];
+  for (const entry of readdirSync(prefix === '' ? runDir : join(runDir, prefix), { withFileTypes: true })
+    .sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) out.push(...statusRunFiles(runDir, relative));
+    else if (entry.isFile()) out.push(relative);
+  }
+  return out;
+}
+
+function statusArtifactPaths(runDir) {
+  return statusRunFiles(runDir).filter((relative) => STATUS_ARTIFACT_SCHEMAS.has(basename(relative)));
+}
+
+// The whole fixture, content included. The status runner is read-only, so this
+// must be identical after it has run — a view that left a cache or a report
+// behind would not be safe to point at a live run.
+function statusRunSnapshot(runDir) {
+  return statusRunFiles(runDir).map((relative) => `${relative}\n${readFileSync(join(runDir, relative), 'utf8')}`).join(' ');
+}
+
+function statusActionKeys(actions) {
+  return actions.map((action) => `${action.phase}/${action.source}/${action.code}`);
+}
+
+// The hint for a code, from wherever it was reported. A code is expected to carry
+// the SAME action whether it surfaced at run level or against an issue.
+function statusHintsByCode(view) {
+  const hints = new Map();
+  for (const action of [...view.next_actions, ...view.issues.flatMap((issue) => issue.next_actions)]) {
+    if (!hints.has(action.code)) hints.set(action.code, action.hint);
+  }
+  return hints;
+}
+
+function runStatusCase(caseId) {
+  const caseDir = join(STATUS_CASES_DIR, caseId);
+  const spec = JSON.parse(readFileSync(join(caseDir, 'case.json'), 'utf8'));
+  const runDir = join(caseDir, 'run');
+  log(`  ${caseId}: ${spec.description}`);
+  if (!check(existsSync(join(runDir, 'plan.json')), `${caseId}: run/plan.json is missing`)) return;
+
+  const expect = spec.expect;
+  const before = statusRunSnapshot(runDir);
+
+  // ---- the fixture artifacts are what the runners actually write -------------
+  const unvalidatable = new Set(expect.schema_unvalidatable ?? []);
+  for (const relative of statusArtifactPaths(runDir)) {
+    if (unvalidatable.has(relative)) continue;
+    let document;
+    try {
+      document = JSON.parse(readFileSync(join(runDir, relative), 'utf8'));
+    } catch (error) {
+      check(false, `fixture ${relative} is not JSON and is not declared in schema_unvalidatable: ${error.message}`);
+      continue;
+    }
+    const errors = validateAgainst(STATUS_ARTIFACT_SCHEMAS.get(basename(relative)), document, relative);
+    check(errors.length === 0, `fixture ${relative} does not conform to its shipped schema: ${errors.slice(0, 3).join('; ')}`);
+  }
+
+  // ---- the text view --------------------------------------------------------
+  const text = runStatusRunner(runDir);
+  check(text.exit === expect.exit, `text exit ${text.exit} !== expected ${expect.exit}`);
+  for (const needle of expect.text_includes ?? []) {
+    check(text.stdout.includes(needle), `the text view does not contain ${JSON.stringify(needle)}`);
+  }
+  for (const needle of expect.text_absent ?? []) {
+    check(!text.stdout.includes(needle), `the text view should not contain ${JSON.stringify(needle)}`);
+  }
+
+  // ---- the structured view --------------------------------------------------
+  const json = runStatusRunner(runDir, ['--json']);
+  check(json.exit === expect.exit, `--json exit ${json.exit} !== expected ${expect.exit}`);
+  let view;
+  try {
+    view = JSON.parse(json.stdout);
+  } catch {
+    check(false, `--json stdout is not valid JSON (exit ${json.exit}): ${json.stdout.slice(0, 200)}`);
+    return;
+  }
+
+  // Determinism: the same run directory yields byte-identical JSON.
+  const repeat = runStatusRunner(runDir, ['--json']);
+  check(repeat.stdout === json.stdout, '--json is not byte-identical across two runs of the same run directory');
+
+  if (expect.latest_phase !== undefined) {
+    check(view.latest_phase_with_evidence === expect.latest_phase, `latest_phase_with_evidence "${view.latest_phase_with_evidence}" !== "${expect.latest_phase}"`);
+  }
+  if (expect.run_id !== undefined) check(view.run.run_id === expect.run_id, `run_id ${JSON.stringify(view.run.run_id)} !== ${JSON.stringify(expect.run_id)}`);
+  if (expect.profile_id !== undefined) check(view.run.profile?.id === expect.profile_id, `profile.id ${JSON.stringify(view.run.profile?.id)} !== ${JSON.stringify(expect.profile_id)}`);
+
+  for (const [phase, state] of Object.entries(expect.phase_states ?? {})) {
+    check(view.phases[phase]?.state === state, `phase ${phase} state "${view.phases[phase]?.state}" !== "${state}"`);
+  }
+  if (expect.unreadable_paths) {
+    check(
+      deepEqual(view.unreadable.map((entry) => entry.path), expect.unreadable_paths),
+      `unreadable ${JSON.stringify(view.unreadable.map((e) => e.path))} !== ${JSON.stringify(expect.unreadable_paths)}`,
+    );
+  }
+  if (expect.issues) {
+    check(deepEqual(view.issues.map((issue) => issue.number), expect.issues), `issues ${JSON.stringify(view.issues.map((i) => i.number))} !== ${JSON.stringify(expect.issues)}`);
+  }
+
+  const issueOfView = (number) => view.issues.find((issue) => issue.number === number);
+  for (const [number, states] of Object.entries(expect.issue_states ?? {})) {
+    const issue = issueOfView(Number(number));
+    if (!check(issue !== undefined, `#${number} has no row in the view`)) continue;
+    for (const [phase, state] of Object.entries(states)) {
+      check(issue[phase].state === state, `#${number} ${phase} state "${issue[phase].state}" !== "${state}"`);
+    }
+  }
+  // plan / dispatch / merge / uat facts, asserted per issue and per field, so a
+  // cell that reads plausibly but names the wrong wave, PR or verdict fails.
+  for (const [number, plan] of Object.entries(expect.plan ?? {})) {
+    const issue = issueOfView(Number(number));
+    if (!check(issue !== undefined, `#${number} has no row in the view`)) continue;
+    if (plan.wave !== undefined) check(issue.plan.wave === plan.wave, `#${number} plan.wave ${issue.plan.wave} !== ${plan.wave}`);
+    if (plan.depends_on !== undefined) {
+      check(deepEqual(issue.plan.depends_on.map((dep) => dep.issue), plan.depends_on), `#${number} depends_on ${JSON.stringify(issue.plan.depends_on)} !== ${JSON.stringify(plan.depends_on)}`);
+    }
+    if (plan.branch_includes !== undefined) check(String(issue.plan.branch).includes(plan.branch_includes), `#${number} branch ${JSON.stringify(issue.plan.branch)} does not contain "${plan.branch_includes}"`);
+  }
+  for (const [number, dispatch] of Object.entries(expect.dispatch ?? {})) {
+    const issue = issueOfView(Number(number));
+    if (!check(issue !== undefined, `#${number} has no row in the view`)) continue;
+    for (const field of ['worker_state', 'verification_outcome', 'wave_index']) {
+      if (dispatch[field] !== undefined) check(issue.dispatch[field] === dispatch[field], `#${number} dispatch.${field} ${JSON.stringify(issue.dispatch[field])} !== ${JSON.stringify(dispatch[field])}`);
+    }
+    if (dispatch.gates !== undefined) {
+      const gates = issue.dispatch.gates.map((gate) => `${gate.id}=${gate.verdict}`);
+      check(deepEqual(gates, dispatch.gates), `#${number} gates ${JSON.stringify(gates)} !== ${JSON.stringify(dispatch.gates)}`);
+    }
+  }
+  for (const [number, merge] of Object.entries(expect.merge ?? {})) {
+    const issue = issueOfView(Number(number));
+    if (!check(issue !== undefined, `#${number} has no row in the view`)) continue;
+    for (const field of ['pr_number', 'merged', 'ci_verdict']) {
+      if (merge[field] !== undefined) check(issue.merge[field] === merge[field], `#${number} merge.${field} ${JSON.stringify(issue.merge[field])} !== ${JSON.stringify(merge[field])}`);
+    }
+    if (merge.outcomes !== undefined) {
+      const outcomes = issue.merge.outcomes.map((entry) => `${entry.phase}:${entry.outcome}`);
+      check(deepEqual(outcomes, merge.outcomes), `#${number} merge outcomes ${JSON.stringify(outcomes)} !== ${JSON.stringify(merge.outcomes)}`);
+    }
+    if (merge.pr_url_includes !== undefined) check(String(issue.merge.pr_url).includes(merge.pr_url_includes), `#${number} pr_url ${JSON.stringify(issue.merge.pr_url)} does not contain "${merge.pr_url_includes}"`);
+  }
+  for (const [number, uat] of Object.entries(expect.uat ?? {})) {
+    const issue = issueOfView(Number(number));
+    if (!check(issue !== undefined, `#${number} has no row in the view`)) continue;
+    for (const field of ['verdict', 'outcome', 'fix_attempts', 'unresolved', 'conditional']) {
+      if (uat[field] !== undefined) check(issue.uat[field] === uat[field], `#${number} uat.${field} ${JSON.stringify(issue.uat[field])} !== ${JSON.stringify(uat[field])}`);
+    }
+  }
+
+  // ---- next actions: exact and ordered --------------------------------------
+  // Exact rather than "contains", in both directions: an invented action is as
+  // wrong as a dropped one. This is the assertion that pins the §5 mapping.
+  if (expect.run_next) {
+    check(deepEqual(statusActionKeys(view.next_actions), expect.run_next), `run next_actions ${JSON.stringify(statusActionKeys(view.next_actions))} !== ${JSON.stringify(expect.run_next)}`);
+  }
+  for (const [number, keys] of Object.entries(expect.issue_next ?? {})) {
+    const issue = issueOfView(Number(number));
+    if (!check(issue !== undefined, `#${number} has no row in the view`)) continue;
+    check(deepEqual(statusActionKeys(issue.next_actions), keys), `#${number} next_actions ${JSON.stringify(statusActionKeys(issue.next_actions))} !== ${JSON.stringify(keys)}`);
+  }
+  // A hint is what the operator actually acts on: a code mapped to the wrong
+  // sentence is worse than an unmapped code, which at least says so.
+  const hints = statusHintsByCode(view);
+  for (const [code, needle] of Object.entries(expect.hints_include ?? {})) {
+    const hint = hints.get(code);
+    if (check(hint !== undefined, `no next action carries the code "${code}"`)) {
+      check(hint.includes(needle), `the hint for "${code}" (${JSON.stringify(hint)}) does not contain "${needle}"`);
+      check(text.stdout.includes(hint), `the hint for "${code}" is in the JSON but not in the text view`);
+    }
+  }
+
+  // ---- redaction ------------------------------------------------------------
+  if (expect.redaction_token) {
+    check(!json.stdout.includes(expect.redaction_token), 'a raw token survived into the structured status view');
+    check(!text.stdout.includes(expect.redaction_token), 'a raw token survived into the text status view');
+    check(json.stdout.includes('[REDACTED-TOKEN]'), 'the token was not replaced with a redaction marker');
+  }
+  if (expect.redaction_kind) {
+    check(
+      view.redactions.some((entry) => entry.kind === expect.redaction_kind && entry.count >= 1),
+      `redactions did not record kind "${expect.redaction_kind}"`,
+    );
+  }
+  // The run directory is a displayed value, so it obeys the same policy. Only
+  // asserted when this checkout sits under a path the redaction list covers —
+  // otherwise there is nothing to redact and a failure here would be about where
+  // the repository happens to live.
+  if (/^(?:\/Users\/|\/home\/|\/root\/|\/var\/|\/private\/|\/tmp\/)/.test(runDir)) {
+    check(view.run.dir === '[REDACTED-PATH]', `the run directory was displayed unredacted: ${JSON.stringify(view.run.dir)}`);
+  }
+
+  // ---- invariants asserted on every case ------------------------------------
+  //
+  // 1. A phase state is never invented: no artifact => 未実行 for every issue, and
+  //    every artifact unreadable => 読取不能 for every issue. This is the guarantee
+  //    that a status view cannot fill a gap with the phase before it.
+  for (const phase of ['plan', 'dispatch', 'merge', 'uat']) {
+    const phaseView = view.phases[phase];
+    for (const issue of view.issues) {
+      if (phaseView.state === 'not_run') {
+        check(issue[phase].state === 'not_run', `#${issue.number} ${phase} is "${issue[phase].state}" while the phase has no artifact`);
+      }
+      if (phaseView.state === 'unreadable') {
+        check(issue[phase].state === 'unreadable', `#${issue.number} ${phase} is "${issue[phase].state}" while every ${phase} artifact is unreadable`);
+      }
+    }
+    // 2. The human-readable half says the same thing. A fact that only exists in
+    //    the JSON is a fact the supervisor reading the table will miss.
+    if (phaseView.state === 'not_run') check(text.stdout.includes('未実行'), `${phase} has no artifact but the text view never says 未実行`);
+    if (phaseView.state === 'unreadable') check(text.stdout.includes('読取不能'), `${phase} is unreadable but the text view never says 読取不能`);
+    // 3. Every artifact the view names is a file that exists, and every readable
+    //    one carries the report headline the matrix was built from.
+    for (const artifact of phaseView.artifacts) {
+      check(existsSync(join(runDir, artifact.path)), `${phase} names an artifact that does not exist: ${artifact.path}`);
+      check(
+        (artifact.state === 'ok') === (artifact.report !== null),
+        `${phase} artifact ${artifact.path} is "${artifact.state}" but its report headline is ${artifact.report === null ? 'null' : 'present'}`,
+      );
+    }
+  }
+  // 4. Nothing is written. Three invocations have run against this directory by
+  //    now; every file in it must still be byte-identical, and no file added.
+  check(statusRunSnapshot(runDir) === before, 'the status runner changed the run directory — it must be read-only');
+}
+
+// =============================================================================
 // Contract parity: the runners only ever call the real commandmate CLI surface
 // =============================================================================
 //
@@ -2013,6 +2289,11 @@ function main() {
     : [];
   for (const caseId of uatIds) runUatCase(caseId);
 
+  log('  -- status cases --');
+  const statusIds = existsSync(STATUS_CASES_DIR)
+    ? readdirSync(STATUS_CASES_DIR).filter((name) => existsSync(join(STATUS_CASES_DIR, name, 'case.json'))).sort()
+    : [];
+  for (const caseId of statusIds) runStatusCase(caseId);
   log('  -- profile-init cases --');
   const profileInitIds = existsSync(PROFILE_INIT_CASES_DIR)
     ? readdirSync(PROFILE_INIT_CASES_DIR).filter((name) => existsSync(join(PROFILE_INIT_CASES_DIR, name, 'case.json'))).sort()
@@ -2031,7 +2312,7 @@ function main() {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution`);
 }
 
 main();

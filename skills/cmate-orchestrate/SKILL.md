@@ -1,6 +1,6 @@
 ---
 name: cmate-orchestrate
-description: 複数の GitHub Issue を並列で進める。dry-run で依存と file 衝突を解いた Wave plan を作り、承認後に監督付きで dispatch し、検証 pass したものだけを PR/merge し、UAT で受入を確認する4段の runner。
+description: 複数の GitHub Issue を並列で進める。dry-run で依存と file 衝突を解いた Wave plan を作り、承認後に監督付きで dispatch し、検証 pass したものだけを PR/merge し、UAT で受入を確認する4段の runner。run の状態は read-only の status runner が phase × Issue のマトリクスで出す。
 ---
 
 # cmate-orchestrate（plan → dispatch → merge → uat）
@@ -30,7 +30,14 @@ runner は決定的なので、この文書が述べるのは「いつ使うか�
 | merge | `scripts/merge.mjs` | 検証 pass した Issue を PR 作成 / guarded merge する | あり（承認時） | [merge-contract.md](./references/merge-contract.md) |
 | uat | `scripts/uat.mjs` | 受入テストと、不合格時の回数上限つき修正ループ | あり（承認時） | [uat-contract.md](./references/uat-contract.md) |
 
-`scripts/lib.mjs` は4 runner の共有ヘルパーで、単体では起動しない。
+これに、**mutation を一切しない read-only の view runner** が付く。phase の一部ではなく、
+上の4つが残した artifact を読むだけである。
+
+| runner | script | 役割 | mutation |
+|---|---|---|---|
+| status | `scripts/status.mjs` | run directory の artifact を突き合わせ、phase × Issue のマトリクスを出す | **なし（read-only）** |
+
+`scripts/lib.mjs` は共有ヘルパーで、単体では起動しない。
 `scripts/profile-init.mjs` は phase ではなく、**最初に1回だけ使う準備 runner** である
 （内蔵 profile 以外のリポジトリ向けに profile draft を起案する。第3.5節・
 [profile-contract.md](./references/profile-contract.md) 第7節）。
@@ -39,7 +46,8 @@ runner は決定的なので、この文書が述べるのは「いつ使うか�
 
 **使う**: 着手前に Issue 間の依存と file 衝突を解いておきたいとき。複数 Issue を並列に worker へ
 配り、前段が壊れていないことを確認しながら段階的に進めたいとき。納品と受入まで同じ gate の下で
-通したいとき。
+通したいとき。**走っている / 走り終えた run が今どこにいるかを知りたいとき**（`status.mjs`。
+read-only なので、いつ何回呼んでも run に影響しない）。
 
 **使わない（スコープ外）**: Issue 本文の自動編集。回数無制限のループ。crash 後の resume /
 attempt retry。cross-model review。どの mutating runner も、明示承認・verification pass・
@@ -263,6 +271,56 @@ node scripts/orchestrate.mjs 123 --profile-json .commandmate/profile.json --allo
    「検証すべき gate が無いから pass」に化けうるので、必ず落ちる command を置く。
    **埋めずに dispatch すれば止まる**、が正しい壊れ方である。
 
+### 3.6 status（run の横断ビュー。read-only）
+
+```
+status.mjs --run <run-dir> [--json]
+```
+
+| flag | 既定 | 効果 |
+|---|---|---|
+| `--run <path>` | **必須** | run directory（`plan.json` のある directory）。`plan.json` 自身の path でも可 |
+| `--json` | off | 人間可読のテキスト表の代わりに構造化 view を出す |
+
+**どの phase でも、いつでも呼べる。** plan → dispatch → merge / uat が残す artifact は
+`plan.json` / `dispatch/dispatch-report.json` / `<phase>/merge-report.json` /
+`<phase>/uat-report.json` に分かれており、各 `summary_markdown` は**単一 phase の要約**である。
+「この run は今どの phase で、どの Issue が何待ちか」に答えるには複数の JSON を突き合わせる
+必要があった。それをやるのがこの runner で、**それ以外は何もしない。**
+
+**完全 read-only である。** run directory 配下の file を読むだけで、`commandmate` / `git` / `gh`
+を一度も呼ばず、network も使わない。生きた状態を取りに行かないのは制約ではなく**契約**である
+（証跡が証明していない状態を表示しないため）。何も書かないので、走っている run に向けても安全である。
+
+出す内容は Issue ごとに:
+
+- **plan**: Wave 番号・依存（`kind` つき）・branch・未回答 question 数
+- **dispatch**: `worker_state` / `verification.outcome` / 判定した gate / task id
+- **merge**: PR 番号・URL・CI verdict・merge 状態（`create_prs` と `merge_prs` の両 artifact を畳む）
+- **uat**: verdict（と `outcome`）・fix attempt 数・意味ゲートの state
+- **次にやること**: 各 report の `stop_reason` / `blocking_reasons` / `limitations` / plan の
+  `warnings` の code を**第5節の対処表の語彙にマップした1行**（例: `worker_failed` →
+  「prompt / worker ログを読む。指示が過大なら Issue を分割して re-plan する」）。
+  detail が Issue を名指ししている reason（runner は `#<n> …` と書く）はその Issue 行に、
+  名指ししないものは run 全体の欄に出る
+
+**証跡に無い状態は推測しない。** artifact が無い phase は **`未実行`**（`dispatch/` が無ければ
+「plan 承認待ち or dispatch 未実行」）、artifact が JSON として読めない、または schema version が
+未対応なら **`読取不能`** として**その phase だけ**落ち、他 phase は表示される。report は読めたが
+その Issue の記録が無い場合は **`記録なし`**（例: verification pass していないので merge の
+`eligible_issues` に入っていない）。`partial` / `blocked` / `failure` はそのまま見せ、success に
+丸めない。表示値は他 runner と同じ redaction を通る。
+
+**exit code は「view を出せたか」だけを表す。** run が blocked でも読取不能があっても **0** で、
+非 0 は入力エラー（`invalid_input` 3 / `load_error` 6 — `--run` が run directory でない）に限る。
+**run の状態は exit code ではなく view の中で読むこと。** plan runner と同じ約束である。
+
+`--json` は決定的で（同一入力 → byte 一致）、`run` / `latest_phase_with_evidence` /
+`phases.<phase>.state` / `issues[].{plan,dispatch,merge,uat}.state` /
+`issues[].next_actions[]` / `next_actions[]` / `unreadable[]` / `redactions[]` を持つ。
+`state` の語彙は `ok` / `not_run` / `unreadable` / `no_record`（phase 単位ではさらに
+`partial_read`）である。
+
 ---
 
 ## 4. 出力の読み方
@@ -273,6 +331,10 @@ profile-init も同じ規約で、status は `success`（全 field に根拠が�
 （雛形か warning がある）/ `failure`、exit は成功時 0、`invalid_input` 3 /
 `out_exists` 4 / `load_error` 6 である（`--emit profile` のときだけ stdout は
 draft JSON そのものになる。失敗時は常に envelope が出る）。
+
+**まず run 全体を見るなら `status.mjs --run <run-dir>`**（第3.6節）。以下の status / code /
+limitation は個々の report の語彙で、status runner はそれらを phase × Issue のマトリクスに
+並べ、code を第5節の対処表へマップして見せる。
 
 ### status
 
@@ -353,6 +415,11 @@ report/artifact に残さない（redaction）。
 **runner が止まったら、それは「押し通す」合図ではなく「読む」合図である。**
 `blocking_reasons` の code と `summary_markdown` を読み、次の対応を取る。
 
+`status.mjs --run <run-dir>`（第3.6節）は**この表を機械的に引いた結果**を、どの Issue の話かを
+添えて出す。JSON を自分で突き合わせる前に、まずこれを読めばよい。表がこの節の正本であり、
+status runner はそれを引くだけなので、**ここに無い code は status runner も推測しない**
+（「detail と `summary_markdown` を読む」に落ちる）。
+
 | 止まり方 | 何が起きたか | 人間がすること |
 |---|---|---|
 | plan `status: partial` + `no_acceptance_criteria` / `no_suspected_files` | Issue に受入条件か対象 file が書かれていない | **Issue 本文に書き足して re-plan する。** run_id は本文を含む hash なので自動的に別 run になる |
@@ -389,3 +456,5 @@ report/artifact に残さない（redaction）。
 [merge-report.v1](./schemas/merge-report.v1.json)・
 [uat-report.v1](./schemas/uat-report.v1.json)。意味ゲートの入力は
 [acceptance-result.v1](../cmate-acceptance-test/schemas/acceptance-result.v1.json)（別 package）。
+status runner の `--json` は artifact ではなく view なので（何も書かない）`schemas/` に対応する
+file を持たない。field は第3.6節が正本である。

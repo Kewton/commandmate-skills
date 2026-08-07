@@ -1,0 +1,172 @@
+{
+  "uat_schema_version": 1,
+  "skill_id": "cmate-orchestrate",
+  "skill_version": "0.13.0",
+  "phase": "write_uat",
+  "status": "success",
+  "stop_reason": "completed",
+  "approved": false,
+  "mutated": false,
+  "plan_run_id": "plan",
+  "out_dir": "dispatch/write-uat",
+  "max_attempts": 2,
+  "attempts_used": 0,
+  "profile": {
+    "id": "node-fake",
+    "repository": "Kewton/CommandMate",
+    "base": "origin/develop",
+    "verified": true
+  },
+  "acceptance": {
+    "configured": false,
+    "required": false,
+    "issues_evaluated": 2,
+    "verdicts": {
+      "go": 0,
+      "conditional_go": 0,
+      "no_go": 0,
+      "missing": 0,
+      "invalid": 0,
+      "mismatched": 0,
+      "not_configured": 2
+    }
+  },
+  "eligible_issues": [
+    201,
+    200
+  ],
+  "preflight": [
+    {
+      "code": "cli_available",
+      "ok": true,
+      "blocking": true,
+      "detail": "commandmate CLI is runnable"
+    },
+    {
+      "code": "repo_access",
+      "ok": true,
+      "blocking": true,
+      "detail": "repo Kewton/CommandMate is reachable"
+    },
+    {
+      "code": "base_resolvable",
+      "ok": true,
+      "blocking": true,
+      "detail": "base origin/develop resolves"
+    }
+  ],
+  "attempts": [
+    {
+      "index": 0,
+      "kind": "assess",
+      "fix_performed": false,
+      "uat_results": [
+        {
+          "issue": 201,
+          "ran": true,
+          "report_schema_version": null,
+          "outcome": "pass",
+          "scenarios": [
+            "cat cmate-verify-ok"
+          ],
+          "note": "acceptance gate not configured (--acceptance-dir was not given); adjudicated on the baseline alone",
+          "verdict": "pass",
+          "verdict_source": "baseline_only",
+          "baseline": {
+            "outcome": "pass",
+            "checks": [
+              "cat cmate-verify-ok"
+            ],
+            "note": ""
+          },
+          "acceptance": {
+            "state": "not_configured",
+            "verdict": null,
+            "status": null,
+            "issue_ref": null,
+            "verdict_reason": "",
+            "findings": [],
+            "conditions": [],
+            "note": "acceptance gate not configured (--acceptance-dir was not given); adjudicated on the baseline alone"
+          }
+        },
+        {
+          "issue": 200,
+          "ran": true,
+          "report_schema_version": null,
+          "outcome": "pass",
+          "scenarios": [
+            "cat cmate-verify-ok"
+          ],
+          "note": "acceptance gate not configured (--acceptance-dir was not given); adjudicated on the baseline alone",
+          "verdict": "pass",
+          "verdict_source": "baseline_only",
+          "baseline": {
+            "outcome": "pass",
+            "checks": [
+              "cat cmate-verify-ok"
+            ],
+            "note": ""
+          },
+          "acceptance": {
+            "state": "not_configured",
+            "verdict": null,
+            "status": null,
+            "issue_ref": null,
+            "verdict_reason": "",
+            "findings": [],
+            "conditions": [],
+            "note": "acceptance gate not configured (--acceptance-dir was not given); adjudicated on the baseline alone"
+          }
+        }
+      ],
+      "failing_issues": [],
+      "worktrees": [],
+      "fixes": [],
+      "remerge": null,
+      "advanced": true
+    }
+  ],
+  "unresolved_issues": [],
+  "conditional_issues": [],
+  "blocking_reasons": [],
+  "limitations": [],
+  "redactions": [],
+  "next_actions": [],
+  "completion_check": {
+    "passed": true,
+    "checks": [
+      {
+        "id": "single_phase",
+        "passed": true,
+        "detail": "exactly one phase was enabled (write_uat)"
+      },
+      {
+        "id": "approval_enforced",
+        "passed": true,
+        "detail": "no mutation ran without --approve"
+      },
+      {
+        "id": "attempts_bounded",
+        "passed": true,
+        "detail": "0 fix attempt(s) used of a 2 cap"
+      },
+      {
+        "id": "blocked_reported",
+        "passed": true,
+        "detail": "the run did not reach the attempt cap"
+      },
+      {
+        "id": "verification_gated",
+        "passed": true,
+        "detail": "every UAT target was a verification-passed issue, and every re-merged fix had re-verified"
+      },
+      {
+        "id": "acceptance_not_rounded",
+        "passed": true,
+        "detail": "no issue with a non-go acceptance verdict was reported as passed, and no conditional_go was rounded up to success"
+      }
+    ]
+  },
+  "summary_markdown": "## 対象と結論\nUAT 実行（assess）（preview）を Kewton/CommandMate で実行: success（完了, stop=completed）。\n\n## eligible（verification pass 済み）\n- #201, #200\n\n## 受入判定（機械ゲート + 意味ゲート）\n- `--acceptance-dir` 無し。baseline（機械ゲート）のみで裁定した。受入条件の意味判定は行っていない。\n\n## attempt 履歴\n- attempt 0 (assess): UAT #201=pass（baseline pass / acceptance not_configured）, #200=pass（baseline pass / acceptance not_configured）\n\n## preflight\n- cli_available: ok\n- repo_access: ok\n- base_resolvable: ok\n\n## 未解決と next action\n- なし。全 eligible が UAT を通過した。"
+}
