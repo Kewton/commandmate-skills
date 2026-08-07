@@ -1,0 +1,69 @@
+{
+  "description": "ADR §3.4 の和集合規則。operator が `--verify-gates lint` で絞り込み、Issue が `require: [adr-present]` を宣言したとき、契約は **両方** を sort + 重複除去して書く。素朴に `require` を書き出すと lint が走らなくなり、逆に operator の列挙をそのまま使うと Issue 固有の要求が落ちる — どちらも「受入条件を足したつもりで判定が弱くなる」。fake は契約の verify.gates を読んでその 2 つだけを実行するので、和集合が実際に走ったことが GATE 行に出る。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-acceptance-gates.json",
+    "orchestrate_args": [
+      "310",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--verify-gates",
+    "lint"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      310
+    ],
+    "worker_states": {
+      "310": "completed"
+    },
+    "verification_outcomes": {
+      "310": "pass"
+    },
+    "verification_gates": {
+      "310": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "adr-present",
+          "verdict": "pass",
+          "origin": "issue"
+        },
+        {
+          "id": "lint",
+          "verdict": "pass",
+          "origin": "repo"
+        }
+      ]
+    },
+    "contract_issues": [
+      310
+    ],
+    "contract_contains": {
+      "310": [
+        "verify:\n  gates:\n    - \"adr-present\"\n    - \"lint\"\n"
+      ]
+    }
+  }
+}

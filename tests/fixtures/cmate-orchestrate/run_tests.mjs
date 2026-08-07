@@ -167,7 +167,13 @@ function planToWorktrees(plan, pathOverrides = {}, hidden = []) {
 // the plan template) so a runner that cwd's into the template path instead finds
 // nothing — the #1473 regression. Returns the integration directory the runner
 // should be spawned in.
-function setupWorktrees(plan, work, markerFor, pathOverrides = {}, absent = []) {
+// `files` (Issue #114) is the worktree's CONTENT: `{ "<relative path>": "<text>" }`,
+// written into every worktree that is created. It is what makes an acceptance
+// gate measurable — `.commandmate/verify.yaml` declares the gate, and the
+// deliverable the gate tests for is a file in this map. A mutation fixture is
+// then the SAME case with one entry removed, so the difference between the green
+// run and the red run is the artifact and nothing else (ADR §4 (2)).
+function setupWorktrees(plan, work, markerFor, pathOverrides = {}, absent = [], files = {}) {
   const integration = join(work, 'integration');
   mkdirSync(integration, { recursive: true });
   for (const issue of plan.issues) {
@@ -177,6 +183,11 @@ function setupWorktrees(plan, work, markerFor, pathOverrides = {}, absent = []) 
     const dir = join(work, basename(registeredPathFor(issue, pathOverrides)));
     mkdirSync(dir, { recursive: true });
     if (markerFor(issue.number)) writeFileSync(join(dir, 'cmate-verify-ok'), 'ok');
+    for (const [relative, content] of Object.entries(files)) {
+      const target = join(dir, relative);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, content.endsWith('\n') ? content : `${content}\n`, 'utf8');
+    }
   }
   return integration;
 }
@@ -237,7 +248,7 @@ function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, lo
         .map((issue) => registeredPathFor(issue, pathOverrides)),
     };
   }
-  const integration = setupWorktrees(plan, work, (n) => workerVerifyPasses(scenario, n), pathOverrides, absent);
+  const integration = setupWorktrees(plan, work, (n) => workerVerifyPasses(scenario, n), pathOverrides, absent, scenarioObject.worktree_files ?? {});
   const scenarioPath = join(work, 'dispatch-scenario.json');
   writeFileSync(scenarioPath, `${JSON.stringify(scenario, null, 2)}\n`);
   const stateDir = opts.state ?? work;
@@ -547,6 +558,33 @@ function runCase(caseId) {
       );
     }
   }
+  // The machine-readable acceptance block (Issue #114), asserted exactly —
+  // including `null`, which is what a body with no block and a body with a
+  // BROKEN block both produce. The two are told apart by warning_codes, and a
+  // case that pins both proves the planner never rounds one to the other.
+  if (expect.acceptance_gates) {
+    for (const [number, gates] of Object.entries(expect.acceptance_gates)) {
+      const issue = plan.issues.find((i) => i.number === Number(number));
+      check(
+        issue !== undefined && deepEqual(issue.acceptance_gates, gates),
+        `acceptance_gates of #${number} ${JSON.stringify(issue?.acceptance_gates)} !== ${JSON.stringify(gates)}`,
+      );
+    }
+  }
+  // Phase 0 item 3 of the ADR, pinned: the advisory command extraction must be
+  // BYTE-IDENTICAL whether or not an acceptance-gates block sits above the code
+  // fence it reads. The measured defect was the block's CLOSING fence pairing
+  // with the next block's OPENING fence, which swallowed the following ```bash
+  // block whole.
+  if (expect.test_expectations) {
+    for (const [number, commands] of Object.entries(expect.test_expectations)) {
+      const issue = plan.issues.find((i) => i.number === Number(number));
+      check(
+        issue !== undefined && deepEqual(issue.test_expectations, commands),
+        `test_expectations of #${number} ${JSON.stringify(issue?.test_expectations)} !== ${JSON.stringify(commands)}`,
+      );
+    }
+  }
   if (expect.risk_level) check(plan.risk.level === expect.risk_level, `risk ${plan.risk.level} !== ${expect.risk_level}`);
   if (expect.profile_verified !== undefined) check(plan.profile.verified === expect.profile_verified, `profile.verified ${plan.profile.verified} !== ${expect.profile_verified}`);
   if (expect.base) check(plan.profile.base === expect.base, `base ${plan.profile.base} !== ${expect.base}`);
@@ -685,6 +723,18 @@ function checkContracts(spec, expect, planPath, scenarioObject, caseDir, outDir,
     const goldenPath = join(caseDir, 'contracts', `issue-${number}.yaml`);
     if (check(existsSync(goldenPath), `${label}: golden contracts/issue-${number}.yaml is missing`)) {
       check(text === readFileSync(goldenPath, 'utf8'), `${label}: does not match the golden contract byte for byte`);
+    }
+
+    // A golden pins EVERY byte, which also means a golden regenerated alongside a
+    // wrong change still matches itself. These two say out loud what the contract
+    // must and must not contain, so the semantic claims of a case (the union
+    // written into verify.gates; the acceptance section absent for a block-less
+    // issue) are readable in the case file rather than buried in the golden.
+    for (const needle of (expect.contract_contains ?? {})[number] ?? []) {
+      check(text.includes(needle), `${label}: does not contain ${JSON.stringify(needle)}`);
+    }
+    for (const needle of (expect.contract_absent ?? {})[number] ?? []) {
+      check(!text.includes(needle), `${label}: unexpectedly contains ${JSON.stringify(needle)}`);
     }
 
     const repeatPath = join(secondOut, 'contracts', `issue-${number}.yaml`);
@@ -1078,6 +1128,20 @@ function runDispatchCase(caseId) {
         deepEqual(worker.verification.gates, gates),
         `#${num} verification.gates ${JSON.stringify(worker.verification.gates)} !== ${JSON.stringify(gates)}`,
       );
+    }
+  }
+  // Why a run was red. A two-point acceptance-gate measurement is worthless
+  // unless the red run is red for the RIGHT reason (ADR §4 (3)): exit 20 — a gate
+  // judged the work and failed — and not 21/99/124/2, which mean the gate never
+  // reached a verdict. The exit code is quoted verbatim in `checks`, and the
+  // failing gate id is named there too, so pinning substrings here pins both.
+  for (const [num, needles] of Object.entries(expect.verification_checks_include ?? {})) {
+    const worker = allWorkers(report).find((w) => w.issue === Number(num));
+    if (check(worker !== undefined, `#${num} has no worker record`)) {
+      const checksText = (worker.verification.checks ?? []).join(' | ');
+      for (const needle of needles) {
+        check(checksText.includes(needle), `#${num} verification.checks ${JSON.stringify(worker.verification.checks)} does not contain "${needle}"`);
+      }
     }
   }
   for (const [num, taskId] of Object.entries(expect.task_ids ?? {})) {

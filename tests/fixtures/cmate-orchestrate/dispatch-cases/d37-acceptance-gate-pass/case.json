@@ -1,0 +1,81 @@
+{
+  "description": "ADR §4 (1) の適合側（緑）。Issue が `require: [adr-present]` を宣言し、その id は worktree の .commandmate/verify.yaml に実在する。fake CLI は **宣言されたゲートを実際に sh -c で実行する**（`run_declared_gates`）ので、緑は「fake が 0 を返すよう指示された」ではなく「`test -f docs/adr.md` が本当に通った」である。契約には `verify:` key が書かれない — `require` は「必ず走らねばならないゲート」であって「走る全ゲート」ではないから（ADR §3.4）。由来は report に残り、Issue が名指しした adr-present は origin=issue、repo 共通の lint と work-evidence は origin=repo になる（ADR §10 (4) の固定）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-acceptance-gates.json",
+    "orchestrate_args": [
+      "310",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      310
+    ],
+    "send_counts": {
+      "310": 1
+    },
+    "worker_states": {
+      "310": "completed"
+    },
+    "verification_outcomes": {
+      "310": "pass"
+    },
+    "verification_gates": {
+      "310": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "adr-present",
+          "verdict": "pass",
+          "origin": "issue"
+        },
+        {
+          "id": "lint",
+          "verdict": "pass",
+          "origin": "repo"
+        }
+      ]
+    },
+    "task_ids": {
+      "310": "task-issue-310"
+    },
+    "contract_issues": [
+      310
+    ],
+    "contract_contains": {
+      "310": [
+        "  ## Acceptance gates this issue declared",
+        "  - adr-present"
+      ]
+    },
+    "contract_absent": {
+      "310": [
+        "verify:"
+      ]
+    },
+    "verify_calls": 0,
+    "wait_verify_calls_min": 1
+  }
+}

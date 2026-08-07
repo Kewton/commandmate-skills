@@ -49,11 +49,13 @@
       "201": [
         {
           "id": "work-evidence",
-          "verdict": "pass"
+          "verdict": "pass",
+          "origin": "repo"
         },
         {
           "id": "lint",
-          "verdict": "fail"
+          "verdict": "fail",
+          "origin": "repo"
         }
       ]
     },

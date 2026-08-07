@@ -38,6 +38,7 @@
       "acceptance_criteria": [
         "`src/store.ts` persists a session"
       ],
+      "acceptance_gates": null,
       "suspected_files": [
         "src/store.ts"
       ],
@@ -60,6 +61,7 @@
       "acceptance_criteria": [
         "`src/base.ts` reads config from disk"
       ],
+      "acceptance_gates": null,
       "suspected_files": [
         "src/base.ts"
       ],

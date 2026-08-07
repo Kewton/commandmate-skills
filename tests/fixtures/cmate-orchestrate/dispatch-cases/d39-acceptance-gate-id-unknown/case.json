@@ -1,0 +1,48 @@
+{
+  "description": "ADR §4 (5) / §3.4: `require:` した id が worktree の verify.yaml に無い Issue は **send に到達しない**。`send --contract` の exit 2 に落とすと「契約が不正だった」という報告になり、走っていない worker の話になってしまう — 何が足りないかを名指しして止めるほうが解ける（contract_scope_unknown と同じ読み）。limitation は実在する id を列挙するので、綴り違いなら diff がそのまま出る。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-acceptance-gates-unknown.json",
+    "orchestrate_args": [
+      "310",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "never_sent": [
+      310
+    ],
+    "no_contract_calls": true,
+    "worker_states": {
+      "310": "not_dispatched"
+    },
+    "verification_outcomes": {
+      "310": "not_run"
+    },
+    "limitation_codes": [
+      "acceptance_gate_id_unknown"
+    ],
+    "limitation_details_include": [
+      "#310: the issue requires gate id(s) no-such-gate, which .commandmate/verify.yaml does not declare",
+      "Available there: adr-present, lint, scope, work-evidence"
+    ]
+  }
+}

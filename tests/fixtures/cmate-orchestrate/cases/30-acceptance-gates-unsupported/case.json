@@ -1,0 +1,15 @@
+{
+  "description": "ADR §3.5 / §9 stage 2: `gates:` (declaring a NEW command) is valid notation this release does not enforce. Enforcing it means writing the definition into the worktree's `.commandmate/verify.yaml`, and the ADR's preconditions for that are open — measured here: an uncommitted `.commandmate/verify.yaml` DOES count towards the work-evidence gate (only `.commandmate/tasks/` is excluded), so a worktree that received nothing but a gate definition reports uncommitted=1 and exit 21 stops meaning 'the worker did nothing'. Accepting the key and then not enforcing it would be exactly the silent drop this feature exists to prevent, so the block raises `acceptance_gate_block_unsupported` and stops the run instead.",
+  "args": ["350", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "fixture", "--no-infer"],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": ["acceptance_gate_block_unsupported"],
+    "warning_details_include": [
+      "#350: The `acceptance-gates` block could not be read: \"gates:\" (new command gates) is stage 2 of the ADR and is not enforced by this release",
+      "use \"require:\" with gate ids that already exist in .commandmate/verify.yaml",
+      "It is NOT treated as absent"
+    ],
+    "acceptance_gates": { "350": null }
+  }
+}

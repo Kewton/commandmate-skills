@@ -1,0 +1,21 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "run_declared_gates": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "310": {
+      "state": "completed"
+    }
+  },
+  "worktree_files": {
+    ".commandmate/verify.yaml": "# The worktree's own gate declarations — the one file BOTH judges read.\nversion: 1\ngates:\n  - id: adr-present\n    command: \"test -f docs/adr.md\"\n    timeoutSec: 60\n  - id: lint\n    command: \"true\"\n    timeoutSec: 60\n",
+    "docs/adr.md": "# ADR: issue acceptance gates\n\nThe deliverable this issue's gate tests for.\n"
+  }
+}

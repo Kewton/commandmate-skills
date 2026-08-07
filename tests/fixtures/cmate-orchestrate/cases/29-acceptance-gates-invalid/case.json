@@ -1,0 +1,24 @@
+{
+  "description": "ADR §2.4, fail-closed: a broken `acceptance-gates` block is NEVER rounded to 'there was no block'. Four ways to break it — two blocks in one body, a version this runner does not implement, an id the contract parser would reject, and a block that requires nothing — each raise `acceptance_gate_block_invalid` as an open question, drop the run to `partial` (so dispatch refuses the issue), and leave `acceptance_gates` null. Nothing is recovered by guessing: rounding a broken block to an absent one is how a run ends green with the acceptance conditions its author wrote silently missing.",
+  "args": ["340", "341", "342", "343", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "fixture", "--no-infer"],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "acceptance_gate_block_invalid",
+      "acceptance_gate_block_invalid",
+      "acceptance_gate_block_invalid",
+      "acceptance_gate_block_invalid"
+    ],
+    "warning_details_include": [
+      "#340: The `acceptance-gates` block could not be read: the body carries 2 blocks and exactly one is allowed",
+      "#341: The `acceptance-gates` block could not be read: version must be exactly 1 (got \"2\")",
+      "#342: The `acceptance-gates` block could not be read: \"Verify_Selftest\" is not a valid gate id",
+      "#343: The `acceptance-gates` block could not be read: the block requires no gate",
+      "It is NOT treated as absent",
+      "The planner never guesses acceptance gates from prose.",
+      "The dispatch runner refuses an issue with an unanswered question"
+    ],
+    "acceptance_gates": { "340": null, "341": null, "342": null, "343": null }
+  }
+}

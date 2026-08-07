@@ -154,6 +154,21 @@ completed でありながら裁定が1つも記録されなかった場合は、
 limitation `verification_unrecorded` と completion check `verification_recorded` の失敗として報告する。
 これは verification の失敗でも worker の失敗でもなく、**runner が記録に失敗した**という別の事実である。
 
+`verification.gates[]` には optional field **`origin`**（`repo` / `issue`）が載る。
+`issue` はその Issue の ```acceptance-gates ブロックが `require:` で名指しした id、`repo` は
+repo 共通ゲート（verify.yaml に在るが `require` されていないものを含む）である。
+[#97](https://github.com/Kewton/commandmate-skills/issues/97) の PR 証跡が
+「10 個のゲートが緑」ではなく「そのうち何個がこの Issue のために走ったか」を書けるようにするためで、
+`dispatch_schema_version` は **1 のまま**である（optional field の追加は additive。第7節）。
+
+**欠落を `repo` と読んではならない。** 欠落は「由来が記録されていない」であり、
+`not_run` を pass にも fail にも丸めないのと同じ理由で既定値に丸めない。欠落するのは
+この field より古い runner が書いた report と、フォールバック経路（第 2.1.1 (b)）である。
+実測: `commandmate wait --verify` の `GATE <id> PASS|FAIL (<detail>)` 行に由来は含まれないので、
+`origin` は読み取るものではなく **runner が「自分が契約に運んだ id か」から決める**
+（ADR 第 11.4 節）。`--resume` が裁定を引き継ぐときは、記録されていた `origin` だけを転記し、
+無いものを補わない。
+
 **(b) フォールバック経路** — plan `profile.baseline` の各 command を **worktree 内で
 `execFile`（cwd=worktree path）** 実行する。全 command が exit 0 なら `outcome: pass`、worktree が
 無い・いずれかが非0なら `fail`。`report_schema_version` は `null`、`checks` は実行した baseline
@@ -196,9 +211,12 @@ runner は承認済み plan **だけ**から契約を組み立てる。時刻・
   work-evidence の計数と scope 判定から除外されるので、**未 commit のまま置いてよい**（#1580）。
 - 同じ内容を `<out>/contracts/issue-<n>.yaml` にも残す。worktree の写しは worker が書き換えうるが、
   run artifact は動かない。
-- `verify.gates` は `--verify-gates` を指定したときだけ書く。runner は対象リポジトリの
-  `verify.yaml` を知らず、**存在しない gate id は `send --contract` を exit 2 で落とす**。キーの
-  省略は「全ゲートを走らせる」であり、緩い側ではなく厳しい側の既定である。
+- `verify.gates` は `--verify-gates` を指定したときだけ書く。キーの省略は
+  「全ゲートを走らせる」であり、緩い側ではなく厳しい側の既定である。
+  **Issue が `acceptance_gates.require` を宣言していても、それだけではこのキーは書かれない** —
+  詳しくは第 2.9 節。
+- Issue が受入ゲートを宣言している場合、`goal` に `## Acceptance gates this issue declared` 節が
+  1つ足される。宣言が無い Issue の `goal` は **byte 単位で従来どおり**である。
 - `success.requireScopeClean` は**常に `true`** である。以前は `<allow が非空か>` で決めており、
   対象 file を1つも挙げていない Issue だけ scope ゲートが丸ごと無効化されていた。scope 判定が
   無い契約は「worktree 内の何を書いても clean」と同義なので、これは過剰拒否の裏返しの
@@ -276,6 +294,49 @@ dispatch / uat / monitor / verify-advisor のすべてが同じ launcher を使�
 
 **ランチャー解決は実行時の話である。** plan.json は入力の純粋関数であり、`$CM` を変えても
 plan の byte 列は変わらない。dispatch report にも解決結果は載せない。
+
+### 2.9 受入ゲートの解決（Issue が名指ししたゲート）
+
+**記法の正本は [acceptance-gates-notation.md](./acceptance-gates-notation.md)**、裁定の記録は
+[adr-issue-acceptance-gates.md](./adr-issue-acceptance-gates.md) である。ここは dispatch 側の規約だけを書く。
+
+planner は `plan.issues[].acceptance_gates.require` を**構文だけ**見て載せる。id が実在するかは
+worktree を持つ dispatch にしか判断できない。dispatch は `commandmate ls` で解決した実 path の
+`<worktree>/.commandmate/verify.yaml` を読み、**`send` する前に**突き合わせる。
+
+- **解決可能な id** = `work-evidence` + `scope` + verify.yaml が宣言した全 gate id。
+  これは CommandMate 自身が契約の `verify.gates` を検証するときの集合と同一である
+  （built-in の `env-clean` は**この集合に入らない**）。
+- verify.yaml の読み取りは **fail-closed** である。ファイルが無い・読めない・YAML subset で
+  読めない場合、`require` を宣言した Issue は dispatch しない。部分的に読めた id 集合で
+  「実在しない」と判断すると、理由の違う停止が同じ顔をしてしまう。
+  **このファイルは `require` を宣言した Issue のためにしか読まれない**ので、subset で読めない
+  verify.yaml を持つリポジトリでも他の挙動は一切変わらない。
+
+#### `verify.gates` の書き出し — 絞り込みを禁ずる
+
+`verify` キーの省略は「全ゲートを走らせる」、明示は「そのゲートだけを走らせる」である。
+したがって `require: [adr-present]` を素朴に `verify.gates: [adr-present]` と書き出すと、
+lint も test も走らない契約になる。**受入条件を足したつもりで、判定が弱くなる。**
+
+| operator の `--verify-gates` | Issue の `require:` | 契約の `verify` |
+|---|---|---|
+| 無し | 無し | **キーを書かない**（＝全ゲート） |
+| 無し | 有り | **キーを書かない**。全ゲートに `require` の id は必ず含まれる（実在確認済み） |
+| 有り | 無し | operator の列挙を、operator の順序のまま |
+| 有り | 有り | **和集合**（sort + 重複除去） |
+
+#### 停止する条件（いずれも `send` の前）
+
+| limitation | 条件 | 読み方 |
+|---|---|---|
+| `acceptance_gate_id_unknown` | `require` の id が worktree の verify.yaml に無い / ファイルを読めない | limitation が**実在する id を列挙する**ので、綴り違いなら diff がそのまま出る |
+| `acceptance_gates_not_enforceable` | 実行契約の無い run（`--contract-mode off`、契約非対応 CLI）で `require` が宣言されている | 裁定は profile baseline の再実行になり、gate id を伝える口が無い。ここで dispatch すると **Issue が書いた条件を一度も測っていない緑**ができる |
+| `acceptance_gate_block_invalid` | plan の `acceptance_gates` 自体が壊れている（手編集された plan）、または和集合が 32 件を超える | planner は構文の通ったブロックからしかこの field を書かないので、前者は plan が手で編集された証拠である |
+
+いずれも `send --contract` の exit 2 に頼らない。理由は `contract_scope_unknown` と同じで、
+走っていない worker を「契約が不正だった」と報告するより、**何が足りないかを名指しして止める**
+ほうが解ける。当該 worker は `not_dispatched` のまま残り、wave は advance しない。
 
 ## 3. 監督ループと gate
 

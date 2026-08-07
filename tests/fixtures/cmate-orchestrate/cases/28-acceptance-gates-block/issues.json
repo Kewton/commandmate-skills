@@ -1,0 +1,20 @@
+{
+  "issues": [
+    {
+      "number": 330,
+      "title": "feat: carry acceptance gates",
+      "body": "Wire the acceptance block into the planner.\n\n## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] the block is parsed\n- [ ] the ids reach the plan\n\n```acceptance-gates\n# the notation's own comment form: a `#` at column 0, on its own line\nversion: 1\nrequire:\n  - verify-selftest\n  - orchestrate-fixtures\n```\n\n## Verification\n\n```bash\npython3 scripts/validate.py\nnode tests/fixtures/cmate-orchestrate/run_tests.mjs\n```\n\nAlso run `pytest -q` before pushing.\n",
+      "labels": [
+        "enhancement"
+      ]
+    },
+    {
+      "number": 331,
+      "title": "feat: carry acceptance gates",
+      "body": "Wire the acceptance block into the planner.\n\n## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] the block is parsed\n- [ ] the ids reach the plan\n\n## Verification\n\n```bash\npython3 scripts/validate.py\nnode tests/fixtures/cmate-orchestrate/run_tests.mjs\n```\n\nAlso run `pytest -q` before pushing.\n",
+      "labels": [
+        "enhancement"
+      ]
+    }
+  ]
+}

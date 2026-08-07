@@ -49,12 +49,15 @@
       "201": [
         {
           "id": "work-evidence",
-          "verdict": "fail"
+          "verdict": "fail",
+          "origin": "repo"
         }
       ]
     },
     "worker_notes_include": {
-      "201": ["verification failed (work-evidence)"]
+      "201": [
+        "verification failed (work-evidence)"
+      ]
     },
     "contract_issues": [
       201

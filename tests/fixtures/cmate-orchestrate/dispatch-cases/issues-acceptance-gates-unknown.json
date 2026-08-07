@@ -1,0 +1,12 @@
+{
+  "issues": [
+    {
+      "number": 310,
+      "title": "docs: write the acceptance-gates ADR",
+      "body": "Write the acceptance-gates ADR and land it.\n\n## 対象ファイル\n- `docs/adr.md`\n\n## Acceptance criteria\n- [ ] the ADR file exists in the repository\n\n```acceptance-gates\nversion: 1\nrequire:\n  - adr-present\n  - no-such-gate\n```\n",
+      "labels": [
+        "documentation"
+      ]
+    }
+  ]
+}

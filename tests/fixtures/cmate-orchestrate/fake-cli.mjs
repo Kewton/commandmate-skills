@@ -83,6 +83,7 @@
 //
 // Node stdlib only. Not part of the release pipeline; used only by run_tests.mjs.
 
+import { spawnSync } from 'node:child_process';
 import { readFileSync, appendFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -435,6 +436,103 @@ function verifyExitFor(worker, issue) {
   return exits[Math.min(turn - 1, exits.length - 1)];
 }
 
+// ---------------------------------------------------------------------------
+// Really running the worktree's declared gates (Issue #114)
+// ---------------------------------------------------------------------------
+//
+// Every other verification path in this fake is a scenario knob: `verify_exits`
+// SAYS the run passed or failed. That is enough to exercise the supervision loop,
+// but it cannot be evidence that an ACCEPTANCE gate measured anything — a knob
+// returns 20 whether the deliverable is broken or not, so a "mutation" fixture
+// built on it proves only that the harness can be told to say 20.
+//
+// The ADR's §4 (2) requires the mutation to live in the JUDGED ARTIFACT. So for
+// the acceptance-gate cases this fake does what CommandMate does: it reads the
+// worktree's own `.commandmate/verify.yaml`, runs each gate's command with
+// `sh -c` in the worktree, and derives the verdict from the exit status. The two
+// runs of a two-point measurement then differ ONLY in the worktree's contents,
+// and the red run is red because a command actually failed.
+//
+// Opted into per scenario with `run_declared_gates: true`, so the 36 existing
+// dispatch cases keep the knob behaviour unchanged.
+function declaredGatesOf(worktreePath) {
+  const path = join(worktreePath, '.commandmate', 'verify.yaml');
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    return [];
+  }
+  const gates = [];
+  let inGates = false;
+  for (const raw of text.split(/\r?\n/)) {
+    if (/^[ ]*(#|$)/.test(raw)) continue;
+    if (/^[a-zA-Z]/.test(raw)) {
+      inGates = raw.startsWith('gates:');
+      continue;
+    }
+    if (!inGates) continue;
+    const item = /^ {2}- id:\s*(.+?)\s*$/.exec(raw);
+    if (item) {
+      gates.push({ id: item[1], command: '' });
+      continue;
+    }
+    const field = /^ {4}command:\s*(.+?)\s*$/.exec(raw);
+    if (field && gates.length > 0) {
+      const value = field[1];
+      gates[gates.length - 1].command = /^".*"$/.test(value) || /^'.*'$/.test(value) ? value.slice(1, -1) : value;
+    }
+  }
+  return gates.filter((gate) => gate.id !== '' && gate.command !== '');
+}
+
+// The gate ids the contract selected, or null when it declares no `verify.gates`
+// (which means "every declared gate runs" — the case an issue's `require:` list
+// deliberately produces, ADR §3.4).
+function contractGateIds(worktreePath, issue) {
+  const path = join(worktreePath, '.commandmate', 'tasks', `cmate-orchestrate-issue-${issue}.yaml`);
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((line) => line === 'verify:');
+  if (start < 0) return null;
+  const ids = [];
+  for (const line of lines.slice(start + 2)) {
+    const item = /^ {4}- (.+?)\s*$/.exec(line);
+    if (!item) break;
+    const value = item[1];
+    ids.push(/^".*"$/.test(value) || /^'.*'$/.test(value) ? value.slice(1, -1) : value);
+  }
+  return ids;
+}
+
+// Run them. Returns { lines, exit, failing } shaped like the real CLI's output:
+// one `GATE <id> PASS|FAIL (exit=<n>)` line per gate, exit 20 if any failed.
+function runDeclaredGates(spec, issue, worktreeId) {
+  const row = visibleWorktrees(spec).find((entry) => entry.id === worktreeId);
+  const worktreePath = resolve(process.cwd(), row?.path ?? '.');
+  const declared = declaredGatesOf(worktreePath);
+  const selected = contractGateIds(worktreePath, issue);
+  const toRun = selected === null ? declared : declared.filter((gate) => selected.includes(gate.id));
+  const lines = ['GATE work-evidence PASS (commits=1, uncommitted=0)'];
+  const failing = [];
+  for (const gate of toRun) {
+    const result = spawnSync('sh', ['-c', gate.command], { cwd: worktreePath, encoding: 'utf8' });
+    // A command that could not be launched at all still has an exit status here
+    // (sh reports 127); it is recorded as the gate's exit, never as "skipped".
+    const code = result.status === null ? 1 : result.status;
+    lines.push(`GATE ${gate.id} ${code === 0 ? 'PASS' : 'FAIL'} (exit=${code})`);
+    if (code !== 0) {
+      failing.push({ id: gate.id, exit: code, logTail: `${(result.stderr || result.stdout || '').trim().slice(-200) || `${gate.command}: exited ${code}`}` });
+    }
+  }
+  return { lines, exit: failing.length > 0 ? VERIFY_FAILED : 0, failing };
+}
+
 function emit(object) {
   process.stdout.write(`${JSON.stringify(object)}\n`);
   process.exit(0);
@@ -774,6 +872,16 @@ function main() {
     if (state === 'prompt' && marker && existsSync(marker)) state = 'completed';
     if (state === 'completed') {
       if (!argv.includes('--verify')) process.exit(WAIT_COMPLETED);
+      // Issue #114: with `run_declared_gates` the verdict is not a knob — the
+      // gates declared in the worktree's verify.yaml are really executed there,
+      // so the exit code follows the DELIVERABLE. That is what lets an
+      // acceptance-gate fixture measure two points (adapted → green, mutated →
+      // red) instead of asserting that the fake was told to say 20.
+      if (spec.run_declared_gates) {
+        const run = runDeclaredGates(spec, issue, worktreeId);
+        for (const line of run.lines) process.stdout.write(`${line}\n`);
+        process.exit(run.exit);
+      }
       // Like the real CLI (verify-runner's reportGates), a judged run prints one
       // `GATE <id> PASS|FAIL` line per executed gate (#1678 B-5): pass runs list
       // work-evidence plus the scenario's pass_gates (default ['baseline']),
@@ -820,8 +928,13 @@ function main() {
     const worker = workerSpec(spec, issue);
     // A failed_gates entry is a gate id string, or an object {id, logTail, exit}
     // when a scenario needs to control the gate's log — e.g. a scope gate whose
-    // logTail lists the out-of-scope paths (#1678 B-2).
-    const failedGates = Array.isArray(worker.failed_gates) ? worker.failed_gates : [];
+    // logTail lists the out-of-scope paths (#1678 B-2). Under
+    // `run_declared_gates` the list is not declared at all: it is whatever really
+    // failed when the worktree's own gates were run, so the breakdown the runner
+    // reads names the actual command and its actual exit status (Issue #114).
+    const failedGates = spec.run_declared_gates
+      ? runDeclaredGates(spec, issue, worktreeId).failing
+      : (Array.isArray(worker.failed_gates) ? worker.failed_gates : []);
     const gates = [
       { gateId: 'work-evidence', status: 'passed', exitCode: null, durationMs: 12, logTail: 'commits=1 uncommitted=0' },
       ...failedGates.map((entry) => {

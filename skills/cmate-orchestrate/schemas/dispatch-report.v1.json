@@ -234,7 +234,11 @@
                 "required": ["id", "verdict"],
                 "properties": {
                   "id": { "type": "string", "minLength": 1 },
-                  "verdict": { "enum": ["pass", "fail"] }
+                  "verdict": { "enum": ["pass", "fail"] },
+                  "origin": {
+                    "enum": ["repo", "issue"],
+                    "description": "OPTIONAL. Where this gate came from: `issue` when the issue's own ```acceptance-gates block named the id under `require:`, `repo` when the gate is part of the repository's common set and the issue said nothing about it. Added for #97's PR evidence, which must be able to say how many of the green gates ran FOR THIS ISSUE rather than only that ten gates were green. Measured: `commandmate wait --verify`'s `GATE <id> PASS|FAIL` line carries no provenance, so the value is DECIDED by the dispatch runner from the ids it resolved out of the plan and wrote into the contract — deterministic, and it fixes the reading that a declared-but-not-required gate is `repo`. ABSENT means the origin was not recorded (a runner older than this field, or the fallback baseline path) and must NOT be read as `repo`, for the same reason `not_run` is rounded to neither pass nor fail."
+                  }
                 }
               },
               "description": "The gates that judged this work, transcribed from `commandmate wait --verify`'s `GATE <id> PASS|FAIL` stdout lines (falling back to the confirming `verify --json` run's failing gates on exit 20). Empty when nothing was judged (not_run), when the CLI printed no GATE lines, or on the fallback baseline path (whose commands are already named in checks). This is what lets the report alone answer WHAT a pass was based on (#1678 B-5). Since 0.16.0 an empty list on a contract PASS is itself reported — a `verification_gates_unrecorded` limitation plus a line in `checks` — so an unattributed pass is visible instead of reading as a pass with nothing to show (Issue #83)."

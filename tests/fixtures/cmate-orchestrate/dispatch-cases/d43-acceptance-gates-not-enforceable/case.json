@@ -1,0 +1,48 @@
+{
+  "description": "実行契約が無い run（`--contract-mode off`）で受入ゲートを宣言した Issue は dispatch しない。契約が無ければ `verify.gates` も `wait --verify` も無く、裁定は profile baseline の再実行になる — そこに gate id を伝える口は無い。ここで dispatch すると、この機能がまさに防ごうとしている run（Issue が書いた条件を一度も測っていない緑）ができあがる。fail-closed で止め、acceptance_gates_not_enforceable が理由と回避策を名指しする。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-acceptance-gates.json",
+    "orchestrate_args": [
+      "310",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--contract-mode",
+    "off"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "never_sent": [
+      310
+    ],
+    "worker_states": {
+      "310": "not_dispatched"
+    },
+    "verification_outcomes": {
+      "310": "not_run"
+    },
+    "limitation_codes": [
+      "acceptance_gates_not_enforceable"
+    ],
+    "limitation_details_include": [
+      "#310: the issue requires gate(s) adr-present, but this dispatch runs without an execution contract"
+    ]
+  }
+}

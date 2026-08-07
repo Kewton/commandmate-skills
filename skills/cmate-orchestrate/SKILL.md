@@ -160,7 +160,7 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 | `--prepare-worktrees` | **off** | pre-flight で未解決だった worktree を `cmate-worktree-setup` に作らせてから続行する。既定 off＝従来どおり停止 |
 | `--worktree-setup <launcher>` | — | 上記 provider の呼び出し口（`--cli` と同じ argv 規約）。`--prepare-worktrees` 無しに渡すと `invalid_input` |
 | `--contract-mode <m>` | `auto` | `auto` / `require`（フォールバック拒否）/ `off`（probe せず baseline 裁定） |
-| `--verify-gates <ids>` | 省略＝全ゲート | 契約の `verify.gates` に載せる gate id。**存在しない id を発明しない** |
+| `--verify-gates <ids>` | 省略＝全ゲート | 契約の `verify.gates` に載せる gate id。**存在しない id を発明しない**。run 全体に1つ。Issue 側の `require:` とは**和集合**を取る（絞り込みが Issue の要求を落とすことは許さない） |
 | `--expect-branch <name>` | — | plan 承認時の統合 branch。不一致なら drift |
 | `--wait-timeout <sec>` | `300` | `commandmate wait` の1回あたり timeout |
 | `--max-turns <n>` | `8` | 各 worker を駆動する最大ターン数。未 commit で到達なら `failed` |
@@ -195,6 +195,30 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 
 規則の正本は [dispatch-contract.md](./references/dispatch-contract.md) 第3.0.1節、
 裁定の記録は [adr-worktree-preparation.md](./references/adr-worktree-preparation.md)。
+
+**Issue が名指しした受入ゲート（`acceptance-gates` ブロック）** — Issue 本文に置かれた
+```acceptance-gates ブロックの `require:` は、その Issue の裁定に**必ず参加しなければならない**
+gate id の宣言である。ここまで `verify.gates` は operator の run 単位フラグでしか動かせず、
+Issue ごとに違うゲート集合を要求する方法が無かった。
+
+- **明示ブロックだけを運ぶ。散文からは何も生成しない。** `test_expectations`（Issue 本文の
+  backtick から拾ったコマンド）は従来どおり**助言的**で、裁定には使われない。引用は指示ではなく、
+  抽出結果は profile にも依存するので、裁定の根拠にできない。
+- **planner は構文しか見ない。** id が実在するかは dispatch が worktree の
+  `.commandmate/verify.yaml` に突き合わせ、**`send` する前に**拒否する
+  （`acceptance_gate_id_unknown`）。`send --contract` の exit 2 には落とさない。
+- **`require:` だけでは `verify.gates` を書かない。** 書くと「そのゲートだけ走らせる」になり、
+  lint も test も走らなくなる — 受入条件を足したつもりで判定が弱くなる。キーを省略したまま
+  全ゲートを走らせるほうが厳しい。
+- **壊れたブロックは「無かったこと」にしない**（`acceptance_gate_block_invalid`）。
+  `gates:`（新規コマンドの宣言）は記法としては予約済みだが**この release は実行しない**ので、
+  黙って無視せず停止する（`acceptance_gate_block_unsupported`）。
+- report の `verification.gates[].origin` に由来（`repo` / `issue`）が残る。**欠落は
+  「記録されていない」であり `repo` ではない。**
+
+記法の正本は [acceptance-gates-notation.md](./references/acceptance-gates-notation.md)、
+dispatch 側の規約は [dispatch-contract.md](./references/dispatch-contract.md) 第2.9節、
+裁定の記録と実測は [adr-issue-acceptance-gates.md](./references/adr-issue-acceptance-gates.md)。
 
 **部分失敗からの再開（`--resume <前回の --out>`）** — 並列開発では Wave 途中の1 Issue だけが
 落ちるのが常態である。`--resume` は前回 run の**最新 report** を読み、次のように分ける。
@@ -565,6 +589,7 @@ dispatch report の `summary_markdown` には上表と同じ next action が出�
 **契約の正本**（この文書と食い違ったら正本が優先する）— 第3節の runner 表からもリンクしている
 4つの `*-contract.md` に加えて:
 
+- [references/acceptance-gates-notation.md](./references/acceptance-gates-notation.md) — Issue 本文の `acceptance-gates` ブロックの記法（**記法の正本**）
 - [references/profile-contract.md](./references/profile-contract.md) — profile の形と unverified の扱い
 - [references/agent-compatibility.md](./references/agent-compatibility.md) — Agent 差異と fallback
 - [references/release-notes.md](./references/release-notes.md) — なぜその挙動なのか（経緯）

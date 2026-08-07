@@ -1,0 +1,28 @@
+{
+  "issues": [
+    {
+      "number": 340,
+      "title": "fix: two blocks",
+      "body": "Two blocks in one body.\n\n## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\nrequire:\n  - selftest\n```\n\nLater in the same body, a second one:\n\n```acceptance-gates\nversion: 1\nrequire:\n  - validate\n```\n",
+      "labels": []
+    },
+    {
+      "number": 341,
+      "title": "fix: unknown version",
+      "body": "A version this runner does not implement.\n\n## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 2\nrequire:\n  - selftest\n```\n",
+      "labels": []
+    },
+    {
+      "number": 342,
+      "title": "fix: malformed id",
+      "body": "A gate id the contract parser would reject.\n\n## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\nrequire:\n  - Verify_Selftest\n```\n",
+      "labels": []
+    },
+    {
+      "number": 343,
+      "title": "fix: empty block",
+      "body": "A block that requires nothing.\n\n## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\nrequire:\n```\n",
+      "labels": []
+    }
+  ]
+}
