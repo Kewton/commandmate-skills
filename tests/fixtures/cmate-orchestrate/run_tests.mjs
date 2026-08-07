@@ -43,7 +43,11 @@ const FAKE_CLI = join(HERE, 'fake-cli.mjs');
 const NODE_FAKE_PROFILE = join(PROFILES_DIR, 'node-fake.json');
 const CLI_CONTRACT_PATH = join(HERE, 'commandmate-cli-contract.json');
 
-const planSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'execution-plan.v1.json'), 'utf8'));
+const planSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'execution-plan.v2.json'), 'utf8'));
+const planSchemaV1 = JSON.parse(readFileSync(join(SCHEMA_DIR, 'execution-plan.v1.json'), 'utf8'));
+// A checked-in run artifact carries the version it was produced with; validate it
+// against that schema rather than the one the current planner emits.
+const planSchemaFor = (plan) => (plan && plan.plan_schema_version === 1 ? planSchemaV1 : planSchema);
 const resultSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'orchestrate-result.v1.json'), 'utf8'));
 const dispatchSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'dispatch-report.v1.json'), 'utf8'));
 const mergeSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'merge-report.v1.json'), 'utf8'));
@@ -2003,7 +2007,7 @@ function runUatCase(caseId) {
 // silently upgraded into a state the artifacts do not prove.
 
 const STATUS_ARTIFACT_SCHEMAS = new Map([
-  ['plan.json', planSchema],
+  ['plan.json', planSchemaFor],
   ['dispatch-report.json', dispatchSchema],
   ['merge-report.json', mergeSchema],
   ['uat-report.json', uatSchema],
@@ -2078,7 +2082,9 @@ function runStatusCase(caseId) {
       check(false, `fixture ${relative} is not JSON and is not declared in schema_unvalidatable: ${error.message}`);
       continue;
     }
-    const errors = validateAgainst(STATUS_ARTIFACT_SCHEMAS.get(basename(relative)), document, relative);
+    const schemaOrPicker = STATUS_ARTIFACT_SCHEMAS.get(basename(relative));
+    const schema = typeof schemaOrPicker === 'function' ? schemaOrPicker(document) : schemaOrPicker;
+    const errors = validateAgainst(schema, document, relative);
     check(errors.length === 0, `fixture ${relative} does not conform to its shipped schema: ${errors.slice(0, 3).join('; ')}`);
   }
 

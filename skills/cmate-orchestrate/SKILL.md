@@ -600,7 +600,7 @@ dispatch report の `summary_markdown` には上表と同じ next action が出�
 - [references/adr-worktree-preparation.md](./references/adr-worktree-preparation.md) — worktree 準備段の合成（`--prepare-worktrees`）
 
 **機械検証用 schema** — `schemas/` に
-[execution-plan.v1](./schemas/execution-plan.v1.json)（plan）・
+[execution-plan.v2](./schemas/execution-plan.v2.json)（plan）・
 [orchestrate-result.v1](./schemas/orchestrate-result.v1.json)（planner envelope）・
 [dispatch-report.v1](./schemas/dispatch-report.v1.json)・
 [merge-report.v1](./schemas/merge-report.v1.json)・

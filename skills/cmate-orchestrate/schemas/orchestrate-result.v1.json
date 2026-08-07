@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/orchestrate-result.v1.json",
   "title": "cmate-orchestrate result v1",
-  "description": "Result envelope printed to stdout and written to result.json by the cmate-orchestrate runner. Closed schema for the envelope. The embedded plan, when present, is validated separately against execution-plan.v1.json.",
+  "description": "Result envelope printed to stdout and written to result.json by the cmate-orchestrate runner. Closed schema for the envelope. The embedded plan, when present, is validated separately against execution-plan.v2.json.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -46,7 +46,7 @@
     },
     "plan": {
       "oneOf": [{ "type": "null" }, { "type": "object" }],
-      "description": "The full execution plan on success/partial, null on failure. When non-null it conforms to execution-plan.v1.json."
+      "description": "The full execution plan on success/partial, null on failure. When non-null it conforms to execution-plan.v2.json."
     },
     "errors": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
     "warnings": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
