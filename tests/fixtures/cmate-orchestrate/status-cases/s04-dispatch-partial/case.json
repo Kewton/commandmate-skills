@@ -1,0 +1,28 @@
+{
+  "description": "dispatch が partial（#201 が commit に到達せず worker_failed、barrier が閉じて #200 は未 dispatch）。partial は success に丸めず、#201 は failed/pass（完了と裁定は別物）、#200 は「記録なし」として出る。merge の次アクションは「dispatch が完走していないのでまだ回さない」に落ちる。",
+  "expect": {
+    "exit": 0,
+    "latest_phase": "dispatch",
+    "phase_states": { "plan": "ok", "dispatch": "ok", "merge": "not_run", "uat": "not_run" },
+    "unreadable_paths": [],
+    "issues": [200, 201],
+    "issue_states": {
+      "200": { "plan": "ok", "dispatch": "no_record", "merge": "not_run", "uat": "not_run" },
+      "201": { "plan": "ok", "dispatch": "ok", "merge": "not_run", "uat": "not_run" }
+    },
+    "dispatch": {
+      "201": { "worker_state": "failed", "verification_outcome": "pass", "wave_index": 0 }
+    },
+    "run_next": ["dispatch/stop_reason/worker_failed", "merge/not_run/not_run"],
+    "issue_next": { "200": [], "201": ["dispatch/blocking/worker_failed"] },
+    "hints_include": {
+      "worker_failed": "指示が過大なら Issue を分割して re-plan する",
+      "not_run": "dispatch が完走していないので"
+    },
+    "text_includes": [
+      "status=partial / stop=worker_failed",
+      "| #201  | W0          | failed/pass",
+      "記録なし"
+    ]
+  }
+}

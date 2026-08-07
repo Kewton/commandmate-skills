@@ -1,0 +1,35 @@
+{
+  "description": "blocking_reasons / limitations の code が SKILL.md §5 の語彙にマップされる。detail が Issue を名指しした reason（worker_failed の #201、worktree_unresolved の #200）はその Issue 行に、名指ししないもの（drift_*、limitation）は run 全体に出る。drift_<check> は接頭辞規則で drift の対処に、対処表に無い code は推測せず「detail と summary_markdown を読む」に落ちる。hand-edit された artifact に残った token 形も表示前に redact される。",
+  "expect": {
+    "exit": 0,
+    "latest_phase": "dispatch",
+    "phase_states": { "plan": "ok", "dispatch": "ok", "merge": "not_run", "uat": "not_run" },
+    "unreadable_paths": [],
+    "issues": [200, 201],
+    "issue_states": {
+      "200": { "plan": "ok", "dispatch": "no_record", "merge": "not_run", "uat": "not_run" },
+      "201": { "plan": "ok", "dispatch": "ok", "merge": "not_run", "uat": "not_run" }
+    },
+    "run_next": [
+      "dispatch/stop_reason/worker_failed",
+      "dispatch/blocking/drift_integration_clean",
+      "dispatch/limitation/auto_yes_used",
+      "dispatch/limitation/a_code_from_the_future",
+      "merge/not_run/not_run"
+    ],
+    "issue_next": {
+      "200": ["dispatch/blocking/worktree_unresolved"],
+      "201": ["dispatch/blocking/worker_failed"]
+    },
+    "hints_include": {
+      "worker_failed": "Issue を分割して re-plan する",
+      "worktree_unresolved": "cmate-worktree-setup で worktree を作成して再実行する",
+      "drift_integration_clean": "drift の上に dispatch しない",
+      "auto_yes_used": "何に答えたのかを report で確認する",
+      "a_code_from_the_future": "§5 対処表に無い code"
+    },
+    "redaction_token": "ghp_FAKEtokenNOTAREALSECRET00",
+    "redaction_kind": "token",
+    "text_includes": ["worktree_unresolved", "[REDACTED-TOKEN]"]
+  }
+}
