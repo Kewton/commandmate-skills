@@ -1,0 +1,27 @@
+{
+  "description": "Two npm-family lockfiles and a Makefile: the draft picks one toolchain and one manager and warns about both choices. The branch prefix is read from the README, so it is not hardcoded to \"feature\".",
+  "args": [],
+  "expect": {
+    "status": "partial",
+    "sources": {
+      "id": "derived",
+      "repository": "default",
+      "base": "default",
+      "branch_template": "detected",
+      "worktree_template": "default",
+      "baseline": "detected",
+      "verified": "fixed"
+    },
+    "todos": [
+      "id_derived_from_placeholder",
+      "repository_undetermined",
+      "base_undetermined",
+      "worktree_template_undetermined"
+    ],
+    "warnings": ["multiple_ecosystems", "multiple_lockfiles"],
+    "evidence_files": {
+      "branch_template": ["README.md"],
+      "baseline": ["pnpm-lock.yaml", "package.json"]
+    }
+  }
+}

@@ -23,11 +23,13 @@ const RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'orches
 const DISPATCH_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'dispatch.mjs');
 const MERGE_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'merge.mjs');
 const UAT_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'uat.mjs');
+const PROFILE_INIT_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'profile-init.mjs');
 const SCHEMA_DIR = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'schemas');
 const CASES_DIR = join(HERE, 'cases');
 const DISPATCH_CASES_DIR = join(HERE, 'dispatch-cases');
 const MERGE_CASES_DIR = join(HERE, 'merge-cases');
 const UAT_CASES_DIR = join(HERE, 'uat-cases');
+const PROFILE_INIT_CASES_DIR = join(HERE, 'profile-init-cases');
 const PROFILES_DIR = join(HERE, 'profiles');
 const FAKE_CLI = join(HERE, 'fake-cli.mjs');
 // The dispatch/merge/uat runners execute the profile baseline INSIDE each
@@ -1784,6 +1786,214 @@ function launcherTest() {
 }
 
 // =============================================================================
+// profile-init cases (Issue #94)
+// =============================================================================
+//
+// The drafting runner turns a repository's own declarations into a profile
+// draft. Each case is a miniature repository under `<case>/repo` plus the golden
+// profile it must produce, and the suite holds the runner to the four promises
+// the feature is worth having for:
+//
+//   the golden        same tree in, byte-identical profile out (Claude/Codex
+//                     parity, and the reason no clock/network/subprocess is used)
+//   the gaps          a field with no evidence gets a safe template AND a TODO;
+//                     never a quiet guess that reads like a detected value
+//   the provenance    every evidence path names a file that actually exists in
+//                     the fixture, at a line that actually contains the quote
+//   the handoff       the draft feeds straight into orchestrate.mjs
+//                     --profile-json and plans
+
+function runProfileInit(args) {
+  try {
+    const stdout = execFileSync('node', [PROFILE_INIT_RUNNER, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: baseEnv(),
+    });
+    return { exit: 0, stdout };
+  } catch (error) {
+    return { exit: error.status ?? 1, stdout: error.stdout ? error.stdout.toString() : '' };
+  }
+}
+
+// The draft has to survive the round trip it exists for: written to a file and
+// handed to the planner exactly as emitted. --allow-unverified is required and
+// that is the point — a drafted profile is unverified by construction.
+function planWithDraft(profilePath, label) {
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-profile-init-plan-'));
+  const planned = runRunner([
+    '100',
+    '--profile-json', profilePath,
+    '--allow-unverified',
+    '--issue-json', join(CASES_DIR, '01-independent', 'issues.json'),
+    '--runs-dir', runsDir,
+  ]);
+  if (!check(planned.exit === 0, `${label}: the draft should plan, exited ${planned.exit}: ${planned.stdout.slice(0, 400)}`)) {
+    return;
+  }
+  const result = JSON.parse(planned.stdout);
+  const errors = validateAgainst(planSchema, result.plan, `${label} plan`);
+  check(errors.length === 0, `${label}: plan from the draft is not schema-conformant: ${errors.join('; ')}`);
+  check(
+    result.plan.profile.verified === false,
+    `${label}: a drafted profile must reach the plan as unverified`,
+  );
+  check(
+    result.plan.risk.factors.some((factor) => factor.code === 'unverified_profile'),
+    `${label}: planning on a draft must carry the unverified_profile risk factor`,
+  );
+}
+
+function runProfileInitCase(caseId) {
+  const caseDir = join(PROFILE_INIT_CASES_DIR, caseId);
+  const spec = JSON.parse(readFileSync(join(caseDir, 'case.json'), 'utf8'));
+  const repoDir = join(caseDir, 'repo');
+  log(`  ${caseId}: ${spec.description}`);
+
+  const args = ['--repo-root', repoDir, ...(spec.args ?? [])];
+  const run = runProfileInit(args);
+  if (!check(run.exit === 0, `drafting should exit 0, exited ${run.exit}: ${run.stdout.slice(0, 400)}`)) return;
+
+  let result;
+  try {
+    result = JSON.parse(run.stdout);
+  } catch {
+    check(false, 'the envelope on stdout is not JSON');
+    return;
+  }
+  const expect = spec.expect ?? {};
+
+  check(result.draft === true, 'the envelope must declare itself a draft');
+  check(result.profile.verified === false, 'a drafted profile must never claim verification');
+  check(result.status === expect.status, `status ${result.status} != ${expect.status}`);
+  check(result.completion_check.passed === true, 'the drafting completion check should pass');
+
+  // The golden. Compared as BYTES, not as a parsed object: field order is part of
+  // what a reviewer diffs, and `--emit profile` is what gets piped into a file.
+  const golden = readFileSync(join(caseDir, 'expected-profile.json'), 'utf8');
+  const emitted = runProfileInit([...args, '--emit', 'profile']);
+  check(emitted.exit === 0, `--emit profile should exit 0, exited ${emitted.exit}`);
+  check(emitted.stdout === golden, `--emit profile does not match the golden profile:\n${emitted.stdout}`);
+  check(deepEqual(result.profile, JSON.parse(golden)), 'the envelope profile and the golden disagree');
+
+  // Determinism: the same tree twice is the same bytes. This is the property the
+  // whole no-clock/no-network/sorted-listing discipline exists to buy.
+  const again = runProfileInit(args);
+  check(again.stdout === run.stdout, 'two runs over the same tree produced different output');
+
+  const sources = {};
+  for (const entry of result.provenance) sources[entry.field] = entry.source;
+  for (const [field, source] of Object.entries(expect.sources ?? {})) {
+    check(sources[field] === source, `provenance source for ${field} is ${sources[field]}, expected ${source}`);
+  }
+  check(
+    deepEqual((result.todos ?? []).map((todo) => todo.code), expect.todos ?? []),
+    `todo codes ${JSON.stringify((result.todos ?? []).map((t) => t.code))} != ${JSON.stringify(expect.todos ?? [])}`,
+  );
+  check(
+    deepEqual((result.warnings ?? []).map((warning) => warning.code), expect.warnings ?? []),
+    `warning codes ${JSON.stringify((result.warnings ?? []).map((w) => w.code))} != ${JSON.stringify(expect.warnings ?? [])}`,
+  );
+
+  // A default with no TODO is the failure this feature is about: it reads
+  // exactly like a detected value and nobody goes looking for it.
+  for (const entry of result.provenance) {
+    if (entry.source !== 'default') continue;
+    check(
+      (result.todos ?? []).some((todo) => todo.field === entry.field),
+      `${entry.field} fell back to a template with no TODO to say so`,
+    );
+    check(entry.evidence.length === 0, `${entry.field} is a template yet claims evidence`);
+  }
+
+  // Provenance has to point at something real. A cited line that does not
+  // contain the quoted text is a citation that cannot be checked.
+  for (const entry of result.provenance) {
+    for (const item of entry.evidence) {
+      const full = join(repoDir, item.file);
+      if (!check(existsSync(full), `${entry.field} cites ${item.file}, which is not in the fixture`)) continue;
+      if (item.line === null) continue;
+      const line = readFileSync(full, 'utf8').split(/\r?\n/)[item.line - 1] ?? '';
+      check(
+        line.trim() === item.text || line.includes(item.text.replace(/…$/, '')),
+        `${entry.field} cites ${item.file}:${item.line} but that line does not contain the quoted text`,
+      );
+    }
+    const expectedFiles = (expect.evidence_files ?? {})[entry.field];
+    if (expectedFiles !== undefined) {
+      check(
+        deepEqual(entry.evidence.map((item) => item.file), expectedFiles),
+        `${entry.field} evidence files ${JSON.stringify(entry.evidence.map((i) => i.file))} != ${JSON.stringify(expectedFiles)}`,
+      );
+    }
+  }
+
+  // A baseline nobody could infer must FAIL, not pass by having nothing to run:
+  // dispatch.mjs treats an empty baseline as a fail, and a placeholder that
+  // exits zero would be worse than either.
+  if (expect.baseline_fails_closed) {
+    check(result.profile.baseline.length > 0, 'a placeholder baseline must not be empty');
+    for (const command of result.profile.baseline) {
+      const argv = command.trim().split(/\s+/);
+      let ok = true;
+      try {
+        execFileSync(argv[0], argv.slice(1), { stdio: 'ignore' });
+      } catch {
+        ok = false;
+      }
+      check(!ok, `the placeholder baseline command "${command}" exited zero; it must fail closed`);
+    }
+  }
+
+  // --out writes the same bytes as --emit profile, and refuses to clobber.
+  const outDir = mkdtempSync(join(tmpdir(), 'cmate-profile-init-out-'));
+  const outPath = join(outDir, 'profile.json');
+  const written = runProfileInit([...args, '--out', outPath]);
+  check(written.exit === 0, `--out should exit 0, exited ${written.exit}`);
+  check(existsSync(outPath) && readFileSync(outPath, 'utf8') === golden, '--out did not write the golden profile');
+  const clobber = runProfileInit([...args, '--out', outPath]);
+  check(clobber.exit === 4, `a second --out to the same path should be refused with exit 4, exited ${clobber.exit}`);
+  check(
+    JSON.parse(clobber.stdout).errors.some((error) => error.code === 'out_exists'),
+    '--out over an existing file should fail with out_exists',
+  );
+
+  planWithDraft(outPath, caseId);
+}
+
+// The drafting runner's argument and failure handling: bad input is refused with
+// a machine code, not absorbed into a plausible-looking draft.
+function profileInitInputTest() {
+  log('  profile-init input handling');
+  const bad = [
+    { args: ['--repo-root', join(PROFILE_INIT_CASES_DIR, 'does-not-exist')], code: 'load_error', exit: 6 },
+    { args: ['--emit', 'yaml'], code: 'invalid_input', exit: 3 },
+    { args: ['--repo', 'not-a-slug'], code: 'invalid_input', exit: 3 },
+    { args: ['--id', '-leading-dash'], code: 'invalid_input', exit: 3 },
+  ];
+  for (const scenario of bad) {
+    const run = runProfileInit(scenario.args);
+    check(run.exit === scenario.exit, `${scenario.args.join(' ')} should exit ${scenario.exit}, exited ${run.exit}`);
+    const result = JSON.parse(run.stdout);
+    check(result.status === 'failure', `${scenario.args.join(' ')} should report status failure`);
+    check(
+      result.errors.some((error) => error.code === scenario.code),
+      `${scenario.args.join(' ')} should fail with ${scenario.code}, got ${JSON.stringify(result.errors)}`,
+    );
+  }
+
+  // The two declarations override detection rather than being merged with it.
+  const repoDir = join(PROFILE_INIT_CASES_DIR, '01-node-npm', 'repo');
+  const declared = runProfileInit(['--repo-root', repoDir, '--repo', 'Other/name', '--id', 'my-profile']);
+  check(declared.exit === 0, `declaring --repo/--id should exit 0, exited ${declared.exit}`);
+  const result = JSON.parse(declared.stdout);
+  check(result.profile.repository === 'Other/name', '--repo did not override the detected slug');
+  check(result.profile.id === 'my-profile', '--id did not override the derived id');
+  const sources = Object.fromEntries(result.provenance.map((entry) => [entry.field, entry.source]));
+  check(sources.repository === 'flag' && sources.id === 'flag', 'a declared value must be recorded as coming from a flag');
+}
+
+// =============================================================================
 // Self-test of the validator: it must reject a broken plan, not wave it through.
 // =============================================================================
 
@@ -1862,6 +2072,13 @@ function main() {
     : [];
   for (const caseId of uatIds) runUatCase(caseId);
 
+  log('  -- profile-init cases --');
+  const profileInitIds = existsSync(PROFILE_INIT_CASES_DIR)
+    ? readdirSync(PROFILE_INIT_CASES_DIR).filter((name) => existsSync(join(PROFILE_INIT_CASES_DIR, name, 'case.json'))).sort()
+    : [];
+  for (const caseId of profileInitIds) runProfileInitCase(caseId);
+  profileInitInputTest();
+
   log('  -- contract parity --');
   parityTest();
 
@@ -1873,7 +2090,7 @@ function main() {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, contract parity, launcher resolution`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution`);
 }
 
 main();

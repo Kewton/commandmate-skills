@@ -1,0 +1,25 @@
+{
+  "description": "A rust crate: clippy is added because CI evidences it; two CI branches make the base an explicit choice, not a reading.",
+  "args": [],
+  "expect": {
+    "status": "partial",
+    "sources": {
+      "id": "derived",
+      "repository": "detected",
+      "base": "detected",
+      "branch_template": "default",
+      "worktree_template": "default",
+      "baseline": "detected",
+      "verified": "fixed"
+    },
+    "todos": ["base_ambiguous", "branch_template_undetermined", "worktree_template_undetermined"],
+    "warnings": [],
+    "evidence_files": {
+      "repository": ["Cargo.toml"],
+      "base": [".github/workflows/rust.yml"],
+      "branch_template": [],
+      "worktree_template": [],
+      "baseline": ["Cargo.toml", ".github/workflows/rust.yml"]
+    }
+  }
+}
