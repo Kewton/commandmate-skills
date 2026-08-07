@@ -47,7 +47,14 @@
 import { readFileSync } from 'node:fs';
 
 export const SKILL_ID = 'cmate-orchestrate';
-export const SKILL_VERSION = '0.13.0';
+
+// Stamped into the `skill_version` field of every report the four runners write,
+// which is the field a bug report against this package is triaged by. It must
+// equal `version:` in commandmate.skill.yaml, and scripts/validate.py fails the
+// package when it does not — 0.15.0 through 0.17.0 shipped with this constant
+// left at 0.13.0, and the reports named a version nobody had installed
+// (Issue #92, observed in Kewton/CommandMate#1741).
+export const SKILL_VERSION = '0.17.0';
 
 // The dispatch report version merge.mjs and uat.mjs consume. It is the dispatch
 // report's contract as a CONSUMER sees it, which is why it is stated here rather
