@@ -422,6 +422,44 @@ CI / cron からの無人運転はそこに例外を作る。フラグ追加で�
 [dispatch-contract.md](./dispatch-contract.md) の語彙で網羅列挙してあり、
 **「unattended だけの停止」は1つも足していない**。実装は ADR のレビュー後。
 
+### #114 — 受入条件は契約に載っているのに、誰も測っていなかった
+
+契約が運ぶ検証情報は `verify.gates` だけで、それも operator が `--verify-gates` で名指しした
+場合に限られた。**Issue 固有の受入条件は機械ゲートに一切変換されず**、意味的な判定は UAT の
+`cmate-acceptance-test`（任意 install）まで、しかも **merge の後**まで遅れていた。
+「動いた」（repo 共通ゲート緑）と「完成した」（受入条件充足）を分けるのが中核なのに、
+その最初の問いが納品後にしか発されない。
+
+→ [adr-issue-acceptance-gates.md](./adr-issue-acceptance-gates.md) 第9節の段1〜6を実装した。
+Issue 本文の `acceptance-gates` ブロックを planner が**構文だけ** parse して
+`plan.issues[].acceptance_gates` に載せ、dispatch が worktree の verify.yaml と突き合わせて
+`send` 前に解決し、和集合規則で `verify.gates` を書き出す。記法の正本は
+[acceptance-gates-notation.md](./acceptance-gates-notation.md)。
+
+**散文からの推測生成はしない。** 明示マークされたブロックだけを運ぶ（fail-closed）。
+散文からコマンドを推測する経路（`extractTestExpectations()`）は元から在るが、
+**裁定に使わないという判断が既に下されている** — 本実装はそれを覆さない。
+
+実装前に第10節の未決事項4点を CommandMate 0.22.0 で実測し、第11節に記録した
+（scope の基準点は merge-base ／ verify.yaml の未 commit 変更は work-evidence に計上される ／
+fence 抽出の干渉は**実在した** ／ `GATE` 行に由来は出ない）。ADR から形が変わった点は第12節にある。
+とくに `gates:`（新規コマンド）は planner が受理して dispatch が実行しないと
+**宣言が黙って消えた緑の run** になるので、無視ではなく停止にした。
+
+### #118 — plan の版を上げないと、古い dispatch が受入ゲートを黙って捨てる
+
+#114 は `plan_schema_version` を 1 のままにした。plan を読む runner が ADR の数えた3つではなく
+**4つ**（`status.mjs` は ADR 執筆後の #99 で増えた）で、実行契約が2 runner しか許して
+いなかったためである。結果、**受入ゲートを載せた plan を 0.18.0 以前の dispatch が読むと
+ゲートは黙って無視される**窓が残った。
+
+→ planner は **2** を出し、consumer（dispatch / merge / uat / status）は **1 と 2 の両方を受理**する。
+守りたい向きは「古い runner が新しい plan を拒否する」であって逆ではない。とくに `status.mjs` は
+**過去 run の artifact を読む view** であり、0.18.0 で作った run を読めなくなるのは
+この runner が存在する理由そのものの後退である。schema は
+[../schemas/execution-plan.v2.json](../schemas/execution-plan.v2.json) を新設し v1 は残した。
+fixture の検査は **plan が申告した版**の schema で行う。
+
 ## merge（`scripts/merge.mjs`）
 
 ### #97 — PR 本文が「検証した」と言うだけで、何を通ったのかは JSON の中だった
@@ -485,7 +523,53 @@ fix 回数は `--max-attempts` を超えない。上限到達でなお不合格�
 
 ---
 
+## 設計（ADR のみ。実装は後続）
+
+### #103 — 「ワーカーが Issue を受け取ってから何をするか」を持つ Skill が無かった
+
+11 スキルは上流（Issue 起案・精錬・調査）・準備・実行制御・検証・後始末を覆うが、
+**開発の方法だけが空白**だった。`buildContractGoal()` が渡すのは WHAT（Objective / 受入条件 /
+変更してよいファイル）と制約で、**HOW（調査・計画・実装の作法）を渡していない**。
+CommandMate リポジトリ内では `/pm-auto-issue2dev` が埋めているが、
+**スラッシュコマンドはリポジトリスコープ**なので外部リポジトリでは `Unknown command` になる。
+
+→ [adr-worker-development-skill.md](./adr-worker-development-skill.md) を書いた。中心の裁定は
+**「このスキルが足すのは方法であって権限ではない。契約と食い違ったら契約が勝つ」**。
+呼び出し口は契約 `goal` の `## Method` 節で skill を名指しする形とし、
+**`buildWorkerPrompt`（契約非対応 CLI のフォールバック経路）にも同じ節を置く**
+—— 片方だけだと `--contract-mode auto` の落ち先で方法論が黙って消える。
+runner に方法論の要約を埋め込む案は、正本が2つになる・方法の更新に本 package の再リリースが
+要る・委譲先の install を検査できない、の3点で却下した。実装は別 Issue。
+
+### #115 — unattended の未決事項を測ったら、前提が2つ逆だった
+
+[adr-unattended-mode.md](./adr-unattended-mode.md) 第13節の6点を実測し、第14節に記録した。
+**4点で ADR の記述を訂正した。**
+
+- **`gh` は対話に落ちない。** TTY が無いことを自分で判定して待たずに落ちる。無人運転を実際に
+  止めるのは **`git push` の資格情報プロンプト**である。第6.3節に足すべき停止は無く、
+  必要なのは job 定義側の環境変数だった。
+- **契約の `autoYes: mode: off` は monitor を止めない。** サーバ側では確かに効くが、
+  その事実が `capture --json` に出るのは Auto-Yes poller が回っているときだけで、poller は
+  `autoYesState.enabled` が false なら起動しない。unattended は auto-yes を切るので
+  poller が回らず、monitor は抑止を知らないまま Enter を送る。**`--no-auto-approve` は要件のまま**。
+- **cron の再入は排他が要る**（同じ worktree に2つの supervisor が交互に `send` する状態を再現）。
+- **uat の再merge は detached HEAD で「merged」と報告してどこにも残らない**（段階Cに pre-flight 検査）。
+
+第14.7節に**測らなかったこと**を明記してある。
+
+---
+
 ## パッケージ
+
+### 0.19.0 — 受入条件の機械ゲート化と、無人運転の前提の訂正（#103 / #114 / #115 / #118）
+
+Issue の受入条件を契約へ運ぶ経路が入った（#114）。plan は v2 になり、古い dispatch が
+新しい plan を拒否するようになった（#118）—— ゲートが黙って捨てられる窓を、
+**新 planner を持つ版が世に出る前に**塞いである。
+
+無人運転（#115）とワーカー側の開発スキル（#103）は ADR まで。#115 の実測は ADR の記述を
+4点訂正しており、実装 Issue は**訂正後の第14節を正本として書くこと**。
 
 ### 0.18.0 — 一気通貫化の第一陣（#90 / #91 / #92 / #93 / #94 / #95 / #97 / #98 / #99 / #100）
 
