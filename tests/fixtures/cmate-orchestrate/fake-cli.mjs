@@ -424,6 +424,29 @@ function main() {
     process.stdout.write(`Merge made by the 'ort' strategy.\n`);
     process.exit(0);
   }
+  if (sub === 'diff') {
+    // `git diff --name-only|--numstat <base>...<branch>`, run by merge.mjs inside
+    // the issue's worktree to read what the branch ACTUALLY changed (Issue #97).
+    // The issue is recovered from the diff range (…issue-<n>…), falling back to
+    // the cwd the runner spawned this in — the worktree carries the number too.
+    //
+    // Scenario shape, per issue: `{ files: [...] }`, or the string "fail" to model
+    // a worktree that is gone / a range git cannot resolve. The harness injects a
+    // default of the issue's own plan scope, so a case that says nothing models
+    // the ordinary scope-clean branch and only a case that CARES declares a diff.
+    const range = argv[argv.length - 1];
+    const issue = issueFromBranch(range) ?? issueFromCwd();
+    const diff = (spec.diff ?? {})[issue] ?? (spec.diff ?? {})[String(issue)] ?? {};
+    if (diff === 'fail') fail(`fatal: ambiguous argument '${range}': unknown revision or path not in the working tree`, 128);
+    const files = Array.isArray(diff.files) ? diff.files : [];
+    // Deterministic per-file line counts: the Nth changed file is +10N / -N, so a
+    // fixture can assert an exact "+X / -Y" summary without pinning real content.
+    const body = argv.includes('--numstat')
+      ? files.map((file, i) => `${(i + 1) * 10}\t${i + 1}\t${file}`)
+      : files;
+    process.stdout.write(body.length ? `${body.join('\n')}\n` : '');
+    process.exit(0);
+  }
   if (sub === 'push') {
     // `git push --set-upstream origin <branch>` from merge.mjs --create-prs.
     const branch = argv[argv.length - 1];

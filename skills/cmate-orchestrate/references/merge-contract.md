@@ -82,6 +82,8 @@ merge runner は次を呼ぶ。各呼び出しは失敗で非0を返し、握り
 | preflight | `gh repo view <repo> --json nameWithOwner` | `{ "nameWithOwner": "…" }` | repo アクセス |
 | preflight | `git rev-parse --verify <base>` | exit 0 | base 解決 |
 | create_prs | `gh repo view <repo> --json defaultBranchRef` | `{ "defaultBranchRef": { "name": "…" } }` | Issue 自動クローズの到達性（invocation あたり1回） |
+| create_prs | `git diff --name-only <base>...<branch>`（cwd = その Issue の worktree） | 変更 file の一覧 | PR 本文の「実変更」（読めなければ本文に「読めなかった」と書く） |
+| create_prs | `git diff --numstat <base>...<branch>`（cwd = 同上） | `<added>\t<deleted>\t<path>` | PR 本文の diff 規模 |
 | create_prs | `git push --set-upstream origin <branch>` | exit 0 | verification pass branch を push |
 | create_prs | `gh pr create --repo R --base B --head <branch> --title T --body-file F` | PR URL を stdout | PR 作成 |
 | merge_prs | `gh pr view <branch> --repo R --json number,url,state` | `{ "number", "url", "state" }` | PR 発見 |
@@ -90,8 +92,8 @@ merge runner は次を呼ぶ。各呼び出しは失敗で非0を返し、握り
 
 規則:
 
-- PR body は plan だけから構成する self-contained な内容（objective・受入条件・baseline・
-  `Resolves #n`）とし、`<out>/pr-bodies/issue-<n>.md` に artifact として残す。
+- PR body は objective・受入条件・**検証証拠**（5.2節）・`Resolves #n` からなる self-contained な
+  内容とし、`<out>/pr-bodies/issue-<n>.md` に artifact として残す。
 - `--base` は profile の base（例 `origin/develop`）から先頭 remote 節を除いた branch 名にする。
 - CI の green 判定は、check state を pass（`SUCCESS`/`NEUTRAL`/`SKIPPED`）・pending
   （`PENDING`/`QUEUED`/`IN_PROGRESS`/…）・それ以外（failure 扱い）に分け、
@@ -116,6 +118,40 @@ PR の base（`baseBranchName(plan.profile.base)`）と比較する。
 
 記録に留める。`gh issue close` を runner が勝手に実行することはしない（「勝手に閉じない」
 という製品方針より）。**merge 後のクローズは operator の手作業である。**
+
+## 5.2 PR body の Verification 節 = 検証証拠の提出
+
+worker の完了は「実装結果と**検証証拠を提出する**」ことである。検証そのもの（`wait --verify` の
+exit code を一次ソースとし、verification pass だけを merge 対象にすること）は dispatch 側で
+済んでいるが、**証拠が人間に届くのは PR 本文だけ**である。そこで Verification 節は定型文を
+持たず、当該 Issue の実測値だけで構成する（[#97](https://github.com/Kewton/commandmate-skills/issues/97)）。
+
+| 節 | 内容 | 出どころ |
+|---|---|---|
+| verdict | `verification.outcome`。`ran: false` なら「検証は走っていない」と明示する | dispatch report の当該 worker（同じ Issue が複数 wave にあれば**最後**の記録） |
+| Gates 表 | gate 名 / 合否 / exit code（`gate <id>: <status> (exit n)` 形の check 行から拾える場合。無ければ `—`） | `verification.gates` + `verification.checks` |
+| Checks 表 | 記録された check 行そのまま / そこに書かれた exit code | `verification.checks` |
+| 宣言 scope vs 実変更 | `scope.allow`（plan の `suspected_files`）と実変更 file の対比表、**scope 外変更の件数** | plan + `git diff --name-only <base>...<branch>`（当該 worktree で実行） |
+| diff 規模 | 変更 file 数・追加/削除行数 の1行 | `git diff --numstat`（同上） |
+
+規則:
+
+1. **転記であって主張ではない。** dispatch report は runner が書いた保証の無い**入力**なので、
+   転記値は例外なく `redact()` を通す。redact 済みだと仮定しない。
+2. **読めなかったものを pass に丸めない。** diff が読めなければ本文にその事実と理由を書き、
+   `limitations[]` に `change_evidence_unavailable` を記録する。「変更なし」とも
+   「scope 内に収まっていた」とも書かない。`ran: false` も同様に明示する。
+3. **黙って切り詰めない。** gh の本文上限（65536 字）に収めるため gates（30）・checks（15）・
+   path（50）の一覧は上限件数で打ち切るが、**打ち切った件数を本文に書く**。本文全体が上限を
+   超える場合も、切り詰めた旨の marker を末尾に置く。
+4. 実変更が `scope.allow` の外に出ていれば違反 path を本文で名指しし、`limitations[]` に
+   `branch_changed_outside_declared_scope` を記録する。契約ゲート `requireScopeClean` の
+   人間可読版であり、**phase は止めない**（機械ゲートは上流で既に判定済みである）。
+5. scope entry は原則ただの repo 相対 path だが、契約は pattern を許すので `*` / `**` を
+   解釈して照合する。pattern を literal として扱うと scope 内の変更を違反と誤報する。
+
+merge-report.json / merge-summary.md の**構造は変えない**。本文と report が食い違わないよう、
+上の 2 つの limitation だけを既存の `limitations[]` に足す。
 
 ## 6. 停止と status / stop_reason / exit
 
