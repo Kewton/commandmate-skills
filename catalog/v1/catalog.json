@@ -750,7 +750,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.20.0",
+      "latest": "0.21.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -1338,6 +1338,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.20.0/cmate-orchestrate-0.20.0.tar.gz",
             "sha256": "a3b14c96115744e992a2bf08757e4f18d8da0b4c59eb84cbd4b7ed8aaa7ec9d4",
             "size": 376813,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.21.0",
+          "changelog": "cmate-orchestrate 0.21.0 — パレット復帰・無人運転の段階 B・--auto-yes の実効化\n\n0.20.0 はスラッシュコマンドのパレットに表示されなかった。SKILL.md が 71,383 bytes となり\nCommandMate の 64KB 上限を超えて、ローダーが黙って読み飛ばしていた。本版で直る。\n\nパッケージ\n- #135 SKILL.md を references/ へ移送した。0.14.0 が決めた方針（SKILL.md は「いつ使うか /\n  呼び出し方と順序 / 出力の読み方 / 停止時に人間が何をするか」の4点に絞り、機構の詳細は\n  正本への一方向参照にする）への回帰であり、内容は削っていない（71,383 → 37,334 bytes）。\n  再発防止として scripts/validate.py にサイズガードを足した。validate は verify.yaml の\n  宣言ゲートかつ CI の両ジョブで走るので、リリース前に必ず止まる。閾値は 64KB の生値ではなく\n  60,000 bytes で、上限に触れる前に止める。超過時のメッセージは references/ への移送を名指しする\n\nmerge\n- #134 無人運転の段階 B。merge.mjs が --unattended を受理する。含意する締め付けは1つだけで、\n  change_evidence_unavailable を limitation ではなく blocking として扱う。PR 本文に実変更を\n  載せられなかったという事実は、人間が読む運転なら読み手が branch を開いて補える劣化だが、\n  無人では証拠の無い PR が黙って作られることになるので、その Issue の PR を作らずに停止する。\n  --approve は含意しない。--merge-prs との併用は invalid_input で拒否する（段階 C 未実装）\n\ndispatch\n- #136 --auto-yes を指定しても Claude の許可プロンプトで止まっていた。原因は2つあり、\n  両方直さないと動かなかった。(1) 契約の mode: safe は yes_no しか許さず、Claude の許可\n  プロンプトは multiple_choice なので必ず弾かれる。判定しているのは契約のポリシーであって\n  worktree のトグルではない。(2) send に --auto-yes が渡っておらず、サーバーの Auto-Yes\n  poller が起動しないので抑止の記録すら残らない。契約は mode: allow-listed と\n  allowPromptTypes: [yes_no, multiple_choice] を書き、send にも --auto-yes と算出した\n  --duration を渡すようにした。autoYes ブロックを書かない案は却下した。この runner が\n  mode: off を書くのは「積極的な禁止」と「省略」が別物だからで、許可も同じ理屈である\n\nテストは 30 plan / 60 dispatch / 9 resume+reverify / 20 merge / 17 uat / 11 status /\n5 profile-init。前版から dispatch が 4 増えている。",
+          "published_at": "2026-08-08T13:11:32Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.21.0",
+            "commit": "fc6c55f82a0242d8b873988de8c49e510f79ed24"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.21.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.21.0/cmate-orchestrate-0.21.0.tar.gz",
+            "sha256": "5f5e0d25cf857f0dc48a23c8abeea0b2ddfafa657a74d978ce5c53c76e3d55f6",
+            "size": 397912,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
