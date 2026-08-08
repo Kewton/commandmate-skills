@@ -505,8 +505,14 @@ worker が構造的に開けない file を「これを読め」と契約に書�
 `--unattended` は **「この invocation に人間は居ない」という入力の宣言**である。
 mutation の権限を与えるフラグではない（裁定の記録は
 [adr-unattended-mode.md](./adr-unattended-mode.md) 第2節「裁定 0」、実測は同 第14節）。
-段階 A で受け付けるのは **dispatch runner だけ**であり、merge / uat に渡すと
-`invalid_input` で落ちる（受理して無視すると、CI は自分が守られていると誤解する）。
+段階 A で受け付けたのは **dispatch runner だけ**だった。段階 B
+（[#134](https://github.com/Kewton/commandmate-skills/issues/134)）で **merge runner の
+`--create-prs`** が加わっている（[merge-contract.md](./merge-contract.md) 第5.3節）。**その外
+—— merge `--merge-prs` と uat —— に渡すと `invalid_input` で落ちる**（受理して無視すると、
+CI は自分が守られていると誤解する）。**フラグは runner ごとに独立の宣言であり、
+runner 間で伝播しない**（同 ADR 第8節）: この runner が unattended だったかを merge / uat が
+読むことはなく、merge / uat が dispatch report から読むのは従来どおり `worker_state` と
+`verification.outcome` の2 field だけである。
 
 不変条件は4つで、**どれも「緩めない」側にしか働かない**。
 

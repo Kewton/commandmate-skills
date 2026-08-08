@@ -39,6 +39,7 @@ merge.mjs --plan <plan.json> --dispatch <dispatch-report.json> (--create-prs | -
 | `--dispatch <path>` | 必須 | なし | dispatch runner の `dispatch-report.json`。eligible 集合の唯一の根拠 |
 | `--create-prs` / `--merge-prs` | どちらか1つ必須 | なし | 有効化する mutating phase |
 | `--approve` | 任意 | **off** | 明示承認。無ければ mutation しない preview |
+| `--unattended` | 任意 | **off** | この invocation に人間は居ない、という**入力の宣言**（5.3節）。**`--create-prs` でのみ受理**する。`--merge-prs` との併用は `invalid_input`（段階 C 未実装） |
 | `--merge-method <m>` | 任意 | `squash` | `merge_prs` の merge 方式（`merge`/`squash`/`rebase`） |
 | `--out <dir>` | 任意 | `<dispatch-dir>/<phase>` | 出力先。既存なら `out_exists` で拒否 |
 | `--gh <path>` | 任意 | `gh` | PR 作成・CI 確認・merge に使う GitHub CLI |
@@ -153,6 +154,41 @@ exit code を一次ソースとし、verification pass だけを merge 対象に
 merge-report.json / merge-summary.md の**構造は変えない**。本文と report が食い違わないよう、
 上の 2 つの limitation だけを既存の `limitations[]` に足す。
 
+## 5.3 無人運転（`--unattended`。`--create-prs` のみ）
+
+[adr-unattended-mode.md](./adr-unattended-mode.md) 第8節の**段階 B** である
+（[#134](https://github.com/Kewton/commandmate-skills/issues/134)）。dispatch の同名フラグ
+（[dispatch-contract.md](./dispatch-contract.md) 第3.0.3節）と**同じ宣言**であり、
+runner 間で伝播はしない —— この runner は上流の dispatch が unattended だったかを**検査しない**
+（同 ADR 第8節「runner 間で unattended を伝播させない」）。
+
+**`--unattended` は「この invocation に人間は居ない」という入力の宣言であって、
+mutation の権限を与えるフラグではない。含意するのは締め付けだけである**（ADR 第2節「裁定 0」）。
+
+| 論点 | 規定 |
+|---|---|
+| `--approve` との関係 | **含意しない。** `--unattended` だけの invocation は preview であり、push も PR 作成もしない。無人で PR を作る CI は**両方**書く。これにより `approved: true` は「この mutation は明示的に承認された」を意味し続ける |
+| 含意する締め付け | **1つだけ: `change_evidence_unavailable` を limitation ではなく blocking として扱う**（5.2節 規則2 / ADR 第6.5節）。**その Issue の PR を作らずに停止**する（`partial` / exit 7 / `stop_reason: pr_create_failed`・target outcome `pr_failed`）。以降の eligible は `skipped` として残す。**PR 本文（`pr-bodies/issue-<n>.md`）も書かない** —— 作らない PR の本文を残さない |
+| 昇格しないもの | **`branch_changed_outside_declared_scope`。** 契約ゲート `requireScopeClean` が上流で既に判定しており、unattended dispatch は契約経路を必須にしているので、この limitation は「機械ゲートが通ったうえでの人間可読版」であることが保証される（ADR 第6.5節） |
+| 拒否する入力 | **`--merge-prs` との併用**（段階 C 未実装）。dispatch の緩和フラグ（`--auto-yes` / `--allow-questions` / `--contract-mode`）はこの runner に存在しないので、未知 option として同じ `invalid_input`（exit 3）になる。**受理して無視しない** |
+| 証跡 | `limitations[]` の **`unattended_mode`**（run 全体で1件。preflight で止まった run にも残る）。含意した締め付けと拒否する入力を detail に書く。**絶対 path を書かない**（redaction の tally がフラグ無しの run と食い違うため） |
+| 変えないもの | `merge_schema_version` は **1 のまま**。`stop_reason` にも target `outcome` にも**値を1つも足していない**。全 gate が通る世界では、フラグ無しの run と**同じ `status` / `stop_reason` / 作られる PR** になり、差分は `unattended_mode` の1件だけである（fixture で機械的に固定してある） |
+
+**`gh` 由来の停止は足していない。** [#115](https://github.com/Kewton/commandmate-skills/issues/115)
+の実測（ADR 第14.5節）どおり **`gh pr create` / `gh pr merge` は TTY 非依存で完結する** ——
+認証切れも確認プロンプトも gh は待たずに非ゼロで落ち、既存の `pr_create_failed` /
+`merge_failed` / `preflight_failed` が受ける。足すべきは停止ではなく**入力の衛生**であり、
+無人運転では **job 定義側**で次を置くこと。
+
+- `GH_TOKEN`（または `GH_ENTERPRISE_TOKEN`）
+- **`GIT_TERMINAL_PROMPT=0`**
+
+**`git push` の資格情報プロンプトだけは別**で、git は stdin ではなく `/dev/tty` を読むため、
+**制御端末を持つ起動元**（tmux ペインから起動した cron、人間の shell）では
+`stdio: ['ignore', …]` はプロンプトを止めない —— 「止まる」ではなく**無言で待つ**に化ける唯一の
+経路である。**runner はこれを検査しない**（別プロセスの環境を runner は保証できない。
+第4節の monitor と同じ理由）。
+
 ## 6. 停止と status / stop_reason / exit
 
 failure・blocked は途中で **停止** し、`blocking_reasons` と該当 target に記録する。停止後の
@@ -167,6 +203,11 @@ eligible は outcome `skipped` として残し、対象集合を隠さない。
 `stop_reason` は `completed` / `preflight_failed` / `pr_create_failed` / `pr_missing` /
 `pr_closed` / `ci_failed` / `ci_pending` / `merge_failed` / `runner_error`。
 最初の blocking 条件を採る。**failure を `completed` として報告しない。**
+
+`--unattended` はこの写像を1文字も変えない（ADR 第6.1節）。昇格した
+`change_evidence_unavailable` も**既存の `pr_create_failed` で受ける** —— 何が起きたかを
+名指しするのは `blocking_reasons[]` の code であって `stop_reason` ではない
+（dispatch の `wall_clock_budget_exhausted` と同じ形）。**新しい値は足さない。**
 
 ## 7. security（redaction）
 
@@ -192,6 +233,11 @@ report は5つの check を自己申告する。
 
 UAT 修正ループ（[#1456](https://github.com/Kewton/CommandMate/issues/1456)）、Issue 本文の自動編集、
 明示承認・CI pass 無しの無条件 merge は **この runner では行わない**。
+
+**無人 merge（`--merge-prs --unattended`）も現時点ではスコープ外**である。
+[adr-unattended-mode.md](./adr-unattended-mode.md) 第8節の段階 C であり、`verification_gates_unrecorded`
+の昇格と [#100](https://github.com/Kewton/commandmate-skills/issues/100) 段階1 を前提とする。
+実装するまでは `invalid_input` で拒否する（5.3節）。
 
 ## 10. version 運用
 
