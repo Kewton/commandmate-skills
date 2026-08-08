@@ -1,0 +1,13 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "320": { "state": "completed", "verify_exits": [0] }
+  },
+  "worktree_files": {
+    ".claude/skills/cmate-worker-development/SKILL.md": "# cmate-worker-development\n\nThe worker-side development method. Installed in BOTH roots by `commandmate skill install`.\n",
+    ".agents/skills/cmate-worker-development/SKILL.md": "# cmate-worker-development\n\nThe worker-side development method. Installed in BOTH roots by `commandmate skill install`.\n"
+  }
+}

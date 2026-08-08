@@ -1,0 +1,27 @@
+{
+  "description": "ADR §2 不変条件4 / §11 の非回帰。`--worker-method` を **渡さない** run は 1 bit も変わらない。この case の worktree には方法論スキルが両 root に install 済みであり、それでも契約に `## Method` は現れない —— 判断材料は install の有無ではなく operator の明示 opt-in だけである（既定を暗黙 on にしない）。golden contract は #128 の実装 **前** の dispatch.mjs が生成した bytes をそのまま凍結してあり、そこに差分が出たらそれは非回帰の破れである。d44 と同じ plan・同じ scenario を使うので、両者の report の差分は「フラグが足したもの」だけになる（二点測定の片側）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-worker-method.json",
+    "orchestrate_args": ["320", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [true],
+    "no_respond": true,
+    "sent": [320],
+    "worker_states": { "320": "completed" },
+    "verification_outcomes": { "320": "pass" },
+    "contract_issues": [320],
+    "contract_absent": { "320": ["## Method", "cmate-worker-development"] },
+    "prompt_artifact_absent": { "320": ["## Method", "cmate-worker-development"] },
+    "absent_limitation_codes": ["worker_method_declared", "worker_method_applied"],
+    "absent_blocking_codes": ["worker_method_unavailable"],
+    "summary_excludes": ["方法論"]
+  }
+}

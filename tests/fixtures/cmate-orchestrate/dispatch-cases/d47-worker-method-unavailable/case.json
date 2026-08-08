@@ -1,0 +1,31 @@
+{
+  "description": "ADR §3.4: `--worker-method` を指定したのに worktree に Skill が無ければ **停止する**（`limitations` に書いて続行する `acceptance_not_run` 型ではなく、`worktree_setup_unavailable` と同じ側）。最初の Wave なので判定は `--out` を作る **前** の pre-flight で起き、`--out` を消費せず 1人も dispatch しない —— だから `commandmate skill install` の後に **同じコマンドをそのまま再実行**できる（`rerun_when_installed` がそれを実測する）。stop_reason は既存 enum の `dispatch_error` のまま（対処が #93 と同型なので enum に値を足さない）、status は failure、blocking は `worker_method_unavailable`。宣言そのものは残るので、停止した report からも「この run は方法論つきで走らせるつもりだった」が読める。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-worker-method.json",
+    "orchestrate_args": ["320", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration", "--worker-method", "cmate-worker-development"],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "waves_count": 0,
+    "never_sent": [320],
+    "no_respond": true,
+    "no_contract_calls": true,
+    "out_dir_created": false,
+    "completion_check_passed": false,
+    "blocking_codes": ["worker_method_unavailable"],
+    "absent_blocking_codes": ["drift_worktrees_present", "worker_failed", "worktree_unresolved"],
+    "blocking_details_include": [
+      "#320: --worker-method cmate-worker-development was requested, but this worktree does not carry .claude/skills/cmate-worker-development/SKILL.md or .agents/skills/cmate-worker-development/SKILL.md",
+      "commandmate skill install cmate-worker-development"
+    ],
+    "limitation_codes": ["worker_method_declared"],
+    "absent_limitation_codes": ["worker_method_applied"],
+    "summary_includes": ["## 方法論", "worker_method_unavailable", "同じコマンドをそのまま再実行"],
+    "rerun_when_installed": { "exit": 0, "status": "success" }
+  }
+}

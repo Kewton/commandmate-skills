@@ -1,0 +1,26 @@
+{
+  "description": "Phase 0 の実測1（install の判定条件）を fixture に固定する。Skill が `.claude/skills` にだけ在り `.agents/skills` に無い worktree は「入っている」と読まない。理由は臆病さではなく測定できないことである: dispatch は `send --agent` を一度も渡さず、`ls --json` の row も id/branch/path しか持たないので、**どの Agent がこのタスクを取るかを知らない**。片側を許すと、Codex が読む root に無い契約に「この worktree の Skill を読め」と書くことになり、それは dispatch が測れない主張になる（ADR §3.5）。実測では開発機の `cmate-*` install 45 件はすべて両置きだったので、両方を要求しても実在の install は1件も落ちない。片側だけ在ることは detail に書く —— 「無い」と「半分ある」は操作者にとって別の情報である。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-worker-method.json",
+    "orchestrate_args": ["320", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration", "--worker-method", "cmate-worker-development"],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "waves_count": 0,
+    "never_sent": [320],
+    "no_respond": true,
+    "out_dir_created": false,
+    "completion_check_passed": false,
+    "blocking_codes": ["worker_method_unavailable"],
+    "blocking_details_include": [
+      "this worktree does not carry .agents/skills/cmate-worker-development/SKILL.md",
+      "it does carry .claude/skills/cmate-worker-development/SKILL.md, which is only half an install"
+    ],
+    "limitation_codes": ["worker_method_declared"],
+    "absent_limitation_codes": ["worker_method_applied"]
+  }
+}

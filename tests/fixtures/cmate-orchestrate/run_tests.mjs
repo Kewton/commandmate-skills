@@ -741,6 +741,24 @@ function checkContracts(spec, expect, planPath, scenarioObject, caseDir, outDir,
       check(!text.includes(needle), `${label}: unexpectedly contains ${JSON.stringify(needle)}`);
     }
 
+    // Section ORDER, not just presence. Where a section sits is load-bearing:
+    // the goal is truncated from the END, so a section that drifts down the
+    // document is a section that can be silently cut, and a worker reads top to
+    // bottom, so a method stated after the objective arrives too late
+    // (Issue #128 / ADR §3.3).
+    const order = (expect.contract_section_order ?? {})[number];
+    if (order) {
+      let previous = -1;
+      let previousName = null;
+      for (const section of order) {
+        const at = text.indexOf(`\n  ${section}\n`);
+        if (!check(at >= 0, `${label}: section "${section}" is missing from the goal`)) break;
+        check(at > previous, `${label}: section "${section}" must come after "${previousName}" but does not`);
+        previous = at;
+        previousName = section;
+      }
+    }
+
     const repeatPath = join(secondOut, 'contracts', `issue-${number}.yaml`);
     if (check(existsSync(repeatPath), `${label}: missing on the determinism re-run`)) {
       check(text === readFileSync(repeatPath, 'utf8'), `${label}: is not byte-identical across two runs of the same plan`);
@@ -835,6 +853,44 @@ function runDispatchCase(caseId) {
         `re-run status "${rerunReport.status}" !== "${expect.rerun_when_registered.status}"`);
       check(!rerunReport.blocking_reasons.some((entry) => entry.code === 'out_exists'),
         'the re-run was refused with out_exists: the first run consumed --out');
+      check(existsSync(join(outDir, 'dispatch-report.json')), 'the re-run wrote no dispatch-report.json');
+    }
+  }
+
+  // The same shape for the worker-method refusal (Issue #128 / ADR §3.4): the
+  // stop is only cheap if `commandmate skill install <id>` + the SAME command
+  // gets the operator all the way through. The re-run adds the Skill to both
+  // roots of every worktree and changes nothing else — same plan, same `--out`,
+  // same argv. A refusal that had consumed `--out` dies here on `out_exists`.
+  if (expect.rerun_when_installed) {
+    const skill = 'cmate-worker-development';
+    const body = `# ${skill}\n\nInstalled between the refusal and the re-run.\n`;
+    const rerunScenario = {
+      ...scenarioObject,
+      worktree_files: {
+        ...(scenarioObject.worktree_files ?? {}),
+        [`.claude/skills/${skill}/SKILL.md`]: body,
+        [`.agents/skills/${skill}/SKILL.md`]: body,
+      },
+    };
+    const rerun = runDispatchRunner(planPath, rerunScenario, work, outDir, spec.dispatch_args ?? [], null);
+    check(rerun.exit === expect.rerun_when_installed.exit,
+      `re-run after installing the skill exited ${rerun.exit} !== ${expect.rerun_when_installed.exit}`);
+    let rerunReport = null;
+    try {
+      rerunReport = JSON.parse(rerun.stdout);
+    } catch {
+      check(false, `re-run stdout is not valid JSON: ${rerun.stdout.slice(0, 200)}`);
+    }
+    if (rerunReport) {
+      check(rerunReport.status === expect.rerun_when_installed.status,
+        `re-run status "${rerunReport.status}" !== "${expect.rerun_when_installed.status}"`);
+      check(!rerunReport.blocking_reasons.some((entry) => entry.code === 'out_exists'),
+        'the re-run was refused with out_exists: the refusal consumed --out');
+      check(!rerunReport.blocking_reasons.some((entry) => entry.code === 'worker_method_unavailable'),
+        'the re-run still reports worker_method_unavailable after the skill was installed in both roots');
+      check(rerunReport.limitations.some((entry) => entry.code === 'worker_method_applied'),
+        'the re-run dispatched without recording worker_method_applied');
       check(existsSync(join(outDir, 'dispatch-report.json')), 'the re-run wrote no dispatch-report.json');
     }
   }
@@ -1173,6 +1229,48 @@ function runDispatchCase(caseId) {
   }
   if (expect.contract_issues) {
     checkContracts(spec, expect, planPath, scenarioObject, caseDir, outDir, cliLog);
+  }
+
+  // The prompt artifact — `<out>/prompts/issue-<n>.md`, the file that shows what
+  // the worker was actually given. On the contract path it holds the goal; on the
+  // fallback path it holds the worker prompt, which is the ONLY place that second
+  // generator's output is inspectable after the run (Issue #128 / ADR §1.2: a
+  // section written into only one of the two generators disappears exactly on the
+  // `--contract-mode auto` fallback, where nobody is looking).
+  for (const [num, needles] of Object.entries(expect.prompt_artifact_contains ?? {})) {
+    const promptPath = join(outDir, 'prompts', `issue-${num}.md`);
+    if (check(existsSync(promptPath), `no <out>/prompts/issue-${num}.md was written`)) {
+      const text = readFileSync(promptPath, 'utf8');
+      for (const needle of needles) {
+        check(text.includes(needle), `prompts/issue-${num}.md does not contain ${JSON.stringify(needle)}`);
+      }
+    }
+  }
+  for (const [num, needles] of Object.entries(expect.prompt_artifact_absent ?? {})) {
+    const promptPath = join(outDir, 'prompts', `issue-${num}.md`);
+    if (check(existsSync(promptPath), `no <out>/prompts/issue-${num}.md was written`)) {
+      const text = readFileSync(promptPath, 'utf8');
+      for (const needle of needles) {
+        check(!text.includes(needle), `prompts/issue-${num}.md unexpectedly contains ${JSON.stringify(needle)}`);
+      }
+    }
+  }
+
+  // Exact limitation counts. `limitation_codes` proves a code was recorded;
+  // this proves it was recorded the RIGHT NUMBER of times — the run-wide
+  // declaration exactly once, the per-issue record exactly once per issue
+  // (ADR §9). A duplicated declaration reads as two runs in one report.
+  for (const [code, count] of Object.entries(expect.limitation_code_counts ?? {})) {
+    const actual = report.limitations.filter((entry) => entry.code === code).length;
+    check(actual === count, `limitation "${code}" was recorded ${actual} time(s) !== ${count}`);
+  }
+
+  // The report's schema version, asserted from the CASE rather than only from the
+  // schema file: "we added a fact without touching dispatch_schema_version" is a
+  // claim about this number, and a case that means it should say so (ADR §9).
+  if (expect.dispatch_schema_version !== undefined) {
+    check(report.dispatch_schema_version === expect.dispatch_schema_version,
+      `dispatch_schema_version ${report.dispatch_schema_version} !== ${expect.dispatch_schema_version}`);
   }
 
   // Redaction: a secret shape in a captured prompt must not survive into the

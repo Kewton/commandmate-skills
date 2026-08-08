@@ -330,6 +330,9 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   parallelism_truncated: 'wave が max_parallel より広く、上限で切られた。--max-parallel か plan の wave 幅を見直す。',
   unsafe_worktree_target: 'worktree path が path-escape guard に弾かれた。profile の worktree_template を直す。',
   worktree_unresolved: 'worktree を解決できていない。cmate-worktree-setup で worktree を作成して再実行する。',
+  worker_method_unavailable: '`--worker-method` で指定した Skill が worktree に入っていない。`commandmate skill install <skill-id>` で入れて同じコマンドを再実行する（`--out` は消費していない）。方法論なしでよいなら flag を外す。',
+  worker_method_declared: '`--worker-method` 付きの run である。契約 / prompt に `## Method` 節が入っている。適用されたことは、守られたことではない。',
+  worker_method_applied: '当該 Issue の task text に `## Method` 節を書いた。遵守の証拠は worker の成果物側で確認する（dispatch は測っていない）。',
   verification_unrecorded: 'completed した worker に裁定が1つも記録されていない（runner 側の欠陥）。裁定なしを pass として扱わない。',
   verification_gates_unrecorded: 'pass の根拠となった gate を report が名指しできない。GATE 行を出す CLI で再実行して根拠を残す。',
 

@@ -37,6 +37,7 @@ CommandMate の exit code へ移しただけで、report 上の表現（field �
 | `--auto-yes` | 任意 | off | worker prompt を自動応答する。既定 off（prompt で停止し human へ提示） |
 | `--prepare-worktrees` | 任意 | **off** | pre-flight で未解決だった worktree を `cmate-worktree-setup` provider に作らせてから dispatch する（第3.0.1節）。既定 off＝従来どおり停止する |
 | `--worktree-setup <launcher>` | 任意（`--prepare-worktrees` 指定時は実質必須） | なし | 上記 provider のランチャー（`--cli` と同じ argv 規約・同じ guard。シェルは経由しない）。`--prepare-worktrees` 無しに渡すと `invalid_input` |
+| `--worker-method <skill-id>` | 任意 | **なし（off）** | worker が従うべき開発スキルの id（例 `cmate-worker-development`）。指定すると、dispatch 対象 worktree に**その skill が install されていることを実測**してから dispatch し、契約 goal と worker prompt の**両方**に `## Method` 節を1つ足す（第3.0.2節）。**指定しない run は、この flag が存在しなかった頃と byte 一致する。** id は `^[a-z0-9][a-z0-9-]{0,63}$`（path に展開されるので、それ以外は `invalid_input`） |
 | `--contract-mode <m>` | 任意 | `auto` | `auto` / `require` / `off`。契約非対応 CLI での挙動を決める（第2.7節） |
 | `--verify-gates <ids>` | 任意 | なし | 契約の `verify.gates` に載せる gate id（comma 区切り）。既定は省略＝全ゲート |
 | `--expect-branch <name>` | 任意 | なし | plan 承認時の統合 branch。dispatch 時に不一致なら drift |
@@ -342,8 +343,10 @@ lint も test も走らない契約になる。**受入条件を足したつも�
 
 ### 3.0 blocking pre-flight（`--out` を消費する前）
 
-**plan の検証と、最初の Wave の drift 再確認は、出力ディレクトリを作る前に行う**
-（[#90](https://github.com/Kewton/commandmate-skills/issues/90)）。ここで停止した場合:
+**plan の検証と、最初の Wave の drift 再確認と、`--worker-method` の install 実測は、
+出力ディレクトリを作る前に行う**
+（[#90](https://github.com/Kewton/commandmate-skills/issues/90) /
+[#128](https://github.com/Kewton/commandmate-skills/issues/128)）。ここで停止した場合:
 
 - **`--out` を作らない**（`out_dir` は `null`）。artifact も書かない。failure report は stdout にだけ出す。
 - exit は failure の規約どおり 1。
@@ -364,6 +367,18 @@ dispatch する最初の Wave」であり、その Wave のうち引き継がな
 ことになる。再実行対象が1件も無ければ pre-flight は**まったく走らない**（mutation が無いので
 守るべき mutation も無い）。停止したときに `<dir>/resume-attempt-<n>/` を作らないのは同じで、
 やはり同じコマンドを再実行できる。
+
+pre-flight の blocking 判定は2種類あり、`stop_reason` が違う。
+
+| 判定 | blocking reason | `stop_reason` |
+|---|---|---|
+| drift（branch / HEAD / 権限 / worktree 解決） | `drift_<check>` / `worktree_unresolved` | `drift` |
+| 条件付き依存の Skill が呼べない（`--prepare-worktrees` / `--worker-method`） | `worktree_setup_unavailable` 等 / `worker_method_unavailable` | `dispatch_error` |
+
+**どちらも `stop_reason` の enum に値を足していない。** 後者は drift ではない
+（branch も base も権限も動いていない）が、`dispatch_error` が schema に既に持っている
+「dispatch 前の停止」の形にそのまま収まり、対処も同型（**依存を install して同じコマンドを
+再実行する**）だからである。
 
 ### 3.0.1 worktree 準備段（`--prepare-worktrees`。既定 off）
 
@@ -409,6 +424,64 @@ proportional baseline は [cmate-worktree-setup](../../cmate-worktree-setup/) �
 `limitations` の `worktree_setup_ran` / `worktree_prepared`（Issue・branch・base SHA・baseline 合否）/
 `worktree_setup_partial` / `worktree_setup_skipped`、`summary_markdown` の「worktree 準備」節、
 そして run が進んだ場合のみ `<out>/worktree-setup/prepared.json`（redaction 済みの転記）。
+
+### 3.0.2 ワーカー側方法論の実測（`--worker-method`。既定 off）
+
+`--worker-method <skill-id>` を渡すと、dispatch は **contract を書く前に**、その Wave が
+dispatch する各 worktree に当該 Skill が在ることを実測する（[#128](https://github.com/Kewton/commandmate-skills/issues/128)。
+裁定の記録は [adr-worker-development-skill.md](./adr-worker-development-skill.md)）。
+
+**判定条件は「両 root に `SKILL.md` が在ること」である。**
+
+```
+<worktree>/.claude/skills/<skill-id>/SKILL.md      # Claude が読む
+<worktree>/.agents/skills/<skill-id>/SKILL.md      # Codex が読む
+```
+
+CommandMate は `skill install` でこの両方へ byte-identical に配備する。両方を要求するのは
+慎重さではなく**測定可能性**の問題である: この runner は `send --agent` を一度も渡さず、
+worktree を解決する `ls --json` の row も id / branch / path しか持たないので、
+**どの Agent がそのタスクを取るかを知らない**。片側だけを「入っている」と読むと、
+worker が構造的に開けない file を「これを読め」と契約に書くことになり、それは dispatch が
+測れない主張になる（ADR 第3.5節）。片側だけ在る場合はその事実を detail に書く
+（「無い」と「半分ある」は operator にとって別の情報である）。
+
+- **probe の対象は `commandmate ls` が返した worktree path 配下**である（リポジトリ root ではない）。
+  これは `.commandmate/verify.yaml` を読むのと同じ base であり、Skill の install が
+  worktree 単位であることの帰結である。手で両 root に配置した（receipt の付かない）package も
+  同じ path に在るので、同じように読める。
+- **version は記録しない。** `commandmate.skill.yaml` は block scalar と入れ子リストを使う
+  YAML であり、この runner が持つ唯一の YAML reader（`.commandmate/verify.yaml` 用の閉じた
+  subset parser）はその先頭 key で拒否する。読めないものを推測で埋めない。
+- **all-or-nothing である。** install 済みの worker だけ方法論つきで走らせない
+  （方法が worker ごとに違う wave では「全部通った」の意味が run ごとに変わる）。
+- 最初の Wave は **`--out` を作る前**の pre-flight で判定するので `--out` を消費しない。
+  2つ目以降の Wave は、従来どおり**その Wave の解決時**に同じ code で止まる
+  （その時点では `--out` は既に在るので、`status: partial` になる）。
+
+在れば、`## Objective` の**直前**に `## Method` 節を1つ足す。**契約 goal
+（`buildContractGoal`）と worker prompt（`buildWorkerPrompt`）の両方に、同じ位置に**足す
+——片方だけだと `--contract-mode auto` が契約非対応 CLI に落ちたときに方法論だけが黙って消える
+（第2.7節のフォールバック経路）。節が書くのは **どの Skill を読むか・どこに在るか・
+方法論と契約が食い違ったら契約が勝つこと・無ければ止まれ** の4つだけで、
+**方法論の要約は書かない**（書けば正本が2つになり、方法の更新が本 package の再リリースを要求する）。
+
+| 状況 | 扱い |
+|---|---|
+| 両 root に在る | `## Method` 節を書いて dispatch。`limitations` に `worker_method_applied`（Issue ごとに1件） |
+| 片方にしか無い / どちらにも無い | `blocking_reasons` の `worker_method_unavailable` で**停止**（Issue ごとに1件）。`stop_reason` は `dispatch_error`、status は failure（最初の Wave なら `--out` 未作成） |
+| worktree がそもそも解決できない | `worker_method_unavailable` は出さない。`worktree_unresolved` が先で、対処が違う |
+| flag を渡していない | **何も起きない。** probe せず、節も書かず、limitation も出さない |
+
+証跡は `dispatch_schema_version` を上げずに運ぶ（field も enum 値も足さない。第7節）:
+`limitations` の `worker_method_declared`（**run 全体で1件**。停止した run にも残る）と
+`worker_method_applied`（**Issue ごとに1件**）、`blocking_reasons` の
+`worker_method_unavailable`、そして `summary_markdown` の「方法論」節。
+
+**dispatch が証明できるのは3つだけである** —— ①方法論つきで走ると宣言した
+②その Skill が対象 worktree に在った ③参照が契約に書かれた。
+**「worker が実際に方法論に従ったか」は測っていない。**「適用された」と「守られた」は
+別の事実であり、report もその区別を明記する。
 
 ### 3.1 Wave ループ
 

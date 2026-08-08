@@ -1,0 +1,13 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "320": { "state": "completed", "verify": "pass" }
+  },
+  "worktree_files": {
+    ".claude/skills/cmate-worker-development/SKILL.md": "# cmate-worker-development\n\nThe worker-side development method. `commandmate skill install` writes this file byte-identically into BOTH roots.\n",
+    ".agents/skills/cmate-worker-development/SKILL.md": "# cmate-worker-development\n\nThe worker-side development method. `commandmate skill install` writes this file byte-identically into BOTH roots.\n"
+  }
+}

@@ -90,21 +90,37 @@ worktree path・baseline は **profile から解決**し、`develop`/`npm`/`carg
 |---|---|---|
 | [cmate-acceptance-test](../cmate-acceptance-test/) | uat の**意味ゲート**を使うとき | orchestrate は動くが **UAT の裁定は機械ゲートだけ**になる。report の `limitations[]`（`acceptance_not_run`）に記録される |
 | [cmate-worktree-setup](../cmate-worktree-setup/) | dispatch の **`--prepare-worktrees`** を使うとき | **停止する**（`limitations` ではなく `blocking_reasons` の `worktree_setup_unavailable`）。1人も dispatch せず `--out` も作らない |
+| [cmate-worker-development](../cmate-worker-development/) | dispatch の **`--worker-method`** を使うとき | **停止する**（`limitations` ではなく `blocking_reasons` の `worker_method_unavailable`）。最初の Wave なら1人も dispatch せず `--out` も作らない |
 
 ```bash
 commandmate skill install cmate-acceptance-test
 commandmate skill install cmate-worktree-setup
+commandmate skill install cmate-worker-development
 ```
 
-どちらも**黙って劣化しない**という型は同じだが、結果は違う。意味ゲートは未導入でも機械ゲートで
+3つとも**黙って劣化しない**という型は同じだが、結果は違う。意味ゲートは未導入でも機械ゲートで
 裁定できるので**続行して記録**する。worktree 準備は、準備できなければ **dispatch する対象が
 存在しない**（続行しても全 Issue が「worker を起動できないまま failed」になるだけ）なので**停止**する。
 理由は [references/adr-worktree-preparation.md](./references/adr-worktree-preparation.md) 第5節。
 
-未導入の環境では本書中の `../cmate-acceptance-test/...` / `../cmate-worktree-setup/...` への
-相対リンクが解決しない。**リンク切れ自体が「まだ入れていない」ことのサイン**である。
-plan / merge はどちらの Skill にも依存しない。dispatch が `cmate-worktree-setup` に依存するのは
-`--prepare-worktrees` を指定したときだけである（既定 off）。
+方法論も**停止**する側である。`--worker-method` を指定した run は「**方法が揃っていること**」を
+前提にした run であり、揃わないまま走らせればその前提が偽のまま wave が進む。停止のコストは
+`commandmate skill install <id>` と**同じコマンドの再実行**だけで、`--out` は消費していない。
+理由は [references/adr-worker-development-skill.md](./references/adr-worker-development-skill.md) 第3.4節。
+
+**`--worker-method` の判定は「両 root に在ること」である。** CommandMate は Skill を
+`.claude/skills/<id>/`（Claude が読む）と `.agents/skills/<id>/`（Codex が読む）の両方へ
+byte-identical に配備し、**dispatch はどちらの Agent が worker になるかを知らない**
+（`send --agent` を一度も渡さず、`ls --json` の row も agent を持たない）。片側だけの worktree を
+「入っている」と読むと、worker が構造的に開けない file を「これを読め」と契約に書くことになる。
+片側だけ在る場合はその旨が blocking reason の detail に出る（「無い」と「半分ある」は別の情報である）。
+
+未導入の環境では本書中の `../cmate-acceptance-test/...` / `../cmate-worktree-setup/...` /
+`../cmate-worker-development/...` への相対リンクが解決しない。
+**リンク切れ自体が「まだ入れていない」ことのサイン**である。
+plan / merge はどの Skill にも依存しない。dispatch が `cmate-worktree-setup` /
+`cmate-worker-development` に依存するのは、それぞれ `--prepare-worktrees` /
+`--worker-method` を指定したときだけである（どちらも既定 off）。
 
 ---
 
@@ -159,6 +175,7 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 | `--allow-questions` | **off** | 未回答 question を持つ Issue を含む plan を dispatch する |
 | `--prepare-worktrees` | **off** | pre-flight で未解決だった worktree を `cmate-worktree-setup` に作らせてから続行する。既定 off＝従来どおり停止 |
 | `--worktree-setup <launcher>` | — | 上記 provider の呼び出し口（`--cli` と同じ argv 規約）。`--prepare-worktrees` 無しに渡すと `invalid_input` |
+| `--worker-method <skill-id>` | **off** | worker が従うべき開発スキル（例 `cmate-worker-development`）を名指しする。**install を実測してから** dispatch し、無ければ停止する。契約 goal と worker prompt の**両方**に `## Method` 節が入る。**渡さない run は 1 bit も変わらない** |
 | `--contract-mode <m>` | `auto` | `auto` / `require`（フォールバック拒否）/ `off`（probe せず baseline 裁定） |
 | `--verify-gates <ids>` | 省略＝全ゲート | 契約の `verify.gates` に載せる gate id。**存在しない id を発明しない**。run 全体に1つ。Issue 側の `require:` とは**和集合**を取る（絞り込みが Issue の要求を落とすことは許さない） |
 | `--expect-branch <name>` | — | plan 承認時の統合 branch。不一致なら drift |
@@ -195,6 +212,36 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 
 規則の正本は [dispatch-contract.md](./references/dispatch-contract.md) 第3.0.1節、
 裁定の記録は [adr-worktree-preparation.md](./references/adr-worktree-preparation.md)。
+
+**ワーカー側の方法論（`--worker-method`。既定 off）** — 契約が worker へ渡すのは、これまで
+**WHAT（目的・受入条件・境界）と制約だけ**で、**HOW を渡す口が無かった**。
+`--worker-method <skill-id>` はその口である。渡すと、task text の `## Objective` の直前に
+`## Method` 節が1つ入り、**どの Skill を読むか・どこに在るか・無ければ止まれ**の3つだけを書く。
+
+- **足すのは「方法」であって「権限」ではない。** ゲートを緩めず、`scope.allow` を広げず、
+  push / PR の権限を与えない。**方法論と契約が食い違ったら契約が勝つ**と節自身が明記する。
+- **install を実測してから dispatch する。** 対象 worktree の
+  `.claude/skills/<id>/SKILL.md` と `.agents/skills/<id>/SKILL.md` の**両方**を読み、
+  在ることを確かめる。無ければ `worker_method_unavailable` で**停止**する（第2節）。
+  最初の Wave なら `--out` を作る前なので、**install して同じコマンドを再実行**すればよい。
+- **all-or-nothing である。** install 済みの worker だけ方法論つきで走らせ、残りを素通りさせない。
+  方法が worker ごとに違う wave では「全部通った」の意味が run ごとに変わる。
+- **契約 goal と worker prompt の両方に入る。** 片方だけだと `--contract-mode auto` が
+  契約非対応 CLI にぶつかったときに方法論だけが黙って消える。
+- **方法論の要約は runner に持たせない。** 節が書くのは skill 名と path だけなので、
+  方法が変わっても `cmate-orchestrate` を再リリースしなくてよい。
+- **既定では何も起きない。** 指定しない run は、この機能が存在しなかった頃と **byte 一致**する
+  （Skill が install 済みの worktree であっても、勝手に on にはならない）。
+- 証跡は `dispatch_schema_version` を上げずに `limitations[]` で運ぶ:
+  `worker_method_declared`（run 全体で1件）と `worker_method_applied`（Issue ごとに1件）。
+- **「適用された」と「守られた」は別の事実である。** dispatch が測れるのは
+  ①宣言した ②skill が worktree に在った ③契約に書いた の3つだけで、
+  **worker が実際に方法論に従ったかは測っていない**。遵守の証拠は worker の成果物側にあり、
+  機械で測りたいなら Issue の `acceptance-gates` が正しい場所である。
+
+規約の正本は [dispatch-contract.md](./references/dispatch-contract.md) 第1節・第3.0節、
+裁定の記録と実測は
+[adr-worker-development-skill.md](./references/adr-worker-development-skill.md)。
 
 **Issue が名指しした受入ゲート（`acceptance-gates` ブロック）** — Issue 本文に置かれた
 ```acceptance-gates ブロックの `require:` は、その Issue の裁定に**必ず参加しなければならない**
@@ -516,6 +563,8 @@ limitation は個々の report の語彙で、status runner はそれらを phas
 | `worktree_setup_partial` | dispatch | 要求したうち一部しか作られなかった。作れた分は**消さずに保持**し、未解決 Issue については停止する |
 | `worktree_setup_skipped` | dispatch | `--prepare-worktrees` を指定したが、pre-flight が別の drift で先に止まったため provider を呼んでいない |
 | `worktree_sync_rescanned` | dispatch | 準備段のため `commandmate sync` を2回実行した（解決時の1回＋作成後の強制1回） |
+| `worker_method_declared` | dispatch | `--worker-method <id>` 付きの run である。**run 全体で1件。** 停止した run にも残る（何を前提にした run だったかが読めるように） |
+| `worker_method_applied` | dispatch | その Issue の worktree に skill が在り、task text に `## Method` 節を書いた。**Issue ごとに1件。** 「適用された」であって「守られた」ではない |
 | `verification_unrecorded` | dispatch | completed した worker に裁定が1つも記録されなかった（runner 側の欠陥。`verification_recorded` completion check も落ちる） |
 | `verification_gates_unrecorded` | dispatch | verification は pass だが `GATE` 行を読めず、pass の根拠となった gate を report が名指しできない |
 | `drift_<check>` | dispatch | 非 blocking な drift（`integration_clean` / `worktrees_present`）を記録して続行した |
@@ -562,6 +611,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | dispatch `worktree_setup_unavailable`（`stop_reason: dispatch_error`） | `--prepare-worktrees` を指定したのに `cmate-worktree-setup` を呼べなかった（未 install / `--worktree-setup` 未指定 / launcher が起動不能） | **`cmate-worktree-setup` を install し、`--worktree-setup <launcher>` でその呼び出し口を渡して再実行する。** 準備段を使わないなら `--prepare-worktrees` を外し、従来どおり worktree を用意してから dispatch する |
 | dispatch `worktree_setup_failed`（同上） | provider は動いたが result contract を返さなかった、または1件も作らなかった | provider の出力（blocking reason）を読んで原因を直し、同じコマンドで再実行する。**作成済みの worktree は削除していない**ので、再実行の対象は残りの Issue だけになる |
 | dispatch `worktree_profile_mismatch`（同上） | provider が作った branch が plan の branch と違う（**profile の不一致**） | plan と `cmate-worktree-setup` に**同じ profile（同じ `branch_template`）**を渡す。既に作られた branch を使いたいなら、その branch を作る profile で plan を作り直す |
+| dispatch `worker_method_unavailable`（`stop_reason: dispatch_error`） | `--worker-method <id>` を指定したのに、その Skill が対象 worktree に無い（`.claude/skills/<id>/SKILL.md` と `.agents/skills/<id>/SKILL.md` の**両方**が要る。detail が「無い」のか「片側だけ在る」のかを名指しする）。**worker は1人も起動していない** | **`commandmate skill install <skill-id>` で対象 worktree に入れ、同じコマンドをそのまま再実行する**（最初の Wave 前で止まった場合、`--out` は消費されていない）。方法論なしで走らせてよいと判断したなら `--worker-method` を外す。**Issue の分割や re-plan は不要** |
 | dispatch exit 10（prompt 検出） | worker が人間の判断を求めている | `capture` の内容が report に出ている。**自分で判断して答える。** runner は自動応答しない |
 | dispatch `verification_not_judged`（exit 99） | run が error / cancelled で**誰も判定していない** | **再 dispatch では解けない。** CommandMate 側のログを見る。判定していないものを worker に直させない |
 | dispatch `worker_failed`（`--max-turns` 到達で未 commit） | worker が起動したが commit まで到達しなかった（worktree 未解決はこの code に落ちない。上の行） | prompt / worker ログを読む。指示が過大なら Issue を分割して re-plan する |
@@ -598,6 +648,7 @@ dispatch report の `summary_markdown` には上表と同じ next action が出�
 
 - [references/adr-issue-acceptance-gates.md](./references/adr-issue-acceptance-gates.md) — Issue 受入条件の機械ゲート化
 - [references/adr-worktree-preparation.md](./references/adr-worktree-preparation.md) — worktree 準備段の合成（`--prepare-worktrees`）
+- [references/adr-worker-development-skill.md](./references/adr-worker-development-skill.md) — ワーカー側方法論の呼び出し口（`--worker-method`）
 
 **機械検証用 schema** — `schemas/` に
 [execution-plan.v2](./schemas/execution-plan.v2.json)（plan）・

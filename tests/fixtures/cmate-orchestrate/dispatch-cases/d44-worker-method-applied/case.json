@@ -1,0 +1,54 @@
+{
+  "description": "ADR §12 段4 の二点測定の適合側（緑）。`--worker-method cmate-worker-development` を渡し、その Skill は worktree の `.claude/skills` と `.agents/skills` の **両方** に在る。契約 goal に `## Method` 節が入り、節は skill 名と 2 つの path と「契約が勝つ」だけを言う（方法論の要約は書かない = ADR §3.3 の (b) 化の禁止）。節の位置は `## Objective` の直前で、`# Issue` header より後（`yamlBlockScalar` は非空白の見出し行で始まることを前提にしている）。証跡は schema を触らずに limitations で運ぶ: run 全体で1件の `worker_method_declared` と、Issue ごとに1件の `worker_method_applied`。d45 は **同じ plan・同じ scenario** をフラグ無しで走らせた側で、2 つの report の差分がフラグの足したものそのものになる。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-worker-method.json",
+    "orchestrate_args": ["320", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration", "--worker-method", "cmate-worker-development"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [true],
+    "no_respond": true,
+    "sent": [320],
+    "send_counts": { "320": 1 },
+    "worker_states": { "320": "completed" },
+    "verification_outcomes": { "320": "pass" },
+    "contract_issues": [320],
+    "contract_contains": {
+      "320": [
+        "  ## Method",
+        "  Follow the `cmate-worker-development` Skill installed in this worktree.",
+        "  - .claude/skills/cmate-worker-development/SKILL.md",
+        "  - .agents/skills/cmate-worker-development/SKILL.md",
+        "  Where the Skill and this task disagree, THIS TASK WINS.",
+        "  If the Skill is not there, STOP and report it — do not improvise a method.",
+        "\n  ## Method\n",
+        "\n  ## Objective\n"
+      ]
+    },
+    "contract_absent": {
+      "320": ["赤の実測", "test-first", "変異注入"]
+    },
+    "contract_section_order": {
+      "320": ["## Method", "## Objective", "## Acceptance criteria", "## Files you may change", "## Rules"]
+    },
+    "prompt_artifact_contains": {
+      "320": ["## Method", "- .claude/skills/cmate-worker-development/SKILL.md", "- .agents/skills/cmate-worker-development/SKILL.md"]
+    },
+    "limitation_codes": ["worker_method_declared", "worker_method_applied"],
+    "limitation_code_counts": { "worker_method_declared": 1, "worker_method_applied": 1 },
+    "limitation_details_include": [
+      "#320: cmate-worker-development was found in this worktree",
+      "the execution contract's goal",
+      "適用されたことは、守られたことではない"
+    ],
+    "absent_blocking_codes": ["worker_method_unavailable"],
+    "summary_includes": ["## 方法論", "「適用された」と「守られた」は別の事実である"],
+    "dispatch_schema_version": 1
+  }
+}
