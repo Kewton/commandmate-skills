@@ -13,7 +13,10 @@
 // against commandmate-cli-contract.json (the real CLI surface transcribed from
 // `commandmate <cmd> --help`). A subcommand or flag the real CLI does not accept
 // makes the fake exit non-zero — so a runner that reaches for a fictional flag
-// fails the suite here, not only in production. The real CLI is worktree-id based:
+// fails the suite here, not only in production. A flag whose argument is an enum
+// carries its values in the contract's `flag_values` and is checked the same way
+// (Issue #136: `send --duration` takes 1h/3h/8h, and the real CLI rejects anything
+// else before it sends). The real CLI is worktree-id based:
 // `send <worktree-id> <message>`, `wait <worktree-ids...>`, `capture <worktree-id>
 // --json`, `respond <worktree-id> <answer>`, `ls --json`. There is no `--json
 // --worktree --prompt-file` on send, no `--task` anywhere, and no `verify`/`uat`
@@ -167,12 +170,26 @@ function enforceContract() {
     process.exit(2);
   }
   const allowed = new Set(spec.flags ?? []);
-  for (const token of argv.slice(1)) {
+  const enums = spec.flag_values ?? {};
+  const tokens = argv.slice(1);
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
     if (typeof token !== 'string' || !token.startsWith('--')) continue;
-    const flag = token.split('=')[0];
+    const [flag, inline] = [token.split('=')[0], token.includes('=') ? token.slice(token.indexOf('=') + 1) : null];
     if (!allowed.has(flag)) {
       process.stderr.write(`fake-cli: contract violation: commandmate ${sub} does not accept ${flag}\n`);
       process.exit(2);
+    }
+    // A flag whose argument is an enum (Issue #136: `send --duration` takes
+    // 1h/3h/8h and nothing else). The real CLI validates BEFORE it sends, and its
+    // failure is the whole dispatch, so the fake refuses the same way instead of
+    // accepting a value that would have aborted the run in production.
+    const values = enums[flag];
+    if (!values) continue;
+    const given = inline ?? tokens[i + 1] ?? null;
+    if (given === null || !values.includes(given)) {
+      process.stderr.write(`Error: Invalid ${flag.replace(/^--/, '')}. Must be one of: ${values.join(', ')}\n`);
+      process.exit(1);
     }
   }
 }

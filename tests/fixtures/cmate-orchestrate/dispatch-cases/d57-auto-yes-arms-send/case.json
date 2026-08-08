@@ -1,0 +1,25 @@
+{
+  "description": "`--auto-yes` は契約の1行ではなく worktree の状態を有効化する（#136）: 契約経路で `--auto-yes` を渡した dispatch は、supervision を開く `send --contract` にそのまま `--auto-yes --duration 1h` を載せる。サーバの Auto-Yes poller は worktree の auto-yes 状態が有効でなければ起動しない（ADR §14.6）ので、契約の `autoYes.mode: safe` だけでは自動応答は動かない。既定（--max-turns 8 × --wait-timeout 300s = 40分）は 1h で覆えるため window 不足の limitation は出ない。二点測定の相方は d58。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--auto-yes"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "no_respond": true,
+    "sent": [201, 200],
+    "send_counts": { "201": 1, "200": 1 },
+    "dispatch_send_args": {
+      "201": ["--auto-yes", "--duration", "1h"],
+      "200": ["--auto-yes", "--duration", "1h"]
+    },
+    "absent_limitation_codes": ["auto_yes_used", "auto_yes_window_short"]
+  }
+}
