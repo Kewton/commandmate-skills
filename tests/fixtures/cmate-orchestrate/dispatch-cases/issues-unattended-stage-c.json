@@ -1,0 +1,36 @@
+{
+  "issues": [
+    {
+      "number": 350,
+      "title": "feat: land the stage C merge gate",
+      "body": "Land the unattended merge gate.\n\n## 対象ファイル\n- `src/stage-c.ts`\n\n## Acceptance criteria\n- [ ] the gate refuses an issue with no acceptance-gate block\n\n```acceptance-gates\nversion: 1\nrequire:\n  - uat-smoke\n```\n",
+      "labels": [
+        "enhancement"
+      ]
+    },
+    {
+      "number": 351,
+      "title": "feat: land the stage C uat pre-flight",
+      "body": "Land the invocation-cwd pre-flight.\n\n## 対象ファイル\n- `src/preflight.ts`\n\n## Acceptance criteria\n- [ ] a detached HEAD creates no fix worktree\n\n```acceptance-gates\nversion: 1\nrequire:\n  - uat-smoke\n```\n",
+      "labels": [
+        "enhancement"
+      ]
+    },
+    {
+      "number": 352,
+      "title": "docs: describe the stage table",
+      "body": "Describe the stage table. This issue deliberately carries NO acceptance-gate block: it is the issue an unattended --merge-prs must refuse rather than silently exclude.\n\n## 対象ファイル\n- `docs/stages.md`\n\n## Acceptance criteria\n- [ ] the stage table names every runner\n",
+      "labels": [
+        "documentation"
+      ]
+    },
+    {
+      "number": 353,
+      "title": "chore: tidy the stage C helpers",
+      "body": "Tidy the helpers. This issue deliberately states NO acceptance criteria — it is the `no_acceptance_criteria` half of ADR section 9's condition 2 — while still declaring a gate block, so the two findings can be measured apart.\n\n## 対象ファイル\n- `src/helpers.ts`\n\n```acceptance-gates\nversion: 1\nrequire:\n  - uat-smoke\n```\n",
+      "labels": [
+        "chore"
+      ]
+    }
+  ]
+}

@@ -175,7 +175,8 @@ const MAX_ATTEMPTS = 99;
 
 // =============================================================================
 // Unattended — the declaration that nobody is watching this invocation
-// (Issue #122 / references/adr-unattended-mode.md sections 2, 3, 14.1, 14.2)
+// (Issue #122 / #142 / references/adr-unattended-mode.md sections 2, 3, 6.5,
+// 8, 14.1, 14.2)
 // =============================================================================
 //
 // `--unattended` is an INPUT DECLARATION, not a permission (ADR "裁定 0"). It
@@ -185,11 +186,20 @@ const MAX_ATTEMPTS = 99;
 // have) and it does not answer prompts: a run that says "there is no human here"
 // cannot also say "answer every prompt with yes".
 //
-// Stage A is the dispatch runner only. merge/uat refuse the flag today because
-// their `parseArgs` has no such option and an unknown flag is already
-// `invalid_input` (exit 3) — which is exactly what ADR section 8 asks for: an
-// unimplemented stage must refuse the flag rather than accept and ignore it.
-const UNATTENDED_STAGE = 'A（dispatch のみ）';
+// Stage C (Issue #142) reaches every runner: dispatch, `merge.mjs` (both
+// phases) and `uat.mjs`. What it adds HERE over stage A is exactly one thing
+// (ADR section 6.5): `verification_gates_unrecorded` becomes BLOCKING. A pass
+// whose gates the report cannot name is an unattributed pass — readable, and
+// correctable, by a human who opens the run, and with nobody reading it it is
+// the whole basis on which an unattended `--merge-prs` would move a base branch.
+// The promotion is tied to `--unattended`, not to any downstream flag, for the
+// reason section 16.1 gives: an invocation's declaration must not mean different
+// things depending on what some other job does later.
+//
+// `change_evidence_unavailable` is NOT promoted here — it is a merge-side
+// limitation and stage B already promoted it (ADR section 6.5's correction note;
+// section 16). Nothing about it is re-decided in this runner.
+const UNATTENDED_STAGE = 'C（dispatch + merge + uat）';
 
 // The exclusivity lock (ADR section 14.1). Issue #115 measured the window
 // between process start and the creation of `--out`: two runs started 700 ms
@@ -1698,7 +1708,9 @@ function unattendedModeLimitation(inputs, lockKeys) {
       + '締め付けだけを含意し、権限は1つも足していない — **`--approve` は含意しない**、prompt には答えない、'
       + 'ゲートを無効化せず、blocking を limitation に格下げせず、status を1段も上げない。'
       + `含意した締め付け: --contract-mode require / pre-flight で全 Issue の scope 宣言を all-or-nothing 検査（--out を作る前）/ `
-      + `--wall-clock-budget ${inputs.wallClockBudget}s / worktree 単位の排他 lock ${lockKeys.length} 件（${lockKeys.join(', ') || 'なし'}）。`
+      + `--wall-clock-budget ${inputs.wallClockBudget}s / worktree 単位の排他 lock ${lockKeys.length} 件（${lockKeys.join(', ') || 'なし'}）/ `
+      + 'verification_gates_unrecorded を limitation ではなく blocking として扱う'
+      + '（gate を名指しできない pass は、無人 merge の根拠にしない。段階 C）。'
       + '拒否する緩和フラグ: --auto-yes / --allow-questions / --contract-mode off|auto（invalid_input, exit 3）。'
       + 'monitor を併用するなら monitor 側の `--no-auto-approve` は要件である（契約の autoYes: off は monitor を止めない）。',
   };
@@ -3526,14 +3538,27 @@ function verificationNoteClause(verification, source) {
 // pick up is recorded, instead of an empty list that reads as "nothing ran".
 // #47 / CommandMate #1678 B-5 exists so a report alone can answer WHAT a pass
 // was based on; a silently empty `gates` returns the report to before that.
-function recordVerification(report, worker, verification, source) {
+// `unattributed` is the stage-C promotion channel (Issue #142 / ADR sections 6.5
+// and 8). Under `--unattended` the same finding is written to `blocking_reasons`
+// instead of `limitations` and its issue number is collected here, so the wave
+// barrier below can stop the run on it. The VERDICT is untouched either way: it
+// is an exit code and it stands (that is what Issue #83 decided), so
+// `verification.outcome` stays `pass` and the `checks` line is added on both
+// paths. What the promotion changes is whether the run keeps going.
+function recordVerification(report, worker, verification, source, unattended = false, unattributed = null) {
   worker.verification = verification;
   worker.note = appendNote(worker.note, verificationNoteClause(verification, source));
   if (source === 'contract' && verification.outcome === 'pass' && verification.gates.length === 0) {
-    report.limitations.push({
-      code: 'verification_gates_unrecorded',
-      detail: `#${worker.issue} passed verification, but no \`GATE <id> PASS|FAIL\` line could be read from the \`commandmate wait --verify\` output, so the report cannot name which gates the pass was based on; the verdict is the exit code and stands, but treat the pass as unattributed`,
-    });
+    const detail = `#${worker.issue} passed verification, but no \`GATE <id> PASS|FAIL\` line could be read from the \`commandmate wait --verify\` output, so the report cannot name which gates the pass was based on; the verdict is the exit code and stands, but treat the pass as unattributed`;
+    if (unattended) {
+      if (unattributed) unattributed.add(worker.issue);
+      report.blocking_reasons.push({
+        code: 'verification_gates_unrecorded',
+        detail: `${detail}. Under --unattended this is blocking rather than a limitation (ADR section 6.5): nobody is here to open the run and see WHAT judged it, and an unattributed pass is the whole basis an unattended merge would act on`,
+      });
+    } else {
+      report.limitations.push({ code: 'verification_gates_unrecorded', detail });
+    }
     worker.verification.checks = [
       ...verification.checks,
       'gate list unavailable: the wait --verify output carried no parseable `GATE <id> PASS|FAIL` line',
@@ -3940,6 +3965,11 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   // Issues that completed with no verification verdict recorded at all (#83).
   // Feeds the `verification_recorded` completion check below.
   const verificationUnrecorded = new Set();
+  // Issues whose contract pass could not name a single gate, under `--unattended`
+  // only (Issue #142 / ADR sections 6.5, 8 — stage C). `recordVerification` has
+  // already written the blocking reason; this set is what makes the wave loop
+  // STOP on it rather than carry an unattributed pass into the next wave.
+  const unattributedPasses = new Set();
 
   for (let waveIndex = 0; waveIndex < plan.waves.length && !stopped; waveIndex += 1) {
     // The budget, checked before a wave is STARTED as well as between turns
@@ -4428,7 +4458,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
         // invariant holds on this path by construction. An issue step 3b' did
         // not re-judge has no entry here, and its transcribed record stands.
         const judged = reverifyVerdicts.get(worker.issue);
-        if (judged) recordVerification(report, worker, judged.verdict, judged.source);
+        if (judged) recordVerification(report, worker, judged.verdict, judged.source, inputs.unattended, unattributedPasses);
       } else if (contractMode) {
         // The verdict already exists: it is the exit code CommandMate returned
         // while the worker was supervised. Re-running anything here would be a
@@ -4441,7 +4471,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
             outcome: verdict.outcome,
             gates: verdict.gates ?? [],
             checks: verdict.checks,
-          }, 'contract');
+          }, 'contract', inputs.unattended, unattributedPasses);
         }
       } else if (worker.worker_state === 'completed') {
         // The fallback judge is an ACTION, not a stored verdict, so it runs for
@@ -4543,6 +4573,24 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
       } else {
         halt('partial', 'dispatch_error', 'wave_not_advanced', `wave ${waveIndex} did not advance`);
       }
+      break;
+    }
+
+    // The stage-C stop (Issue #142 / ADR sections 6.5, 8). Placed AFTER the
+    // ranking above, deliberately: every stop in that chain is a finding this
+    // run really made about a worker, and this one is a finding about what the
+    // report can SHOW. When both hold, the worker-level cause is the one an
+    // operator acts on first, and the promoted reason is in `blocking_reasons`
+    // either way (`recordVerification` wrote it when it happened, not here), so
+    // ranking it last loses nothing.
+    //
+    // The wave DID advance: `barrier.advanced` stays true, because the barrier
+    // measures completion and verification and both held. What stops the run is
+    // that the next wave would be dispatched on top of a pass nobody can attribute.
+    if (unattributedPasses.size > 0) {
+      report.status = 'partial';
+      report.stop_reason = 'dispatch_error';
+      stopped = true;
       break;
     }
   }
@@ -4827,6 +4875,12 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
     }
     if (report.blocking_reasons.some((reason) => reason.code === 'contract_scope_unknown')) {
       lines.push('- next: 対象 file を1件も宣言していない Issue がある。**Issue 本文に対象ファイルを書いて re-plan する。** `--unattended` は plan 全体を pre-flight で検査するので、1件でも欠けていれば1人も dispatch しない（`--out` は消費していない）（owner: human）。');
+    }
+    // The stage-C promotion (Issue #142). The verdict itself is not in doubt —
+    // it is an exit code — so the action is about the EVIDENCE, and the line
+    // says so rather than sending the operator to debug a worker.
+    if (report.blocking_reasons.some((reason) => reason.code === 'verification_gates_unrecorded')) {
+      lines.push('- next: pass の根拠となった gate を report が名指しできていない。`GATE <id> PASS|FAIL` 行を出す CommandMate で再実行して根拠を残す。**裁定（exit code）は pass のままだが、無人 merge の根拠にはしない**（段階 C）。人間が読む運転に戻すなら `--unattended` を外せば従来どおり limitation として続行する（owner: operator）。');
     }
     if (report.limitations.some((reason) => reason.code === 'contract_unsupported')) {
       lines.push('- next: 契約非対応の CLI だったため裁定はフォールバック（baseline 再実行）である。契約ゲートで裁定したい場合は CommandMate を 0.17.0 以上へ更新する（owner: operator）。');

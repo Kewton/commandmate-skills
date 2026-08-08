@@ -2917,17 +2917,24 @@ function unattendedInputTest() {
   check(accepted.exit === 0,
     `--unattended --contract-mode require should dispatch (it states the implied mode), exited ${accepted.exit}: ${accepted.stdout.slice(0, 300)}`);
 
-  // Stage B reaches merge `--create-prs` only (ADR §8; Issue #134). Every runner
-  // and phase BEYOND it must REFUSE the flag rather than accept and ignore it: a
-  // CI that passes `--unattended` to a runner that shrugs believes it is being
-  // guarded when it is not. Asserted here so a later stage cannot quietly start
-  // accepting one of them without a fixture saying so.
-  //
-  // uat.mjs has no such option at all, so its refusal comes from parseArgs;
-  // merge.mjs HAS the option and refuses the combination itself, which is why
-  // both rows are checked rather than assuming one covers the other.
-  const uatRefused = runUatRunner(planPath, '/dev/null', join(work, 'uat'), '--write-uat', ['--unattended'], baseEnv(), work);
-  check(uatRefused.exit === 3, `uat.mjs --unattended should be refused with exit 3 (stage C is not implemented), exited ${uatRefused.exit}`);
+  // Stage C reaches every runner (ADR §8; Issue #142), so the row that used to
+  // assert "uat.mjs refuses --unattended outright" now asserts the two things
+  // that flag IMPLIES there. Both are refusals of an under-specified invocation,
+  // not of the flag: `--unattended` without the semantic gate is a baseline
+  // re-run calling itself an acceptance run, and without an explicit
+  // `--max-attempts` it is a bound nobody chose.
+  for (const [label, args, needle] of [
+    ['uat --unattended with no --require-acceptance', ['--unattended'], 'requires --require-acceptance'],
+    ['uat --unattended with no --max-attempts', ['--unattended', '--acceptance-dir', work, '--require-acceptance'], 'requires --max-attempts'],
+  ]) {
+    const refused = runUatRunner(planPath, '/dev/null', join(work, 'uat'), '--write-uat', args, baseEnv(), work);
+    check(refused.exit === 3, `${label}: expected exit 3, got ${refused.exit}`);
+    let doc = null;
+    try { doc = JSON.parse(refused.stdout); } catch { /* a refused invocation still prints a failure envelope */ }
+    const detail = (doc?.blocking_reasons ?? []).map((entry) => `${entry.code} ${entry.detail}`).join(' ');
+    check(detail.includes('invalid_input'), `${label}: expected an invalid_input error, got: ${detail.slice(0, 200)}`);
+    check(detail.includes(needle), `${label}: the error should say "${needle}", got: ${detail.slice(0, 300)}`);
+  }
 }
 
 // The auto-yes arming table (Issue #136).
@@ -3335,6 +3342,11 @@ function unattendedMergeTest() {
       `the unattended run should name change_evidence_unavailable as blocking, got ${JSON.stringify(codesOf(unattended.report?.blocking_reasons))}`);
     check(!codesOf(unattended.report?.limitations).includes('change_evidence_unavailable'),
       'the promoted finding should be blocking, not blocking AND a limitation');
+    // Stage C must not promote this a SECOND time (Issue #142; ADR §6.5's
+    // correction note — the stage table put it in stage B and #134 shipped it).
+    // A second promotion would show up here as two reasons for one finding.
+    check(codesOf(unattended.report?.blocking_reasons).filter((code) => code === 'change_evidence_unavailable').length === 1,
+      `change_evidence_unavailable should be promoted exactly once, got ${JSON.stringify(codesOf(unattended.report?.blocking_reasons))}`);
     // No PR, and not even a push: the stop is before the first mutation.
     check(countCalls(unattended.log, 'pr', 'create') === 0 && countCalls(unattended.log, 'push') === 0,
       `a blocked unattended run pushed or created something (push=${countCalls(unattended.log, 'push')}, create=${countCalls(unattended.log, 'pr', 'create')})`);
@@ -3348,16 +3360,21 @@ function unattendedMergeTest() {
       'a refused PR still had its body written');
   }
 
-  // --- 4. --merge-prs --unattended is refused (stage C is not implemented) ---
+  // --- 4. --merge-prs --unattended is ACCEPTED now (stage C, Issue #142) ------
+  // The stage-B refusal was not deleted, it was replaced by the stage it named.
+  // What it refuses instead is the ISSUE it cannot merge unattended (§9), which
+  // this plan's issues all are — so the phase stops, and the stop is a stop
+  // rather than an `invalid_input` about the flag.
   {
     const stageC = mergePhase('--merge-prs', ['--approve', '--unattended']);
-    check(stageC.exit === 3, `--merge-prs --unattended should be refused with exit 3, exited ${stageC.exit}`);
-    check(codesOf(stageC.report?.blocking_reasons).includes('invalid_input'),
-      `the refusal should be invalid_input, got ${JSON.stringify(codesOf(stageC.report?.blocking_reasons))}`);
-    check((stageC.report?.blocking_reasons ?? []).some((entry) => entry.detail.includes('stage C')),
-      `the refusal should say why (stage C), got ${JSON.stringify(stageC.report?.blocking_reasons)}`);
-    check(!existsSync(stageC.outDir), 'a refused invocation created its output directory');
-    check(stageC.log.length === 0, `a refused invocation called the CLI ${stageC.log.length} time(s)`);
+    check(stageC.exit === 1, `--merge-prs --unattended should be accepted and stop on its issues (exit 1), exited ${stageC.exit}`);
+    check(!codesOf(stageC.report?.blocking_reasons).includes('invalid_input'),
+      `the flag itself must no longer be refused, got ${JSON.stringify(codesOf(stageC.report?.blocking_reasons))}`);
+    check(stageC.report?.stop_reason === 'preflight_failed',
+      `the stage-C stop should reuse preflight_failed, got ${stageC.report?.stop_reason}`);
+    check(codesOf(stageC.report?.blocking_reasons).includes('acceptance_gates_required'),
+      `the stop should name acceptance_gates_required, got ${JSON.stringify(codesOf(stageC.report?.blocking_reasons))}`);
+    check(countCalls(stageC.log, 'pr', 'merge') === 0, `an accepted-but-stopped run merged ${countCalls(stageC.log, 'pr', 'merge')} PR(s)`);
   }
 
   // --- 5. the relaxing flags of the dispatch runner are refused here too -----
@@ -3374,6 +3391,459 @@ function unattendedMergeTest() {
       check(refused.log.length === 0, `${relaxing[0]}: a refused invocation called the CLI ${refused.log.length} time(s)`);
     }
   }
+}
+
+// =============================================================================
+// Stage C (Issue #142 / ADR §6.5, §8, §9, §14.3)
+// =============================================================================
+//
+// Stage C is the first stage whose furthest reach is not a PR. Everything below
+// is written as a COMPARISON or as a count taken from the fake CLI's invocation
+// log rather than from the report the runner wrote about itself: "no fix
+// worktree was created" is a claim about the world, and the empty `worktree add`
+// log is the evidence for it.
+
+// The one file BOTH judges read, declaring the gate id the stage-C issue fixture
+// requires. Without it dispatch refuses the issue before `send`
+// (`acceptance_gate_id_unknown`), so the plan would never reach merge/uat.
+const STAGE_C_VERIFY_YAML = 'version: 1\ngates:\n  - id: uat-smoke\n    command: "true"\n    timeoutSec: 60\n';
+const STAGE_C_ISSUES = 'dispatch-cases/issues-unattended-stage-c.json';
+
+// plan -> dispatch report over a contract-capable world, for a chosen subset of
+// the stage-C issue fixture. `--allow-questions` is needed only for the subset
+// that includes the issue with no acceptance criteria (the planner raises a
+// question for it, and dispatch would otherwise refuse the whole plan). Passing
+// it to DISPATCH is legitimate here and is the point of ADR §8's "unattended is
+// not propagated between runners": this dispatch had a human, the merge does not.
+function stageCWorld(prefix, issues, { allowQuestions = false } = {}) {
+  const runsDir = mkdtempSync(join(tmpdir(), `${prefix}-plan-`));
+  const spec = {
+    plan: {
+      issues_fixture: STAGE_C_ISSUES,
+      orchestrate_args: [...issues.map(String), '--max-parallel', '3', '--run-id', 'plan'],
+    },
+  };
+  const planPath = generatePlan(spec, runsDir);
+  if (!existsSync(planPath)) return null;
+  const work = mkdtempSync(join(tmpdir(), `${prefix}-`));
+  const scenario = {
+    cli_available: true,
+    cli_contract: true,
+    git: { branch: 'feature/integration', dirty: false },
+    gh: { repo_access: true },
+    workers: Object.fromEntries(issues.map((n) => [n, { state: 'completed', verify: 'pass' }])),
+    worktree_files: { '.commandmate/verify.yaml': STAGE_C_VERIFY_YAML },
+  };
+  const dispatchOut = join(work, 'dispatch');
+  runDispatchRunner(planPath, scenario, work, dispatchOut, [
+    '--expect-branch', 'feature/integration',
+    ...(allowQuestions ? ['--allow-questions'] : []),
+  ], null);
+  const dispatchPath = join(dispatchOut, 'dispatch-report.json');
+  if (!existsSync(dispatchPath)) return null;
+  return { planPath, plan: readPlan(planPath), work, dispatchPath, integration: join(work, 'integration') };
+}
+
+// Stage C: `merge.mjs --merge-prs --unattended` (Issue #142 / ADR §8, §9).
+function unattendedMergePrsTest() {
+  log('  unattended merge --merge-prs (#142)');
+  const green = stageCWorld('cmate-stagec-green', [350, 351]);
+  if (!check(green !== null, 'stage C: the green plan/dispatch world was not generated')) return;
+
+  let runIndex = 0;
+  const mergePhase = (world, args, extraScenario = {}) => {
+    runIndex += 1;
+    const label = `run-${runIndex}`;
+    const outDir = join(world.work, `merge-${label}`);
+    const logPath = join(world.work, `${label}.log`);
+    const prs = {};
+    for (const issue of world.plan.issues) {
+      prs[issue.number] = { view_state: 'OPEN', checks: [{ name: 'build', state: 'SUCCESS' }], merge: 'ok', create: 'ok' };
+    }
+    const scenarioPath = writeScenario(world.work, `scenario-${label}.json`, withDiffDefaults({
+      cli_available: true,
+      gh: { repo_access: true },
+      git: { base_resolvable: true },
+      prs,
+      ...extraScenario,
+    }, world.plan));
+    const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath };
+    const { exit, stdout } = runMerge(world.planPath, world.dispatchPath, outDir, '--merge-prs', args, env, world.integration);
+    let report = null;
+    try { report = JSON.parse(stdout); } catch { /* a refused invocation still prints a failure envelope */ }
+    return { exit, report, outDir, log: readCliLog(logPath) };
+  };
+  const codesOf = (entries) => (entries ?? []).map((entry) => entry.code);
+  const targetShape = (report) => (report?.targets ?? []).map((target) => ({
+    issue: target.issue, branch: target.branch, outcome: target.outcome, pr_number: target.pr_number,
+    ci_passed: target.ci_passed, merge_attempted: target.merge_attempted, merged: target.merged, note: target.note,
+  }));
+  const mergedPrs = (log) => log
+    .filter((entry) => entry.sub === 'pr' && entry.args[0] === 'merge')
+    .map((entry) => entry.args[1])
+    .sort();
+
+  // --- 1. the twin: --merge-prs --approve --unattended vs --approve ----------
+  // Both issues of this plan declare an acceptance-gate block AND acceptance
+  // criteria, so the stage-C condition is satisfied and the unattended run must
+  // reach exactly the same place as its flagless twin: same status, same stop,
+  // same targets, and the same PRs really merged (read from the fake's log, not
+  // from the report). The only permitted difference is the declaration itself.
+  {
+    const plain = mergePhase(green, ['--approve']);
+    const unattended = mergePhase(green, ['--approve', '--unattended']);
+
+    check(plain.exit === 0 && unattended.exit === 0,
+      `both twins should exit 0, got plain=${plain.exit} unattended=${unattended.exit}`);
+    check(validateAgainst(mergeSchema, unattended.report, 'merge').length === 0,
+      `the unattended report is not schema-valid: ${validateAgainst(mergeSchema, unattended.report, 'merge').slice(0, 3).join('; ')}`);
+    check(unattended.report?.merge_schema_version === 1,
+      `stage C must not bump merge_schema_version, got ${unattended.report?.merge_schema_version}`);
+    check(unattended.report?.status === plain.report?.status && unattended.report?.status === 'success',
+      `status differs between the twins: ${plain.report?.status} vs ${unattended.report?.status}`);
+    check(unattended.report?.stop_reason === plain.report?.stop_reason && unattended.report?.stop_reason === 'completed',
+      `stop_reason differs between the twins: ${plain.report?.stop_reason} vs ${unattended.report?.stop_reason}`);
+    check(deepEqual(unattended.report?.eligible_issues, plain.report?.eligible_issues),
+      'the eligible set differs between the twins');
+    check(deepEqual(targetShape(unattended.report), targetShape(plain.report)),
+      `the targets differ between the twins: ${JSON.stringify(targetShape(unattended.report))} vs ${JSON.stringify(targetShape(plain.report))}`);
+    check(mergedPrs(plain.log).length === 2, `the flagless twin should have merged 2 PRs, merged ${mergedPrs(plain.log).length}`);
+    check(deepEqual(mergedPrs(unattended.log), mergedPrs(plain.log)),
+      `the PRs merged differ between the twins: ${JSON.stringify(mergedPrs(unattended.log))} vs ${JSON.stringify(mergedPrs(plain.log))}`);
+    check(deepEqual(unattended.report?.blocking_reasons, plain.report?.blocking_reasons),
+      'the unattended twin recorded a different blocking reason');
+    check(deepEqual(unattended.report?.completion_check, plain.report?.completion_check),
+      'the unattended twin recorded a different completion_check');
+    check(deepEqual(unattended.report?.redactions, plain.report?.redactions),
+      `the unattended record changed the redaction tally: ${JSON.stringify(unattended.report?.redactions)} vs ${JSON.stringify(plain.report?.redactions)}`);
+    // The ONLY permitted difference: one `unattended_mode` limitation.
+    const extra = (unattended.report?.limitations ?? []).filter((entry) => entry.code !== 'unattended_mode');
+    check(codesOf(unattended.report?.limitations).filter((code) => code === 'unattended_mode').length === 1,
+      `the unattended run should record exactly one unattended_mode limitation, got ${JSON.stringify(codesOf(unattended.report?.limitations))}`);
+    check(deepEqual(extra, plain.report?.limitations ?? []),
+      `the twins differ by more than the unattended record: ${JSON.stringify(extra)} vs ${JSON.stringify(plain.report?.limitations)}`);
+    check(unattended.report?.approved === true && unattended.report?.mutated === true,
+      'the approved unattended twin should report approved and mutated');
+  }
+
+  // --- 2. --unattended alone merges nothing (it does not imply --approve) ----
+  {
+    const preview = mergePhase(green, ['--unattended']);
+    check(preview.exit === 0, `--merge-prs --unattended should be a preview (exit 0), exited ${preview.exit}`);
+    check(preview.report?.status === 'success', `an unattended preview should succeed, got ${preview.report?.status}`);
+    check(preview.report?.approved === false, `--unattended must not imply --approve, got approved=${preview.report?.approved}`);
+    check(preview.report?.mutated === false, `an unattended preview must not mutate, got mutated=${preview.report?.mutated}`);
+    check(mergedPrs(preview.log).length === 0, `--unattended alone merged ${mergedPrs(preview.log).length} PR(s)`);
+    check((preview.report?.targets ?? []).every((target) => target.outcome === 'previewed'),
+      `every target of an unattended preview should be previewed, got ${JSON.stringify((preview.report?.targets ?? []).map((t) => t.outcome))}`);
+    check(codesOf(preview.report?.limitations).includes('unattended_mode'),
+      'an unattended preview should still record what it declared');
+  }
+
+  // --- 3. an issue with no acceptance-gate block STOPS the phase -------------
+  // ADR §9 condition 2: refuse, do not exclude. #350 qualifies and #352 does
+  // not, so the load-bearing assertion is that #350 was NOT merged either — a
+  // run that quietly shrank its target set would have merged it and reported
+  // success. Measured twice, so the promotion is visibly what did it.
+  {
+    const world = stageCWorld('cmate-stagec-noblock', [350, 352]);
+    if (check(world !== null, 'stage C: the no-block world was not generated')) {
+      const attended = mergePhase(world, ['--approve']);
+      check(attended.exit === 0, `without --unattended a block-less issue must not stop the phase, exited ${attended.exit}`);
+      check(attended.report?.status === 'success', `the attended run should still succeed, got ${attended.report?.status}`);
+      check(mergedPrs(attended.log).length === 2, `the attended run should merge both PRs, merged ${mergedPrs(attended.log).length}`);
+
+      const unattended = mergePhase(world, ['--approve', '--unattended']);
+      check(unattended.exit === 1, `a block-less issue should stop an unattended merge (exit 1), exited ${unattended.exit}`);
+      check(unattended.report?.status === 'failure', `the unattended run should be a failure, got ${unattended.report?.status}`);
+      check(unattended.report?.stop_reason === 'preflight_failed',
+        `the stop should reuse preflight_failed, got ${unattended.report?.stop_reason}`);
+      const named = (unattended.report?.blocking_reasons ?? []).filter((entry) => entry.code === 'acceptance_gates_required');
+      check(named.length === 1, `exactly #352 should be named, got ${JSON.stringify(codesOf(unattended.report?.blocking_reasons))}`);
+      check((named[0]?.detail ?? '').startsWith('#352:'), `the reason should name #352, got ${named[0]?.detail?.slice(0, 60)}`);
+      // Nothing merged — INCLUDING the issue that qualifies. That is the whole
+      // difference between "stop" and "exclude".
+      check(mergedPrs(unattended.log).length === 0, `a stopped unattended run merged ${JSON.stringify(mergedPrs(unattended.log))}`);
+      check(unattended.report?.mutated === false, `a stopped unattended run reported mutated=${unattended.report?.mutated}`);
+      check(deepEqual(unattended.report?.eligible_issues, attended.report?.eligible_issues),
+        'the eligible set was shrunk instead of the phase being stopped');
+      check((unattended.report?.targets ?? []).length === 0,
+        `a run stopped before the phase should have no targets, got ${JSON.stringify(targetShape(unattended.report))}`);
+      check((unattended.report?.summary_markdown ?? '').includes('acceptance-gates'),
+        'the summary should say what to write into the issue body');
+    }
+  }
+
+  // --- 4. an issue with no acceptance criteria STOPS the phase too -----------
+  // The other half of ADR §9 condition 2, and it reuses the planner's own code
+  // (`no_acceptance_criteria`) rather than inventing a merge-side synonym.
+  {
+    const world = stageCWorld('cmate-stagec-nocriteria', [350, 353], { allowQuestions: true });
+    if (check(world !== null, 'stage C: the no-criteria world was not generated')) {
+      const attended = mergePhase(world, ['--approve']);
+      check(attended.report?.status === 'success', `the attended run should still succeed, got ${attended.report?.status}`);
+      check(mergedPrs(attended.log).length === 2, `the attended run should merge both PRs, merged ${mergedPrs(attended.log).length}`);
+
+      const unattended = mergePhase(world, ['--approve', '--unattended']);
+      check(unattended.exit === 1, `a criteria-less issue should stop an unattended merge (exit 1), exited ${unattended.exit}`);
+      const named = (unattended.report?.blocking_reasons ?? []).filter((entry) => entry.code === 'no_acceptance_criteria');
+      check(named.length === 1, `exactly #353 should be named, got ${JSON.stringify(codesOf(unattended.report?.blocking_reasons))}`);
+      check((named[0]?.detail ?? '').startsWith('#353:'), `the reason should name #353, got ${named[0]?.detail?.slice(0, 60)}`);
+      check(mergedPrs(unattended.log).length === 0, `a stopped unattended run merged ${JSON.stringify(mergedPrs(unattended.log))}`);
+    }
+  }
+
+  // --- 5. --create-prs is NOT given the stage-C condition --------------------
+  // Stage B's tightening list is one entry long, and it stays that way: the same
+  // block-less world reaches a PR under `--create-prs --unattended`. Adding the
+  // acceptance requirement there would change what stage B means after the fact.
+  {
+    const world = stageCWorld('cmate-stagec-createprs', [350, 352]);
+    if (check(world !== null, 'stage C: the create-prs world was not generated')) {
+      const outDir = join(world.work, 'merge-create');
+      const logPath = join(world.work, 'create.log');
+      const scenarioPath = writeScenario(world.work, 'scenario-create.json', withDiffDefaults({
+        cli_available: true,
+        gh: { repo_access: true },
+        git: { base_resolvable: true },
+        prs: { 350: { create: 'ok' }, 352: { create: 'ok' } },
+      }, world.plan));
+      const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath };
+      const { exit, stdout } = runMerge(world.planPath, world.dispatchPath, outDir, '--create-prs', ['--approve', '--unattended'], env, world.integration);
+      let report = null;
+      try { report = JSON.parse(stdout); } catch { /* ignore */ }
+      check(exit === 0, `--create-prs --unattended must not inherit the stage-C condition, exited ${exit}`);
+      check(report?.status === 'success', `--create-prs --unattended over a block-less plan should succeed, got ${report?.status}`);
+      check(countCalls(readCliLog(logPath), 'pr', 'create') === 2,
+        `--create-prs --unattended should still open both PRs, opened ${countCalls(readCliLog(logPath), 'pr', 'create')}`);
+    }
+  }
+}
+
+// Stage C: `uat.mjs --unattended` (Issue #142 / ADR §8, §14.3).
+function unattendedUatTest() {
+  log('  unattended uat (#142)');
+  const world = stageCWorld('cmate-stagec-uat', [350, 351]);
+  if (!check(world !== null, 'stage C uat: the plan/dispatch world was not generated')) return;
+
+  // Each UAT run gets its OWN worktree world, exactly as runUatCase does: the
+  // dispatch report says which issues are eligible, the uat scenario says which
+  // of them pass their baseline.
+  let runIndex = 0;
+  const uatPhase = (phaseFlag, args, uatScenario = {}) => {
+    runIndex += 1;
+    const workUat = mkdtempSync(join(tmpdir(), `cmate-stagec-uat-run${runIndex}-`));
+    const integration = setupWorktrees(world.plan, workUat, (n) => uatSpecPasses(uatScenario, n));
+    const outDir = join(workUat, 'uat');
+    const logPath = join(workUat, 'uat-cli.log');
+    const scenarioPath = writeScenario(workUat, 'uat-scenario.json', { ...uatScenario, worktrees: planToWorktrees(world.plan) });
+    const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath, CMATE_FAKE_STATE: workUat };
+    const { exit, stdout } = runUatRunner(world.planPath, world.dispatchPath, outDir, phaseFlag, args, env, integration);
+    let report = null;
+    try { report = JSON.parse(stdout); } catch { /* a refused invocation still prints a failure envelope */ }
+    return { exit, report, outDir, log: readCliLog(logPath) };
+  };
+  const codesOf = (entries) => (entries ?? []).map((entry) => entry.code);
+  // A world where both eligible issues fail their baseline, so an approved fix
+  // loop has something to repair — and therefore a reason to create a worktree.
+  const FAILING = { uat: { 350: { fix_on: 1 }, 351: { fix_on: 1 } }, workers: { 350: { state: 'completed' }, 351: { state: 'completed' } } };
+  const acceptanceDir = mkdtempSync(join(tmpdir(), 'cmate-stagec-acc-'));
+
+  // --- 1. the control: HEAD attached and on --expect-branch → it DOES fix ----
+  // Without this row every assertion below would pass on a harness that simply
+  // never gets as far as creating a worktree.
+  {
+    const control = uatPhase('--create-uat-fix-worktrees', [
+      '--approve', '--unattended', '--require-acceptance', '--acceptance-dir', acceptanceDir,
+      '--max-attempts', '1', '--expect-branch', 'feature/integration',
+    ], FAILING);
+    check(validateAgainst(uatSchema, control.report, 'uat').length === 0,
+      `the unattended uat report is not schema-valid: ${validateAgainst(uatSchema, control.report, 'uat').slice(0, 3).join('; ')}`);
+    check(control.report?.uat_schema_version === 1,
+      `stage C must not bump uat_schema_version, got ${control.report?.uat_schema_version}`);
+    check(countCalls(control.log, 'worktree', 'add') > 0,
+      'the control run created no fix worktree, so the two stops below prove nothing');
+    check(codesOf(control.report?.limitations).includes('unattended_mode'),
+      `an unattended uat run should record what it declared, got ${JSON.stringify(codesOf(control.report?.limitations))}`);
+  }
+
+  // --- 2. detached HEAD: not one fix worktree is created ---------------------
+  // Issue #115 measured it: the re-merge exits 0, builds a commit no branch can
+  // reach, and this runner reports `outcome: merged`. The stop is BEFORE that.
+  {
+    const detached = uatPhase('--create-uat-fix-worktrees', [
+      '--approve', '--unattended', '--require-acceptance', '--acceptance-dir', acceptanceDir,
+      '--max-attempts', '1', '--expect-branch', 'feature/integration',
+    ], { ...FAILING, git: { branch: 'feature/integration', head_ref: null } });
+    check(detached.exit === 1, `a detached HEAD should stop the fix loop (exit 1), exited ${detached.exit}`);
+    check(detached.report?.status === 'failure', `the detached run should be a failure, got ${detached.report?.status}`);
+    check(detached.report?.stop_reason === 'preflight_failed',
+      `the stop should reuse preflight_failed, got ${detached.report?.stop_reason}`);
+    check(codesOf(detached.report?.blocking_reasons).includes('unattended_cwd_detached'),
+      `the stop should name unattended_cwd_detached, got ${JSON.stringify(codesOf(detached.report?.blocking_reasons))}`);
+    check(countCalls(detached.log, 'worktree', 'add') === 0,
+      `a detached-HEAD run created ${countCalls(detached.log, 'worktree', 'add')} fix worktree(s)`);
+    check(countCalls(detached.log, 'merge') === 0, `a detached-HEAD run re-merged ${countCalls(detached.log, 'merge')} time(s)`);
+    check(countCalls(detached.log, 'send') === 0, `a detached-HEAD run sent ${countCalls(detached.log, 'send')} fix worker(s)`);
+    check(detached.report?.mutated === false, `a stopped run reported mutated=${detached.report?.mutated}`);
+    check((detached.report?.attempts ?? []).length === 0,
+      `a run stopped in the pre-flight should have no attempt, got ${(detached.report?.attempts ?? []).length}`);
+  }
+
+  // --- 3. HEAD on another branch: same stop, different reason ----------------
+  // The `main`-checkout shape: the fix would land on the checked-out branch with
+  // no PR, no CI and no review, and be irreversible once pushed.
+  {
+    const wrong = uatPhase('--create-uat-fix-worktrees', [
+      '--approve', '--unattended', '--require-acceptance', '--acceptance-dir', acceptanceDir,
+      '--max-attempts', '1', '--expect-branch', 'feature/integration',
+    ], { ...FAILING, git: { branch: 'main', head_ref: 'main' } });
+    check(wrong.exit === 1, `a mismatched HEAD should stop the fix loop (exit 1), exited ${wrong.exit}`);
+    check(wrong.report?.stop_reason === 'preflight_failed',
+      `the stop should reuse preflight_failed, got ${wrong.report?.stop_reason}`);
+    check(codesOf(wrong.report?.blocking_reasons).includes('unattended_cwd_branch_mismatch'),
+      `the stop should name unattended_cwd_branch_mismatch, got ${JSON.stringify(codesOf(wrong.report?.blocking_reasons))}`);
+    check(countCalls(wrong.log, 'worktree', 'add') === 0,
+      `a mismatched-HEAD run created ${countCalls(wrong.log, 'worktree', 'add')} fix worktree(s)`);
+    check(countCalls(wrong.log, 'merge') === 0, `a mismatched-HEAD run re-merged ${countCalls(wrong.log, 'merge')} time(s)`);
+  }
+
+  // --- 4. the same two worlds WITHOUT --unattended run as they always did ----
+  // The non-regression half: the cwd check is part of the unattended contract,
+  // and a run with a human present chose its own cwd (ADR §14.3).
+  {
+    for (const [label, scenario] of [
+      ['detached', { ...FAILING, git: { branch: 'feature/integration', head_ref: null } }],
+      ['mismatched', { ...FAILING, git: { branch: 'main', head_ref: 'main' } }],
+    ]) {
+      const attended = uatPhase('--create-uat-fix-worktrees', ['--approve', '--max-attempts', '1'], scenario);
+      check(attended.report?.stop_reason !== 'preflight_failed',
+        `${label}: a run without --unattended must not take the cwd pre-flight, got ${attended.report?.stop_reason}`);
+      check(countCalls(attended.log, 'worktree', 'add') > 0,
+        `${label}: a run without --unattended created no fix worktree`);
+    }
+  }
+
+  // --- 5. --unattended implies --require-acceptance, so acceptance_not_run
+  //        cannot happen (ADR §6.5: not promoted — made impossible) -----------
+  // The acceptance directory is EMPTY, which is exactly the world that produces
+  // `acceptance_not_run` for a run that tolerates the degradation. Measured
+  // twice: without the flag it is a limitation and the issues pass on the
+  // baseline alone; with it the run cannot even be invoked without the gate, and
+  // once the gate is required the same world is a failure with no limitation.
+  {
+    const degraded = { uat: { 350: 'pass', 351: 'pass' } };
+    const tolerated = uatPhase('--write-uat', ['--acceptance-dir', acceptanceDir], degraded);
+    check(tolerated.report?.status === 'success', `the tolerating run should succeed, got ${tolerated.report?.status}`);
+    check(codesOf(tolerated.report?.limitations).includes('acceptance_not_run'),
+      `the tolerating run should record acceptance_not_run, got ${JSON.stringify(codesOf(tolerated.report?.limitations))}`);
+
+    const required = uatPhase('--write-uat', [
+      '--unattended', '--require-acceptance', '--acceptance-dir', acceptanceDir, '--max-attempts', '1',
+    ], degraded);
+    check(required.exit === 7, `the unattended run should fail UAT on the missing result (exit 7), exited ${required.exit}`);
+    check(required.report?.stop_reason === 'uat_failed', `the unattended run should stop as uat_failed, got ${required.report?.stop_reason}`);
+    check(!codesOf(required.report?.limitations).includes('acceptance_not_run'),
+      `acceptance_not_run must not be reachable under --unattended, got ${JSON.stringify(codesOf(required.report?.limitations))}`);
+    check(required.report?.acceptance?.required === true,
+      `the report should say the semantic gate was required, got ${required.report?.acceptance?.required}`);
+    const verdicts = (required.report?.attempts ?? []).flatMap((a) => a.uat_results).map((r) => r.verdict_source);
+    check(verdicts.every((source) => source === 'acceptance_required'),
+      `every verdict should come from the required gate, got ${JSON.stringify(verdicts)}`);
+  }
+
+  // --- 6. --write-uat --unattended does not take the cwd pre-flight ----------
+  // It creates no worktree and re-merges nothing, so there is no cwd to protect;
+  // a gate there would refuse a run it cannot make safer.
+  {
+    const detachedRead = uatPhase('--write-uat', [
+      '--unattended', '--require-acceptance', '--acceptance-dir', acceptanceDir, '--max-attempts', '1',
+    ], { uat: { 350: 'pass', 351: 'pass' }, git: { branch: 'feature/integration', head_ref: null } });
+    check(detachedRead.report?.stop_reason !== 'preflight_failed',
+      `--write-uat is read-only and must not take the cwd pre-flight, got ${detachedRead.report?.stop_reason}`);
+    check(!codesOf(detachedRead.report?.blocking_reasons).includes('unattended_cwd_detached'),
+      'a read-only phase must not report a cwd stop');
+  }
+}
+
+// Stage C: the `verification_gates_unrecorded` promotion in dispatch
+// (Issue #142 / ADR §6.5, §8).
+//
+// The two-point measurement. The second point is the FLAGLESS twin, and that is
+// not a shortcut: the promotion is tied to `--unattended` (ADR §16.1 rules that
+// a declaration must not mean different things depending on what a later job
+// does), stages are releases rather than an invocation-level selector, and the
+// un-promoted reading is exactly the one stage A and stage B shipped. So "a
+// limitation at stage A/B, blocking at stage C" is measured as "a limitation
+// without the flag, blocking with it", over one world read twice.
+function unattendedGatesTest() {
+  log('  unattended dispatch: unattributed pass (#142)');
+  const planPath = unattendedPlan('cmate-unattributed-plan-');
+  if (!check(existsSync(planPath), 'unattributed: plan.json was not generated')) return;
+
+  // A contract-capable CLI whose `wait --verify` exits 0 but prints no
+  // `GATE <id> PASS|FAIL` line — the Issue #83 world, which d26 already pins for
+  // an attended run.
+  const scenario = {
+    ...UNATTENDED_SCENARIO,
+    workers: {
+      201: { state: 'completed', verify_exits: [0], gate_lines: false },
+      200: { state: 'completed', verify_exits: [0], gate_lines: false },
+    },
+  };
+  const runOnce = (args) => {
+    const work = mkdtempSync(join(tmpdir(), 'cmate-unattributed-'));
+    const logPath = join(work, 'cli.log');
+    const result = runDispatchRunner(planPath, scenario, work, join(work, 'dispatch'), args, logPath);
+    return { ...result, report: launcherReport(result), log: readCliLog(logPath) };
+  };
+  const codesOf = (entries) => (entries ?? []).map((entry) => entry.code);
+
+  // --- point 1: no flag → a limitation, and the run finishes -----------------
+  const attended = runOnce(['--expect-branch', 'feature/integration']);
+  check(attended.exit === 0, `without --unattended an unattributed pass must not stop the run, exited ${attended.exit}`);
+  check(attended.report?.status === 'success', `the attended run should succeed, got ${attended.report?.status}`);
+  check(codesOf(attended.report?.limitations).filter((code) => code === 'verification_gates_unrecorded').length === 2,
+    `the attended run should record one limitation per unattributed pass, got ${JSON.stringify(codesOf(attended.report?.limitations))}`);
+  check(codesOf(attended.report?.blocking_reasons).length === 0,
+    `the attended run should record no blocking reason, got ${JSON.stringify(codesOf(attended.report?.blocking_reasons))}`);
+  check(deepEqual(sentIssuesFromLog(attended.log), [201, 200]),
+    `the attended run should dispatch both waves, sent ${JSON.stringify(sentIssuesFromLog(attended.log))}`);
+
+  // --- point 2: --unattended → blocking, and the next wave is not dispatched --
+  const unattended = runOnce(UNATTENDED_ARGS);
+  check(unattended.exit === 7, `an unattributed pass should stop an unattended run as partial (exit 7), exited ${unattended.exit}`);
+  check(unattended.report?.status === 'partial', `the unattended run should be partial, got ${unattended.report?.status}`);
+  // The existing vocabulary receives it: no value was added to the enum.
+  check(unattended.report?.stop_reason === 'dispatch_error',
+    `the stop should reuse dispatch_error, got ${unattended.report?.stop_reason}`);
+  check(unattended.report?.dispatch_schema_version === 1,
+    `stage C must not bump dispatch_schema_version, got ${unattended.report?.dispatch_schema_version}`);
+  check(validateAgainst(dispatchSchema, unattended.report, 'dispatch').length === 0,
+    `the unattended report is not schema-valid: ${validateAgainst(dispatchSchema, unattended.report, 'dispatch').slice(0, 3).join('; ')}`);
+  check(codesOf(unattended.report?.blocking_reasons).includes('verification_gates_unrecorded'),
+    `the unattended run should name verification_gates_unrecorded as blocking, got ${JSON.stringify(codesOf(unattended.report?.blocking_reasons))}`);
+  check(!codesOf(unattended.report?.limitations).includes('verification_gates_unrecorded'),
+    'the promoted finding should be blocking, not blocking AND a limitation');
+  // The stop is what a stop means here: the second wave was never dispatched.
+  check(deepEqual(sentIssuesFromLog(unattended.log), [201]),
+    `the unattended run should stop before the second wave, sent ${JSON.stringify(sentIssuesFromLog(unattended.log))}`);
+  // The VERDICT is untouched — it is an exit code and it stands (Issue #83). What
+  // the promotion changes is whether the run carries it any further.
+  const judged = (unattended.report?.waves ?? []).flatMap((wave) => wave.workers ?? []);
+  check(judged.every((worker) => worker.verification.outcome === 'pass'),
+    `the promotion must not rewrite the verdict, got ${JSON.stringify(judged.map((w) => w.verification.outcome))}`);
+  check(unattended.report?.waves?.[0]?.barrier?.advanced === true,
+    'the wave barrier itself measures completion and verification, and both held; the stop is a separate finding');
+  // Not a human_required stop: a CommandMate that prints GATE lines resolves it,
+  // which is an operator change to the invocation, not a judgement call.
+  check(unattended.report?.human_required === false,
+    `an unattributed pass is re-runnable, so human_required should stay false, got ${unattended.report?.human_required}`);
+  // dispatch owns no merge-side code: `change_evidence_unavailable` is stage B's
+  // promotion and must not appear here at all (no double promotion).
+  check(!codesOf(unattended.report?.blocking_reasons).includes('change_evidence_unavailable')
+    && !codesOf(unattended.report?.limitations).includes('change_evidence_unavailable'),
+  'the dispatch runner must not touch change_evidence_unavailable (stage B promoted it in merge)');
 }
 
 function launcherTest() {
@@ -3818,12 +4288,17 @@ function main() {
   unattendedLockTest();
   unattendedMergeTest();
 
+  log('  -- unattended stage C --');
+  unattendedGatesTest();
+  unattendedMergePrsTest();
+  unattendedUatTest();
+
   log('');
   if (failures > 0) {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution, worktree-setup input, reverify input, auto-yes arming, unattended input + exclusivity + merge`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution, worktree-setup input, reverify input, auto-yes arming, unattended input + exclusivity + merge, unattended stage C (gates + merge-prs + uat)`);
 }
 
 main();

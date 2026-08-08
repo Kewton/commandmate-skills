@@ -265,12 +265,15 @@ dispatch 側の規約は [dispatch-contract.md](./dispatch-contract.md) 第2.9�
   構造的に到達不能になる）・`--allow-questions`（引き受ける主体が居ないときに立てられる旗ではない）・
   `--contract-mode off｜auto`。**黙って上書きしない** —— どちらの宣言が勝ったかを、report の読み手
   （無人運転では次の job）が判定できなくなる。
-- 含意する締め付けは5つ: **①`--contract-mode require`**（フォールバック経路には scope ゲートが
+- 含意する締め付けは6つ: **①`--contract-mode require`**（フォールバック経路には scope ゲートが
   存在しないので、scope 必須化と契約必須化は同義である）／**②pre-flight で plan 全 Issue の scope 宣言を
   all-or-nothing 検査**（1件でも欠ければ **1人も dispatch せず・`--out` も作らずに**停止。未回答 question も
   同じ pre-flight で報告する）／**③worktree 単位の排他 lock**（2本目の run を拒否する。`--out` は
   mutex にならない）／**④`--wall-clock-budget` の明示必須**（回数は有界でも時計は有界でない）／
-  **⑤`unattended_baseline` の記録**（各 worktree の開始時 HEAD を branch 名と短縮 SHA で残す）。
+  **⑤`unattended_baseline` の記録**（各 worktree の開始時 HEAD を branch 名と短縮 SHA で残す）／
+  **⑥裁定の根拠の要求**（段階 C。`verification_gates_unrecorded` を blocking として扱い、
+  `GATE` 行を1本も読めなかった pass が在れば **次の wave を dispatch せずに停止**する。
+  **裁定そのものは書き換えない** —— exit code の pass はそのまま残り、変わるのは run が先へ進むかだけ）。
 - **runner は次の phase を始めない。** 無人運転の driver は **CI の job 定義（cron script）**であって
   runner ではない。plan → dispatch → merge → uat を1コマンドで回す5つ目の runner は作らない。
 - **job 定義側で置くべき環境変数が2つある。** `GH_TOKEN`（または `GH_ENTERPRISE_TOKEN`）と
@@ -284,8 +287,12 @@ dispatch 側の規約は [dispatch-contract.md](./dispatch-contract.md) 第2.9�
 
 規約の正本は [dispatch-contract.md](./dispatch-contract.md) 第3.0.3節・第3.0.4節、
 裁定の記録と実測は [adr-unattended-mode.md](./adr-unattended-mode.md)（特に第2節の裁定 0、
-実測の第14節、実装差分の第15節）。**段階 A は dispatch のみ**で、merge / uat に `--unattended` を
-渡すと `invalid_input` で落ちる（受理して無視すると、CI は自分が守られていると誤解する）。
+実測の第14節、実装差分の第15節・第16節・第17節）。段階 A は dispatch のみ、段階 B で
+merge `--create-prs`、**段階 C（[#142](https://github.com/Kewton/commandmate-skills/issues/142)）で
+merge `--merge-prs` と uat** が加わり、**3 runner すべてが受け付ける**。
+各 runner が何を含意するかは [merge-contract.md](./merge-contract.md) 第5.3節と
+[uat-contract.md](./uat-contract.md) 第5.2節にある。**フラグは runner ごとに独立の宣言であり、
+runner 間で伝播しない。**
 
 
 ## 11. dispatch: monitor との境界

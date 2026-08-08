@@ -154,10 +154,11 @@ exit code を一次ソースとし、verification pass だけを merge 対象に
 merge-report.json / merge-summary.md の**構造は変えない**。本文と report が食い違わないよう、
 上の 2 つの limitation だけを既存の `limitations[]` に足す。
 
-## 5.3 無人運転（`--unattended`。`--create-prs` のみ）
+## 5.3 無人運転（`--unattended`。両 phase）
 
-[adr-unattended-mode.md](./adr-unattended-mode.md) 第8節の**段階 B** である
-（[#134](https://github.com/Kewton/commandmate-skills/issues/134)）。dispatch の同名フラグ
+[adr-unattended-mode.md](./adr-unattended-mode.md) 第8節の**段階 B**（`--create-prs`。
+[#134](https://github.com/Kewton/commandmate-skills/issues/134)）と**段階 C**（`--merge-prs`。
+[#142](https://github.com/Kewton/commandmate-skills/issues/142)）である。dispatch の同名フラグ
 （[dispatch-contract.md](./dispatch-contract.md) 第3.0.3節）と**同じ宣言**であり、
 runner 間で伝播はしない —— この runner は上流の dispatch が unattended だったかを**検査しない**
 （同 ADR 第8節「runner 間で unattended を伝播させない」）。
@@ -167,12 +168,14 @@ mutation の権限を与えるフラグではない。含意するのは締め�
 
 | 論点 | 規定 |
 |---|---|
-| `--approve` との関係 | **含意しない。** `--unattended` だけの invocation は preview であり、push も PR 作成もしない。無人で PR を作る CI は**両方**書く。これにより `approved: true` は「この mutation は明示的に承認された」を意味し続ける |
-| 含意する締め付け | **1つだけ: `change_evidence_unavailable` を limitation ではなく blocking として扱う**（5.2節 規則2 / ADR 第6.5節）。**その Issue の PR を作らずに停止**する（`partial` / exit 7 / `stop_reason: pr_create_failed`・target outcome `pr_failed`）。以降の eligible は `skipped` として残す。**PR 本文（`pr-bodies/issue-<n>.md`）も書かない** —— 作らない PR の本文を残さない |
+| `--approve` との関係 | **含意しない。** `--unattended` だけの invocation は preview であり、push も PR 作成も merge もしない。無人で回す CI は**両方**書く。これにより `approved: true` は「この mutation は明示的に承認された」を意味し続ける |
+| `--create-prs` が含意する締め付け | **1つだけ: `change_evidence_unavailable` を limitation ではなく blocking として扱う**（5.2節 規則2 / ADR 第6.5節）。**その Issue の PR を作らずに停止**する（`partial` / exit 7 / `stop_reason: pr_create_failed`・target outcome `pr_failed`）。以降の eligible は `skipped` として残す。**PR 本文（`pr-bodies/issue-<n>.md`）も書かない** —— 作らない PR の本文を残さない |
+| `--merge-prs` が含意する締め付け | **1つだけ: 全 eligible Issue が「受入ゲートブロックを持つ」かつ「受入条件を持つ」こと**（ADR 第9節 条件2）。1件でも欠ければ **1つも merge せずに停止**する（`failure` / exit 1 / `stop_reason: preflight_failed`）。**除外ではなく停止**であり、**条件を満たす Issue も merge しない** —— 対象集合を黙って縮めない（第3節・ADR 却下案 C と同じ理由）。読むのは plan だけで、`acceptance_gates.require` が空／欠落なら `acceptance_gates_required`、`acceptance_criteria` が空なら planner と同じ code **`no_acceptance_criteria`** を `blocking_reasons[]` に積む（Issue ごとに1件、**最初の1件で打ち切らない**）。**ゲート id が実在するかは問わない** —— それは worktree を持つ dispatch の問い（`acceptance_gate_id_unknown`）であり、ここで再判定すると既に消えているかもしれない worktree について二番目に悪い意見を出すことになる |
 | 昇格しないもの | **`branch_changed_outside_declared_scope`。** 契約ゲート `requireScopeClean` が上流で既に判定しており、unattended dispatch は契約経路を必須にしているので、この limitation は「機械ゲートが通ったうえでの人間可読版」であることが保証される（ADR 第6.5節） |
-| 拒否する入力 | **`--merge-prs` との併用**（段階 C 未実装）。dispatch の緩和フラグ（`--auto-yes` / `--allow-questions` / `--contract-mode`）はこの runner に存在しないので、未知 option として同じ `invalid_input`（exit 3）になる。**受理して無視しない** |
-| 証跡 | `limitations[]` の **`unattended_mode`**（run 全体で1件。preflight で止まった run にも残る）。含意した締め付けと拒否する入力を detail に書く。**絶対 path を書かない**（redaction の tally がフラグ無しの run と食い違うため） |
-| 変えないもの | `merge_schema_version` は **1 のまま**。`stop_reason` にも target `outcome` にも**値を1つも足していない**。全 gate が通る世界では、フラグ無しの run と**同じ `status` / `stop_reason` / 作られる PR** になり、差分は `unattended_mode` の1件だけである（fixture で機械的に固定してある） |
+| phase をまたがないこと | 段階 C の受入条件検査は **`--merge-prs` のみ**に効く。`--create-prs` の締め付けリストは段階 B の1件のままである（後から段階 B の意味を変えない）。fixture で両方向に固定してある |
+| 拒否する入力 | dispatch の緩和フラグ（`--auto-yes` / `--allow-questions` / `--contract-mode`）はこの runner に存在しないので、未知 option として `invalid_input`（exit 3）になる。**受理して無視しない** |
+| 証跡 | `limitations[]` の **`unattended_mode`**（run 全体で1件。preflight で止まった run にも残る）。**phase ごとに含意した締め付けを detail に書き分ける**（`--merge-prs` の report が `--create-prs` の昇格を語らない）。**絶対 path を書かない**（redaction の tally がフラグ無しの run と食い違うため） |
+| 変えないもの | `merge_schema_version` は **1 のまま**。`stop_reason` にも target `outcome` にも**値を1つも足していない**。全 gate が通る世界では、フラグ無しの run と**同じ `status` / `stop_reason` / 作られる PR / merge される PR** になり、差分は `unattended_mode` の1件だけである（両 phase について fixture で機械的に固定してある） |
 
 **`gh` 由来の停止は足していない。** [#115](https://github.com/Kewton/commandmate-skills/issues/115)
 の実測（ADR 第14.5節）どおり **`gh pr create` / `gh pr merge` は TTY 非依存で完結する** ——
@@ -205,9 +208,13 @@ eligible は outcome `skipped` として残し、対象集合を隠さない。
 最初の blocking 条件を採る。**failure を `completed` として報告しない。**
 
 `--unattended` はこの写像を1文字も変えない（ADR 第6.1節）。昇格した
-`change_evidence_unavailable` も**既存の `pr_create_failed` で受ける** —— 何が起きたかを
-名指しするのは `blocking_reasons[]` の code であって `stop_reason` ではない
+`change_evidence_unavailable` も**既存の `pr_create_failed` で受ける**し、段階 C の受入条件検査は
+**既存の `preflight_failed` で受ける**（何も試していないので `failure` / exit 1）——
+何が起きたかを名指しするのは `blocking_reasons[]` の code
+（`acceptance_gates_required` / `no_acceptance_criteria`）であって `stop_reason` ではない
 （dispatch の `wall_clock_budget_exhausted` と同じ形）。**新しい値は足さない。**
+`preflight[]` の `code` は schema の閉じた enum なので、この検査は**そこには載らない**
+（version を上げないための帰結。ADR 第11節）。
 
 ## 7. security（redaction）
 

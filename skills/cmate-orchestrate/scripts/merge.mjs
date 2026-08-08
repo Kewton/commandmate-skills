@@ -64,7 +64,7 @@ const CI_PENDING_STATES = new Set(['PENDING', 'QUEUED', 'IN_PROGRESS', 'WAITING'
 
 // =============================================================================
 // Unattended — the declaration that nobody is watching this invocation
-// (Issue #134 / references/adr-unattended-mode.md sections 2, 6.5, 8)
+// (Issue #134 / #142 / references/adr-unattended-mode.md sections 2, 6.5, 8, 9)
 // =============================================================================
 //
 // `--unattended` is an INPUT DECLARATION, not a permission (ADR "裁定 0"). It
@@ -81,9 +81,24 @@ const CI_PENDING_STATES = new Set(['PENDING', 'QUEUED', 'IN_PROGRESS', 'WAITING'
 // degradation somebody notices, and with nobody reading it it is a PR created on
 // no evidence at all.
 //
-// `--merge-prs --unattended` is stage C and is REFUSED (`invalid_input`, exit 3)
-// rather than accepted and ignored — a CI that passes the flag to a phase that
-// shrugs believes it is being guarded when it is not (ADR section 8).
+// `--merge-prs --unattended` is STAGE C (Issue #142). Until stage C it was
+// refused with `invalid_input` rather than accepted and ignored, and the refusal
+// was not deleted — it was replaced by the stage it named. What stage C adds to
+// this phase is the condition ADR section 9 puts on unattended merging: an issue
+// the plan cannot show an acceptance-gate block for is not merged with nobody
+// watching. Stage A and B reach a PR at the furthest, and a PR is a place a human
+// reads; here the furthest point is the base branch, and a misreading of "lint
+// and test passed" as "the issue is done" lands there with nobody reading it.
+//
+// The requirement STOPS the phase rather than shrinking the target set (ADR
+// section 9 item 2, same reason as the scope pre-flight in section 3): quietly
+// merging the subset that happens to qualify would report success over a run
+// that did less than it was asked to. Nothing is merged, including the issues
+// that DO qualify — the eligible set is the unit, not the issue.
+//
+// It applies to `--merge-prs` only. `--create-prs` is stage B, whose one
+// tightening is `change_evidence_unavailable`, and adding a second one there
+// would change what stage B means after the fact.
 //
 // No stop was added for `gh`. Issue #115 measured it (ADR section 14.5): `gh pr
 // create` / `gh pr merge` decide for themselves that no TTY is present and exit
@@ -93,7 +108,7 @@ const CI_PENDING_STATES = new Set(['PENDING', 'QUEUED', 'IN_PROGRESS', 'WAITING'
 // `GIT_TERMINAL_PROMPT=0`, SKILL.md section 3.3) — the runner does not check it,
 // for the same reason it does not check the monitor: it cannot guarantee another
 // process's environment.
-const UNATTENDED_STAGE = 'B（dispatch + merge --create-prs）';
+const UNATTENDED_STAGE = 'C（dispatch + merge + uat）';
 
 // =============================================================================
 // Redaction (SkillError, the pattern list and redact/redactionsList are shared
@@ -131,12 +146,16 @@ Options:
   --unattended           Declare that NO HUMAN is watching this invocation (CI /
                          cron). It grants nothing: it does NOT imply --approve, it
                          disables no gate and it never turns a blocking reason into
-                         a limitation. What it adds is tightening — the
-                         change_evidence_unavailable limitation becomes blocking, so
-                         a PR whose body could not show what the branch changed is
-                         not opened at all. Accepted for --create-prs only;
-                         --merge-prs --unattended is refused with invalid_input
-                         (stage C) rather than accepted and ignored.
+                         a limitation. What it adds is tightening, per phase:
+                         --create-prs  the change_evidence_unavailable limitation
+                                       becomes blocking, so a PR whose body could
+                                       not show what the branch changed is not
+                                       opened at all;
+                         --merge-prs   every eligible issue must carry an
+                                       acceptance-gate block AND acceptance
+                                       criteria. One that does not stops the
+                                       phase — nothing is merged, and the target
+                                       set is never quietly shrunk instead.
   --merge-method <m>     merge | squash | rebase for --merge-prs (default ${DEFAULT_MERGE_METHOD}).
   --out <dir>            Where merge artifacts are written
                          (default: <dispatch-dir>/<phase>).
@@ -190,27 +209,19 @@ function resolveInputs(parsed) {
     );
   }
 
-  // Stage B accepts `--unattended` for PR creation only (ADR section 8). The
-  // refusal of the unimplemented stage is a refusal rather than a shrug for the
-  // same reason the two-phase flags refuse each other: an invocation that
-  // declared something this runner cannot honour must not have that declaration
-  // silently dropped, because the reader of the report — in unattended operation
-  // the next CI job, not a person — cannot tell that it was.
+  // Stage C accepts `--unattended` for BOTH phases (Issue #142 / ADR section 8).
+  // The stage-B refusal of `--merge-prs --unattended` was not removed as a
+  // refusal — it was replaced by the stage it named, which is the discipline the
+  // refusal existed for: an invocation that declared something this runner cannot
+  // honour must not have that declaration silently dropped, because the reader of
+  // the report — in unattended operation the next CI job, not a person — cannot
+  // tell that it was. What each phase's declaration now implies is enforced
+  // below, in `unattendedAcceptanceReasons` and `recordEvidenceFindings`.
   //
   // A relaxing flag of the dispatch runner (`--auto-yes`, `--allow-questions`,
   // `--contract-mode off`) is refused one step earlier, by parseArgs: this runner
   // has no such option, and an unknown option is already `invalid_input`. That is
   // the same exit 3 with the same meaning, so nothing is re-implemented here.
-  if (values.unattended && phases[0] === 'merge_prs') {
-    throw new SkillError(
-      'invalid_input',
-      '--merge-prs and --unattended cannot both hold yet: unattended merging is stage C of '
-        + 'references/adr-unattended-mode.md section 8 and is not implemented, so the flag is refused rather than accepted '
-        + 'and ignored (a CI that passes it to a phase that shrugs believes it is being guarded when it is not). '
-        + 'Today --unattended is accepted for --create-prs only',
-      3,
-    );
-  }
 
   if (!values.plan) throw new SkillError('invalid_input', '--plan <path> is required', 3);
   if (!values.dispatch) throw new SkillError('invalid_input', '--dispatch <path> is required', 3);
@@ -848,6 +859,74 @@ function newTarget(issue, branch, action) {
 const EVIDENCE_UNAVAILABLE_CODE = 'change_evidence_unavailable';
 const SCOPE_EXCEEDED_CODE = 'branch_changed_outside_declared_scope';
 
+// =============================================================================
+// Stage C: what an unattended `--merge-prs` requires of its issues
+// (Issue #142 / references/adr-unattended-mode.md sections 8, 9)
+// =============================================================================
+//
+// ADR section 9's condition 2, taken as a REQUIREMENT rather than a possibility:
+// an issue whose plan record carries no acceptance-gate block, or no acceptance
+// criteria at all, is not merged with nobody watching. Both readings are of the
+// PLAN — the document a human approved — and neither is re-derived here:
+//
+//   - `acceptance_gates.require` is the transcription of the issue body's
+//     ```acceptance-gates block (Issue #114, #100 stage 1). Null means the body
+//     carried no block, or carried one the planner refused to read; the plan
+//     tells the two apart with an open question, not with this field, and for
+//     this gate they are the same finding — no machine condition was declared.
+//   - an empty `acceptance_criteria` is exactly what makes the planner raise
+//     `no_acceptance_criteria`, so the code the report carries is that same one:
+//     the operator's action is identical (write it in the issue and re-plan) and
+//     the status runner's hint for it already says so.
+//
+// The check is deliberately shallow. Whether the required ids EXIST is the
+// dispatch runner's question (it holds the worktree; `acceptance_gate_id_unknown`
+// is its answer), and re-asking it here would be a second, worse opinion about a
+// worktree that may already be gone.
+const ACCEPTANCE_GATES_REQUIRED_CODE = 'acceptance_gates_required';
+const NO_ACCEPTANCE_CRITERIA_CODE = 'no_acceptance_criteria';
+
+function hasAcceptanceGateBlock(issue) {
+  const declared = issue.acceptance_gates;
+  if (declared === null || declared === undefined) return false;
+  if (typeof declared !== 'object' || Array.isArray(declared)) return false;
+  if (declared.version !== 1) return false;
+  return Array.isArray(declared.require) && declared.require.some((id) => typeof id === 'string' && id.trim() !== '');
+}
+
+function hasAcceptanceCriteria(issue) {
+  return Array.isArray(issue.acceptance_criteria)
+    && issue.acceptance_criteria.some((line) => typeof line === 'string' && line.trim() !== '');
+}
+
+// Every reason the whole eligible set fails the stage-C condition — every one,
+// not the first: the operator has to edit the issues and re-plan, and a list
+// that stops at the first one turns that into as many round trips as there are
+// issues. Empty means the phase may proceed.
+function unattendedAcceptanceReasons(plan, eligible) {
+  const reasons = [];
+  for (const number of eligible) {
+    const issue = issueOf(plan, number) ?? {};
+    if (!hasAcceptanceGateBlock(issue)) {
+      reasons.push({
+        code: ACCEPTANCE_GATES_REQUIRED_CODE,
+        detail: `#${number}: the plan records no acceptance-gate block for this issue, so no machine-checkable acceptance condition was ever declared for it. `
+          + 'Under --unattended --merge-prs the base branch moves with nobody reading the result, and "lint and test passed" is not "the issue is done": '
+          + 'add an ```acceptance-gates block naming the gate id(s) that must judge it and re-plan. '
+          + 'The issue is NOT excluded from the target set — nothing was merged, including the issues that do carry one',
+      });
+    }
+    if (!hasAcceptanceCriteria(issue)) {
+      reasons.push({
+        code: NO_ACCEPTANCE_CRITERIA_CODE,
+        detail: `#${number}: the plan read no acceptance criteria out of this issue (the planner's no_acceptance_criteria finding), so the issue never stated what "done" means. `
+          + 'Under --unattended --merge-prs that is refused rather than merged: write 1-3 concrete completion checks in the issue body and re-plan',
+      });
+    }
+  }
+  return reasons;
+}
+
 // Returns the blocking detail when the phase must stop here, null otherwise.
 //
 // Under `--unattended` the FIRST finding stops the phase (ADR section 6.5, stage
@@ -1079,15 +1158,21 @@ function runMergePrs(inputs, plan, eligible, report) {
 // property would stop being true.
 const UNATTENDED_MODE_CODE = 'unattended_mode';
 
-function unattendedModeLimitation() {
+// Phase-aware because the two phases imply DIFFERENT tightenings (ADR section 8's
+// stage table gives one to each). A single sentence covering both would tell the
+// reader of a `--merge-prs` report about a promotion that phase never applies.
+function unattendedModeLimitation(phase) {
+  const implied = phase === 'merge_prs'
+    ? '全 eligible Issue が受入ゲートブロック（```acceptance-gates）と受入条件を持つことを要求する'
+      + '（1件でも欠ければ **1つも merge せずに停止**する。対象集合を黙って縮めない。段階 C）'
+    : `${EVIDENCE_UNAVAILABLE_CODE} を limitation ではなく blocking として扱う（実変更を示せない PR は開かない。段階 B）`;
   return {
     code: UNATTENDED_MODE_CODE,
     detail: `--unattended（段階 ${UNATTENDED_STAGE}）: この invocation に人間は居ない、という入力の宣言である。`
       + '締め付けだけを含意し、権限は1つも足していない — **`--approve` は含意しない**、'
       + 'ゲートを無効化せず、blocking を limitation に格下げせず、status を1段も上げない。'
-      + `含意した締め付け: ${EVIDENCE_UNAVAILABLE_CODE} を limitation ではなく blocking として扱う`
-      + '（実変更を示せない PR は開かない）。'
-      + `拒否する入力: --merge-prs との併用（段階 C 未実装）と dispatch の緩和フラグ（invalid_input, exit 3）。`
+      + `含意した締め付け: ${implied}。`
+      + '拒否する入力: dispatch の緩和フラグ（--auto-yes / --allow-questions / --contract-mode。invalid_input, exit 3）。'
       + '`gh` 由来の停止は足していない（実測どおり gh は TTY 非依存で完結する）ので、'
       + '`GH_TOKEN` と `GIT_TERMINAL_PROMPT=0` は job 定義側で置くこと（runner は検査しない）。',
   };
@@ -1206,12 +1291,17 @@ function renderSummary(report) {
   if (unattendedDeclared) {
     lines.push('## 無人運転（unattended）');
     lines.push(`- 宣言: ${unattendedDeclared.detail}`);
-    lines.push('- **`--unattended` は mutation の許可ではない。** 無人で PR を作る CI は `--approve` を別に書く。');
+    lines.push(report.phase === 'merge_prs'
+      ? '- **`--unattended` は mutation の許可ではない。** 無人で merge する CI は `--approve` を別に書く。'
+      : '- **`--unattended` は mutation の許可ではない。** 無人で PR を作る CI は `--approve` を別に書く。');
     lines.push('- job 定義側で `GH_TOKEN`（または `GH_ENTERPRISE_TOKEN`）と `GIT_TERMINAL_PROMPT=0` を置くこと。**`git push` の資格情報プロンプトだけは「止まる」ではなく無言で待つに化ける**（SKILL.md 第3.3節）。');
     lines.push('');
   }
   lines.push('## 未解決と next action');
   const evidenceBlocked = report.blocking_reasons.some((r) => r.code === EVIDENCE_UNAVAILABLE_CODE);
+  const acceptanceBlocked = report.blocking_reasons.some(
+    (r) => r.code === ACCEPTANCE_GATES_REQUIRED_CODE || r.code === NO_ACCEPTANCE_CRITERIA_CODE,
+  );
   if (report.blocking_reasons.length === 0 && report.limitations.length === 0) {
     lines.push(report.approved ? '- なし。全 eligible を処理した。' : '- なし。preview のみ（mutation なし）。');
   } else {
@@ -1224,7 +1314,12 @@ function renderSummary(report) {
     if (evidenceBlocked) lines.push('- next: 対象 Issue の worktree を復旧してから再実行する（`git diff <base>...<branch>` が答える状態にする）。人間が読む運転に戻すなら `--unattended` を外せば従来どおり limitation として続行する（owner: operator）。');
     if (report.stop_reason === 'pr_create_failed' && !evidenceBlocked) lines.push('- next: push/PR 作成の失敗要因を解消し、再実行する（owner: operator）。');
     if (report.stop_reason === 'pr_missing') lines.push('- next: 先に --create-prs で PR を作成する（owner: operator）。');
-    if (report.stop_reason === 'preflight_failed') lines.push('- next: gh 認証・repo 到達性・base 解決を復旧し、再実行する（owner: operator）。');
+    // The stage-C stop shares `preflight_failed` with the gh/git probes, but
+    // nothing about gh or git failed there: the action is on the ISSUE bodies.
+    if (acceptanceBlocked) {
+      lines.push('- next: 無人 merge の対象 Issue に受入ゲートブロック（```acceptance-gates）／受入条件が無い。**Issue 本文に書いて re-plan する。** 該当 Issue を除外して回す道は用意していない（対象集合を黙って縮めないため）。人間が読む運転に戻すなら `--unattended` を外す（owner: human）。');
+    }
+    if (report.stop_reason === 'preflight_failed' && !acceptanceBlocked) lines.push('- next: gh 認証・repo 到達性・base 解決を復旧し、再実行する（owner: operator）。');
   }
   return lines.join('\n');
 }
@@ -1238,7 +1333,7 @@ function runMerge(inputs, plan, dispatch, outDir) {
   const report = baseReport(inputs, plan, eligible, outDir);
   // Recorded before anything else so it survives every early return below: a run
   // that stopped in the preflight still says what it had declared.
-  if (inputs.unattended) report.limitations.push(unattendedModeLimitation());
+  if (inputs.unattended) report.limitations.push(unattendedModeLimitation(inputs.phase));
 
   // Read-only preflight before any mutation.
   report.preflight = preflight(inputs, plan);
@@ -1253,6 +1348,22 @@ function runMerge(inputs, plan, dispatch, outDir) {
     report.limitations.push({ code: 'no_eligible_issues', detail: 'the dispatch report has no completed-and-verified issue; nothing to do' });
     finalize(report);
     return report;
+  }
+
+  // Stage C (Issue #142 / ADR sections 8, 9). Read-only, over the WHOLE eligible
+  // set, and before the phase touches a single PR: an unattended merge either
+  // runs on issues that all declared what "done" means, or it does not run.
+  if (inputs.unattended && inputs.phase === 'merge_prs') {
+    const reasons = unattendedAcceptanceReasons(plan, eligible);
+    if (reasons.length > 0) {
+      // `preflight_failed` receives it: the enum is a schema-versioned closed set
+      // (ADR section 11), and what actually happened is named by the codes in
+      // `blocking_reasons` — the shape section 15.2 used for
+      // `wall_clock_budget_exhausted` and section 16 for the stage-B promotion.
+      for (const reason of reasons) halt(report, 'failure', 'preflight_failed', reason.code, reason.detail);
+      finalize(report);
+      return report;
+    }
   }
 
   if (inputs.phase === 'create_prs') {

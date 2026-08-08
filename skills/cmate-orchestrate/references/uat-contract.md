@@ -44,6 +44,8 @@ uat.mjs --plan <plan.json> --dispatch <dispatch-report.json> (--write-uat | --cr
 | `--max-attempts <1-5>` | 任意 | `2` | fix 試行回数の上限。ループはこれを超えない |
 | `--acceptance-dir <dir>` | 任意 | なし | 意味ゲートの入力 directory（第4節）。`issue-<n>.json` を読む。read-only |
 | `--require-acceptance` | 任意 | off | 意味ゲートを必須にする。`--acceptance-dir` 無しでの指定は `invalid_input`（exit 3） |
+| `--unattended` | 任意 | off | **この invocation に人間は居ない**という宣言（第5.2節）。権限は足さず、締め付けだけを含意する。`--require-acceptance` と `--max-attempts` の明示を要求し、`--create-uat-fix-worktrees` では `--expect-branch` も要求する |
+| `--expect-branch <name>` | 任意 | なし | 再merge が入るべき integration branch。`--unattended --create-uat-fix-worktrees` では**必須**（第5.1／5.2節） |
 | `--out <dir>` | 任意 | `<dispatch-dir>/<phase>` | 出力先。既存なら `out_exists` で拒否 |
 | `--cli <launcher>` | 任意 | `$CM` → `commandmate` | preflight と fix worker dispatch（send/wait）に使うランチャー。解決規約は dispatch-contract.md 第 2.8 節と同一 |
 | `--git <path>` | 任意 | `git` | base 解決・fix worktree 作成・再merge に使う git |
@@ -194,17 +196,36 @@ per-issue の `baseline` / `acceptance` / `verdict` / `verdict_source` を記録
 人間が居る運転では、cwd を選んだのが人間なので前提は満たされている。**無人運転（`--unattended`）で
 `fix_uat` を回す段階 C では、これは前提ではなく検査すべき条件になる。**
 
-**段階 C の前提（本 release では未実装。実装は段階 C の Issue）:** fix worktree を1つも作る前に、
+**この検査は段階 C（[#142](https://github.com/Kewton/commandmate-skills/issues/142)）で実装した。**
+規定は第5.2節にある。段階 A（[#122](https://github.com/Kewton/commandmate-skills/issues/122)）でも
+段階 B（[#134](https://github.com/Kewton/commandmate-skills/issues/134)。merge `--create-prs` まで）でも
+uat runner は `--unattended` を受け付けなかった（渡すと `invalid_input`）ので、それらの release に
+この検査は存在しない。
 
-- `git symbolic-ref -q HEAD` が空でないこと（**detached HEAD でない**こと）
-- HEAD が期待する integration branch と一致すること
+## 5.2 無人運転（`--unattended`）
 
-を確かめ、外れていれば **1つも fix worktree を作らずに停止する**（dispatch が `branch_matches`
-drift check で既に持っている形をそのまま置けばよく、**新しい停止語彙は要らない**
-——`preflight_failed` 相当で足りる）。**この節は段階 C の着手条件としてここに記録してある。**
-段階 A（[#122](https://github.com/Kewton/commandmate-skills/issues/122)）でも段階 B
-（[#134](https://github.com/Kewton/commandmate-skills/issues/134)。merge `--create-prs` まで）でも
-uat runner は `--unattended` を受け付けない（渡すと `invalid_input`）ので、この検査はまだ存在しない。
+[adr-unattended-mode.md](./adr-unattended-mode.md) 第8節の**段階 C** である
+（[#142](https://github.com/Kewton/commandmate-skills/issues/142)）。dispatch / merge の同名フラグと
+**同じ宣言**であり、runner 間で伝播はしない —— この runner は上流の dispatch が unattended
+だったかを**検査しない**（同 ADR 第8節）。
+
+**`--unattended` は「この invocation に人間は居ない」という入力の宣言であって、
+mutation の権限を与えるフラグではない。含意するのは締め付けだけである**（ADR 第2節「裁定 0」）。
+
+| 論点 | 規定 |
+|---|---|
+| `--approve` との関係 | **含意しない。** `--unattended` だけの `--create-uat-fix-worktrees` は preview であり、fix worktree も fix worker も再merge も無い |
+| 含意する締め付け（両 phase） | **`--require-acceptance` と `--max-attempts` の明示を要求する**（欠けていれば `invalid_input` / exit 3。ADR 第8節）。意味ゲート無しの無人 UAT は「dispatch が既に通した baseline をもう一度走らせた」でしかなく、**受入を確認したとは言えない**。`--max-attempts` を明示させるのは dispatch が `--wall-clock-budget` にそうしているのと同じ理由で、**誰も打っていない上限は default であって、この run について誰かがした決定ではない** |
+| `acceptance_not_run` | **昇格しない。起こさない**（ADR 第6.5節 3行目）。`--require-acceptance` が必須である帰結として、result 欠落・不適合・Issue 不一致は **fail**（`verdict_source: acceptance_required`）になり、劣化を記録する limitation は発生しない |
+| 追加で含意する締め付け（`--create-uat-fix-worktrees` のみ） | **invocation cwd の pre-flight**（第5.1節・ADR 第14.3節）。fix worktree を**1つも作る前に** `git symbolic-ref -q HEAD` を撃ち、(a) 出力が空（**detached HEAD**）なら `unattended_cwd_detached`、(b) `--expect-branch` と一致しなければ `unattended_cwd_branch_mismatch` で停止する。どちらも `failure` / exit 1 / `stop_reason: preflight_failed`。**worktree を1つも作らず、fix worker を1人も送らず、再merge を1度もしない**（`attempts[]` は空、`mutated: false`） |
+| `--expect-branch` | `--unattended --create-uat-fix-worktrees` では**必須**（欠ければ `invalid_input`）。比較対象になる integration branch が plan のどこにも無いためである —— `profile.base` は **base** であり、fix を base に入れることこそこの検査が防ぐ事故である。dispatch の `--expect-branch`（drift check `branch_matches`）と同じ形・同じ名前 |
+| `--write-uat` | cwd の pre-flight は**効かない**。read-only で worktree も再merge も作らないので、守るべき cwd が無い。含意する2つの明示要求は効く（裁定の意味の問題であり、phase に依らない） |
+| 証跡 | `limitations[]` の **`unattended_mode`**（run 全体で1件。pre-flight で止まった run にも残る）。含意した締め付けを phase ごとに書き分ける。**絶対 path を書かない**（redaction の tally がフラグ無しの run と食い違うため） |
+| 変えないもの | `uat_schema_version` は **1 のまま**。`stop_reason` にも**値を1つも足していない**（新しい停止語彙は要らない、を実装がそのまま守った）。`preflight[]` の `code` は schema の閉じた enum なので cwd 検査は**そこには載らず**、名指しするのは `blocking_reasons[]` の code である |
+
+**`git push` / `gh` 由来の停止は足していない**（ADR 第14.5節。merge 契約 第5.3節と同じ）。
+無人運転では job 定義側で `GH_TOKEN` と **`GIT_TERMINAL_PROMPT=0`** を置くこと。
+**runner はこれを検査しない。**
 
 ## 6. fix worktree（#1448 worktree-result との整合）
 
@@ -234,6 +255,12 @@ failure・blocked は途中で **停止** し、`blocking_reasons`・`unresolved
 `worktree_failed` / `fix_failed` / `remerge_failed` / `preflight_failed` / `runner_error`。
 最初の blocking 条件を採る。**failure・blocked を `completed` として報告しない。**
 
+`--unattended` はこの写像を1文字も変えない（ADR 第6.1節）。段階 C の cwd pre-flight も
+**既存の `preflight_failed` で受ける**（何も試していないので `failure` / exit 1）——
+何が起きたかを名指しするのは `blocking_reasons[]` の code
+（`unattended_cwd_detached` / `unattended_cwd_branch_mismatch`）であって `stop_reason` ではない。
+**新しい値は足さない。**
+
 ## 8. run artifact（append 履歴）
 
 `--out` は既存なら `out_exists` で拒否する（**既存 run artifact を上書きしない**）。各 attempt は
@@ -256,6 +283,8 @@ worker note は redaction 済みの短い抜粋のみとし、除去した値は
 - `blocked`（上限到達）→ 人手で triage する（owner: human）。回数無制限ループはしない。
 - `worktree_failed` / `fix_failed` / `remerge_failed` → 該当 worktree を診断し解消して再実行（owner: operator）。
 - `preflight_failed` → commandmate 到達性・repo access・base 解決を復旧して再実行（owner: operator）。
+  `--unattended` の cwd 検査で止まった場合は、**invocation cwd を integration branch（`--expect-branch`）に
+  checkout してから**再実行する（owner: operator）。fix worktree は1つも作られていない。
 
 ## 11. completion_check（report）
 

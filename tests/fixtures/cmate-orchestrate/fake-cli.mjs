@@ -787,6 +787,22 @@ function main() {
     process.stdout.write('deadbeef\n');
     process.exit(0);
   }
+  if (sub === 'symbolic-ref') {
+    // `git symbolic-ref -q HEAD` — the detached-HEAD probe uat.mjs's stage-C
+    // pre-flight runs (Issue #142 / ADR §14.3). `head_ref` is the knob:
+    //   absent        -> refs/heads/<git.branch>, i.e. the same branch
+    //                    `rev-parse --abbrev-ref HEAD` reports, so a scenario
+    //                    written before this knob answers both probes the same way
+    //   null | false  -> DETACHED: exit 1 with no output, which is what `-q` turns
+    //                    a detached HEAD into (without `-q` it is exit 128 + a
+    //                    message on stderr)
+    //   "<branch>"    -> that branch, whatever `git.branch` says
+    const git = spec.git ?? {};
+    const head = 'head_ref' in git ? git.head_ref : (git.branch ?? 'feature/integration');
+    if (head === null || head === false) process.exit(1);
+    process.stdout.write(`refs/heads/${head}\n`);
+    process.exit(0);
+  }
   if (sub === 'rev-list') {
     // `git rev-list --count <base>..HEAD`, run INSIDE a worktree: how many
     // commits the work branch carries over the base. It is one half of the

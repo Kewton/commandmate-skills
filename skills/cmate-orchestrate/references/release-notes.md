@@ -535,7 +535,43 @@ poller が回らなければ抑止の記録すら残らない（[#115](https://g
 「積極的な禁止」と「省略」が別物だからで、**許可についても同じ理屈が当てはまる**。
 `denyPatterns` は空のまま（CommandMate #1699 の scrollback 汚染を避ける）。
 
+### #142 — 無人運転の段階 C: 根拠を名指しできない pass の上に無人 merge を積まない
+
+契約経路の `wait --verify` が exit 0 を返したのに `GATE <id> PASS|FAIL` 行を1本も出さない CLI が在る
+（#83）。その場合 `gates` は空になり、**pass の根拠を report が名指しできない**。人間が読む運転では
+limitation として続行してよい —— 読み手が run を開いて確かめられるからである。**無人運転では、その
+名指しできない pass が段階 C の `--merge-prs` が動く唯一の根拠になる。**
+
+→ `--unattended` では `verification_gates_unrecorded` を **blocking** として扱い、**次の wave を
+dispatch せずに停止する**（`dispatch_error` / exit 7）。**裁定そのものは書き換えない** ——
+exit code の pass はそのまま `verification.outcome: pass` で残り、wave barrier の `advanced` も
+true のままである（barrier が測っているのは completion と verification であって、report が何を
+示せるかではない）。変わるのは run が先へ進むかだけである。`human_required` は **false**（`GATE` 行を
+出す CommandMate で再実行すれば解ける）。フラグ無しでは従来どおり limitation で続行する
+（同じ世界を2回 dispatch して突き合わせる fixture で二点測定）。
+
+---
+
 ## merge（`scripts/merge.mjs`）
+
+### #142 — 無人運転の段階 C（`merge --merge-prs`）
+
+段階 A / B が到達する最遠点は PR であり、**PR は人間が読む場所である**。「lint と test が通った」を
+「Issue が完成した」と読み替えた成果物が PR として立つことは、害ではなく本来の姿だった
+（レビュアーが読み、必要なら close する）。**段階 C は違う。そこで読み替えが起きると、誰も読まないまま
+base branch に入る。**
+
+→ `--merge-prs --unattended` を受理する。段階 B の `invalid_input` は**消したのではなく、それが名指し
+していた段に置き換えた**。**含意する締め付けは1つだけである: 全 eligible Issue が「受入ゲートブロック
+（```acceptance-gates）を持つ」かつ「受入条件を持つ」こと**（ADR 第9節 条件2）。1件でも欠ければ
+**1つも merge せずに停止**する（`preflight_failed` / exit 1）—— **除外ではなく停止**であり、
+**条件を満たす Issue も merge しない**。除外にすると「満たす方だけ merge して success」を返すので、
+対象集合が黙って縮んだことに誰も気づけない。読むのは plan だけで、**ゲート id が実在するかは問わない**
+（それは worktree を持つ dispatch の問いであり、merge 段では既に消えているかもしれない worktree に
+ついて二番目に悪い意見を出すことになる）。
+
+`--create-prs` の締め付けリストは**段階 B の1件のままである**（後から段階 B の意味を変えない）。
+`merge_schema_version` は 1 のまま、`stop_reason` の enum にも値を足していない。
 
 ### #134 — 無人運転の段階 B（`merge --create-prs`）
 
@@ -580,6 +616,29 @@ PR を出すと、merge しても Issue は open のまま残った。
 ---
 
 ## uat（`scripts/uat.mjs`）
+
+### #142 — 無人運転の段階 C（`uat`）と、再merge が入る先の検査
+
+`uat.mjs` の再merge は `git merge --no-ff --no-edit <fix-branch>` で **cwd 指定を持たない**ので、fix は
+**invocation cwd の現在の branch** に入る。[#115](https://github.com/Kewton/commandmate-skills/issues/115)
+が使い捨てリポジトリで実測した（ADR 第14.3節）: **CI が base branch を checkout した状態で回すと
+UAT の fix が誰のレビューも経ずにそこへ入り**（push 済みなら不可逆）、**detached HEAD では merge exit 0 で
+「merged」と報告しながらどの branch にも残らない**（既存の停止語彙では捕まらない静かな false success）。
+人間が居る運転では cwd を選んだのが人間なので前提は満たされていたが、**無人運転ではこれは前提ではなく
+検査すべき条件になる**。
+
+→ `--unattended` を受理し、`--create-uat-fix-worktrees` では **fix worktree を1つも作る前に**
+`git symbolic-ref -q HEAD` を撃つ。出力が空（detached）なら `unattended_cwd_detached`、
+`--expect-branch` と違えば `unattended_cwd_branch_mismatch` で停止する（`preflight_failed` / exit 1）。
+**worktree を1つも作らず、fix worker を1人も送らず、再merge を1度もしない。** 比較対象の branch は
+plan のどこにも無いので（`profile.base` は **base** であり、fix を base に入れることこそこの検査が
+防ぐ事故である）、dispatch の drift check と同名の **`--expect-branch` を足した**。
+
+`--unattended` は **`--require-acceptance` と `--max-attempts` の明示も要求する**。意味ゲート無しの
+無人 UAT は「dispatch が既に通した baseline をもう一度走らせた」でしかなく、**受入を確認したとは
+言えない**。その帰結として `acceptance_not_run` は**昇格ではなく「起こらない」**（劣化は不合格になる）——
+専用のコードは1行も書いていない。`uat_schema_version` は 1 のまま、`stop_reason` の enum にも
+値を足していない。
 
 ### CommandMate #1616 — baseline が green でも受入条件は未達、という穴
 

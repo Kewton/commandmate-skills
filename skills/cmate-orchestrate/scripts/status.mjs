@@ -335,8 +335,11 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   worker_method_applied: '当該 Issue の task text に `## Method` 節を書いた。遵守の証拠は worker の成果物側で確認する（dispatch は測っていない）。',
   verification_unrecorded: 'completed した worker に裁定が1つも記録されていない（runner 側の欠陥）。裁定なしを pass として扱わない。',
   verification_gates_unrecorded: 'pass の根拠となった gate を report が名指しできない。GATE 行を出す CLI で再実行して根拠を残す。',
-  // ---- dispatch: unattended（#122。段階 A は dispatch のみ）------------------
-  unattended_mode: '`--unattended` を宣言した run である。締め付けのみを含意し（contract require / pre-flight の scope 検査 / wall-clock budget / worktree lock）、mutation 権限は足していない。**`--approve` は含意しない。**',
+  // ---- unattended（#122 段階 A → #134 段階 B → #142 段階 C）-------------------
+  // One entry for the code, not one per runner: `unattended_mode` is the same
+  // declaration wherever it appears, and the per-run detail (which tightenings
+  // THIS invocation implied) is in the report's own limitation text.
+  unattended_mode: '`--unattended` を宣言した run である。締め付けのみを含意し（contract require / pre-flight の scope 検査 / wall-clock budget / worktree lock / 証拠と受入条件の要求）、mutation 権限は足していない。**`--approve` は含意しない。**',
   unattended_baseline: 'その Issue の worktree が dispatch 開始時どこに居たか（branch と短縮 SHA）。取り消しの起点である。untracked file・merge/push 済み・gc 済みは戻らない。',
   unattended_locked: '同じ worktree を別の dispatch run が動かしている。その run の終了を待って**同じコマンドを再実行する**（`--out` は消費していない）。死んだ run の lock は次の run が自動回収する。',
   wall_clock_budget_exhausted: '`--wall-clock-budget` に到達して打ち切った。**成功ではない。** 何に時間を使ったか（baseline / acceptance コマンドは自前の timeout を持たない）を確認し、原因を潰すか budget を実測に合わせてから `--resume` で再開する。',
@@ -350,6 +353,11 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   ci_failed: 'CI を直す。green 無しに merge しない。',
   ci_pending: 'CI が pending、または check が0件である。green を確認してから再実行する。',
   merge_failed: 'conflict / branch protection を手で解消してから再実行する。',
+  // SKILL.md §5 の merge 行。#134 で表には書いたがこの表には無く、#142 で写した
+  // （#134 の実装ノート 第16.6節が「次に status を触る Issue で写す」と残した欠落）。
+  change_evidence_unavailable: '宣言 scope と実変更を対比できない。対象 Issue の worktree を復旧して `git diff <base>...<branch>` が答える状態にしてから再実行する。**`--unattended` では blocking**（読めなかったを scope 内だったと読ませない）。',
+  // ---- merge: unattended 段階 C（#142）-------------------------------------
+  acceptance_gates_required: '無人 merge の対象 Issue に受入ゲートブロック（```acceptance-gates）が無い。**Issue 本文に書いて re-plan する。** 該当 Issue だけを除外して回す道は無い（対象集合を黙って縮めないため）。',
   issue_autoclose_not_default_branch: 'base がデフォルトブランチでないため `Resolves #n` が効かない。merge 後に Issue を手動でクローズする。',
   preflight_failed: 'gh 認証・repo 到達性・base 解決を復旧してから再実行する。',
   preflight_cli_available: 'CLI を実行可能にしてから再実行する。',
@@ -365,6 +373,9 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   fix_failed: 'fix worker が修正に到達しなかった。fix prompt と worker ログを読み、指示が過大なら Issue を分割する。',
   remerge_failed: 're-merge が conflict した。conflict を手で解消してから再実行する。',
   acceptance_not_run: 'cmate-acceptance-test を入れて result を用意し、必要なら --require-acceptance で必須にする。',
+  // ---- uat: unattended 段階 C（#142。ADR 第14.3節の実測）--------------------
+  unattended_cwd_detached: 'invocation cwd が detached HEAD である。再merge（`git merge --no-ff`）はどの branch にも残らないのに成功と報告されるため、fix worktree を1つも作らずに停止した。integration branch を checkout してから再実行する。',
+  unattended_cwd_branch_mismatch: 'invocation cwd の branch が `--expect-branch` と違う。再merge はその branch に入る（base branch なら review を経ずに入り、push 済みなら不可逆）ため、fix worktree を1つも作らずに停止した。integration branch を checkout してから再実行する。',
 
   // ---- shared --------------------------------------------------------------
   no_eligible_issues: 'dispatch report に completed かつ verification pass の Issue が無い。まず dispatch を通す。',
