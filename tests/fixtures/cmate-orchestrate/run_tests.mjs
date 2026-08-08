@@ -1060,6 +1060,26 @@ function runDispatchCase(caseId) {
         `#${num}: the dispatch send argv ${JSON.stringify(sends[0].args)} does not contain ${JSON.stringify(tokens)} in order`);
     }
   }
+  // What the SERVER's Auto-Yes poller did with a prompt (Issue #136). This is the
+  // assertion the issue's correction is about: `--auto-yes` on the send enables
+  // the state, but the contract's policy decides the prompt's TYPE, and
+  // `mode: safe` refuses `multiple_choice` — the type Claude's permission menu
+  // raises. The verdicts are the resolver's own vocabulary: `answered`,
+  // `type-not-allowed`, `mode-off`, `not-answerable`, `not-enabled`.
+  //
+  // A prompt the poller answered never reaches the runner, so this cannot be
+  // confused with the runner's own `--auto-yes` path (`no_respond` pins that half).
+  if (expect.auto_yes_poller) {
+    for (const [num, verdict] of Object.entries(expect.auto_yes_poller)) {
+      const events = cliLog.filter((entry) => entry.sub === 'auto-yes-poller'
+        && /issue-(\d+)/.exec(entry.args[0] ?? '')?.[1] === String(num));
+      if (!check(events.length > 0, `#${num}: the auto-yes poller never judged a prompt`)) continue;
+      const last = events[events.length - 1];
+      check(last.args[1] === verdict,
+        `#${num}: the poller's verdict was "${last.args[1]}" (type ${last.args[2]}, contract mode ${last.args[3]}) !== "${verdict}"`);
+    }
+  }
+
   // The other half of the two-point measurement: a run that did NOT ask for
   // auto-yes must not arm it on any send — not on the dispatch send, not on a
   // nudge, not on a re-instruction. Asserted over every send to the issue, so a
@@ -2971,8 +2991,11 @@ function autoYesWindowTest() {
       `${row.label}: auto_yes_window_short was ${short ? 'recorded' : 'not recorded'}, expected ${row.capped ? 'recorded' : 'not recorded'}`);
     const contractPath = join(outDir, 'contracts', 'issue-201.yaml');
     if (check(existsSync(contractPath), `${row.label}: no contract was written for #201`)) {
-      check(/^ {2}mode: "safe"$/m.test(readFileSync(contractPath, 'utf8')),
-        `${row.label}: the contract stopped declaring autoYes.mode "safe" — the send arms the state, the contract still states the policy`);
+      const contract = readFileSync(contractPath, 'utf8');
+      check(/^ {2}mode: "allow-listed"$/m.test(contract),
+        `${row.label}: the contract stopped declaring autoYes.mode "allow-listed" — the send arms the state, the contract still states the policy`);
+      check(/^ {4}- "multiple_choice"$/m.test(contract),
+        `${row.label}: the contract does not authorise multiple_choice, the type Claude's permission menu raises`);
     }
   }
 

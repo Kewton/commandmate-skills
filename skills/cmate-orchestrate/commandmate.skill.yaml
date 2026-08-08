@@ -221,8 +221,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: 98ee80f337b55b65f0dadd0d8bc318cd396f9f11e600ecea1029b6af4cb3fa43
-    size: 287813
+    sha256: 69db4b2fdb7bab3bf7a0258496ad106f0032b4d61a688cffde83b2f46eb753ef
+    size: 291426
     kind: script
     executable: true
     script: true

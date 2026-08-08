@@ -1,0 +1,16 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "auto_yes_poller": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "201": {
+      "state": "prompt",
+      "prompt_type": "multiple_choice",
+      "prompt": "Do you want to make this edit to src/base.ts?",
+      "verify_exits": [0]
+    },
+    "200": { "state": "completed", "verify_exits": [0] }
+  }
+}

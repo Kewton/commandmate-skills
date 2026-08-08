@@ -2329,6 +2329,52 @@ function buildContractGoal(plan, issue, requiredGates = [], workerMethod = null)
   return `${redacted.slice(0, MAX_CONTRACT_GOAL - marker.length)}${marker}`;
 }
 
+// The prompt types the contract authorises under `--auto-yes`, and why the runner
+// stopped writing `mode: safe` (Issue #136, the correction on the issue).
+//
+// MEASURED, in the installed CommandMate 0.22.1:
+//   - `dist/server/src/lib/polling/auto-yes-resolver.js`, `evaluatePolicyAgainstTexts`:
+//       mode 'off'          -> {reason: 'mode-off'} for everything;
+//       mode 'safe'         -> `promptType === 'yes_no' ? null : {reason: 'type-not-allowed'}`
+//                              — the allow list is NOT consulted, `yes_no` is hardcoded;
+//       mode 'allow-listed' -> `policy.allowPromptTypes.includes(promptType)`;
+//       mode null (no block)-> falls through to `return null`, i.e. no constraint.
+//   - `dist/server/src/lib/detection/prompt-detect-multiple-choice.js`: Claude's
+//     permission menu (`❯ 1.` / `2.` / `3.`) is detected as `multiple_choice`.
+//   - `dist/server/src/lib/tasks/contract-parser.js`: AUTO_YES_MODES is
+//     ['off','safe','allow-listed'] and PROMPT_TYPES is ['yes_no','multiple_choice',
+//     'approval','choice','input','continue'].
+//   - the same resolver's `resolveBaseAnswer`: an answer is only ever produced for
+//     `yes_no` ('y') and `multiple_choice` (the default option, else the first).
+//     The other four types resolve to null before any policy is consulted.
+//
+// So `mode: safe` suppressed the ONE type that a Claude worker raises most —
+// which is the bug: `--auto-yes` promised "prompts do not stop this run" and then
+// wrote the policy that stops it on every edit approval.
+//
+// DECISION: under `--auto-yes` the contract states `mode: allow-listed` with
+// exactly the two types the resolver can answer at all. The two alternatives were
+// weighed against this:
+//   - writing NO autoYes block (mode null, "no constraint") would work today, and
+//     is rejected because it makes the run's authorisation unreadable: this runner
+//     writes `mode: off` precisely because an active prohibition and an omission
+//     are different things, and the same argument applies to permission. A null
+//     policy also silently inherits whatever a future CommandMate teaches the base
+//     rules to answer, without this Skill ever deciding to grant it.
+//   - listing all six PROMPT_TYPES would grant four types that `resolveBaseAnswer`
+//     never answers — a contract claiming an authorisation nobody can use, which
+//     is exactly the kind of line a reader would later take as evidence.
+// Under no `--auto-yes` the block stays `mode: off`: the safe default is an active
+// prohibition, unchanged (ADR §4).
+//
+// `denyPatterns` is deliberately NEVER written. CommandMate #1699 measured what a
+// deny list costs when it is matched against pane text: a command approved several
+// turns earlier stayed inside the scrollback window and went on suppressing every
+// later prompt — the run looked hung, and nothing said why. The scope gate and the
+// verification gates are where this Skill constrains a worker; the parser's
+// default (an empty list) is what the contract carries.
+const AUTO_YES_ALLOWED_PROMPT_TYPES = ['yes_no', 'multiple_choice'];
+
 // The contract document for one issue. Field order is fixed, so is every list.
 //
 // `requiredGates` is the issue's resolved `require:` list (empty when the issue
@@ -2366,15 +2412,21 @@ function buildTaskContract(plan, issue, inputs, requiredGates = [], workerMethod
   // server-side policy and the supervision loop cannot disagree. `off` is an
   // active prohibition (distinct from omitting the block, which says nothing).
   //
-  // This line is a POLICY DECLARATION and nothing else (Issue #136): the server's
-  // Auto-Yes poller reads it only after it has already started, and it starts only
-  // when the WORKTREE's auto-yes state is enabled. Enabling that state is the
-  // separate job of `send --auto-yes` (autoYesSendFlags). The two are kept —
-  // contract declares, send enables — rather than collapsed into one, because a
-  // run whose worktree state expires mid-run must still carry the policy that says
-  // which prompts may be answered at all.
+  // These lines are a POLICY DECLARATION and nothing else (Issue #136): the
+  // server's Auto-Yes poller reads them only after it has already started, and it
+  // starts only when the WORKTREE's auto-yes state is enabled. Enabling that state
+  // is the separate job of `send --auto-yes` (autoYesSendFlags). BOTH are needed —
+  // the policy decides which prompts may be answered, the state decides whether
+  // anything is looking — and neither one alone answers a single prompt.
+  //
+  // Which types are authorised, and why not `safe`, is decided at
+  // AUTO_YES_ALLOWED_PROMPT_TYPES above.
   lines.push('autoYes:');
-  lines.push(`  mode: ${yamlString(inputs.autoYes ? 'safe' : 'off')}`);
+  lines.push(`  mode: ${yamlString(inputs.autoYes ? 'allow-listed' : 'off')}`);
+  if (inputs.autoYes) {
+    lines.push('  allowPromptTypes:');
+    for (const type of AUTO_YES_ALLOWED_PROMPT_TYPES) lines.push(`    - ${yamlString(type)}`);
+  }
   lines.push('success:');
   lines.push('  requireWorkEvidence: true');
   // Always true (Issue #50). It used to be `allow.length > 0`, which turned an
@@ -2932,13 +2984,16 @@ const COMMIT_REQUEST_MESSAGE = [
 // violation on stderr and sends nothing, so a rejected contract is an honest
 // failed dispatch — never a quiet downgrade to a plain send.
 //
-// `--auto-yes` rides on THIS send (Issue #136). The contract's `autoYes.mode` is a
-// policy the server only ever consults from inside its Auto-Yes poller, and that
-// poller does not start unless the worktree's auto-yes state is enabled
-// (`if (!autoYesState?.enabled) return { started: false, reason: 'auto-yes not
-// enabled' }`, ADR §14.6) — so a contract that says `mode: safe` on a worktree
-// nobody enabled answers nothing at all. Enabling it is what `send --auto-yes`
-// does, and this is the send that opens the supervision.
+// `--auto-yes` rides on THIS send (Issue #136), and that is the SECOND of the two
+// things the flag has to do. The contract's `autoYes` block is a policy the server
+// only ever consults from inside its Auto-Yes poller, and that poller does not
+// start unless the worktree's auto-yes state is enabled (`if
+// (!autoYesState?.enabled) return { started: false, reason: 'auto-yes not enabled'
+// }` — `dist/server/src/lib/auto-yes-poller.js`, ADR §14.6). So however permissive
+// the contract is, a worktree nobody enabled answers nothing; and however enabled
+// the worktree is, a policy that forbids the prompt's type answers nothing either
+// (see AUTO_YES_ALLOWED_PROMPT_TYPES). This send is where the state is enabled,
+// because it is the send that opens the supervision.
 async function sendContractAndConfirm(inputs, worktreeId, relativeContractPath) {
   const first = await runCmAsync(inputs, ['send', worktreeId, '--contract', relativeContractPath, ...autoYesSendFlags(inputs)]);
   if (!first.ok) {
