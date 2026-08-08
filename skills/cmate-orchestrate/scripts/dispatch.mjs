@@ -298,6 +298,22 @@ Options:
                          under <dir>/${RESUME_ATTEMPT_PREFIX}<n>/; nothing is
                          overwritten. Refused when the report was produced for a
                          different plan.
+  --reverify <dir>       Re-judge a prior dispatch WITHOUT sending anything:
+                         <dir> is the --out directory of the run being re-judged.
+                         The same carry-over rule as --resume applies (worker
+                         completed AND verification passed is transcribed, never
+                         re-judged); of the rest, every issue whose worktree
+                         still HOLDS WORK — a commit on the work branch or an
+                         uncommitted change, the two facts the work-evidence gate
+                         counts — is put through the verification gate again as
+                         it stands. Nothing is sent, no contract is written and
+                         no worker turn is consumed, so an issue whose worker
+                         finished after its report was frozen can rejoin the
+                         delivery path without being asked to work again. An
+                         issue with no work evidence is NOT re-judged: its prior
+                         record is transcribed unchanged. Artifacts append under
+                         <dir>/${RESUME_ATTEMPT_PREFIX}<n>/ exactly as a resume's
+                         do. Mutually exclusive with --out and --resume.
   --cli <launcher>       The CommandMate launcher to drive: an executable plus
                          fixed leading arguments, split on whitespace and run
                          WITHOUT a shell — "commandmate" (default),
@@ -389,6 +405,7 @@ function parseCli(argv) {
         plan: { type: 'string' },
         out: { type: 'string' },
         resume: { type: 'string' },
+        reverify: { type: 'string' },
         cli: { type: 'string' },
         git: { type: 'string' },
         gh: { type: 'string' },
@@ -573,11 +590,30 @@ function resolveInputs(parsed) {
       '--out and --resume are mutually exclusive: a resume appends into the directory it resumes ' +
         `(<resume-dir>/${RESUME_ATTEMPT_PREFIX}<n>/), so there is no second output path to choose`, 3);
   }
+  // The same reasoning for `--reverify` (Issue #121): it appends into the
+  // directory it re-judges, so `--out` has nothing to choose either.
+  if (values.reverify !== undefined && values.out !== undefined) {
+    throw new SkillError('invalid_input',
+      '--out and --reverify are mutually exclusive: a reverify appends into the directory it re-judges ' +
+        `(<reverify-dir>/${RESUME_ATTEMPT_PREFIX}<n>/), so there is no second output path to choose`, 3);
+  }
+  // `--resume` and `--reverify` are opposite answers to the same question. A
+  // resume decides "this issue is not finished, send it back to its worker"; a
+  // reverify decides "the work is already there, judge it again as it stands and
+  // send nothing". Accepting both would make the runner pick one of the two for
+  // every non-carried issue, and the wrong pick either consumes a worker turn
+  // nobody asked for or leaves unfinished work unfinished.
+  if (values.reverify !== undefined && values.resume !== undefined) {
+    throw new SkillError('invalid_input',
+      '--resume and --reverify cannot both hold: a resume RE-DISPATCHES what did not finish, a reverify RE-JUDGES what is '
+        + 'already in the worktree and sends nothing. Choose the one that matches why the prior attempt stopped', 3);
+  }
   const unattended = resolveUnattended(values);
   return {
     planPath: values.plan,
     outDir: values.out ?? null,
     resumeDir: values.resume ?? null,
+    reverifyDir: values.reverify ?? null,
     cliArgv,
     cli: cliArgv.join(' '),
     git: values.git ?? 'git',
@@ -702,6 +738,101 @@ function validatePlan(plan) {
 // uses for its attempt history. references/dispatch-contract.md section 8 defines
 // the layout and states which report merge/uat/status must read.
 
+// =============================================================================
+// Reverify — re-judge what is already there, without sending (Issue #121)
+// =============================================================================
+//
+// `--resume` gave the recovery path Issue #89 was missing, but it recovers by
+// RE-DISPATCHING. In #89's situation that is the wrong instrument: the worker
+// timed out, then finished and committed anyway, and the only thing that is
+// stale is the VERDICT frozen into the report. Re-dispatching there spends a
+// worker turn on work that is done and hands the contract back to a worker that
+// has no reason to touch anything — room for a diff nobody asked for.
+//
+// `--reverify <prior-out-dir>` splits the plan the same way `--resume` does and
+// then does the opposite thing with the second half:
+//
+//   carried    `worker_state: completed` AND `verification.outcome: pass`.
+//              Transcribed, exactly as on a resume, and NOT re-judged. Identical
+//              code (`isCarryable` / `carriedWorkerRecord`) on purpose: the two
+//              flags must not disagree about who is already finished.
+//   re-judged  the rest, RESTRICTED to the issues whose worktree still holds
+//              work. Put through the verification gate as they stand.
+//   left       the rest of the rest — no work evidence. The prior record is
+//              transcribed unchanged and a limitation says why.
+//
+// `send` is never called. That is the whole reason the flag exists, and it is
+// what the fixtures pin (`sent: []`).
+//
+// WHAT COUNTS AS "THERE IS WORK HERE" (the one thing this must not guess).
+// It is the work-evidence gate's own criterion, and nothing else: A COMMIT ON
+// THE WORK BRANCH, OR AN UNCOMMITTED CHANGE IN THE WORKTREE. CommandMate's
+// work-evidence gate counts exactly those two facts, `wait --verify`'s exit 21
+// is that gate finding neither, and this repository's own work-evidence check
+// asks the same question. Three reasons it is measured HERE, with git, rather
+// than inferred or delegated:
+//
+//   1. The prior report cannot answer it. A `timeout` worker's record says
+//      `verification.outcome: not_run` — the gate never ran, so the report holds
+//      no measurement at all. Reading "timed out" as "probably has work" is the
+//      guess the Issue forbids.
+//   2. Delegating it to `commandmate verify` would make the answer arrive as a
+//      VERDICT (exit 21 = fail). Recording that would DOWNGRADE the record of an
+//      issue nobody ever worked on, on the strength of a run this flag exists to
+//      avoid making. The adjudication rules are fixed (exit 21 means what it has
+//      always meant), so the only way to keep them fixed is not to ask.
+//   3. It must hold on the fallback path too. Without an execution contract the
+//      judge is the profile baseline, which measures the deliverable and knows
+//      nothing about work evidence; a criterion that only existed under a
+//      contract would make `--reverify` mean two different things.
+//
+// The measurement is fail-closed: a worktree whose commits AND whose status
+// cannot be read is NOT re-judged (`reverify_evidence_unreadable`). "We could not
+// look" is not "there is something there".
+//
+// THE VERDICT is taken from the same judge the ordinary path uses, in the same
+// mode: `commandmate verify <worktree-id> --json` under a contract (whose exit
+// code IS the verdict, 0/20/21/99 with the meanings section 2.1 already fixes),
+// and the profile-baseline re-run without one. No new CLI surface is asked for.
+//
+// COMPLETION stays what it has always been: a commit on the work branch. A
+// re-judged issue is `completed` when the branch carries one — which is what
+// makes it eligible for merge again — and keeps its prior state when the work in
+// the tree is uncommitted, because nothing downstream can deliver an uncommitted
+// change and this flag cannot ask for the commit (it does not send).
+//
+// THE EXCLUSIVITY LOCK IS TAKEN, on the same terms as any other unattended run
+// (ADR section 14.1). Adjudicated rather than assumed: the flag sends nothing,
+// so no second SUPERVISOR appears — but `commandmate verify` RUNS THE
+// REPOSITORY'S GATES INSIDE THE WORKTREE, and the verdict it produces is written
+// into a report that merge reads as eligibility. Judging a tree another run's
+// worker is actively writing to yields a verdict about a state that never
+// existed as a deliverable, and then delivers it. The lock's granularity is
+// already "one supervisor per worktree" for that reason; a reader-that-judges is
+// inside it. Carried issues are excluded from the lock set exactly as on a
+// resume — their worktree is never touched and may legitimately be gone.
+//
+// Everything else is deliberately unchanged: the attempt layout
+// (`resume-attempt-<n>/`, append-only, one ledger line), the consistency guards
+// (a report from another plan or one that cannot be read is refused before
+// anything is probed), the exit codes, and `dispatch_schema_version` staying 1.
+
+// The two operations that read a prior dispatch report back in. They are the
+// same refusals reached through different flags, so the wording is parameterised
+// instead of duplicated — a second copy is a second thing to keep true.
+const RESUME_OP = {
+  flag: '--resume',
+  verb: 'resume',
+  verbed: 'resumed',
+  because: 'A resume carries verification verdicts forward as fact',
+};
+const REVERIFY_OP = {
+  flag: '--reverify',
+  verb: 'reverify',
+  verbed: 're-judged',
+  because: 'A reverify carries the passing verdicts forward as fact and re-judges the rest against the same report',
+};
+
 function resumeAttemptDir(outDir, attempt) {
   return join(outDir, `${RESUME_ATTEMPT_PREFIX}${attempt}`);
 }
@@ -734,10 +865,10 @@ function nextAttemptNumber(outDir) {
 // The report a resume reads: the NEWEST attempt in the directory. Each attempt
 // re-states what it carried over, so the newest report alone is the whole
 // picture — which is the same rule merge, uat and the status matrix follow.
-function priorReport(outDir) {
+function priorReport(outDir, op = RESUME_OP) {
   if (!existsSync(outDir)) {
     throw new SkillError('load_error',
-      `--resume ${outDir} does not exist; it must be the --out directory of the dispatch being resumed`, 6);
+      `${op.flag} ${outDir} does not exist; it must be the --out directory of the dispatch being ${op.verbed}`, 6);
   }
   let newest = { path: join(outDir, DISPATCH_REPORT_FILE), attempt: 1 };
   for (let attempt = 2; attempt <= MAX_ATTEMPTS; attempt += 1) {
@@ -747,7 +878,7 @@ function priorReport(outDir) {
   }
   if (!existsSync(newest.path)) {
     throw new SkillError('load_error',
-      `--resume ${outDir} holds no ${DISPATCH_REPORT_FILE}; there is no dispatch run there to resume`, 6);
+      `${op.flag} ${outDir} holds no ${DISPATCH_REPORT_FILE}; there is no dispatch run there to ${op.verb}`, 6);
   }
   return newest;
 }
@@ -785,7 +916,7 @@ function resumeNonConformance(doc) {
   return null;
 }
 
-function loadResumeReport(path, plan) {
+function loadResumeReport(path, plan, op = RESUME_OP) {
   let text;
   try {
     text = readFileSync(path, 'utf8');
@@ -797,14 +928,14 @@ function loadResumeReport(path, plan) {
     doc = JSON.parse(text);
   } catch (error) {
     throw new SkillError('resume_invalid',
-      `the report at ${path} cannot be resumed: it is not valid JSON (${redact(error.message)}). ` +
-        'A resume carries verification verdicts forward as fact, so a report this runner cannot read is refused rather than partly believed', 3);
+      `the report at ${path} cannot be ${op.verbed}: it is not valid JSON (${redact(error.message)}). ` +
+        `${op.because}, so a report this runner cannot read is refused rather than partly believed`, 3);
   }
   const nonConformance = resumeNonConformance(doc);
   if (nonConformance !== null) {
     throw new SkillError('resume_invalid',
-      `the report at ${path} is not a dispatch report v${DISPATCH_SCHEMA_VERSION} this runner can resume: ${nonConformance}. ` +
-        'A resume carries verification verdicts forward as fact, so a report whose shape cannot be checked is refused rather than partly believed', 3);
+      `the report at ${path} is not a dispatch report v${DISPATCH_SCHEMA_VERSION} this runner can ${op.verb}: ${nonConformance}. ` +
+        `${op.because}, so a report whose shape cannot be checked is refused rather than partly believed`, 3);
   }
   // The plan guard (Issue #98 item 2). run_id is the plan's identity; repository
   // and base are the two profile fields the report copies out of it, so a report
@@ -818,9 +949,9 @@ function loadResumeReport(path, plan) {
     throw new SkillError('resume_plan_mismatch',
       `the report at ${path} was produced for plan run_id "${redact(String(doc.plan_run_id))}" ` +
         `(${redact(String(doc.profile.repository))} / ${redact(String(doc.profile.base))}), but --plan is run_id "${plan.run_id}" ` +
-        `(${plan.profile.repository} / ${plan.profile.base}). Refusing to resume a different plan's run: the carried-over records would ` +
+        `(${plan.profile.repository} / ${plan.profile.base}). Refusing to ${op.verb} a different plan's run: the carried-over records would ` +
         'claim that issues of THIS plan are completed and verified on the strength of work that was planned somewhere else. ' +
-        "Point --resume at that plan's own dispatch directory, or start a fresh dispatch with --out", 3);
+        `Point ${op.flag} at that plan's own dispatch directory, or start a fresh dispatch with --out`, 3);
   }
   return doc;
 }
@@ -892,10 +1023,61 @@ function carriedWorkerRecord(prior, priorAttempt) {
   return worker;
 }
 
-// The whole resume decision, computed once before anything is probed or written.
-function buildResume(inputs, plan) {
-  const prior = priorReport(inputs.resumeDir);
-  const doc = loadResumeReport(prior.path, plan);
+// The worker_state values the report schema allows. Needed only where a prior
+// report's value is copied forward: the conformance check asserts the field is a
+// string, and a hand-edited one that is a string but not a state must not be
+// able to make THIS report unreadable.
+const WORKER_STATE_VALUES = ['completed', 'failed', 'timeout', 'prompt', 'not_dispatched'];
+
+// A prior worker's verification, re-validated on the way through. Same reasoning
+// as `carriedWorkerRecord`'s — the report is an INPUT here — but unlike that one
+// this transcribes the verdict AS IT STANDS. A reverify repeats what the prior
+// attempt found for the issues it does not re-judge; it never promotes them.
+function transcribedVerification(verification) {
+  const source = (verification !== null && typeof verification === 'object' && !Array.isArray(verification)) ? verification : {};
+  const gates = (Array.isArray(source.gates) ? source.gates : [])
+    .filter((gate) => gate !== null && typeof gate === 'object'
+      && typeof gate.id === 'string' && gate.id.length > 0
+      && (gate.verdict === 'pass' || gate.verdict === 'fail'))
+    .slice(0, MAX_REPORTED_GATES)
+    .map((gate) => (gate.origin === 'repo' || gate.origin === 'issue'
+      ? { id: redact(gate.id), verdict: gate.verdict, origin: gate.origin }
+      : { id: redact(gate.id), verdict: gate.verdict }));
+  const checks = (Array.isArray(source.checks) ? source.checks : [])
+    .filter((check) => typeof check === 'string' && check.length > 0)
+    .slice(0, MAX_REPORTED_GATES)
+    .map((check) => redact(check));
+  return {
+    ran: source.ran === true,
+    report_schema_version: Number.isInteger(source.report_schema_version) ? source.report_schema_version : null,
+    // Anything that is not one of the two verdicts is `not_run`, which is what
+    // the schema already means by it: nothing judged this.
+    outcome: (source.outcome === 'pass' || source.outcome === 'fail') ? source.outcome : 'not_run',
+    gates,
+    checks,
+  };
+}
+
+// A prior worker's prompt, re-validated the same way. Transcribed rather than
+// cleared (which is what a CARRIED record does): a prompt the prior attempt
+// stopped on is still pending in that worktree, and a reverify did not answer
+// it — it does not send.
+function transcribedPrompt(prompt) {
+  const source = (prompt !== null && typeof prompt === 'object' && !Array.isArray(prompt)) ? prompt : {};
+  const text = typeof source.excerpt === 'string' && source.excerpt.length > 0 ? redact(source.excerpt) : null;
+  return { detected: source.detected === true, excerpt: text };
+}
+
+// The whole resume (or reverify) decision, computed once before anything is
+// probed or written. `mode` selects which of the two this attempt is; the SPLIT
+// is identical in both — same carry-over rule, same "everything else" set — and
+// only what the second half is then subjected to differs (Issue #121).
+function buildResume(inputs, plan, mode = 'resume') {
+  const reverifying = mode === 'reverify';
+  const dir = reverifying ? inputs.reverifyDir : inputs.resumeDir;
+  const op = reverifying ? REVERIFY_OP : RESUME_OP;
+  const prior = priorReport(dir, op);
+  const doc = loadResumeReport(prior.path, plan, op);
   const latest = priorWorkerRecords(doc);
 
   const carried = new Map();
@@ -913,14 +1095,22 @@ function buildResume(inputs, plan) {
     waveDispatch.push(pending);
   }
 
-  const attempt = nextAttemptNumber(inputs.resumeDir);
+  const attempt = nextAttemptNumber(dir);
   return {
+    mode,
+    reverifying,
+    dir,
     attempt,
-    attemptDir: resumeAttemptDir(inputs.resumeDir, attempt),
+    attemptDir: resumeAttemptDir(dir, attempt),
     priorAttempt: prior.attempt,
     priorRelative: attemptReportRelative(prior.attempt),
     carried,
     carriedIssues: [...carried.keys()].sort((a, b) => a - b),
+    // The prior record of every issue, carried and not. A reverify needs the
+    // not-carried ones too: an issue it does not re-judge is transcribed as it
+    // stood rather than blanked, so the report keeps saying what the attempt
+    // that DID dispatch it found.
+    priorRecords: latest,
     waveDispatch,
     redispatchIssues: waveDispatch.flat(),
     firstActiveWave: waveDispatch.findIndex((entries) => entries.length > 0),
@@ -936,6 +1126,21 @@ function buildResume(inputs, plan) {
 // machine-readable record is the attempt-history ledger beside the report.
 function resumeLimitation(plan, resume) {
   const list = (numbers) => (numbers.length === 0 ? 'なし' : numbers.map((n) => `#${n}`).join(', '));
+  // The reverify twin (Issue #121). Its own code, because the two attempts are
+  // not the same event and a reader that grepped `resume_attempt` must not find
+  // an attempt that dispatched nobody. The carry-over half is worded identically
+  // because it IS identical.
+  if (resume.reverifying) {
+    return {
+      code: 'reverify_attempt',
+      detail: `--reverify: attempt ${resume.attempt} of plan ${plan.run_id}; resumed_from=${resume.priorRelative} (attempt ${resume.priorAttempt}). `
+        + `NOTHING WAS SENT: this attempt called no \`commandmate send\`, wrote no execution contract and consumed no worker turn. `
+        + `Carried over without re-judging (worker completed and verification passed there): ${list(resume.carriedIssues)}. `
+        + `Re-judged here from the worktree as it stands, if it holds work evidence (a commit on the work branch or an uncommitted change): ${list(resume.redispatchIssues)}. `
+        + `The carried verification records are transcribed from that report and were NOT re-judged; `
+        + `this attempt's artifacts are under ${RESUME_ATTEMPT_PREFIX}${resume.attempt}/ and no earlier attempt was overwritten`,
+    };
+  }
   return {
     code: 'resume_attempt',
     detail: `--resume: attempt ${resume.attempt} of plan ${plan.run_id}; resumed_from=${resume.priorRelative} (attempt ${resume.priorAttempt}). `
@@ -3202,6 +3407,153 @@ function verifyWorker(inputs, worktreePath, baseline) {
   return { ran: true, outcome: 'pass', checks, note: '' };
 }
 
+// =============================================================================
+// Reverify — measuring work evidence, and re-judging without sending (#121)
+// =============================================================================
+
+// The two facts CommandMate's `work-evidence` gate counts, measured inside the
+// worktree with the git CLI this runner already drives:
+//
+//   commits      `git rev-list --count <base>..HEAD` — the work branch's own
+//                commits. The same range the gate counts, and the same range
+//                merge later turns into a PR.
+//   uncommitted  `git status --porcelain` — a non-empty listing.
+//
+// Positive evidence wins: one readable half that says "there is something here"
+// is enough, because the question is whether there is anything to judge. The
+// negative answer is the one that must be complete — "there is nothing here"
+// requires BOTH halves to be readable and empty, and anything less comes back as
+// `unreadable` so the caller can say "we could not look" instead of "it is
+// empty". Neither answer is ever guessed from the prior report's worker_state.
+async function workEvidence(inputs, plan, worktreePath) {
+  if (!worktreePath) {
+    return { present: false, unreadable: true, commits: null, uncommitted: null };
+  }
+  const counted = await runCliAsync(inputs.git, ['rev-list', '--count', `${plan.profile.base}..HEAD`], { cwd: worktreePath });
+  const raw = counted.ok ? counted.stdout.trim() : '';
+  const commits = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : null;
+  const status = await runCliAsync(inputs.git, ['status', '--porcelain'], { cwd: worktreePath });
+  const uncommitted = status.ok ? status.stdout.trim().length > 0 : null;
+  return {
+    present: (commits !== null && commits > 0) || uncommitted === true,
+    unreadable: commits === null || uncommitted === null,
+    commits,
+    uncommitted,
+  };
+}
+
+// How the measurement reads in a report line.
+function workEvidenceDetail(evidence) {
+  const commits = evidence.commits === null ? 'unreadable' : String(evidence.commits);
+  const dirty = evidence.uncommitted === null ? 'unreadable' : (evidence.uncommitted ? 'yes' : 'no');
+  return `commits on the work branch: ${commits}; uncommitted change in the worktree: ${dirty}`;
+}
+
+// The gate list of a `commandmate verify --json` run document. The ordinary path
+// reads `GATE <id> PASS|FAIL` lines off `wait --verify`; a reverify has no wait,
+// so the same facts are read out of the document's own `gates[]` (the shape
+// describeFailingGates already reads). `skipped` is not a verdict and is left
+// out rather than rounded, exactly as the ordinary path leaves it out.
+function gatesFromVerifyDocument(run, requiredGateIds = new Set()) {
+  const gates = [];
+  for (const gate of (run !== null && typeof run === 'object' && Array.isArray(run.gates)) ? run.gates : []) {
+    if (gate === null || typeof gate !== 'object') continue;
+    const id = typeof gate.gateId === 'string' ? gate.gateId.trim() : '';
+    if (id === '') continue;
+    const status = String(gate.status ?? '');
+    const verdict = FAILED_GATE_STATUSES.has(status) ? 'fail' : (status === 'passed' ? 'pass' : null);
+    if (verdict === null) continue;
+    gates.push({ id: redact(id), verdict, origin: gateOrigin(id, requiredGateIds) });
+    if (gates.length >= MAX_REPORTED_GATES) break;
+  }
+  return gates;
+}
+
+// Re-judge ONE worktree as it stands. Nothing is sent, no contract is written
+// and no worker turn is consumed; the only thing that happens is the same
+// verification the ordinary path runs, against a tree whose work is finished.
+//
+// The verdict vocabulary is the ordinary one, unchanged (contract §2.1 / §2.6):
+// 0 pass, 20 judged-and-failed, 21 the work-evidence gate finding nothing,
+// 99 NO VERDICT AT ALL (escalated, never re-instructed), anything else
+// infrastructure and therefore no verdict to record.
+async function reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePath, requiredGates) {
+  if (!contractMode) {
+    // The fallback judge, unchanged: the profile baseline re-run inside the
+    // worktree. It is the same function, called with the same arguments, as the
+    // one the ordinary fallback path calls — a reverify must not be judged by a
+    // different instrument than the run it is re-judging.
+    const verification = verifyWorker(inputs, worktreePath, plan.profile.baseline);
+    return {
+      source: 'baseline',
+      notJudged: false,
+      verdict: {
+        ran: verification.ran,
+        report_schema_version: null,
+        outcome: verification.outcome,
+        gates: [],
+        checks: verification.checks,
+      },
+      note: verification.note,
+    };
+  }
+  const result = await runCmAsync(inputs, ['verify', worktreeId, '--json']);
+  // `verify` exits WITH the verdict, so on a failing run the exit is 20 and the
+  // run document is still on stdout. Parse it regardless of exit status — the
+  // same reading describeFailingGates takes, and for the same reason.
+  let run = null;
+  try {
+    run = JSON.parse(result.stdout);
+  } catch {
+    run = null;
+  }
+  const code = result.ok ? VERIFY_EXIT_PASS : (result.status ?? null);
+  const gates = gatesFromVerifyDocument(run, new Set(requiredGates));
+  const done = (outcome, checks, extra = {}) => ({
+    source: 'contract',
+    notJudged: false,
+    verdict: { ran: true, report_schema_version: null, outcome, gates, checks },
+    note: '',
+    ...extra,
+  });
+  if (code === VERIFY_EXIT_PASS) {
+    return done('pass', [`commandmate verify --json → exit ${VERIFY_EXIT_PASS} (every declared gate passed; re-judged in place, nothing was sent)`]);
+  }
+  if (code === VERIFY_EXIT_FAILED) {
+    return done('fail', [`commandmate verify --json → exit ${VERIFY_EXIT_FAILED} (a gate failed; re-judged in place, nothing was sent)`]);
+  }
+  if (code === VERIFY_EXIT_NOT_STARTED) {
+    // The judge disagrees with the git measurement that selected this issue.
+    // Recorded as the verdict it is (exit 21 has always been `fail`), and the
+    // disagreement itself is reported by the caller rather than smoothed over.
+    return done('fail',
+      [`commandmate verify --json → exit ${VERIFY_EXIT_NOT_STARTED} (work-evidence found no commit and no uncommitted change)`],
+      { workEvidenceDisagreed: true });
+  }
+  if (code === VERIFY_EXIT_NO_VERDICT) {
+    return {
+      source: 'contract',
+      notJudged: true,
+      verdict: {
+        ran: true,
+        report_schema_version: null,
+        outcome: 'not_run',
+        gates: [],
+        checks: [`commandmate verify --json → exit ${VERIFY_EXIT_NO_VERDICT} (the verification run ended error/cancelled; no verdict was reached)`],
+      },
+      note: `escalated to a human rather than re-judged (exit ${VERIFY_EXIT_NO_VERDICT}: the run ended error/cancelled)`,
+    };
+  }
+  // 1 / 2 / 124 / anything else: infrastructure, not a verdict. No verdict is
+  // recorded at all — the prior record stands, and the caller says why.
+  return {
+    source: 'contract',
+    notJudged: false,
+    verdict: null,
+    note: excerpt(result.stderr || result.stdout || `commandmate verify exited ${code ?? 'with an error'}`) ?? 'commandmate verify could not be run',
+  };
+}
+
 async function respondWorker(inputs, worktreeId) {
   // Only ever reached when --auto-yes is explicitly set. A generic affirmative;
   // the default path never calls this, which is what keeps prompt handling
@@ -3286,6 +3638,10 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   mkdirSync(promptsDir, { recursive: true });
 
   const report = emptyReport(inputs, plan, outDir);
+  // This attempt re-judges instead of re-dispatching (Issue #121). Read off the
+  // same decision object as the resume split, because it IS that split — only
+  // what happens to the not-carried half differs.
+  const reverifying = resume !== null && resume.reverifying === true;
   // The mode of the whole invocation, stated first: everything below is read
   // against it (Issue #122 / ADR section 7.2). Nothing is pushed when the flag
   // was not passed, which is what keeps a run without it byte-identical to a run
@@ -3307,11 +3663,17 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   // the same exit code and must not read the same.
   const nothingToDispatch = resume !== null && resume.firstActiveWave < 0;
   if (nothingToDispatch) {
-    report.limitations.push({
-      code: 'resume_no_work',
-      detail: `再実行対象なし: every issue in plan ${plan.run_id} was already completed and verified in a prior attempt, so this attempt dispatched nobody, `
-        + 'started no worker and re-judged nothing. The verification records below are all carried over; this report is the one to hand to merge/uat',
-    });
+    report.limitations.push(reverifying
+      ? {
+        code: 'reverify_no_work',
+        detail: `再判定対象なし: every issue in plan ${plan.run_id} was already completed and verified in a prior attempt, so this attempt judged nobody again, `
+          + 'sent nothing and started no worker. The verification records below are all carried over; this report is the one to hand to merge/uat',
+      }
+      : {
+        code: 'resume_no_work',
+        detail: `再実行対象なし: every issue in plan ${plan.run_id} was already completed and verified in a prior attempt, so this attempt dispatched nobody, `
+          + 'started no worker and re-judged nothing. The verification records below are all carried over; this report is the one to hand to merge/uat',
+      });
   }
   // The pre-flight's drift verdict is part of THIS report even when the run
   // stops before the first wave for an unrelated reason: it was really checked,
@@ -3390,7 +3752,9 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     }
   }
   const contractsDir = join(outDir, 'contracts');
-  if (contractMode) mkdirSync(contractsDir, { recursive: true });
+  // Not on a reverify: it writes no contract, and an empty `contracts/` beside
+  // its report would say it did (Issue #121).
+  if (contractMode && !reverifying) mkdirSync(contractsDir, { recursive: true });
   // Issues whose verification reached NO verdict (exit 99). Kept beside the
   // report rather than inside it: dispatch_schema_version 1 is a closed field set
   // and merge/uat both refuse any other version, so the fact travels through the
@@ -3516,6 +3880,11 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     const workers = [...carriedWorkers];
     const worktreePaths = new Map();
     const supervisable = [];
+    // The reverify counterpart of `supervisable` (Issue #121): the not-carried
+    // issues of this wave whose worktree resolved. Whether each of them is
+    // actually re-judged is decided in step 3b, by the work-evidence
+    // measurement — not here, and never from the prior report's worker_state.
+    const reverifiable = [];
     // Issues whose worktree the CLI could not resolve at dispatch time, in wave
     // order. The drift re-check above passed, so this is the narrow window it
     // cannot cover: a worktree registered in `git worktree list` but not with
@@ -3548,6 +3917,49 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
         workers.push(worker);
         continue;
       }
+
+      // The reverify branch (Issue #121). Everything below this point exists in
+      // order to SEND: it resolves the issue's acceptance gates so a contract can
+      // carry them, refuses the issue when that contract could not be written,
+      // places the contract in the worktree, and writes the prompt artifact the
+      // worker is about to read. A reverify writes no contract and sends no
+      // message, so none of it applies — and running those dispatch-time
+      // refusals here would report "#N was not dispatched" inside an attempt that
+      // dispatches nobody by definition. What replaces them is the work-evidence
+      // measurement and the same verification gate, both in step 3b.
+      if (reverifying) {
+        // The prior record is the STARTING POINT, not a blank one: an issue this
+        // attempt turns out not to be able to re-judge must keep saying what the
+        // attempt that dispatched it found.
+        const prior = resume.priorRecords.get(number);
+        if (prior !== undefined) {
+          worker.worker_state = WORKER_STATE_VALUES.includes(prior.worker_state)
+            ? prior.worker_state
+            // A string the conformance check accepted but this runner cannot
+            // read is not a state it may repeat. `failed` is the only value that
+            // neither claims a deliverable (`completed`) nor claims that nothing
+            // ever ran (`not_dispatched`).
+            : 'failed';
+          worker.task_id = typeof prior.task_id === 'string' && prior.task_id.length > 0 ? redact(prior.task_id) : null;
+          worker.verification = transcribedVerification(prior.verification);
+          worker.prompt = transcribedPrompt(prior.prompt);
+          worker.note = redact(typeof prior.note === 'string' ? prior.note : '');
+        }
+        worktreePaths.set(number, res.worktreePath);
+        // The issue's `require:` ids, for gate PROVENANCE only (#97). A
+        // malformed block cannot refuse a dispatch that is not happening, so it
+        // degrades to "no issue-declared gate" instead of stopping the issue.
+        const declaredGates = issueRequiredGates(res.issue);
+        reverifiable.push({
+          worker,
+          worktreeId: res.resolved.id,
+          worktreePath: res.worktreePath,
+          requiredGates: declaredGates.error === null ? declaredGates.ids : [],
+        });
+        workers.push(worker);
+        continue;
+      }
+
       // Without a contract the worktree id is the only handle the public CLI
       // gives a worker, so it is what `task_id` carries. With one, the field
       // holds the REAL task id `send --contract` returns — recorded below, once
@@ -3707,6 +4119,96 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
       }
     }));
 
+    // 3b'. The reverify pass (Issue #121), in the place of the supervision loop
+    //      and never beside it: `reverifiable` is empty on every other run, and
+    //      `supervisable` is empty on a reverify. Two steps per issue, in this
+    //      order and no other:
+    //
+    //        1. MEASURE whether the worktree holds work — the work-evidence
+    //           criterion, with git, before anything is judged. An issue that
+    //           holds none is not re-judged at all: asking the gate would turn
+    //           "nobody worked here" into a verdict (exit 21 is `fail`) and
+    //           downgrade a record on the strength of a run this flag exists to
+    //           avoid making.
+    //        2. JUDGE the ones that do, with the same instrument the ordinary
+    //           path uses in the same mode.
+    //
+    //      Concurrent for the same reason the supervision loop is: a gate run is
+    //      the slow part, the wave width is already <= max_parallel, and one
+    //      issue's gates must not wait behind another's.
+    const reverifyVerdicts = new Map();
+    await Promise.all(reverifiable.map(async ({ worker, worktreeId, worktreePath, requiredGates }) => {
+      // A pending prompt is a worker still mid-turn, waiting for a human. The
+      // tree under it is being changed by somebody who has not finished, so a
+      // verdict about it would describe a state that is not a deliverable — and
+      // promoting the issue to `completed` would quietly take the human out of
+      // the loop this runner exists to keep them in.
+      if (worker.worker_state === 'prompt') {
+        report.limitations.push({
+          code: 'reverify_prompt_pending',
+          detail: `#${worker.issue} was NOT re-judged: its prior attempt stopped on a worker prompt that is still pending. A prompt is a worker mid-turn `
+            + 'waiting for a human, so the worktree is not a finished deliverable and judging it would describe a state nobody delivered. Answer the prompt '
+            + '(or re-dispatch the issue with --resume), then re-judge',
+        });
+        worker.note = appendNote(worker.note, 'not re-judged by this --reverify attempt: a worker prompt is still pending');
+        return;
+      }
+      const evidence = await workEvidence(inputs, plan, worktreePath);
+      if (!evidence.present) {
+        report.limitations.push(evidence.unreadable
+          ? {
+            code: 'reverify_evidence_unreadable',
+            detail: `#${worker.issue} was NOT re-judged: this runner could not read whether its worktree holds work (${workEvidenceDetail(evidence)}). `
+              + '"We could not look" is not "there is nothing there", so the prior record is transcribed unchanged rather than re-judged against a tree nobody measured',
+          }
+          : {
+            code: 'reverify_no_work_evidence',
+            detail: `#${worker.issue} was NOT re-judged: its worktree holds no work evidence (${workEvidenceDetail(evidence)}) — the same two facts CommandMate's `
+              + 'work-evidence gate counts. --reverify re-judges work that is already there; an issue with nothing there needs a worker, not a verdict, so its prior '
+              + 'record is transcribed unchanged. Use --resume to dispatch it',
+          });
+        worker.note = appendNote(worker.note, evidence.unreadable
+          ? 'not re-judged by this --reverify attempt: the work evidence in its worktree could not be read'
+          : 'not re-judged by this --reverify attempt: its worktree holds no work evidence (no commit, no uncommitted change)');
+        return;
+      }
+      const judged = await reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePath, requiredGates);
+      if (judged.workEvidenceDisagreed) {
+        report.limitations.push({
+          code: 'reverify_evidence_disagreement',
+          detail: `#${worker.issue}: git says the worktree holds work (${workEvidenceDetail(evidence)}) but the verification run's own work-evidence gate found none `
+            + `(exit ${VERIFY_EXIT_NOT_STARTED}). The gate's verdict stands — this runner does not overrule the judge — but the two disagree, which usually means the `
+            + 'work is on a different branch than the one the plan names, or the gate counts a different range',
+        });
+      }
+      // Completion is what it has always been: a COMMIT on the work branch
+      // (#1468). The verdict does not decide it and never has — the two are
+      // separate facts and the barrier reads them separately. Work that is only
+      // in the working tree is left at its prior state on purpose: nothing
+      // downstream can deliver an uncommitted change, and this flag cannot ask
+      // for the commit, because asking is sending.
+      if (evidence.commits !== null && evidence.commits > 0) {
+        worker.worker_state = 'completed';
+        worker.note = appendNote(worker.note,
+          `re-judged in place by --reverify (nothing was sent); ${workEvidenceDetail(evidence)}`);
+      } else {
+        worker.note = appendNote(worker.note,
+          `re-judged in place by --reverify (nothing was sent), but the work is NOT committed, so this issue is not a deliverable and its worker_state stays "${worker.worker_state}"; ${workEvidenceDetail(evidence)}`);
+      }
+      if (judged.note) worker.note = appendNote(worker.note, redact(judged.note));
+      if (judged.notJudged) notJudged.add(worker.issue);
+      if (judged.verdict === null) {
+        // Infrastructure, not a verdict: the prior record stands untouched.
+        report.limitations.push({
+          code: 'reverify_judge_unavailable',
+          detail: `#${worker.issue}: the verification could not be run against its worktree, so NO verdict was recorded and the prior attempt's record stands as it was. `
+            + 'This is an infrastructure failure of this attempt, not a finding about the work',
+        });
+        return;
+      }
+      reverifyVerdicts.set(worker.issue, judged);
+    }));
+
     // 4. Wave barrier — every dispatched worker must have completed.
     const allCompleted = workers.length > 0 && workers.every((worker) => worker.worker_state === 'completed');
 
@@ -3742,7 +4244,15 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
         if (worker.verification.outcome !== 'pass') allVerified = false;
         continue;
       }
-      if (contractMode) {
+      if (reverifying) {
+        // The verdict already exists too, for the same reason: step 3b' ran the
+        // gate. Recorded through the SAME function as every other verdict, so
+        // the note a human reads is derived from the field merge reads — the #83
+        // invariant holds on this path by construction. An issue step 3b' did
+        // not re-judge has no entry here, and its transcribed record stands.
+        const judged = reverifyVerdicts.get(worker.issue);
+        if (judged) recordVerification(report, worker, judged.verdict, judged.source);
+      } else if (contractMode) {
         // The verdict already exists: it is the exit code CommandMate returned
         // while the worker was supervised. Re-running anything here would be a
         // second opinion from a weaker judge.
@@ -3790,7 +4300,12 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     const advanced = allCompleted && allVerified;
     const waveRecord = {
       index: waveIndex,
-      dispatched: toDispatch.slice(),
+      // `dispatched` means "issues actually sent in this wave" (schema). A
+      // reverify sends nothing, so the honest value is the empty list — and the
+      // list being empty while `workers` is not is exactly the claim the flag
+      // makes. Which issues it re-judged is in the `reverify_attempt` limitation,
+      // in each worker's note, and in the ledger's `reverified`.
+      dispatched: reverifying ? [] : toDispatch.slice(),
       workers,
       barrier: { all_workers_completed: allCompleted, all_verifications_passed: allVerified, advanced },
     };
@@ -3944,10 +4459,19 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
   // A resume that had nothing left to dispatch judged nobody either, but it does
   // hold verdicts — carried ones. Saying "契約で裁定した" there would claim this
   // attempt ran a gate it never ran (Issue #98).
+  // A reverify's `dispatched` is empty by construction, so the "carried
+  // everything" sentence above would be a lie about the one attempt that judges
+  // WITHOUT dispatching (Issue #121). It gets its own sentence, naming the
+  // instrument it really used.
   const dispatchedAny = report.waves.some((wave) => wave.dispatched.length > 0);
+  const reverifying = resume !== null && resume.reverifying === true;
   lines.push(report.waves.length === 0
     ? '裁定: 1件も dispatch していないため、裁定は行っていない。'
-    : (resume !== null && !dispatchedAny)
+    : reverifying
+      ? (contractMode
+        ? '裁定: `--reverify` — 1件も send せず、worktree の現状を `commandmate verify --json` の exit code で判定し直した。引き継ぎ分は前回記録の転記で、再判定していない。'
+        : '裁定: `--reverify` — 1件も send せず、worktree の現状を profile baseline の再実行で判定し直した。引き継ぎ分は前回記録の転記で、再判定していない。')
+      : (resume !== null && !dispatchedAny)
         ? '裁定: この attempt では 1件も dispatch していない。verification はすべて前回 attempt の記録を引き継いだもので、ここで再判定はしていない。'
         : contractMode
           ? '裁定: 実行契約（`commandmate send --contract` / `wait --verify` の exit code）を一次ソースにした。'
@@ -3962,7 +4486,25 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
   // The resume section (Issue #98). Placed first because every other section is
   // read against it: which attempt this is, what was NOT re-run and why, and
   // what this attempt actually dispatched.
-  if (resume !== null) {
+  if (resume !== null && reverifying) {
+    lines.push('## reverify');
+    lines.push(`- attempt ${resume.attempt}（resumed_from: \`${resume.priorRelative}\` / attempt ${resume.priorAttempt}）。既存 artifact は上書きしていない。この attempt の artifact は \`${RESUME_ATTEMPT_PREFIX}${resume.attempt}/\` 配下。`);
+    lines.push('- **`send` を1回も呼んでいない。** 実行契約も書いていないし、worker のターンも1つも消費していない。');
+    lines.push(resume.carriedIssues.length === 0
+      ? '- 引き継ぎ: なし（前回 attempt に「worker completed かつ verification pass」の Issue が無かった）。'
+      : `- 引き継ぎ（再判定もしない）: ${resume.carriedIssues.map((n) => `#${n}`).join(', ')} — worker completed かつ verification pass。verification 記録は転記しただけである。`);
+    lines.push(resume.redispatchIssues.length === 0
+      ? '- **再判定対象なし**: plan の全 Issue が既に completed かつ verification pass だった。'
+      : `- 再判定の候補: ${resume.redispatchIssues.map((n) => `#${n}`).join(', ')}。このうち **worktree に作業証跡（work ブランチの commit / 未 commit の変更）が在るものだけ**を判定し直した。`);
+    const notReverified = report.limitations.filter((entry) => entry.code === 'reverify_no_work_evidence'
+      || entry.code === 'reverify_evidence_unreadable' || entry.code === 'reverify_prompt_pending');
+    if (notReverified.length > 0) {
+      lines.push('- 判定し直していない Issue（前回記録をそのまま転記した）:');
+      for (const entry of notReverified) lines.push(`  - ${entry.detail}`);
+    }
+    lines.push('- 完了の定義は通常経路と同じ「work ブランチの新規 commit」である。未 commit の作業だけの Issue は `completed` に上げない（納品できないし、この経路は commit を要求できない — 要求は send だからである）。');
+    lines.push('');
+  } else if (resume !== null) {
     lines.push('## resume');
     lines.push(`- attempt ${resume.attempt}（resumed_from: \`${resume.priorRelative}\` / attempt ${resume.priorAttempt}）。既存 artifact は上書きしていない。この attempt の artifact は \`${RESUME_ATTEMPT_PREFIX}${resume.attempt}/\` 配下。`);
     lines.push(resume.carriedIssues.length === 0
@@ -4124,6 +4666,16 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
     if (report.limitations.some((entry) => entry.code === 'resume_no_work')) {
       lines.push('- next: 再実行対象は無い。この attempt の report をそのまま merge / uat に渡す（owner: operator）。');
     }
+    if (report.limitations.some((entry) => entry.code === 'reverify_no_work')) {
+      lines.push('- next: 再判定対象は無い。この attempt の report をそのまま merge / uat に渡す（owner: operator）。');
+    }
+    // The reverify next-action (Issue #121). An issue this attempt could not
+    // re-judge needs a WORKER, not another verdict, so the command it names is
+    // the other one — saying "re-run --reverify" would loop on the same finding.
+    if (report.limitations.some((entry) => entry.code === 'reverify_no_work_evidence'
+      || entry.code === 'reverify_evidence_unreadable' || entry.code === 'reverify_prompt_pending')) {
+      lines.push('- next: 判定し直せなかった Issue（作業証跡が無い / 読めない / prompt 保留）は、裁定ではなく worker が要る。`dispatch.mjs --plan <plan.json> --resume <この run の dispatch ディレクトリ>` で dispatch し直す（owner: operator）。');
+    }
     if (report.stop_reason === 'verification_failed') lines.push('- next: verification 失敗の worktree を診断し、修正後に再 dispatch する（owner: operator）。');
     if (report.status !== 'success' && report.out_dir !== null) {
       lines.push('- next: 原因を直したら `dispatch.mjs --plan <plan.json> --resume <この run の dispatch ディレクトリ>` で再開する。worker completed かつ verification pass の Issue は再 dispatch されず、その verification 記録だけが引き継がれる（owner: operator）。');
@@ -4217,8 +4769,15 @@ async function run(argv) {
   // this attempt writes into, which wave the pre-flight has to probe, and which
   // issues it may demand a worktree for. It is also where a report from another
   // plan is refused — before anything is probed, sent or written.
-  const resume = inputs.resumeDir === null ? null : buildResume(inputs, plan);
-  const outDir = resume !== null ? inputs.resumeDir : (inputs.outDir ?? join(dirname(inputs.planPath), 'dispatch'));
+  // `--reverify` (Issue #121) is the same decision reached through a different
+  // flag, so it is built by the same function and travels in the same variable:
+  // every "this attempt appends into a prior run" rule below — the directory it
+  // writes into, which wave the pre-flight probes, which worktrees it may lock,
+  // which report it refuses — is one rule, not two.
+  const resume = inputs.reverifyDir !== null
+    ? buildResume(inputs, plan, 'reverify')
+    : (inputs.resumeDir === null ? null : buildResume(inputs, plan));
+  const outDir = resume !== null ? resume.dir : (inputs.outDir ?? join(dirname(inputs.planPath), 'dispatch'));
   // `--out` claims a new directory; `--resume` appends into an existing one, and
   // protects the earlier attempts by writing under a `resume-attempt-<n>/` name
   // that does not exist yet (nextAttemptNumber) rather than by refusing here.
@@ -4324,7 +4883,7 @@ async function run(argv) {
   const attempt = resume === null ? 1 : resume.attempt;
   appendAttemptHistory(outDir, {
     attempt,
-    kind: resume === null ? 'initial' : 'resume',
+    kind: resume === null ? 'initial' : resume.mode,
     plan_run_id: plan.run_id,
     resumed_from: resume === null ? null : { attempt: resume.priorAttempt, report: resume.priorRelative },
     report: attemptReportRelative(attempt),
@@ -4333,6 +4892,11 @@ async function run(argv) {
     stop_reason: report.stop_reason,
     carried_over: resume === null ? [] : resume.carriedIssues,
     dispatched: report.waves.flatMap((wave) => wave.dispatched),
+    // The reverify half of the ledger (Issue #121). `dispatched` is empty on such
+    // an attempt — nothing was sent — so without this line the ledger could not
+    // say what the attempt actually did. Absent on every other kind rather than
+    // written as `[]`, so an old reader sees the file it has always seen.
+    ...(resume !== null && resume.reverifying ? { reverified: resume.redispatchIssues.slice() } : {}),
   });
 
   process.stderr.write(`wrote dispatch artifacts to ${attemptDir}\n`);

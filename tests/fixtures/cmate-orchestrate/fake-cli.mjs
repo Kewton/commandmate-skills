@@ -315,11 +315,18 @@ function issueFromCwd() {
 // been driven `commit_on` turns (default 1), then one per further turn. A worker
 // whose `commit_on` sits above the runner's --max-turns cap never commits, which
 // is exactly the "idle forever, never completes" case the supervisor must escape.
+// `commits: N` is the commits the branch ALREADY carries when this invocation
+// starts — the work a previous attempt's worker left behind (Issue #121). The
+// harness gives every attempt a fresh CMATE_FAKE_STATE, so the turn counter
+// cannot express "the worktree still holds what was committed last time", and
+// `--reverify` exists precisely for that world. Default 0, so every scenario
+// written before this knob behaves exactly as it did.
 function commitsFor(spec, issue) {
   const worker = workerSpec(spec, issue);
   const commitOn = typeof worker.commit_on === 'number' ? worker.commit_on : 1;
   const sends = readSends(issue);
-  return sends < commitOn ? 0 : sends - commitOn + 1;
+  const existing = Number.isInteger(worker.commits) ? worker.commits : 0;
+  return existing + (sends < commitOn ? 0 : sends - commitOn + 1);
 }
 // A 40-hex worktree HEAD that advances by one each time the worker commits; 40
 // zeros before its first commit. Distinct SHAs per commit let the supervisor see
@@ -606,9 +613,26 @@ function main() {
     process.stdout.write('deadbeef\n');
     process.exit(0);
   }
+  if (sub === 'rev-list') {
+    // `git rev-list --count <base>..HEAD`, run INSIDE a worktree: how many
+    // commits the work branch carries over the base. It is one half of the
+    // work-evidence measurement `--reverify` selects its targets by (Issue #121),
+    // and it answers from the same commit model `git rev-parse HEAD` does, so the
+    // two can never disagree about whether the worker committed.
+    process.stdout.write(`${commitsFor(spec, issueFromCwd())}\n`);
+    process.exit(0);
+  }
   if (sub === 'status') {
     const git = spec.git ?? {};
-    process.stdout.write(git.dirty ? ' M some/file.ts\n' : '');
+    // From a worktree cwd this is the OTHER half of the work-evidence
+    // measurement, so a scenario answers it per worker (`uncommitted: true`).
+    // Falls back to the run-wide `git.dirty` — which is what the integration
+    // directory's drift check reads — whenever the worker says nothing, so every
+    // scenario written before this knob is unchanged.
+    const issue = issueFromCwd();
+    const worker = issue === null ? {} : workerSpec(spec, issue);
+    const dirty = worker.uncommitted === undefined ? git.dirty : Boolean(worker.uncommitted);
+    process.stdout.write(dirty ? ' M some/file.ts\n' : '');
     process.exit(0);
   }
   if (sub === 'worktree') {
@@ -951,8 +975,16 @@ function main() {
     const failedGates = spec.run_declared_gates
       ? runDeclaredGates(spec, issue, worktreeId).failing
       : (Array.isArray(worker.failed_gates) ? worker.failed_gates : []);
+    // The gates a PASSING run names. Empty by default, so every scenario written
+    // before `--reverify` keeps the document it had; a case that re-judges a
+    // worktree in place declares `pass_gates` so the report can say what the
+    // pass was based on (Issue #121 / #1678 B-5).
+    const passGates = failedGates.length === 0 && !spec.run_declared_gates
+      ? (worker.pass_gates ?? [])
+      : [];
     const gates = [
       { gateId: 'work-evidence', status: 'passed', exitCode: null, durationMs: 12, logTail: 'commits=1 uncommitted=0' },
+      ...passGates.map((id) => ({ gateId: id, status: 'passed', exitCode: 0, durationMs: 210, logTail: `${id}: ok` })),
       ...failedGates.map((entry) => {
         const gate = typeof entry === 'string' ? { id: entry } : entry;
         return {
@@ -978,7 +1010,15 @@ function main() {
         gates,
       })}\n`);
     }
-    process.exit(failedGates.length > 0 ? VERIFY_FAILED : 0);
+    // `verify` reports the VERDICT by exit code, exactly as `wait --verify` does.
+    // Derived from the gates by default; `verify_exit` overrides it so a scenario
+    // can model the two verdicts the gate list cannot express — 21 (the
+    // work-evidence gate finding nothing) and 99 (the run ending error/cancelled
+    // with no verdict at all) — which `--reverify` must handle the same way the
+    // ordinary path does (Issue #121).
+    process.exit(Number.isInteger(worker.verify_exit)
+      ? worker.verify_exit
+      : (failedGates.length > 0 ? VERIFY_FAILED : 0));
   }
   if (sub === 'capture') {
     // `commandmate capture <worktree-id> --json` — CurrentOutputResponse shape.

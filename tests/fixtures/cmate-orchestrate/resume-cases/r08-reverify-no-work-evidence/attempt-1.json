@@ -1,0 +1,11 @@
+{
+  "_comment": "r07 と同じ止まり方（#101 が timeout し、裁定が not_run で凍る）だが、こちらの worker は本当に何もしていない。attempt 2 の世界がその違いを持つ。",
+  "cli_available": true,
+  "cli_contract": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "100": { "state": "completed", "verify_exits": [0] },
+    "101": { "state": "timeout" }
+  }
+}

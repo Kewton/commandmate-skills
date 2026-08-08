@@ -1,0 +1,12 @@
+{
+  "_comment": "#89 の核心: timeout のあと worker は実際には完走して commit を積んでいた。その事実は worktree の側にしかないので、`commits: 1` で「この attempt が始まった時点で work ブランチが commit を1つ持っている」世界を作る（fake の turn counter は attempt ごとに空になるので、これでしか表せない）。#100 / #101 にも `commits: 1` を置いてある —— 引き継ぎ対象の branch には worker が積んだ commit が実際に在るからであり、そうしておくことで「reverify しない理由」が **work-evidence が無いこと**ではなく **引き継ぎ規則そのもの**に絞られる（作業証跡ゼロにしておくと、carry-over を壊す変異が work-evidence 側に受け止められて `never_verified` が緑のままになる）。呼べば pass する設定にしてあるので、呼んでいれば `never_verified` が赤になる。",
+  "cli_available": true,
+  "cli_contract": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "100": { "state": "completed", "verify_exits": [0], "commits": 1, "pass_gates": ["lint", "test"] },
+    "101": { "state": "completed", "verify_exits": [0], "commits": 1, "pass_gates": ["lint", "test"] },
+    "102": { "state": "completed", "commits": 1, "uncommitted": false, "pass_gates": ["lint", "test"] }
+  }
+}

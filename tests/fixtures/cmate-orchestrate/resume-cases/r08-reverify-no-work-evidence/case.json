@@ -1,0 +1,79 @@
+{
+  "description": "Issue #121: 「作業が無い」worker は再裁定の対象にならない。r07 と同じ止まり方（#101 が timeout し裁定が not_run で凍る）だが、#101 の worktree には commit も未 commit の変更も無い —— work-evidence ゲートが数える2つの事実がどちらも無い。`--reverify` はその測定（`git rev-list --count <base>..HEAD` と `git status --porcelain`）を **`commandmate verify` を呼ぶ前に** 行い、証跡が無ければ判定そのものを行わない: verify は 0 回、#101 の record は前回のまま（timeout / not_run）転記され、`reverify_no_work_evidence` が理由を名指しする。判定を通していれば exit 21 が `fail` として記録され、何もしていない Issue の記録が **格下げ**されていた —— それは「送らないための flag」が送らずに裁定を作ってしまうことである。attempt 2 の scenario は #101 を「呼べば pass する」設定にしてあるので、呼んでいれば completed + pass になり merge の eligible が [100, 101] になる。空振り検証: 対象選定から work-evidence 判定を外す変異（present を常に true にする）を入れると verify が #101 に飛び、このケースは赤になる。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": ["100", "101", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "attempts": [
+    {
+      "scenario": "attempt-1.json",
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 7,
+        "status": "partial",
+        "stop_reason": "timeout",
+        "waves_count": 1,
+        "sent": [100, 101],
+        "worker_states": { "100": "completed", "101": "timeout" },
+        "verification_outcomes": { "100": "pass", "101": "not_run" },
+        "blocking_codes": ["worker_timeout"],
+        "report_file": "dispatch-report.json",
+        "merge_eligible": [100],
+        "history_length": 1
+      }
+    },
+    {
+      "scenario": "attempt-2.json",
+      "reverify": true,
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 7,
+        "status": "partial",
+        "stop_reason": "timeout",
+        "waves_count": 1,
+        "wave_dispatched": [[]],
+        "sent": [],
+        "never_sent": [100, 101],
+        "never_verified": [100, 101],
+        "no_worker_driven": true,
+        "cli_subcommand_counts": { "verify": 0, "capture": 0, "respond": 0 },
+        "worker_states": { "100": "completed", "101": "timeout" },
+        "verification_outcomes": { "100": "pass", "101": "not_run" },
+        "blocking_codes": ["worker_timeout"],
+        "worker_notes_include": {
+          "101": ["not re-judged by this --reverify attempt: its worktree holds no work evidence"]
+        },
+        "limitation_codes": ["reverify_attempt", "reverify_no_work_evidence"],
+        "absent_limitation_codes": [
+          "resume_attempt",
+          "reverify_evidence_unreadable",
+          "reverify_evidence_disagreement",
+          "reverify_prompt_pending",
+          "verification_unrecorded"
+        ],
+        "limitation_details_include": [
+          "#101 was NOT re-judged: its worktree holds no work evidence",
+          "commits on the work branch: 0; uncommitted change in the worktree: no",
+          "an issue with nothing there needs a worker, not a verdict"
+        ],
+        "summary_includes": [
+          "## reverify",
+          "判定し直していない Issue（前回記録をそのまま転記した）:",
+          "判定し直せなかった Issue（作業証跡が無い / 読めない / prompt 保留）は、裁定ではなく worker が要る"
+        ],
+        "report_file": "resume-attempt-2/dispatch-report.json",
+        "merge_eligible": [100],
+        "history_length": 2,
+        "history": {
+          "attempt": 2,
+          "kind": "reverify",
+          "carried_over": [100],
+          "dispatched": [],
+          "reverified": [101],
+          "status": "partial",
+          "stop_reason": "timeout"
+        }
+      }
+    }
+  ]
+}

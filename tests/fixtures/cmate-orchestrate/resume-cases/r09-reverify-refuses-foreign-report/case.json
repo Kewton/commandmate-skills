@@ -1,0 +1,93 @@
+{
+  "description": "Issue #121: `--reverify` の整合性ガードは `--resume` と同じ扱いである。reverify も「この Issue はもう完了・検証済みだ」という主張（引き継ぎ record）を転記する操作なので、引き継ぎ元が本当にこの plan の run かを、世界を probe する前・何かを書く前に確かめる。別 plan の report（run_id 不一致）は `resume_plan_mismatch`、`dispatch-report.v1` として読めない report は `resume_invalid` で、どちらも exit 3 / **CLI を1回も呼ばず・attempt directory も台帳の行も作らずに**拒否する。code を `--resume` と共有しているのは意図であって手抜きではない: 同じ入力に対する同じ拒否であり、読み手（status.mjs の hint map など）に2つ目の語彙を覚えさせる理由が無い。文面だけがどの flag で来たかを名乗る。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "other_plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "other"],
+    "run_dir": "other"
+  },
+  "attempts": [
+    {
+      "scenario": "all-pass.json",
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 0,
+        "status": "success",
+        "stop_reason": "completed",
+        "waves_count": 2,
+        "report_file": "dispatch-report.json",
+        "history_length": 1
+      }
+    },
+    {
+      "scenario": "all-pass.json",
+      "reverify": true,
+      "plan": "other",
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 3,
+        "status": "failure",
+        "stop_reason": "dispatch_error",
+        "waves_count": 0,
+        "never_sent": [200, 201],
+        "never_verified": [200, 201],
+        "cli_calls_total": 0,
+        "blocking_codes": ["resume_plan_mismatch"],
+        "blocking_details_include": [
+          "was produced for plan run_id \"plan\"",
+          "but --plan is run_id \"other\"",
+          "Refusing to reverify a different plan's run",
+          "Point --reverify at that plan's own dispatch directory"
+        ],
+        "report_file_absent": "resume-attempt-2/dispatch-report.json",
+        "history_length": 1
+      }
+    },
+    {
+      "scenario": "all-pass.json",
+      "reverify": true,
+      "prior_report_patch": { "dispatch_schema_version": 2 },
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 3,
+        "status": "failure",
+        "stop_reason": "dispatch_error",
+        "waves_count": 0,
+        "never_sent": [200, 201],
+        "cli_calls_total": 0,
+        "blocking_codes": ["resume_invalid"],
+        "blocking_details_include": [
+          "this runner can reverify",
+          "its dispatch_schema_version is 2; this runner understands 1",
+          "refused rather than partly believed"
+        ],
+        "report_file_absent": "resume-attempt-2/dispatch-report.json",
+        "history_length": 1
+      }
+    },
+    {
+      "scenario": "all-pass.json",
+      "reverify": true,
+      "prior_report_raw": "{ this is not json",
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 3,
+        "status": "failure",
+        "stop_reason": "dispatch_error",
+        "waves_count": 0,
+        "never_sent": [200, 201],
+        "cli_calls_total": 0,
+        "blocking_codes": ["resume_invalid"],
+        "blocking_details_include": [
+          "cannot be re-judged: it is not valid JSON",
+          "refused rather than partly believed"
+        ],
+        "report_file_absent": "resume-attempt-2/dispatch-report.json",
+        "history_length": 1
+      }
+    }
+  ]
+}

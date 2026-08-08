@@ -1,0 +1,12 @@
+{
+  "_comment": "#89 が報告した世界（r06 の attempt 1 と同型だが、こちらは実行契約経路）: #102 の worker は wait --timeout を使い切り、裁定が下りないまま run が止まる。timeout した worktree は verify されない（実 CLI も fake も、完了を検出した worktree しか verify しない）ので、#102 の verification は not_run のまま凍る。#100 / #101 は wait --verify exit 0 で completed + pass。",
+  "cli_available": true,
+  "cli_contract": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "100": { "state": "completed", "verify_exits": [0] },
+    "101": { "state": "completed", "verify_exits": [0] },
+    "102": { "state": "timeout" }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "_comment": "r07 の attempt 2 との差は #101 の worktree の中身だけである: commit も未 commit の変更も無い（`commits` 省略＝0 / `uncommitted: false`）。引き継ぎ対象の #100 には `commits: 1` を置いてある —— その branch には worker が積んだ commit が実際に在るので、#100 が再判定されない理由は work-evidence ではなく引き継ぎ規則だけになる。#101 の worker spec の `state` / `verify_exits` はわざと「呼べば pass する」値のままにしてある —— reverify がそれを呼ばないことが固定したい挙動であり、呼んでいたら pass になってしまうので、この設定こそが「呼んでいない」の証拠になる。",
+  "cli_available": true,
+  "cli_contract": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "100": { "state": "completed", "verify_exits": [0], "commits": 1, "pass_gates": ["lint", "test"] },
+    "101": { "state": "completed", "uncommitted": false, "pass_gates": ["lint", "test"] }
+  }
+}

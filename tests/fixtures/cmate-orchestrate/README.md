@@ -12,6 +12,11 @@ dispatch-cases/<id>/scenario.json  fake CLI に注入する worker/verify/drift 
 dispatch-cases/<id>/contracts/  （契約 case のみ）生成された実行契約の golden。byte 一致で照合
 dispatch-cases/issues-multifile.json  複数 file を保有する Issue fixture（契約決定性の case 用）
 dispatch-cases/issues-acceptance-gates*.json  受入ゲート case の Issue fixture（ブロック有り / 無し / 未知 id）
+resume-cases/<id>/case.json     複数 attempt を1つの run directory に append する case。
+                                `--resume`（再 dispatch）と `--reverify`（送らずに再裁定）の両方が
+                                ここに入る: attempt の配置規約・append-only 不変条件・台帳・
+                                整合性ガードが同じものだからである
+resume-cases/<id>/attempt-N.json  attempt ごとに fake CLI へ注入する世界
 merge-cases/<id>/case.json      plan/dispatch 生成・merge scenario・merge 期待値（scenario は inline）
 uat-cases/<id>/case.json        plan/dispatch 生成・uat scenario・UAT/修正ループ 期待値（scenario は inline）
 status-cases/<id>/case.json     status view の期待値（phase 状態・Issue ごとの値・次アクション）
