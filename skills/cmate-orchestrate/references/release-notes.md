@@ -678,6 +678,44 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 
 ## パッケージ
 
+### #135 — SKILL.md が 64KB を超え、スラッシュコマンドパレットから消えた
+
+**インストールは正常なのに、`/cmate-orchestrate` が補完に出なくなった。** CommandMate の
+skills API は 0.20.0 を「インストール済み」と認識し、ディスク上にも `.claude/skills/` と
+`.agents/skills/` の両方に実体があり、エージェントは `SKILL.md` を直接読むので手で打てば動く。
+**落としていたのはパレットのローダーだけ**である —— `parseSkillFile()` は読む前に `stat` し、
+`MAX_SKILL_FILE_SIZE_BYTES`（65536）を超えると `logger.warn` を1行書いて `return null` する。
+利用者から見ると**理由もなく消える**。
+
+版ごとの `SKILL.md`: 0.16.0=23,213 → 0.17.0=24,155 → 0.18.0=48,178 → 0.19.0=50,632 →
+**0.20.0=71,383**。#128（`--worker-method`）・#122（unattended 段階A）・#121（`--reverify`）を
+すべて SKILL.md へ書き足した結果で、**0.20.0 で初めて上限を越えた**。インストール済み12件のうち
+次に大きいのは 22,825 bytes（`cmate-task-contract`）で、この package だけが突出していた。
+
+対処は**方針へ戻すこと**である。0.14.0（下記）は SKILL.md を「いつ使うか / 呼び出し方と順序 /
+出力の読み方 / 停止時に人間が何をするか」の4点に絞り、機構の詳細を正本への一方向参照に変えた。
+0.20.0 はそこから外れて肥大した。**移送先を2つ新設し、内容は1文字も削らずに移した**:
+
+- [runner-operations.md](./runner-operations.md) — ランチャー表記・worktree の前提・条件付き依存の
+  Skill・dispatch の各 flag（`--prepare-worktrees` / `--worker-method` / `acceptance-gates` /
+  `--resume` / `--reverify` / `--contract-mode` / `--unattended` / monitor 境界）・PR 本文・
+  profile-init の3点・status の表示規則
+- [codes-and-recovery.md](./codes-and-recovery.md) — plan の失敗 code / warning code /
+  limitation code の全一覧と、**停止したときの対処表の正本**、無人 run の取り消し手順
+
+SKILL.md は 71,383 → 約 37,000 bytes になり、4点だけを述べて上の2つへ一方向に参照する。
+`references` と `schemas` の内容は削っていない（0.14.0 と同じ約束である）。
+
+**再発は `scripts/validate.py` が止める。** 全 package の `SKILL.md` に **60,000 bytes** の上限を
+置き、超えたら hard fail する（`SKILLS_SKILL_MD_TOO_LARGE`。エラーは「`references/` へ移送せよ」と
+次の行動を名指しする）。閾値を上流の 65536 の生値にしないのは、`MAX_SKILL_FILE_SIZE_BYTES` が
+上流の実装詳細だからで、**触れる前に止める**のが安全である。置き場所は #92（`SKILL_VERSION` の
+一致）と同じ —— `.commandmate/verify.yaml` の宣言ゲートかつ CI の両ジョブで走るので、
+**公開前に必ず通る**。今回は公開してから発覚した。validate.py で落ちていれば公開前に止まった。
+
+なお `acceptance-gates` ブロックを説明する行が ` ```acceptance-gates ` で始まっていたため、
+そこから merge 節の直前までが**コードブロックとして描画されていた**。移送のついでに直してある。
+
 ### 0.20.0 — 方法を渡す口・無人運転・送らない再裁定（#121 / #122 / #128）
 
 ワーカーへ **HOW（開発の方法）を渡す口**が入った（#128）。方法論の正本は別 package

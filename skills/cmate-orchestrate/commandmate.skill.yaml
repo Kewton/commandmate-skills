@@ -107,8 +107,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: d0a17ae816ca0e8cdd6d8710853219d282b3d9a3d6de32ac3dd513d6a56d93d3
-    size: 71383
+    sha256: 29a282d949a80b81820218da325b07902e34dfd2a1182f3818f221bd4624107e
+    size: 37334
     kind: skill_md
     executable: false
     script: false
@@ -125,20 +125,20 @@ files:
     executable: false
     script: false
   - path: references/adr-unattended-mode.md
-    sha256: 8ff374c568fc581a9c2c4f0c33dd37cc9967dffb44a291a9da96fd8adf39d747
-    size: 96205
+    sha256: 56077f0a03877457920faa00a1023e93dcd24eb7a82a9f3e4aa8ba28961e8c37
+    size: 96371
     kind: instruction
     executable: false
     script: false
   - path: references/adr-worker-development-skill.md
-    sha256: 3f8c2335d0cbe3814dbf3e0b8e9b69f3ed028c34e0c2ebb96da8addc149e4e8f
-    size: 68482
+    sha256: 93d7acd6884d1269243afbaa3e71df0e03c209b1f5b25670383c53d59efd9695
+    size: 68594
     kind: instruction
     executable: false
     script: false
   - path: references/adr-worktree-preparation.md
-    sha256: 148673d030b71bb8b44ee91ca4758e65924b7eff6920ba182cba2777490ed5b1
-    size: 18549
+    sha256: d2679f3d399d400eebddd047e660a9e609e4f6ff53f8c914c5e275d0d3f3df82
+    size: 18657
     kind: instruction
     executable: false
     script: false
@@ -148,9 +148,15 @@ files:
     kind: instruction
     executable: false
     script: false
+  - path: references/codes-and-recovery.md
+    sha256: a80380a6083bd1e96d52b810a07b582dc812912c5260388552bbdf69dedc9794
+    size: 20435
+    kind: instruction
+    executable: false
+    script: false
   - path: references/dispatch-contract.md
-    sha256: b66cd1c6b24069597d99fbcfcd6d8f259349fca7a527a5e273a03f1a60d35736
-    size: 93662
+    sha256: 66d2197b5c7940cbff47f5fe1ab85c474474c72c2d34a297b487e984cd45b302
+    size: 93703
     kind: instruction
     executable: false
     script: false
@@ -173,8 +179,14 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: b605a56b4138cae8a1ac066739b8e39bd5c03dc932c30d4b5713ebf02a843a47
-    size: 57188
+    sha256: a543becc79311bd94d87985f804e0176f4cee914bb941061237c024f33cb2edb
+    size: 60555
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/runner-operations.md
+    sha256: 06e2b1aa43699565dc19c3304a61e904ad2df2145f7dc5cd0b66170157e7a5bc
+    size: 33243
     kind: instruction
     executable: false
     script: false
