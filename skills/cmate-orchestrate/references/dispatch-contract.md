@@ -31,6 +31,7 @@ CommandMate の exit code へ移しただけで、report 上の表現（field �
 | `--plan <path>` | 必須 | なし | 承認済み `plan.json`（plan-core の出力） |
 | `--out <dir>` | 任意 | `<plan-dir>/dispatch` | dispatch artifact の出力先。既存なら `out_exists` で拒否。**blocking pre-flight（第3節）で停止した場合は作らない**ので、原因を直して同じコマンドを再実行できる。`--resume` とは排他（両方渡すと `invalid_input`） |
 | `--resume <dir>` | 任意 | なし | 部分失敗した run の再開。`<dir>` は再開対象の `--out` ディレクトリ。その**最新 attempt の report** を読み、completed かつ verification pass の Issue を再 dispatch せずに記録だけ引き継ぐ（第8節）。artifact は `<dir>/resume-attempt-<n>/` に append し、既存を上書きしない |
+| `--reverify <dir>` | 任意 | なし | **`send` を1回も呼ばずに**裁定だけ取り直す（第8.5節）。`<dir>` は対象 run の `--out` ディレクトリ。引き継ぎ規則は `--resume` と同一で、それ以外のうち **worktree に作業証跡（work ブランチの commit / 未 commit の変更）が在るもの**だけを verification gate にかけ直す。artifact の配置と整合性ガードは `--resume` と同一。`--out` / `--resume` とは排他（`invalid_input`） |
 | `--cli <launcher>` | 任意 | `$CM` → `commandmate` | 実行する public CommandMate ランチャー（第 2.8 節） |
 | `--git <path>` | 任意 | `git` | drift 確認に使う git |
 | `--gh <path>` | 任意 | `gh` | repo 到達性確認に使う gh |
@@ -792,7 +793,11 @@ dispatch report は**閉じた schema**（`additionalProperties: false`）であ
 黙って読めなくなる。run 固有の事実は `limitations` / `blocking_reasons` / `note` /
 `summary_markdown` に載せる、という既存の裁定をそのまま適用した。
 
-## 8. resume（部分失敗からの再開）
+## 8. resume（部分失敗からの再開）と reverify（送らずに裁定だけ取り直す）
+
+第8.1〜8.4節は `--resume` の規約である。`--reverify` は同じ分割・同じ artifact 配置・同じ整合性
+ガードを使い、**引き継がなかった Issue に対して何をするか**だけが違う。その差分は第8.5節にある。
+
 
 `--resume <前回の --out>` は、Wave 途中で一部の Issue だけが落ちた run を、**落ちた分だけ**
 やり直す（[#98](https://github.com/Kewton/commandmate-skills/issues/98)）。並列開発では部分失敗が
@@ -928,3 +933,139 @@ run_id を名乗れるためで、profile の2 field は plan からそのまま
 要求し、後者は既存のディレクトリに append する。両方受け付けると、どちらの意味で言ったのかを
 runner が推測することになり、外すと前回 attempt を上書きするか、誰も見ないところに書くかの
 どちらかになる。
+
+### 8.5 reverify（送らずに裁定だけ取り直す）
+
+`--reverify <前回の --out>` は、**`send` を1回も呼ばずに** worktree の現状を verification gate に
+かけ直し、report の裁定を更新する（[#121](https://github.com/Kewton/commandmate-skills/issues/121)、
+[#89](https://github.com/Kewton/commandmate-skills/issues/89) の残り）。
+
+`wait --verify` が timeout すると、その時点の裁定（`verification.outcome: not_run`）が report に
+凍る。worker がその後に完走して commit しても report は更新されないので、**検証に通る成果物が
+merge の eligible（`worker_state === 'completed' && verification.outcome === 'pass'`）から外れる**。
+`--resume` はここから回復できるが、回復の手段が**再 dispatch** である。この状況で必要なのは
+worker をもう一度走らせることではなく、**その worktree の現在の状態をもう一度ゲートにかけること**
+であり、再 dispatch は worker のターンを1つ消費し、終わっていると分かっている worker に契約を
+再送するので、契約 scope 内とはいえ不要な差分が生まれる余地も残す。
+
+#### 8.5.1 分割規則
+
+分割は第8.1節と**同じ語彙**で行う。同じ関数（`isCarryable` / `carriedWorkerRecord`）を使う。
+違うのは「それ以外」に対して何をするかだけである。
+
+| 分類 | 条件 | この attempt での扱い |
+|---|---|---|
+| **引き継ぎ** | `worker_state === 'completed'` **かつ** `verification.outcome === 'pass'` | `--resume` と同一。転記する。**再判定もしない** |
+| **再判定** | 引き継ぎ以外で、**worktree に作業証跡が在る**もの | 送らずに verification gate にかけ直す |
+| **転記のみ** | 引き継ぎ以外で、作業証跡が無い / 読めない / prompt 保留 | 前回 record をそのまま転記し、理由を limitation に書く |
+
+#### 8.5.2 「作業が在る」の定義と、それをここで測る理由
+
+**work-evidence ゲートと同じ2つの事実であり、それ以外ではない**:
+**work ブランチの commit**、または **worktree の未 commit の変更**。CommandMate の work-evidence
+ゲートが数えるのはこの2つで、`wait --verify` の exit 21 はそのゲートがどちらも見つけなかった状態
+である。dispatch は `--git` で、`commandmate verify` を呼ぶ**前に**測る。
+
+```
+git rev-list --count <profile.base>..HEAD   # worktree 内で実行
+git status --porcelain                      # worktree 内で実行
+```
+
+前者だけ、あるいは後者だけが読めて「在る」と言っているなら**在る**（肯定側は片方で足りる）。
+「無い」と言い切るには**両方が読めて両方が空**でなければならない。片方でも読めなければ
+`reverify_evidence_unreadable` であって「無い」ではない。
+
+推測にも委譲にもしないのは、次の3つの理由による。
+
+1. **前回 report には答えが無い。** timeout した worker の record は
+   `verification.outcome: not_run` である —— ゲートが走っていないので、測定結果が1つも入っていない。
+   「timeout だから多分作業は在る」は Issue が禁じた推測そのものである。
+2. **`commandmate verify` に委譲すると、答えが「裁定」として返る。** exit 21 は `fail` であり
+   （第2.1節。この意味は変えない）、それを記録することは**誰も作業していない Issue の record を
+   格下げする**ことになる。しかもその格下げは、この flag が避けるために存在する「余計な実行」の
+   産物である。裁定規則を固定したまま済ませる唯一の方法は、**訊かないこと**である。
+3. **契約非対応の経路でも同じ意味でなければならない。** フォールバックの judge は profile baseline
+   で、成果物は測るが work-evidence は測らない。契約経路でしか存在しない基準は、`--reverify` の
+   意味を2つに割ってしまう。
+
+#### 8.5.3 裁定と完了
+
+**裁定機構は通常経路と同一で、新しい CLI 表面を要求しない。**
+
+| 経路 | judge |
+|---|---|
+| 契約経路 | `commandmate verify <worktree-id> --json` の **exit code**（0 pass / 20 判定して不合格 / 21 work-evidence ゼロ＝`fail` / 99 判定に到達せず＝`not_run` かつ human 提示）。gate の内訳は同じ run document の `gates[]` から採る（`skipped` は裁定ではないので載せない） |
+| 契約非対応 | profile baseline の worktree 内再実行。通常経路のフォールバックと**同じ関数**を呼ぶ |
+
+exit 1 / 2 / 124 は裁定ではなく infrastructure なので、**verdict を1つも記録せず**前回 record を
+そのまま残し、`reverify_judge_unavailable` を出す。
+
+git が「作業は在る」と測ったのに judge の work-evidence ゲートが exit 21 を返した場合は、
+**judge の裁定を採る**（この runner は judge を覆さない）うえで、食い違い自体を
+`reverify_evidence_disagreement` に記録する。
+
+**完了の定義は変えない**（第2.2節）: `completed` に上がるのは **work ブランチに commit が在る**
+ときだけである。未 commit の作業しか無い Issue は、ゲートが通っても `completed` にしない ——
+納品できないし、この経路は commit を要求できない（要求は send である）。その場合 record は前回の
+`worker_state` のまま、verification だけが更新される。
+
+#### 8.5.4 report に出る code
+
+| code | 意味 |
+|---|---|
+| `reverify_attempt`（limitation） | この attempt が reverify であること・何も送っていないこと・引き継ぎ / 再判定候補。`resume_attempt` とは**別 code** である（`resume_attempt` を grep した読み手が、1件も dispatch していない attempt を拾ってはならない） |
+| `reverify_no_work` （limitation） | 再判定対象が1件も無かった（全 Issue が引き継ぎだった） |
+| `reverify_no_work_evidence`（limitation） | その Issue の worktree に作業証跡が無いので**判定にかけなかった** |
+| `reverify_evidence_unreadable`（limitation） | 作業証跡を読めなかったので判定にかけなかった |
+| `reverify_prompt_pending`（limitation） | prompt 保留中なので判定にかけなかった |
+| `reverify_evidence_disagreement`（limitation） | git と judge の work-evidence が食い違った |
+| `reverify_judge_unavailable`（limitation） | judge を実行できず、verdict を1つも記録しなかった |
+
+`status` / `stop_reason` / exit の写像（第5節）は**1文字も変わらない**。転記のみになった Issue は
+前回の `worker_state` を保つので、停止理由も従来の梯子（`worker_timeout` / `worker_failed` /
+`not_dispatched` / `human_required` …）がそのまま正しい答えを出す。`dispatch_schema_version` は 1
+のままで、`stop_reason` の enum にも値を足していない（#93 / #95 / #103 / #122 と同じ裁定）。
+
+#### 8.5.5 artifact と整合性ガード
+
+第8.3節・第8.4節と**同一**である。attempt N は `<out>/resume-attempt-N/` に append し、既存
+artifact を1 byte も書き換えない。ディレクトリ名を `reverify-attempt-` にしないのは、
+`status.mjs` の走査順（`dispatch-report.json` より後にソートされる名前が最新 attempt になる）と
+`--resume` / `--reverify` を混ぜて実行したときの attempt 番号の連続性が、**1つの命名規約**に
+依っているからである。
+
+整合性ガードの code は `--resume` と共有する（`resume_plan_mismatch` / `resume_invalid` /
+`load_error`）。同じ入力に対する同じ拒否であり、読み手に2つ目の語彙を覚えさせる理由が無い。
+文面だけがどの flag で来たかを名乗る。
+
+台帳の行:
+
+```json
+{"attempt":2,"kind":"reverify","plan_run_id":"plan",
+ "resumed_from":{"attempt":1,"report":"dispatch-report.json"},
+ "report":"resume-attempt-2/dispatch-report.json","summary":"resume-attempt-2/dispatch-summary.md",
+ "status":"success","stop_reason":"completed","carried_over":[100,101],
+ "dispatched":[],"reverified":[102]}
+```
+
+`dispatched` が空なのは正直な値である（1件も送っていない）。`waves[].dispatched` も同じ理由で
+空になる。**何を再判定したか**は `reverified`（この kind にだけ在る key）と `reverify_attempt` の
+detail と各 worker の `note` に載る。
+
+#### 8.5.6 排他 lock を取る（`--unattended`）
+
+**取る。** 第3.0.3節の lock を、通常の無人 run と同じ条件で取る（引き継ぎ Issue は lock 対象外、
+というのも `--resume` と同じ）。
+
+送信しないので worker は起動しない —— それでも取るのは、**`commandmate verify` が worktree の中で
+リポジトリのゲートを実行する**からであり、そこで出た裁定が **merge が eligible として読む report**
+に書き込まれるからである。別の run の worker が書き換えている最中の木を裁定すると、
+**誰も納品していない状態についての合格**を作り、それをそのまま届けることになる。lock の粒度が
+最初から「1 worktree に supervisor は1人」なのはこの harm のためであり、「読むだけだが裁定する者」は
+その内側にいる。
+
+`--reverify` は `--out` とも `--resume` とも排他である（`invalid_input`）。前2つが排他なのは
+出力先が2つになるからで、`--resume` との排他は理由が違う: 引き継がなかった Issue に対する
+**正反対の答え**（「worker に送り返す」対「在るものを裁定して送らない」）なので、両方受け付けると
+runner が片方を推測することになり、外せば worker のターンを無駄に消費するか、終わっていない作業を
+終わっていないまま放置するかのどちらかになる。

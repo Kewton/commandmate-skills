@@ -219,6 +219,10 @@ function workerVerifyPasses(scenario, number) {
 // and for the resume suite (Issue #98):
 //   opts.resumeDir string  -> passed as --resume instead of --out, which is the
 //                             one flag combination dispatch refuses
+//   opts.reverifyDir string -> passed as --reverify instead of --out (Issue
+//                             #121): the same "append into the prior run" flag
+//                             shape, for the attempt that re-judges without
+//                             sending
 //   opts.state     string  -> a per-attempt CMATE_FAKE_STATE, so a second attempt
 //                             starts from a fresh worker turn counter (the world
 //                             it inherits is the worktrees on disk, not the fake's
@@ -284,7 +288,9 @@ function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, lo
     '--plan', planPath,
     ...(launcher === null ? [] : ['--cli', launcher]),
     '--git', FAKE_CLI, '--gh', FAKE_CLI,
-    ...(opts.resumeDir ? ['--resume', opts.resumeDir] : ['--out', outDir]),
+    ...(opts.reverifyDir
+      ? ['--reverify', opts.reverifyDir]
+      : (opts.resumeDir ? ['--resume', opts.resumeDir] : ['--out', outDir])),
     ...resolvedExtra,
   ];
   try {
@@ -688,6 +694,20 @@ function sentIssuesFromLog(cliLog) {
     if (match) sent.push(Number(match[1]));
   }
   return sent;
+}
+
+// The issues a run handed to `commandmate verify <worktree-id> --json`. On the
+// ordinary path that is only the confirming run after an exit-20 wait; on a
+// `--reverify` attempt it IS the adjudication, so the list is what "which issues
+// were re-judged" means (Issue #121).
+function verifiedIssuesFromLog(cliLog) {
+  const verified = [];
+  for (const entry of cliLog) {
+    if (entry.sub !== 'verify') continue;
+    const match = /issue-(\d+)/.exec(entry.args[0] ?? '');
+    if (match) verified.push(Number(match[1]));
+  }
+  return verified;
 }
 
 function allWorkers(report) {
@@ -1447,6 +1467,23 @@ function assertResumeAttempt(label, spec, exit, stdout, cliLog, outDir, planPath
   for (const number of expect.never_sent ?? []) {
     check(!sent.includes(number), `${label}: #${number} was sent, but it should not have been re-dispatched`);
   }
+  // "This attempt sent NOBODY" — the whole claim of `--reverify` (Issue #121).
+  // Stronger than listing every issue in `never_sent`: it also catches a send to
+  // a worktree the plan does not name.
+  if (expect.sent !== undefined && expect.sent.length === 0) {
+    check(sent.length === 0, `${label}: ${sent.length} send(s) were made (${JSON.stringify(sent)}), but this attempt must send nothing`);
+  }
+  // WHICH issues were re-judged, read from the judge's own invocations rather
+  // than from the report. A carried issue must not be re-judged, and an issue
+  // with no work evidence must not even be asked about — neither claim is
+  // observable in a report that only shows outcomes.
+  const verified = verifiedIssuesFromLog(cliLog);
+  for (const number of expect.verified ?? []) {
+    check(verified.includes(number), `${label}: #${number} should have been re-judged with commandmate verify`);
+  }
+  for (const number of expect.never_verified ?? []) {
+    check(!verified.includes(number), `${label}: #${number} was handed to commandmate verify, but it should not have been re-judged`);
+  }
   // "The dependent is dispatched from the FIRST wave" is only observable as an
   // ordering: with its dependency carried over, nothing precedes it.
   if (expect.first_sent !== undefined) {
@@ -1461,6 +1498,25 @@ function assertResumeAttempt(label, spec, exit, stdout, cliLog, outDir, planPath
   if (expect.cli_calls_total !== undefined) {
     check(cliLog.length === expect.cli_calls_total,
       `${label}: ${cliLog.length} CLI call(s) were made !== ${expect.cli_calls_total}: ${JSON.stringify(cliLog.map((entry) => entry.sub))}`);
+  }
+  // Per-subcommand counts, the same expectation the dispatch cases carry.
+  if (expect.cli_subcommand_counts) {
+    for (const [name, count] of Object.entries(expect.cli_subcommand_counts)) {
+      const actual = cliLog.filter((entry) => entry.sub === name).length;
+      check(actual === count, `${label}: commandmate ${name} was called ${actual} time(s) !== ${count}`);
+    }
+  }
+  // "No worker was driven at all" — the central claim of `--reverify` (Issue
+  // #121), and one no field of the report can show. Stronger than an empty
+  // `sent`: it also rules out a `wait`, a `capture` and a `respond`, i.e. every
+  // way this runner can touch a live worker. The version probes (`send --help` /
+  // `wait --help`) are excluded by construction: they carry no worktree id, and
+  // it is the id that makes a call an interaction with somebody's worker.
+  if (expect.no_worker_driven) {
+    const driving = cliLog.filter((entry) => ['send', 'wait', 'capture', 'respond'].includes(entry.sub)
+      && /issue-\d+/.test(String(entry.args[0] ?? '')));
+    check(driving.length === 0,
+      `${label}: ${driving.length} call(s) drove a worker, but this attempt must drive none: ${JSON.stringify(driving)}`);
   }
 
   for (const [num, state] of Object.entries(expect.worker_states ?? {})) {
@@ -1609,9 +1665,16 @@ function runResumeCase(caseId) {
     }
     const before = snapshotTree(outDir);
 
+    const state = join(work, `state-${index + 1}`);
+    // Exactly one of the three shapes: a first dispatch (--out), a resume, or a
+    // reverify. The state directory is per attempt in all three, so the fake's
+    // turn counter never leaks across attempts — the world a later attempt
+    // inherits is the worktrees on disk, which is what the scenario describes.
     const { exit, stdout } = runDispatchRunner(
       usePlan, scenarioObject, work, outDir, attemptSpec.dispatch_args ?? [], logPath,
-      attemptSpec.resume ? { resumeDir: outDir, state: join(work, `state-${index + 1}`) } : { state: join(work, `state-${index + 1}`) },
+      attemptSpec.reverify
+        ? { reverifyDir: outDir, state }
+        : (attemptSpec.resume ? { resumeDir: outDir, state } : { state }),
     );
 
     assertResumeAttempt(label, attemptSpec, exit, stdout, readCliLog(logPath), outDir, usePlan, work);
@@ -2665,6 +2728,50 @@ function worktreeSetupInputTest() {
 }
 
 // =============================================================================
+// Reverify: the refused flag combinations (Issue #121)
+// =============================================================================
+//
+// Checked here rather than as resume cases because none of them reaches a world:
+// what is asserted is that the invocation is refused BEFORE anything is probed —
+// exit 3 (or 6 for a directory that is not there), `invalid_input`, no output
+// directory, and not one call to any CLI.
+//
+// `--resume` + `--reverify` is the row that matters. They are opposite answers
+// to the same question about every not-carried issue — "send it back to its
+// worker" vs "judge what is already there and send nothing" — so accepting both
+// would make the runner pick one, and the wrong pick either burns a worker turn
+// or leaves unfinished work unfinished. Refusing is the same shape as #98's
+// `--out` + `--resume` refusal and #93's double-specified provider profile.
+function reverifyInputTest() {
+  log('  reverify input (#121)');
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-reverify-plan-'));
+  const spec = { plan: { issues_fixture: 'cases/02-explicit-dependency/issues.json', orchestrate_args: ['200', '201', '--max-parallel', '3', '--run-id', 'plan'] } };
+  const planPath = generatePlan(spec, runsDir);
+  if (!check(existsSync(planPath), 'reverify: plan.json was not generated')) return;
+
+  const refusals = [
+    ['--out with --reverify', {}, ['--reverify', runsDir], 3, 'mutually exclusive'],
+    ['--resume with --reverify', { resumeDir: runsDir }, ['--reverify', runsDir], 3, 'cannot both hold'],
+    // Not a combination but the same "refused before the world" family: a
+    // directory that holds no prior run cannot be re-judged, and saying so with
+    // load_error (exit 6) is what --resume already does.
+    ['--reverify on a directory that does not exist', { reverifyDir: join(runsDir, 'nope') }, [], 6, 'does not exist'],
+  ];
+  for (const [label, opts, args, exitCode, needle] of refusals) {
+    const work = mkdtempSync(join(tmpdir(), 'cmate-reverify-'));
+    const outDir = join(work, 'dispatch');
+    const logPath = join(work, 'cli.log');
+    const result = runDispatchRunner(planPath, LAUNCHER_SCENARIO, work, outDir, args, logPath, opts);
+    const report = launcherReport(result);
+    const detail = (report?.blocking_reasons ?? []).map((entry) => `${entry.code} ${entry.detail}`).join(' ');
+    check(result.exit === exitCode, `${label}: expected exit ${exitCode}, got ${result.exit}: ${result.stdout.slice(0, 200)}`);
+    check(detail.includes(needle), `${label}: the error should say "${needle}", got: ${detail.slice(0, 300)}`);
+    check(!existsSync(outDir), `${label}: a refused invocation created ${outDir}`);
+    check(readCliLog(logPath).length === 0, `${label}: a refused invocation called the CLI ${readCliLog(logPath).length} time(s)`);
+  }
+}
+
+// =============================================================================
 // Unattended: refused inputs and the exclusivity lock (Issue #122)
 // =============================================================================
 //
@@ -3283,6 +3390,9 @@ function main() {
   log('  -- worktree-setup input --');
   worktreeSetupInputTest();
 
+  log('  -- reverify input --');
+  reverifyInputTest();
+
   log('  -- unattended --');
   unattendedInputTest();
   unattendedLockTest();
@@ -3292,7 +3402,7 @@ function main() {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution, worktree-setup input, unattended input + exclusivity`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution, worktree-setup input, reverify input, unattended input + exclusivity`);
 }
 
 main();

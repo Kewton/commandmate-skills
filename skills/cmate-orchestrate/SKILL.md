@@ -179,6 +179,7 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 | `--plan <path>` | **必須** | planner が出した承認済み `plan.json` |
 | `--out <dir>` | `<plan-dir>/dispatch` | artifact の出力先。既存なら `out_exists`。`--resume` とは排他 |
 | `--resume <dir>` | — | 部分失敗した run の再開。`<dir>` は再開対象の `--out`。**pass 済みは再 dispatch せず記録だけ引き継ぐ**（後述） |
+| `--reverify <dir>` | — | **`send` を1回も呼ばずに**裁定だけ取り直す。`<dir>` は対象 run の `--out`。作業が既に worktree に在るのに裁定が古い、という状態のための経路（後述）。`--out` / `--resume` とは排他 |
 | `--cli` / `--git` / `--gh <path>` | `commandmate`/`git`/`gh` | 実行する CLI |
 | `--auto-yes` | **off** | worker prompt を自動応答する。既定は停止して human へ提示 |
 | `--allow-questions` | **off** | 未回答 question を持つ Issue を含む plan を dispatch する |
@@ -302,6 +303,43 @@ dispatch 側の規約は [dispatch-contract.md](./references/dispatch-contract.m
 - 再実行対象が1件も無ければ、`resume_no_work` を明示して **CLI を1回も叩かずに** exit 0 で終わる。
 
 規則の正本は [dispatch-contract.md](./references/dispatch-contract.md) 第8節。
+
+**送らずに裁定だけ取り直す（`--reverify <前回の --out>`）** — `wait --verify` が timeout すると、
+その時点の裁定が report に凍る。worker がその後に完走して commit しても report は更新されないので、
+**検証に通る成果物が merge の eligible から外れたまま**になる。`--resume` はここから回復できるが、
+回復の手段が**再 dispatch** である —— 作業が既に終わっていると分かっている worker のターンを1つ消費し、
+契約を再送するので余計な差分が生まれる余地も残る。`--reverify` は同じ分割を行い、後半に対して
+**送らずに裁定だけを取り直す**。
+
+- **`send` を1回も呼ばない。** 実行契約も書かず、worker のターンも1つも消費しない。これがこの
+  flag の存在理由である（fixture が `sent: []` で固定している）。
+- **引き継ぎ規則は `--resume` と同一である**（`completed` かつ `pass`）。同じ関数を使っている。
+  引き継いだ Issue は**再判定もしない**。
+- **再判定するのは「worktree に作業が在る」Issue だけである。** 「作業が在る」は work-evidence
+  ゲートと同じ2つの事実 —— **work ブランチの commit / worktree の未 commit の変更** —— であり、
+  `git rev-list --count <base>..HEAD` と `git status --porcelain` で**判定の前に**測る。
+  推測しない。前回 report の `worker_state` からは読み取らない（timeout の record は
+  `not_run` であって、測定結果を1つも持っていない）。
+- **作業が無い Issue は判定にかけない。** かければ exit 21（work-evidence がゼロ）が `fail` として
+  記録され、誰も作業していない Issue の記録を**格下げ**することになる。前回 record をそのまま転記し、
+  `reverify_no_work_evidence` で理由を書く。読めなかった場合は `reverify_evidence_unreadable`
+  （「見られなかった」は「無い」ではない）。prompt 保留中の Issue も対象外である
+  （`reverify_prompt_pending`。人間が握っているターンの途中を裁定しない）。
+- **完了の定義は変えない。** `completed` に上がるのは work ブランチに commit が在るときだけである。
+  未 commit の作業しか無い Issue は納品できないし、この経路は commit を要求できない（要求は send である）。
+- **裁定機構も変えない。** 契約経路なら `commandmate verify <worktree-id> --json` の exit code
+  （0 / 20 / 21 / 99 の意味は通常経路と同一）、契約非対応なら profile baseline の再実行。
+  **新しい CLI 表面は要求しない。**
+- **artifact の作法・整合性ガードは `--resume` と同一である。** attempt N は
+  `<out>/resume-attempt-N/` に append し、既存 artifact を上書きしない。別 plan の report は
+  `resume_plan_mismatch`、読めない report は `resume_invalid` で拒否する（code も共有する）。
+  台帳の行は `kind: "reverify"` で、`dispatched` は空、`reverified` に再判定候補が載る。
+- **`--unattended` の排他 lock は取る。** 送らないが、`commandmate verify` は **worktree の中で
+  ゲートを実行する**し、その裁定は merge が eligible として読む report に書き込まれる。別の run の
+  worker が書き換えている最中の木を裁定すると、**誰も納品していない状態についての合格**を作って
+  そのまま届けてしまう。
+
+規則の正本は [dispatch-contract.md](./references/dispatch-contract.md) 第8.5節。
 
 契約経路では plan だけから **実行契約 yaml** を決定的に生成して worktree に置き、
 `commandmate send <worktree-id> --contract <path>` で dispatch する（**同一 plan → byte-identical

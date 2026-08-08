@@ -1,0 +1,12 @@
+{
+  "_comment": "#89 の核心: timeout のあと worker は実際には完走して commit を積んでいた。その事実は worktree の側にしかないので、`commits: 1` で「この attempt が始まった時点で work ブランチが commit を1つ持っている」世界を作る（fake の turn counter は attempt ごとに空になるので、これでしか表せない）。#100 / #101 の worker spec は attempt 1 と同じだが、reverify はそれを読みに行かない —— 引き継ぎ対象なので send も verify もしないことを case.json 側で固定する。",
+  "cli_available": true,
+  "cli_contract": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "100": { "state": "completed", "verify_exits": [0] },
+    "101": { "state": "completed", "verify_exits": [0] },
+    "102": { "state": "completed", "commits": 1, "uncommitted": false, "pass_gates": ["lint", "test"] }
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "description": "Issue #121 受入条件2の中心ケース: timeout で裁定が凍った #102 を、**send を1回も呼ばずに**判定し直して納品経路へ戻す。attempt 1（実行契約経路）で #102 が timeout し、verification は not_run のまま凍って merge の eligible から外れる。attempt 2 の `--reverify` は (a) 引き継ぎ対象 #100 / #101 に send も `commandmate verify` も飛ばさず記録だけを転記し、(b) #102 の worktree に作業証跡（work ブランチの commit）が在ることを git で測ってから `commandmate verify --json` の exit code だけで判定し直し、(c) commit が在るので completed に上げる。結果 3件とも merge の eligible に入る。worker を触る呼び出し（worktree id を伴う send / wait / capture / respond）は 0 件 —— worker は1ターンも消費していない。log に残る `send` / `wait` 各1件は版判定の `--help` probe で、worktree id を持たない。wave の `dispatched` は空である（何も送っていないので、それが正直な値である）。空振り検証: ① reverify の対象選定から work-evidence 判定を外す変異 → r08 が赤、② isCarryable を無視して全員再判定する変異 → `never_verified: [100, 101]` が赤、③ commit が在っても completed に上げない変異 → `merge_eligible` と `worker_states` が赤。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": ["100", "101", "102", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "attempts": [
+    {
+      "scenario": "attempt-1.json",
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 7,
+        "status": "partial",
+        "stop_reason": "timeout",
+        "waves_count": 1,
+        "wave_dispatched": [[100, 101, 102]],
+        "sent": [100, 101, 102],
+        "worker_states": { "100": "completed", "101": "completed", "102": "timeout" },
+        "verification_outcomes": { "100": "pass", "101": "pass", "102": "not_run" },
+        "blocking_codes": ["worker_timeout"],
+        "worker_notes_include": { "102": ["wait timed out after"] },
+        "absent_limitation_codes": ["resume_attempt", "reverify_attempt"],
+        "report_file": "dispatch-report.json",
+        "merge_eligible": [100, 101],
+        "history_length": 1,
+        "history": {
+          "attempt": 1,
+          "kind": "initial",
+          "resumed_from": null,
+          "report": "dispatch-report.json",
+          "carried_over": [],
+          "dispatched": [100, 101, 102]
+        }
+      }
+    },
+    {
+      "scenario": "attempt-2.json",
+      "reverify": true,
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 0,
+        "status": "success",
+        "stop_reason": "completed",
+        "completion_check_passed": true,
+        "waves_count": 1,
+        "wave_dispatched": [[]],
+        "sent": [],
+        "never_sent": [100, 101, 102],
+        "verified": [102],
+        "never_verified": [100, 101],
+        "no_worker_driven": true,
+        "cli_subcommand_counts": { "capture": 0, "respond": 0, "verify": 1, "send": 1, "wait": 1 },
+        "worker_states": { "100": "completed", "101": "completed", "102": "completed" },
+        "verification_outcomes": { "100": "pass", "101": "pass", "102": "pass" },
+        "verification_checks_include": {
+          "100": ["wait --verify"],
+          "102": ["commandmate verify --json → exit 0", "re-judged in place, nothing was sent"]
+        },
+        "worker_notes_include": {
+          "100": ["carried over from attempt 1", "did NOT re-dispatch #100"],
+          "101": ["carried over from attempt 1"],
+          "102": [
+            "re-judged in place by --reverify (nothing was sent)",
+            "commits on the work branch: 1; uncommitted change in the worktree: no",
+            "verification passed (work-evidence, lint, test)"
+          ]
+        },
+        "limitation_codes": ["reverify_attempt"],
+        "absent_limitation_codes": [
+          "resume_attempt",
+          "reverify_no_work",
+          "reverify_no_work_evidence",
+          "reverify_evidence_unreadable",
+          "reverify_evidence_disagreement",
+          "reverify_prompt_pending",
+          "verification_unrecorded"
+        ],
+        "limitation_details_include": [
+          "NOTHING WAS SENT: this attempt called no `commandmate send`",
+          "Carried over without re-judging (worker completed and verification passed there): #100, #101",
+          "Re-judged here from the worktree as it stands, if it holds work evidence"
+        ],
+        "summary_includes": [
+          "## reverify",
+          "**`send` を1回も呼んでいない。**",
+          "引き継ぎ（再判定もしない）: #100, #101",
+          "再判定の候補: #102"
+        ],
+        "summary_excludes": ["## resume"],
+        "report_file": "resume-attempt-2/dispatch-report.json",
+        "merge_eligible": [100, 101, 102],
+        "history_length": 2,
+        "history": {
+          "attempt": 2,
+          "kind": "reverify",
+          "resumed_from": { "attempt": 1, "report": "dispatch-report.json" },
+          "report": "resume-attempt-2/dispatch-report.json",
+          "carried_over": [100, 101],
+          "dispatched": [],
+          "reverified": [102]
+        }
+      }
+    }
+  ]
+}

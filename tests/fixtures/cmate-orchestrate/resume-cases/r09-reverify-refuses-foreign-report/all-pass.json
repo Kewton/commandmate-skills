@@ -1,0 +1,11 @@
+{
+  "_comment": "整合性ガードのケースなので、attempt 1 は普通に全部通ればよい。attempt 2 以降は report を読む前に拒否されるため、この scenario は一度も参照されない（CLI が 1 回も呼ばれないことを cli_calls_total: 0 で固定する）。",
+  "cli_available": true,
+  "cli_contract": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "200": { "state": "completed", "verify_exits": [0] },
+    "201": { "state": "completed", "verify_exits": [0] }
+  }
+}

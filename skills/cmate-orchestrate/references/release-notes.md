@@ -577,6 +577,51 @@ timeout でもあるので、timeout を持たない baseline も打ち切れる
 report を突き合わせる fixture**で機械的に固定してある。実装で形が変わった点は
 [adr-unattended-mode.md](./adr-unattended-mode.md) 第15節にある。
 
+### #121 — 回復経路は在ったが、「終わっている worker をもう一度走らせる」しか無かった
+
+[#89](https://github.com/Kewton/commandmate-skills/issues/89) の中心的な被害（検証に通った成果物が
+納品経路から外れる）は `--resume`（#98）で塞がった。残っていたのは**手段**である。`wait --verify` が
+timeout すると裁定が `not_run` のまま report に凍り、worker がその後に完走して commit しても report は
+更新されない。この状態で古いのは**裁定だけ**で、**作業は既に終わって worktree に在る**。それでも
+`--resume` は再 dispatch する —— worker のターンを1つ消費し、終わっていると分かっている worker に
+契約を再送するので、不要な差分が生まれる余地も残った。
+
+→ `--reverify <前回の --out>` を足した。`send` を1回も呼ばず、worktree の現状を verification gate に
+かけ直して report を更新する。裁定は契約経路なら `commandmate verify <worktree-id> --json` の
+exit code、契約非対応なら profile baseline の再実行 —— **どちらも既に在る CLI 表面**で、新しいものは
+1つも要求していない。
+
+裁定:
+
+- **「作業が在る」を推測しない。** 対象を選ぶ基準は work-evidence ゲートと**同じ2つの事実**
+  （work ブランチの commit / worktree の未 commit の変更）で、`git rev-list --count <base>..HEAD` と
+  `git status --porcelain` で**判定の前に**測る。前回 report の `worker_state` からは読み取れない ——
+  timeout した record は `verification.outcome: not_run` であって、測定結果を1つも持っていない。
+  「timeout だから多分作業は在る」は、Issue が名指しで禁じた推測である。
+- **測定を `commandmate verify` に委譲しない。** 委譲すると答えが**裁定**として返る: exit 21 は
+  `fail` なので（この意味は変えない）、誰も作業していない Issue の record を**格下げ**することになる。
+  しかもその格下げは、この flag が避けるために存在する「余計な実行」の産物である。裁定規則を
+  1つも変えずに済ませる唯一の方法が「訊かないこと」だった。フォールバック経路の judge（profile
+  baseline）が work-evidence を測らないことも、基準を judge の外に置くべき理由になった。
+- **完了の定義は変えない。** `completed` に上がるのは work ブランチに commit が在るときだけである。
+  未 commit の作業しか無い Issue は納品できず、この経路は commit を要求できない（要求は send である）。
+- **無人運転の排他 lock は取る。** 送らないので worker は起動しない —— それでも取るのは、
+  `commandmate verify` が **worktree の中でリポジトリのゲートを実行する**からであり、その裁定が
+  **merge が eligible として読む report** に書き込まれるからである。別の run の worker が書き換えて
+  いる最中の木を裁定すると、誰も納品していない状態についての合格を作って、そのまま届けてしまう。
+  lock の粒度が「1 worktree に supervisor は1人」なのはこの harm のためで、「読むだけだが裁定する者」
+  はその内側にいる。
+- **`--resume` との併用は拒否する。** 両者は引き継がなかった Issue に対する**正反対の答え**である。
+  両方受け付けると runner が片方を推測することになり、外せば worker のターンを無駄にするか、
+  終わっていない作業を放置するかのどちらかになる。
+- **artifact の作法・整合性ガードは `--resume` と同一で、code も共有する。** ディレクトリ名を
+  `reverify-attempt-` にしなかったのは、`status.mjs` の走査順と、両者を混ぜたときの attempt 番号の
+  連続性が1つの命名規約に依っているからである。`dispatch_schema_version` は 1 のまま、
+  `stop_reason` の enum にも値を足していない（#93 / #95 / #103 / #122 と同じ裁定）。
+
+fixture は `sent: []`（1件も送っていない）と `verify` の呼び先（引き継ぎ分には飛ばない・作業証跡が
+無い Issue にも飛ばない）を両方固定する。正本: [dispatch-contract.md](./dispatch-contract.md) 第8.5節。
+
 ---
 
 ## パッケージ
