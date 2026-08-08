@@ -1,0 +1,46 @@
+{
+  "description": "Issue #122（契約経路の必須化）: 実行契約に非対応の CLI（`send --contract` / `wait --verify` を持たない）に対して `--unattended` を渡す。`--contract-mode` を1文字も書いていないのに **`require` が含意される**ので、`auto` の既定である「limitation を書いてフォールバック続行」にはならず、`contract_unsupported` が **blocking** になって1人も dispatch しない。これが第3節の裁定の要である —— フォールバック経路には `requireScopeClean` が存在しないので、scope.allow を必須にすることは契約経路を必須にすることと同義であり、片方だけでは空文になる。next action も unattended 用に変わり、`--contract-mode auto` へ落とす案内を出さない（それは exit 3 になる入力である）。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--unattended",
+    "--wall-clock-budget",
+    "600"
+  ],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "waves_count": 0,
+    "no_respond": true,
+    "never_sent": [201, 200],
+    "no_contract_calls": true,
+    "out_dir_created": true,
+    "blocking_codes": ["contract_unsupported"],
+    "limitation_codes": ["unattended_mode"],
+    "limitation_code_counts": {
+      "unattended_mode": 1,
+      "unattended_baseline": 0,
+      "contract_unsupported": 0
+    },
+    "summary_includes": [
+      "`--unattended` は `--contract-mode require` を含意するので、フォールバックへ落とす選択肢は無い"
+    ],
+    "summary_excludes": ["`--contract-mode auto` でフォールバック実行する"]
+  }
+}

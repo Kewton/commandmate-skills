@@ -1,0 +1,23 @@
+{
+  "description": "Issue #122: 同じ worktree を別の run が動かしていたため排他 lock で拒否された無人 run。**何も書いていない**（`out_dir: null`・wave 0件・drift check 0件）ので dispatch phase は「止まった」として読まれ、hint は「その run の終了を待って同じコマンドを再実行する」になる。**human_required は false** である —— 人間の判断を要する停止ではなく、時間をおけば解ける停止だからで、CI が読むべき signal もそれである。",
+  "expect": {
+    "exit": 0,
+    "latest_phase": "dispatch",
+    "phase_states": { "plan": "ok", "dispatch": "ok", "merge": "not_run", "uat": "not_run" },
+    "unreadable_paths": [],
+    "issues": [200, 201],
+    "run_next": [
+      "dispatch/stop_reason/dispatch_error",
+      "dispatch/limitation/unattended_mode",
+      "merge/not_run/not_run"
+    ],
+    "issue_next": {
+      "200": [],
+      "201": ["dispatch/blocking/unattended_locked"]
+    },
+    "hints_include": {
+      "unattended_locked": "終了を待って**同じコマンドを再実行する**"
+    },
+    "text_includes": ["unattended_locked"]
+  }
+}

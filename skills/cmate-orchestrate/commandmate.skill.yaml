@@ -107,8 +107,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: be7ebbc95cae537906b0971e43cdccbd9727bf54142e18f58f5958f2bbc32d26
-    size: 56730
+    sha256: ac8139a8402cdffeb413c5d3a7e8d646728e917553a1ca6f12fbab696bae1d68
+    size: 67392
     kind: skill_md
     executable: false
     script: false
@@ -125,8 +125,8 @@ files:
     executable: false
     script: false
   - path: references/adr-unattended-mode.md
-    sha256: 56b288c02193b8e47cfc07410f83504af2cf751a6c1e2b9e14d48182c25358c4
-    size: 85097
+    sha256: 8ff374c568fc581a9c2c4f0c33dd37cc9967dffb44a291a9da96fd8adf39d747
+    size: 96205
     kind: instruction
     executable: false
     script: false
@@ -149,8 +149,8 @@ files:
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: 11d43218d1de4f55d7e37a64f28fb6574a5e32a314a4337c5db2f48b68611e1b
-    size: 68436
+    sha256: 24371fce9aab4cbe247a1b51e53b92ea889579e23ab7cc499f7ebfeefc64f2c1
+    size: 82632
     kind: instruction
     executable: false
     script: false
@@ -173,14 +173,14 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 10158fbe71bf53cff918608e1a5c453973a93ffa5ca5722f995b703d338ebd95
-    size: 45657
+    sha256: db6a28c3f1dd46b118063f239153f83e032a5df15a5694bef2db3ff30e3473a5
+    size: 47497
     kind: instruction
     executable: false
     script: false
   - path: references/uat-contract.md
-    sha256: 276bbf91b395c8045c3b887d5ddb194e318cbcc3b58d45de31b17b033384e136
-    size: 20238
+    sha256: 0961bd22bc18d17bb34f7f38652dd53e0209f62b53e250d78f1891cc4903eb00
+    size: 22519
     kind: instruction
     executable: false
     script: false
@@ -221,8 +221,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: 7e0b063eecc86e723331fae2cef5acf2ad8ae585e8546f85aa085619636af203
-    size: 207035
+    sha256: 5bca98b30bcf2d4592145a215cc661c8d1185919eb3c2c077a81689174b8914d
+    size: 244931
     kind: script
     executable: true
     script: true
@@ -251,8 +251,8 @@ files:
     executable: true
     script: true
   - path: scripts/status.mjs
-    sha256: 93f87d7b9ac268711f45445cca159dc45315a6d18a991b00a30d8c0e58265e29
-    size: 59086
+    sha256: e5e5ca5ed5d1788459732949bff9f0c1eaa77dc595f920bf542b88a39108e9ca
+    size: 60244
     kind: script
     executable: true
     script: true

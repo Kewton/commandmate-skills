@@ -1,0 +1,46 @@
+{
+  "description": "Issue #122 二点測定のフラグ無し側（対になるのは d53）: **同じ plan・同じ世界**を `--unattended` 無しで dispatch すると、従来どおり #230 は send され、対象 file を宣言していない #231 だけが wave の中で1人ずつ拒否される（`contract_scope_unknown` は **limitation**、worker は `not_dispatched`）。すなわち「止まった時点で他 Issue の mutation は既に始まっている」——人間が居る運転ではそれで足りる（report を読む人が始末できる）が、無人ではその読み手が居ないので d53 の pre-flight 検査が要る。この case が緑であることが、d53 の停止は**検出時点を早めた**ものであって新しい拒否ではないことの証拠である。open question を持つ Issue でもあるので、その門を `--allow-questions` で開けて scope の層まで到達させている。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-unattended-scope.json",
+    "orchestrate_args": [
+      "230",
+      "231",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--allow-questions"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [false],
+    "no_respond": true,
+    "sent": [230],
+    "never_sent": [231],
+    "out_dir_created": true,
+    "worker_states": {
+      "230": "completed",
+      "231": "not_dispatched"
+    },
+    "verification_outcomes": {
+      "230": "pass",
+      "231": "not_run"
+    },
+    "blocking_codes": ["not_dispatched"],
+    "absent_blocking_codes": ["contract_scope_unknown"],
+    "limitation_codes": ["contract_scope_unknown", "open_questions_accepted"],
+    "absent_limitation_codes": ["unattended_mode", "unattended_baseline"]
+  }
+}

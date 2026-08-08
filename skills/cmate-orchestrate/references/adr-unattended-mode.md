@@ -1105,3 +1105,126 @@ dispatch の `wait --on-prompt agent`（exit 10）より先に届くかという
 | 対話端末つきで `git push` が無限に待つこと（14.5）| 入力側が生きた pty。本 spike の実行環境には制御端末が無かった |
 | `gh pr merge` の非対話拒否メッセージ（14.5）| 実在する PR。方式フラグを必ず渡すので到達しない、はコードの読みである |
 | monitor の Enter と dispatch の exit 10 の競争（14.6）| 実機 |
+
+---
+
+## 15. 実装で変えたこと（Issue [#122](https://github.com/Kewton/commandmate-skills/issues/122)。第12節 段 1〜6）
+
+本 ADR の運用規約（冒頭）に従い、**段階 A の実装で形が変わった点と、本 ADR が裁定を委ねていた
+点をどう裁定したか**を記録する。正本は [dispatch-contract.md](./dispatch-contract.md)
+第1節・第2.7節・第3.0節・第3.0.3節・第3.0.4節・第5節、[../SKILL.md](../SKILL.md) 第3節・第4節・第5節、
+段階 C の前提は [uat-contract.md](./uat-contract.md) 第5.1節である。
+
+**裁定 0（第2節）と第6.1節の写像は1文字も変えていない。** 以下はすべて「締め付けの形」の話である。
+
+### 15.1 排他は **runner が持つ**（第14.1節が委ねた裁定）
+
+候補 **A（runner の lock）** を採った。B（job 定義）は「人間がローカルで叩いた run と cron の衝突を
+防げない」という第14.1節の弱点がそのまま残り、C（サーバ）は上流の変更で本リポジトリでは決められない。
+
+決めた形（正本は dispatch-contract 第3.0.3節）:
+
+| 論点 | 裁定 |
+|---|---|
+| 粒度 | **worktree 単位。** key は `(repository, branch)` から導く —— CommandMate が worktree id を導くのと同じ組で、`commandmate ls` を叩く前（＝ pre-flight の前）に決まる唯一の識別子である。**サーバの id と一致する必要は無い**（誰も突き合わせない）。要るのは安定と一意だけである |
+| 取る時点 | **pre-flight の前。** 第14.1節が測った窓（process 起動〜`--out` 作成、その内側に `--prepare-worktrees` の mutation）を閉じるには、pre-flight の後では遅い |
+| 対象 | **この attempt が dispatch しうる Issue 全部**（`--resume` では引き継がない分だけ）。**all-or-nothing** |
+| 原子性 | `mkdirSync`（`recursive` 無し）の **EEXIST**。所有者情報は取得の**後**に書く（TOCTOU を作らない）。回収後の取り直しは**1回だけ**（ここでループすると自分で TOCTOU を作る） |
+| stale の回収 | **4規則**（この host の生きた pid → 拒否 ／ この host の死んだ pid → **回収**（`kill -9` の経路）／ 別 host → 拒否 ／ 所有者情報が読めない → 60 秒の猶予つきで回収）。**拒否は常に安全側の誤り**である |
+| 置き場所 | `$CMATE_ORCHESTRATE_LOCK_DIR`、既定は `$TMPDIR/cmate-orchestrate-locks/<key>`。**`--out` は流用しない**（#90 の決定を壊すため） |
+| 停止形 | `blocking_reasons` の **`unattended_locked`** ／ `dispatch_error` ／ `failure`（exit 1）／ `--out` 未作成 ／ **`human_required: false`**（人間の判断ではなく時間で解ける停止であり、CI が読むべき signal もそれである） |
+
+**本 ADR から形が変わった点が1つある: lock を取るのは `--unattended` の run だけである。**
+第14.1節の候補 A は「同じ機械のすべての起動元」に効くと書いていたが、それを満たすには
+フラグ無しの run も lock を取る必要があり、**第11節の「`--unattended` を渡さない run は 1 bit も
+変わらない」と両立しない**（lock file の生成も、2本目の拒否も、観測できる挙動の変化である）。
+第11節は努力目標ではなく fixture 化された要件なので、そちらを優先した。
+
+**結果として残る穴を明示する:** 人間がローカルで叩いた素の run と cron の unattended run の衝突は
+runner 側では防げない。第14.1節の (b) がまさにその形である。閉じたい運用は job 定義側
+（`flock` / `concurrency:`）を併用するか、候補 C（サーバ側）を上流に起こすこと。
+**測っていないものを「防いだ」とは書かない**という本 ADR の規律に従い、契約文書にもそう書いてある。
+
+### 15.2 wall-clock budget は `--wall-clock-budget`、**unattended では明示必須**（第14.2節）
+
+status は `partial`（exit 7）、`stop_reason` は既存 enum の **`timeout` を再利用**、名指しは
+`blocking_reasons` の **`wall_clock_budget_exhausted`** —— ここは第14.2節の候補表そのままで、
+**`stop_reason` の enum にも field にも1つも足していない**（`dispatch_schema_version` は 1 のまま）。
+
+第14.2節から**変えた**のは2点である。
+
+1. **「まず `runCli` の timeout、次に budget」を、2段ではなく1つの規則にした。**
+   第14.2節は「budget を worker ループの回数境界にだけ置くと、無限に走る baseline は budget を
+   越えたことにすら気づかれない」と警告している。そこで **残り budget を、この run が起動する
+   子プロセスすべての timeout にした**（呼び出し側が自分で `timeout` を決めている子はそのまま）。
+   `runCli` に無条件の timeout を足す案は採らなかった —— それは3 runner 共通の挙動変更で、
+   `--unattended` を渡さない run を変えてしまう（第11節）。budget が無い run では、この規則は
+   何も足さない。
+2. **判定点を「ターン境界の前」だけでなく「`wait` の後」にも置いた。** budget 自身の timeout で
+   殺された `wait` を「worker の失敗」と読み替えないためである。時計を止めたのは runner であって
+   worker ではなく、`worker_failed` と報告すると operator は worker のログを読みに行かされる。
+
+**明示必須にしたのは本 ADR に無い判断である。** 第5節が uat の `--max-attempts` について書いた理由
+（「何回まで機械に直させてよいかを誰かが決めた、という事実は、無人では job 定義を書く時点でしか
+決められない」）が、時計にはそのまま当てはまる。既定値を黙って入れると、その決定が
+「誰も決めていない」に戻る。したがって `--unattended` かつ `--wall-clock-budget` 無しは
+`invalid_input`（exit 3）である。
+
+### 15.3 pre-flight は scope と open question を**同時に**報告する（第3節の実装形）
+
+第3節は scope 検査だけを pre-flight に置くと書いていた。実装では **plan だけで決まる門を1箇所に
+まとめ**、`open_questions` と `contract_scope_unknown` を**同じ refusal で**報告する。
+
+理由: **scope を宣言できない Issue は、ほぼ必ず planner の `no_suspected_files` question も持つ**
+（planner は `suspected_files` が空なら必ず question を書く）。片方だけを報告すると、直し方の半分が
+消える。加えて `--unattended` では `--allow-questions` が拒否されるので、open question の停止は
+どのみち避けられない —— それを `--out` を作ってから報告する意味が無い。**副作用として
+`open_questions` の停止も unattended では `--out` を消費しなくなった**（フラグ無しの run では
+従来どおり `--out` を作って artifact も書く。第11節の互換は保たれる）。
+
+**判定条件も第3節の字面から変えた。** 検査するのは plan の `suspected_files` が空かどうかではなく、
+**その Issue の実行契約が `scope.allow` を宣言できるか**である（絶対 path・`..` 脱出・長すぎる pattern
+などは契約 parser が拒否するので runner 側で落としている）。wave の中の拒否がまさにその条件で
+動いているので、pre-flight で別の条件を使うと**二重の基準**になる。
+
+`human_required` は **true** にした。第6.2節の表はこの停止に印を付けていないが、`human_required` の
+定義（schema の "None of the three is resolvable by re-dispatching"）にそのまま当てはまる ——
+直し方は Issue 本文の編集と re-plan であって、再 dispatch では絶対に解けない。CI が同じ plan を
+再実行し続けるのを止めるのが、この field の役目である。
+
+### 15.4 `gh` には停止を足していない（第14.5節どおり）
+
+**第6.3節に足した停止は無い。** 代わりに job 定義側の環境変数（`GH_TOKEN` /
+`GIT_TERMINAL_PROMPT=0`）を [../SKILL.md](../SKILL.md) 第3.2節に書いた。第14.5節の実測どおり、
+無人運転を実際に止めるのは `gh` ではなく **`git push` の資格情報プロンプト**であり、
+それは「止まる」ではなく**無言で待つ**に化ける唯一の経路である。**runner はこれを検査しない**
+（別プロセスの環境を runner は保証できない。第4節の monitor と同じ理由）。
+
+### 15.5 `--no-auto-approve` は要件として SKILL.md に書いた（第14.6節どおり）
+
+第4節の「サーバ側の最後の砦」は第14.6節が訂正済みで、砦は無い。SKILL.md 第3.2節の monitor 境界に、
+**unattended と併用するなら monitor 側の `--no-auto-approve` は要件である**ことと、その理由
+（`autoYes.lastSuppression` はサーバ側 Auto-Yes が有効なときしか書かれず、unattended はまさにその状態を
+禁じているので、monitor の判定は `approve` になる）を書いた。**runner は検出しない。**
+
+### 15.6 段階 C の前提は uat 契約に書いた（第14.3節どおり、実装はしていない）
+
+[uat-contract.md](./uat-contract.md) に第5.1節を新設し、再merge が invocation cwd の branch に入ること・
+`main` checkout と detached HEAD の実測結果・**段階 C では fix worktree を作る前に
+`git symbolic-ref -q HEAD` と integration branch 一致を検査して停止すること**を前提として記録した。
+**本 Issue では実装していない**（uat runner は `--unattended` を受け付けない）。
+
+### 15.7 未実装の段の拒否は、既存の挙動で満たされている（第8節）
+
+`merge.mjs` / `uat.mjs` に `--unattended` を渡すと、両者の `parseArgs` が未知の option を拒否し、
+既存の変換で `invalid_input`（exit 3）になる。**コードを1行も足さずに第8節の要求
+（受理して無視しない）を満たしている**ので、そのまま採った。**そのうえで fixture で固定した** ——
+後の段階がこの拒否を黙って外せないようにするためである。
+
+### 15.8 version は上げていない（本 Issue の実行契約による）
+
+第11節と #95 要件3 は minor bump を求めており、`commandmate.skill.yaml` の `version:` と
+`scripts/lib.mjs` の `SKILL_VERSION` を同時に上げるのが本リポジトリの作法である
+（`scripts/validate.py` の `check_version_constant` が両者の一致を強制する）。
+**本 Issue の実行契約は `scripts/lib.mjs` を変更対象に含めておらず、`version:` 行の変更も禁じている**
+ため、bump は行っていない。**リリース時に両方を同一 commit で上げること。**

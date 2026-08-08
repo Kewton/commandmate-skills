@@ -335,6 +335,11 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   worker_method_applied: '当該 Issue の task text に `## Method` 節を書いた。遵守の証拠は worker の成果物側で確認する（dispatch は測っていない）。',
   verification_unrecorded: 'completed した worker に裁定が1つも記録されていない（runner 側の欠陥）。裁定なしを pass として扱わない。',
   verification_gates_unrecorded: 'pass の根拠となった gate を report が名指しできない。GATE 行を出す CLI で再実行して根拠を残す。',
+  // ---- dispatch: unattended（#122。段階 A は dispatch のみ）------------------
+  unattended_mode: '`--unattended` を宣言した run である。締め付けのみを含意し（contract require / pre-flight の scope 検査 / wall-clock budget / worktree lock）、mutation 権限は足していない。**`--approve` は含意しない。**',
+  unattended_baseline: 'その Issue の worktree が dispatch 開始時どこに居たか（branch と短縮 SHA）。取り消しの起点である。untracked file・merge/push 済み・gc 済みは戻らない。',
+  unattended_locked: '同じ worktree を別の dispatch run が動かしている。その run の終了を待って**同じコマンドを再実行する**（`--out` は消費していない）。死んだ run の lock は次の run が自動回収する。',
+  wall_clock_budget_exhausted: '`--wall-clock-budget` に到達して打ち切った。**成功ではない。** 何に時間を使ったか（baseline / acceptance コマンドは自前の timeout を持たない）を確認し、原因を潰すか budget を実測に合わせてから `--resume` で再開する。',
 
   // ---- merge ---------------------------------------------------------------
   unsafe_branch: 'branch 名が safe-ref guard に弾かれた。profile の branch_template を直す。',

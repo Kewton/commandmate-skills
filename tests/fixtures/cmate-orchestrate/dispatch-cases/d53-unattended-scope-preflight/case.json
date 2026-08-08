@@ -1,0 +1,51 @@
+{
+  "description": "Issue #122 停止系（scope 未宣言。二点測定の unattended 側。対になるのは d54）: #231 は対象 file を1件も宣言していないので、その実行契約は空の scope.allow を運ぶことになる。`--unattended` はこれを **plan の全 Wave の全 Issue について pre-flight で** 検査し、1件でも欠けていれば **`--out` を作らず・worktree を1つも probe せず・1人も dispatch せずに** all-or-nothing で停止する。`contract_scope_unknown` は Issue ごとに1件の blocking reason であって limitation ではない。同じ plan を渡しても、`--unattended` が無ければ #230 は dispatch される（d54）—— それが「検出時点を早めた」ことの二点測定である。scope を宣言できない Issue は planner の question も同時に持つので、両方の理由が同じ report に出る（片方だけ出すと直し方が半分しか読めない）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-unattended-scope.json",
+    "orchestrate_args": [
+      "230",
+      "231",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--unattended",
+    "--wall-clock-budget",
+    "600"
+  ],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": true,
+    "waves_count": 0,
+    "never_sent": [230, 231],
+    "no_respond": true,
+    "no_contract_calls": true,
+    "out_dir_created": false,
+    "completion_check_passed": false,
+    "blocking_codes": ["contract_scope_unknown", "open_questions"],
+    "blocking_details_include": [
+      "#231: the plan names no file this issue may write",
+      "no worker of any wave"
+    ],
+    "limitation_codes": ["unattended_mode"],
+    "limitation_code_counts": {
+      "unattended_mode": 1,
+      "unattended_baseline": 0,
+      "contract_scope_unknown": 0
+    },
+    "summary_includes": [
+      "## 無人運転（unattended）",
+      "1件でも欠けていれば1人も dispatch しない"
+    ]
+  }
+}

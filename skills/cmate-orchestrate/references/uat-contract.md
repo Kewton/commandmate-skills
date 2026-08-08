@@ -177,6 +177,34 @@ per-issue の `baseline` / `acceptance` / `verdict` / `verdict_source` を記録
 
 `attempts_used`（fix 回数）は常に `max_attempts` 以下である。ループが無限に回ることは無い。
 
+### 5.1 再merge は invocation の cwd に入る（無人運転の前提）
+
+**`git merge --no-ff` は cwd 指定を持たない。** 上の再merge は `--git` に渡された CLI を
+**uat プロセスの cwd** で実行するので、fix が入る先は **invocation cwd の現在の branch** である。
+[#115](https://github.com/Kewton/commandmate-skills/issues/115) が使い捨てリポジトリで実測した
+（[adr-unattended-mode.md](./adr-unattended-mode.md) 第14.3節）:
+
+| cwd / HEAD | merge exit | 何が起きるか |
+|---|---|---|
+| **`main` を checkout**（branch push を受けた CI の既定）| 0 | **`main` が進む。** PR も CI も review も経ていない。その `main` が push 済みなら**不可逆** |
+| **detached HEAD**（`actions/checkout` が SHA を取ったとき）| 0 | merge commit はできるが**どの branch からも到達できない**。`remerge_failed` は出ないので、uat は **`outcome: merged` と報告する**（静かな false success）|
+| fix branch がその checkout に無い | 1 | `remerge_failed`（正しい停止）|
+| cwd が別 branch の linked worktree | 0 | その worktree の branch が進む |
+
+人間が居る運転では、cwd を選んだのが人間なので前提は満たされている。**無人運転（`--unattended`）で
+`fix_uat` を回す段階 C では、これは前提ではなく検査すべき条件になる。**
+
+**段階 C の前提（本 release では未実装。実装は段階 C の Issue）:** fix worktree を1つも作る前に、
+
+- `git symbolic-ref -q HEAD` が空でないこと（**detached HEAD でない**こと）
+- HEAD が期待する integration branch と一致すること
+
+を確かめ、外れていれば **1つも fix worktree を作らずに停止する**（dispatch が `branch_matches`
+drift check で既に持っている形をそのまま置けばよく、**新しい停止語彙は要らない**
+——`preflight_failed` 相当で足りる）。**この節は段階 C の着手条件としてここに記録してある。**
+段階 A（[#122](https://github.com/Kewton/commandmate-skills/issues/122)）では uat runner は
+`--unattended` を受け付けない（渡すと `invalid_input`）ので、この検査はまだ存在しない。
+
 ## 6. fix worktree（#1448 worktree-result との整合）
 
 fix worktree は [cmate-worktree-setup](../../cmate-worktree-setup/) の worktree-result（#1448）の形で

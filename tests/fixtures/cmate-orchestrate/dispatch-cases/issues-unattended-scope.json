@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 230,
+      "title": "feat: add base configuration loader",
+      "body": "Add the base configuration loader in `src/base.ts`.\n\n## Acceptance criteria\n- [ ] `src/base.ts` reads config from disk\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 231,
+      "title": "chore: レスポンスのゆらぎを直す",
+      "body": "たまに応答が安定しない。気づいたところを直してほしい。\n\n## Acceptance criteria\n- [ ] 応答が安定する\n",
+      "labels": ["chore"]
+    }
+  ]
+}

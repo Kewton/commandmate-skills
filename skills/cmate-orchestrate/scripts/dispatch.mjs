@@ -55,7 +55,8 @@
 
 import { parseArgs, promisify } from 'node:util';
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdirSync, existsSync, writeFileSync, readFileSync, appendFileSync, statSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync, readFileSync, appendFileSync, statSync, rmSync } from 'node:fs';
+import { hostname, tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -173,6 +174,57 @@ const ATTEMPT_HISTORY_FILE = 'attempt-history.jsonl';
 const MAX_ATTEMPTS = 99;
 
 // =============================================================================
+// Unattended — the declaration that nobody is watching this invocation
+// (Issue #122 / references/adr-unattended-mode.md sections 2, 3, 14.1, 14.2)
+// =============================================================================
+//
+// `--unattended` is an INPUT DECLARATION, not a permission (ADR "裁定 0"). It
+// disables no gate, downgrades no blocking reason to a limitation and raises no
+// status by one step; what it adds is tightening, and nothing else. In
+// particular it does NOT imply `--approve` (a flag this runner does not even
+// have) and it does not answer prompts: a run that says "there is no human here"
+// cannot also say "answer every prompt with yes".
+//
+// Stage A is the dispatch runner only. merge/uat refuse the flag today because
+// their `parseArgs` has no such option and an unknown flag is already
+// `invalid_input` (exit 3) — which is exactly what ADR section 8 asks for: an
+// unimplemented stage must refuse the flag rather than accept and ignore it.
+const UNATTENDED_STAGE = 'A（dispatch のみ）';
+
+// The exclusivity lock (ADR section 14.1). Issue #115 measured the window
+// between process start and the creation of `--out`: two runs started 700 ms
+// apart both passed the pre-flight, both invoked the `--prepare-worktrees`
+// provider, and both then drove the SAME worktrees, interleaving their `send`s.
+// `out_exists` is not a mutex there — the directory does not exist yet — and it
+// is not one at all when `--out` varies per run (a timestamped cron output path)
+// or when `--resume` appends into an existing directory.
+//
+// Ownership is the RUNNER's (candidate A of that section's table). The
+// granularity is one lock per WORKTREE, because the harm is "two supervisors in
+// one worktree", not "one plan run twice": two different plans can name the same
+// worktree. The lock is NOT `--out` — Issue #90 decided that a run stopped in
+// the pre-flight does not consume `--out`, and re-using it as a mutex would undo
+// that decision.
+//
+// It is taken only under `--unattended`. A run without the flag is byte-for-byte
+// what it was before this feature existed (ADR section 11), which is the
+// property the whole fixture suite is pinned on; the residual gap — a human's
+// ad-hoc run does not take the lock, so it can still collide with a cron run —
+// is stated in the contract rather than papered over.
+const LOCK_ROOT_ENV = 'CMATE_ORCHESTRATE_LOCK_DIR';
+const LOCK_DIR_NAME = 'cmate-orchestrate-locks';
+const LOCK_OWNER_FILE = 'owner.json';
+// A lock whose owner record cannot be read is only reclaimed once it is older
+// than this: the gap between `mkdirSync` and the `owner.json` write is
+// microseconds, so an unreadable record in a fresh lock means "a run is starting
+// right now", while an old one means "a run died between the two".
+const LOCK_STALE_GRACE_MS = 60_000;
+// Long enough for any branch a profile template produces, short enough that the
+// key is a legal directory name everywhere. A truncation collision can only
+// produce a spurious refusal, never a missed one.
+const LOCK_KEY_MAX = 200;
+
+// =============================================================================
 // Worker method — the opt-in reference to a worker-side development Skill
 // (Issue #128 / references/adr-worker-development-skill.md sections 3 and 9)
 // =============================================================================
@@ -285,6 +337,28 @@ Options:
                          run if it is not, then writes a "## Method" section
                          naming it into the task text. It adds METHOD only: no
                          gate is relaxed and no permission is widened.
+  --unattended           Declare that NO HUMAN is watching this invocation (CI /
+                         cron). It grants nothing: it does not imply --approve,
+                         it answers no prompt, it disables no gate and it never
+                         turns a blocking reason into a limitation. What it adds
+                         is tightening — it implies --contract-mode require,
+                         checks BEFORE creating --out that every issue in the
+                         plan declares a scope (all-or-nothing), takes a
+                         per-worktree exclusivity lock so a second run cannot
+                         drive the same worktrees, requires --wall-clock-budget,
+                         and records the pre-dispatch HEAD of every worktree it
+                         drives so the run can be undone. Combining it with a
+                         relaxing flag (--auto-yes, --allow-questions,
+                         --contract-mode off|auto) is refused with invalid_input
+                         rather than silently overridden.
+  --wall-clock-budget <sec>
+                         Stop the run once it has been running this long. The
+                         remaining budget is also the timeout of every child
+                         process the run spawns, which is the only bound on the
+                         profile baseline and the acceptance commands (they have
+                         none of their own). Reaching it is a partial run with
+                         stop_reason "timeout" — never a success. OFF by default;
+                         required with --unattended.
   --contract-mode <m>    auto (default) | require | off. auto dispatches under an
                          execution contract when the CLI supports one and falls
                          back to the profile baseline with an explicit limitation
@@ -320,6 +394,8 @@ function parseCli(argv) {
         gh: { type: 'string' },
         'auto-yes': { type: 'boolean' },
         'allow-questions': { type: 'boolean' },
+        unattended: { type: 'boolean' },
+        'wall-clock-budget': { type: 'string' },
         'prepare-worktrees': { type: 'boolean' },
         'worktree-setup': { type: 'string' },
         'worker-method': { type: 'string' },
@@ -398,6 +474,47 @@ function resolveWorkerMethod(raw) {
   return id;
 }
 
+// The unattended declaration and the tightening it implies (Issue #122 / ADR
+// sections 2, 3, 4, 5). Returns the contract mode and the wall-clock budget
+// because both are DECIDED here: under `--unattended` the mode is forced to
+// `require` and the budget stops being optional.
+//
+// The three refusals are refusals rather than overrides on purpose (ADR
+// section 2, invariant 2). A run that declared two contradictory things must not
+// have one of them silently win: the reader of the report — which in unattended
+// operation is the next CI job, not a person — cannot tell which one did. The
+// same shape as #93's refusal of a double-specified `--worktree-setup`.
+function resolveUnattended(values) {
+  const contractMode = resolveContractMode(values['contract-mode']);
+  const budget = positiveInt(values['wall-clock-budget'], 'wall-clock-budget', null);
+  if (!values.unattended) return { unattended: false, contractMode, wallClockBudget: budget };
+
+  if (values['auto-yes']) {
+    throw new SkillError('invalid_input',
+      '--unattended and --auto-yes cannot both hold: --auto-yes consumes the prompt stop (exit 10) with an unconditional '
+        + '"yes", which makes the one halt that exists FOR the absent human structurally unreachable. Drop one of the two', 3);
+  }
+  if (values['allow-questions']) {
+    throw new SkillError('invalid_input',
+      '--unattended and --allow-questions cannot both hold: --allow-questions declares that somebody TAKES ON an unanswered '
+        + 'planner question, and --unattended declares that nobody is here to take it on. Answer the questions in the issue '
+        + 'body and re-plan', 3);
+  }
+  if (values['contract-mode'] !== undefined && contractMode !== 'require') {
+    throw new SkillError('invalid_input',
+      `--unattended implies --contract-mode require, so --contract-mode ${contractMode} is refused rather than overridden: `
+        + 'the fallback path has no scope gate at all (an issue with no declared scope is dispatched there), and "no execution '
+        + 'contract" is precisely the silent degradation nobody is present to read', 3);
+  }
+  if (budget === null) {
+    throw new SkillError('invalid_input',
+      '--unattended requires --wall-clock-budget <sec>: the turn caps bound the number of turns, not the clock, and the '
+        + 'profile baseline and the acceptance commands have no timeout of their own. With a human present, the person who '
+        + 'starts the run is the budget; with nobody present, the job definition is the only place the limit can be chosen', 3);
+  }
+  return { unattended: true, contractMode: 'require', wallClockBudget: budget };
+}
+
 // Flags the worktree-setup provider must not be handed a second time (Issue #93).
 // The profile, the base and the issue set come from the APPROVED PLAN; a provider
 // invoked with a second, operator-supplied profile resolves a different
@@ -456,6 +573,7 @@ function resolveInputs(parsed) {
       '--out and --resume are mutually exclusive: a resume appends into the directory it resumes ' +
         `(<resume-dir>/${RESUME_ATTEMPT_PREFIX}<n>/), so there is no second output path to choose`, 3);
   }
+  const unattended = resolveUnattended(values);
   return {
     planPath: values.plan,
     outDir: values.out ?? null,
@@ -466,10 +584,12 @@ function resolveInputs(parsed) {
     gh: values.gh ?? 'gh',
     autoYes: Boolean(values['auto-yes']),
     allowQuestions: Boolean(values['allow-questions']),
+    unattended: unattended.unattended,
+    wallClockBudget: unattended.wallClockBudget,
     prepareWorktrees,
     worktreeSetupArgv: resolveSetupLauncher(values['worktree-setup'], prepareWorktrees),
     workerMethod: resolveWorkerMethod(values['worker-method']),
-    contractMode: resolveContractMode(values['contract-mode']),
+    contractMode: unattended.contractMode,
     verifyGates: resolveVerifyGates(values['verify-gates']),
     expectBranch: values['expect-branch'] ?? null,
     waitTimeout: positiveInt(values['wait-timeout'], 'wait-timeout', DEFAULT_WAIT_TIMEOUT_SECONDS),
@@ -840,6 +960,34 @@ function appendAttemptHistory(outDir, entry) {
 // CLI invocation
 // =============================================================================
 
+// The wall-clock deadline of this invocation, or null when no budget was set
+// (Issue #122 / ADR section 14.2). Module state rather than a field on `inputs`
+// because the two functions that have to honour it — `runCli` and its async twin
+// — are module-level and are called from places that hold no `inputs`.
+//
+// Issue #115 measured why the budget cannot live in the supervision loop alone:
+// `runCli` passes no `timeout` to `execFileSync`, so a profile baseline of
+// `sleep 6` runs for six seconds with `--wait-timeout 1`. A budget checked only
+// between turns would never be reached by a run wedged inside such a child. The
+// order the spike prescribed ("first the child timeout, then the budget") is
+// implemented as ONE rule: the remaining budget IS every child's timeout.
+let wallClockDeadline = null;
+
+function startWallClockBudget(seconds) {
+  wallClockDeadline = typeof seconds === 'number' ? Date.now() + (seconds * 1000) : null;
+}
+
+function wallClockExhausted() {
+  return wallClockDeadline !== null && Date.now() >= wallClockDeadline;
+}
+
+// A caller's own `timeout` always wins: this bounds children that have no bound,
+// it does not lengthen one that was chosen deliberately.
+function budgetedExtra(extra) {
+  if (wallClockDeadline === null || extra.timeout !== undefined) return extra;
+  return { ...extra, timeout: Math.max(1, wallClockDeadline - Date.now()) };
+}
+
 // One structured call to an external CLI. Never throws: a non-zero exit or a
 // missing binary comes back as { ok: false }, so the caller decides whether that
 // is drift, a worker failure, or fatal.
@@ -849,7 +997,7 @@ function runCli(bin, args, extra = {}) {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 8 * 1024 * 1024,
-      ...extra,
+      ...budgetedExtra(extra),
     });
     return { ok: true, stdout, stderr: '', status: 0 };
   } catch (error) {
@@ -879,7 +1027,7 @@ async function runCliAsync(bin, args, extra = {}) {
     const { stdout } = await execFileAsync(bin, args, {
       encoding: 'utf8',
       maxBuffer: 8 * 1024 * 1024,
-      ...extra,
+      ...budgetedExtra(extra),
     });
     return { ok: true, stdout, stderr: '', status: 0 };
   } catch (error) {
@@ -1096,9 +1244,13 @@ function preflightDispatch(inputs, plan, waveIndex, waveIssues) {
 // written — the field already means "null when nothing was written", and it is
 // how a reader (and the summary) can tell that the same command may simply be
 // re-run once the drift is fixed.
-function preflightFailureReport(inputs, plan, preflight, preparation = null, resume = null) {
+function preflightFailureReport(inputs, plan, preflight, preparation = null, resume = null, lockKeys = []) {
   const report = emptyReport(inputs, plan, null);
   report.status = 'failure';
+  // The unattended declaration outlives the refusal, exactly like the
+  // worker-method one below: what a stopped run was declared to be is part of
+  // reading why it stopped (Issue #122 / ADR section 7.2).
+  if (inputs.unattended) report.limitations.push(unattendedModeLimitation(inputs, lockKeys));
   // A refused resume still says it WAS a resume, and what it would have carried:
   // otherwise the reader cannot tell a first attempt that stopped from a fourth
   // one, and the re-run advice below ("re-run the same command") is only true
@@ -1138,6 +1290,305 @@ function preflightFailureReport(inputs, plan, preflight, preparation = null, res
   });
   report.redactions = redactionsList();
   report.summary_markdown = renderSummary(report, false, [], resume);
+  return report;
+}
+
+// =============================================================================
+// Unattended — exclusivity, the plan-only refusal, and the undo baseline
+// (Issue #122 / references/adr-unattended-mode.md sections 3, 7.2, 14.1)
+// =============================================================================
+
+// Where the per-worktree locks live. `$TMPDIR` (per user, per machine) is the
+// default because the lock has to be found by EVERY starter on the machine — a
+// cron job, a CI step and a person all reach the same directory. The override
+// exists for a caller that needs an explicit location (and for this repository's
+// fixtures, which must not touch a shared directory); a job definition that
+// points it somewhere different per run has turned the lock off, which is why
+// the contract says so out loud.
+function lockRoot() {
+  const override = process.env[LOCK_ROOT_ENV];
+  return override && override.trim() !== '' ? override.trim() : join(tmpdir(), LOCK_DIR_NAME);
+}
+
+// CommandMate derives a worktree id from (repository, branch); so does this key.
+// It does not have to EQUAL the server's id — nothing compares the two — it has
+// to be a stable, collision-free function of the same pair, because that pair is
+// what identifies the worktree before `commandmate ls` has been asked (the lock
+// is taken before the pre-flight, which is where `ls` happens).
+function worktreeLockKey(plan, issue) {
+  const slug = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  const repo = slug(String(plan.profile.repository ?? '').split('/').pop() ?? '');
+  const branch = slug(issue.branch);
+  const key = `${repo}-${branch}`.replace(/^-|-$/g, '');
+  return (key === '' ? `issue-${issue.number}` : key).slice(0, LOCK_KEY_MAX);
+}
+
+// Is the process that wrote this lock still running? EPERM means "alive, owned
+// by somebody else" — the answer is still alive, so the lock still holds.
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+}
+
+// The stale-lock rule, decided here because a lock nobody can reclaim is worse
+// than no lock at all (ADR section 14.1 requires this rule to be stated):
+//
+//   1. the owner record names a LIVE pid on THIS host  -> held, refuse;
+//   2. the owner record names a DEAD pid on this host  -> stale, reclaim. This is
+//      the `kill -9` case: the run died without releasing;
+//   3. the owner record names ANOTHER host             -> refuse. This process
+//      cannot judge the liveness of a pid on a machine it is not on;
+//   4. the owner record is missing or unreadable       -> reclaim only once the
+//      directory is older than the grace period. A fresh one means a run is
+//      between its `mkdirSync` and its `owner.json` write, which is microseconds.
+//
+// Refusing is always the safe error: it costs a re-run, while reclaiming a live
+// lock costs two supervisors in one worktree — the exact state this prevents.
+function lockOwnerVerdict(dir) {
+  let owner = null;
+  try {
+    owner = JSON.parse(readFileSync(join(dir, LOCK_OWNER_FILE), 'utf8'));
+  } catch {
+    owner = null;
+  }
+  if (owner === null || typeof owner !== 'object') {
+    let ageMs = 0;
+    try {
+      ageMs = Date.now() - statSync(dir).mtimeMs;
+    } catch {
+      ageMs = 0;
+    }
+    return ageMs >= LOCK_STALE_GRACE_MS
+      ? { stale: true, why: 'its owner record is unreadable and the lock is older than the stale grace period' }
+      : { stale: false, why: 'it was just created and its owner record is not written yet' };
+  }
+  if (owner.host !== hostname()) {
+    return { stale: false, why: `it is owned by a run on another host (${redact(String(owner.host ?? 'unknown'))})` };
+  }
+  if (pidAlive(owner.pid)) {
+    return { stale: false, why: `its owner (pid ${owner.pid}, plan ${redact(String(owner.plan_run_id ?? 'unknown'))}) is still running` };
+  }
+  return { stale: true, why: `its owner (pid ${owner.pid}) is gone, so the lock was left behind by a killed run` };
+}
+
+// Locks this process holds, released on exit. Only paths THIS run created are
+// ever removed — a release that walked the root would delete other runs' locks.
+const heldLocks = [];
+let releaseRegistered = false;
+
+function releaseUnattendedLocks() {
+  for (const dir of heldLocks.splice(0)) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Best effort: a lock that outlives its process is reclaimed by the stale
+      // rule above, which is exactly the `kill -9` path.
+    }
+  }
+}
+
+// Take one lock, atomically. `mkdirSync` WITHOUT `recursive` fails with EEXIST
+// when the directory is already there, and that failure is the mutex: there is
+// no read-then-write window for a second run to slip into (the TOCTOU the ADR
+// warns about). The `owner.json` write comes after, so it describes a lock that
+// is already ours.
+function acquireOneLock(dir, meta) {
+  const create = () => {
+    try {
+      mkdirSync(dir);
+      return { ok: true };
+    } catch (error) {
+      if (error.code === 'EEXIST') return { ok: false, exists: true };
+      return { ok: false, exists: false, detail: redact(error.message ?? String(error)) };
+    }
+  };
+  let attempt = create();
+  if (!attempt.ok && attempt.exists) {
+    const verdict = lockOwnerVerdict(dir);
+    if (!verdict.stale) return { ok: false, why: verdict.why };
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch (error) {
+      return { ok: false, why: `it could not be reclaimed (${redact(error.message ?? String(error))})` };
+    }
+    // Exactly one retry. A loop here would be the TOCTOU this design avoids:
+    // losing the retry means another run took the reclaimed lock first, which is
+    // a refusal, not something to race for.
+    attempt = create();
+    if (!attempt.ok) return { ok: false, why: 'another run took it while this one was reclaiming it' };
+  }
+  if (!attempt.ok) return { ok: false, why: `the lock directory could not be created (${attempt.detail ?? 'unknown error'})` };
+  heldLocks.push(dir);
+  if (!releaseRegistered) {
+    process.on('exit', releaseUnattendedLocks);
+    releaseRegistered = true;
+  }
+  writeFileSync(join(dir, LOCK_OWNER_FILE), `${JSON.stringify(meta, null, 2)}\n`, 'utf8');
+  return { ok: true };
+}
+
+// All-or-nothing over the worktrees this attempt may drive. Partial exclusivity
+// is not exclusivity: holding three of four locks and dispatching anyway puts a
+// second supervisor in the fourth worktree, which is the whole harm.
+//
+// `issues` is what this attempt may dispatch — the whole plan on an ordinary
+// run, and only the not-carried issues on a resume (a carried issue is never
+// sent to, and its worktree may legitimately be gone).
+function acquireUnattendedLocks(plan, issues) {
+  const root = lockRoot();
+  try {
+    mkdirSync(root, { recursive: true });
+  } catch (error) {
+    return {
+      ok: false,
+      keys: [],
+      reasons: [{
+        code: 'unattended_locked',
+        detail: `the exclusivity lock root could not be created (${redact(error.message ?? String(error))}); `
+          + `--unattended will not dispatch without it. Set ${LOCK_ROOT_ENV} to a writable directory that is the SAME for every run on this machine`,
+      }],
+    };
+  }
+  const keys = [];
+  const meta = { host: hostname(), pid: process.pid, plan_run_id: String(plan.run_id ?? 'unknown'), stage: UNATTENDED_STAGE };
+  for (const issue of issues) {
+    const key = worktreeLockKey(plan, issue);
+    const result = acquireOneLock(join(root, key), meta);
+    if (result.ok) {
+      keys.push(key);
+      continue;
+    }
+    releaseUnattendedLocks();
+    return {
+      ok: false,
+      keys: [],
+      reasons: [{
+        code: 'unattended_locked',
+        detail: `#${issue.number}: the worktree lock "${key}" is held — ${result.why}. Another dispatch run is driving this worktree, `
+          + 'so this one stopped before the pre-flight: nothing was probed, no worktree was prepared and no worker was sent to. '
+          + `Locks live in $${LOCK_ROOT_ENV} (default $TMPDIR/${LOCK_DIR_NAME}/<worktree-key>) and are released when the owning run exits`,
+      }],
+    };
+  }
+  return { ok: true, keys, reasons: [] };
+}
+
+// The run-wide declaration (ADR section 7.2). One entry, in EVERY unattended
+// report including the ones that stopped, so what the run declared — and what
+// that declaration implied — is readable from the report alone.
+//
+// Deliberately free of absolute paths: `redact()` would replace them with
+// `[REDACTED-PATH]` and, worse, would tally a redaction that a run without the
+// flag does not have, so the "an unattended run differs only by these two
+// limitations" property would stop being true.
+function unattendedModeLimitation(inputs, lockKeys) {
+  return {
+    code: 'unattended_mode',
+    detail: `--unattended（段階 ${UNATTENDED_STAGE}）: この invocation に人間は居ない、という入力の宣言である。`
+      + '締め付けだけを含意し、権限は1つも足していない — **`--approve` は含意しない**、prompt には答えない、'
+      + 'ゲートを無効化せず、blocking を limitation に格下げせず、status を1段も上げない。'
+      + `含意した締め付け: --contract-mode require / pre-flight で全 Issue の scope 宣言を all-or-nothing 検査（--out を作る前）/ `
+      + `--wall-clock-budget ${inputs.wallClockBudget}s / worktree 単位の排他 lock ${lockKeys.length} 件（${lockKeys.join(', ') || 'なし'}）。`
+      + '拒否する緩和フラグ: --auto-yes / --allow-questions / --contract-mode off|auto（invalid_input, exit 3）。'
+      + 'monitor を併用するなら monitor 側の `--no-auto-approve` は要件である（契約の autoYes: off は monitor を止めない）。',
+  };
+}
+
+// The undo baseline (ADR section 7.2), one entry per worktree this run drives,
+// recorded BEFORE the first message reaches its worker.
+//
+// Branch name and short SHA, never a path — measured in Issue #115 (ADR section
+// 14.4): once the worktree has been cleaned up `git reset --hard` exits 128 and
+// the only move left is `git branch -f <branch> <sha>`, which needs the branch
+// name. The four conditions under which the baseline is NOT enough are in
+// SKILL.md section 5; they are stated there rather than here because they are
+// about the undo procedure, not about this run.
+function unattendedBaselineLimitation(issue, sha) {
+  const short = shortSha(sha ?? '');
+  return {
+    code: 'unattended_baseline',
+    detail: redact(`#${issue.number}: branch ${issue.branch} @ ${short} — dispatch 開始時の worktree HEAD。`)
+      + (short === 'unknown'
+        ? 'HEAD を読めなかった（worktree が無い/壊れている）ので、この Issue の取り消し起点は記録できていない。'
+        : '取り消しは worktree が在れば `git reset --hard <sha>`、片付いていれば `git branch -f <branch> <sha>`。'
+          + 'untracked file は戻らず、merge / push 済みなら戻せない（SKILL.md 第5節）。'),
+  };
+}
+
+// The plan-only gates, evaluated together BEFORE `--out` exists (ADR section 3).
+//
+// Two findings, one refusal:
+//
+//   - `open_questions` — the existing gate (Issue #52), which under
+//     `--unattended` can no longer be waived (`--allow-questions` is refused);
+//   - `contract_scope_unknown` — the scope declaration, per issue. Today this is
+//     decided inside the wave loop, by which time the other workers of the wave
+//     have already been sent to: the refusal is real but it lands on a world
+//     that is already mutating, and no one is present to clean it up.
+//
+// Both are pure functions of the plan, so evaluating them here costs nothing and
+// buys the property #90 established for missing worktrees: the run stops without
+// consuming `--out`, so the same command can be re-run after the issue bodies
+// are fixed and re-planned. Reporting them TOGETHER matters because an issue
+// with no declared files usually also carries the planner's "affected files are
+// unclear" question — reporting only one of the two would hide half the fix.
+//
+// The scope condition is the CONTRACT's, not the plan's: `contractScopeAllow`
+// drops patterns the contract parser would reject, so an issue can name files
+// and still produce an empty `scope.allow`. That is the condition the wave loop
+// refuses on, so it is the condition checked here.
+function unattendedPlanReasons(plan) {
+  const reasons = [];
+  const openQuestions = collectOpenQuestions(plan);
+  if (openQuestions.length > 0) {
+    reasons.push({
+      code: 'open_questions',
+      detail: `${openQuestions.length} issue(s) carry an unanswered planner question: ${formatOpenQuestions(openQuestions)} `
+        + 'Nothing was dispatched and --out was not created: answer them in the issue body and re-plan. '
+        + '--allow-questions is refused under --unattended, because taking on a question needs somebody to take it on',
+    });
+  }
+  for (const issue of plan.issues ?? []) {
+    if (contractScopeAllow(issue).length > 0) continue;
+    reasons.push({
+      code: 'contract_scope_unknown',
+      detail: `#${issue.number}: the plan names no file this issue may write, so its execution contract would declare no scope. `
+        + 'Under --unattended this is checked for EVERY issue of the plan before anything is dispatched, so no worker of any wave '
+        + 'was started (with a human present the same issue is refused inside its wave, by which time the rest of the wave is already running). '
+        + "State the issue's target files and re-run the planner",
+    });
+  }
+  return reasons;
+}
+
+// The report an unattended refusal prints. Same shape as #90's pre-flight
+// refusal: `out_dir: null` because nothing was written, `dispatch_error` because
+// the stop is before any wave, and the declaration is still recorded — a report
+// that stopped must still say what it was declared to be.
+function unattendedRefusalReport(inputs, plan, reasons, { humanRequired, lockKeys = [], resume = null }) {
+  const report = emptyReport(inputs, plan, null);
+  report.status = 'failure';
+  report.stop_reason = 'dispatch_error';
+  report.human_required = humanRequired;
+  report.limitations.push(unattendedModeLimitation(inputs, lockKeys));
+  if (resume !== null) report.limitations.push(resumeLimitation(plan, resume));
+  if (inputs.workerMethod !== null) report.limitations.push(workerMethodDeclaredLimitation(inputs.workerMethod));
+  report.blocking_reasons = reasons;
+  report.completion_check = buildCompletionCheck({
+    planApproved: true,
+    driftReconfirmed: false,
+    parallelismBounded: true,
+    barrierEnforced: true,
+    noAutoPromptResponse: true,
+    reportStatus: 'failure',
+  });
+  report.redactions = redactionsList();
+  report.summary_markdown = renderSummary(report, false, collectOpenQuestions(plan), resume);
   return report;
 }
 
@@ -2392,14 +2843,30 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
 
   const sent0 = await sendContractAndConfirm(inputs, worktreeId, relativeContractPath);
   if (!sent0.sent) {
+    // A send that failed after the deadline failed BECAUSE of the deadline: the
+    // remaining budget is every child's timeout, so the runner killed it. Saying
+    // "dispatch failed" would send the operator to a worker that never got the
+    // message, for a clock this runner stopped (Issue #122).
+    const cutShort = wallClockExhausted();
     return {
-      state: 'failed', taskId: null, verdict: null, notJudged: false,
+      state: cutShort ? 'timeout' : 'failed', taskId: null, verdict: null, notJudged: false,
       promptExcerpt: null, nudges: 0, autoResponded,
-      note: `contract dispatch failed: ${sent0.note}`,
+      note: cutShort
+        ? 'the --wall-clock-budget was exhausted before this worker was dispatched'
+        : `contract dispatch failed: ${sent0.note}`,
     };
   }
   const taskId = sent0.taskId;
   let turns = 1;
+  // The same reading for every later send in this loop (nudge, commit request,
+  // re-instruction): a send the budget cut short is a stopped clock, not a
+  // failed worker.
+  const budgetCutoff = () => (wallClockExhausted()
+    ? {
+      state: 'timeout', taskId, verdict, notJudged: false, promptExcerpt: null, nudges: turns - 1, autoResponded,
+      note: `the --wall-clock-budget was exhausted during turn ${turns}; this worker was left mid-supervision`,
+    }
+    : null);
   // Once a pass is in hand it is FINAL for this run: the passing run moved the
   // task to `succeeded`, and a later verification run that cannot bind to a live
   // contract is exactly the detached-contract `error` → exit 99 case (#1620).
@@ -2409,10 +2876,32 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
 
   const hardIterations = inputs.maxTurns * 4 + 8;
   for (let i = 0; i < hardIterations; i += 1) {
+    // The wall-clock budget, checked between turns (Issue #122). The remaining
+    // budget is already every child's timeout, so a wedged `wait` cannot outlive
+    // it; this check is what turns "the child was killed" into an honest
+    // `timeout` state instead of an infrastructure failure attributed to the
+    // worker. Any verdict already in hand is kept — it was really reached.
+    if (wallClockExhausted()) {
+      return {
+        state: 'timeout', taskId, verdict, notJudged: false, promptExcerpt: null, nudges: turns - 1, autoResponded,
+        note: `the --wall-clock-budget was exhausted after ${turns} turn(s); supervision stopped without waiting for this worker`,
+      };
+    }
     const waitArgs = passed
       ? ['wait', worktreeId, '--on-prompt', 'agent', '--timeout', String(inputs.waitTimeout)]
       : ['wait', worktreeId, '--on-prompt', 'agent', '--verify', '--timeout', String(inputs.waitTimeout)];
     const waited = await runCmAsync(inputs, waitArgs);
+    // The same check AFTER the call, and it is not redundant: the remaining
+    // budget is this child's timeout, so a `wait` that outlives the deadline
+    // comes back killed. Classifying that as an infrastructure failure would
+    // blame the worker for a clock this runner stopped — the operator would go
+    // read a worker log to find out why the run they time-boxed ended.
+    if (wallClockExhausted()) {
+      return {
+        state: 'timeout', taskId, verdict, notJudged: false, promptExcerpt: null, nudges: turns - 1, autoResponded,
+        note: `the --wall-clock-budget was exhausted during turn ${turns}; the pending \`commandmate wait\` was cut short and this worker was left mid-supervision`,
+      };
+    }
     const code = waited.ok ? VERIFY_EXIT_PASS : (waited.status ?? null);
     const done = (state, note) => ({ state, taskId, verdict, notJudged: false, promptExcerpt: null, nudges: turns - 1, autoResponded, note });
 
@@ -2476,7 +2965,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
         return done('failed', `no commit was produced after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap`);
       }
       const asked = await sendAndConfirm(inputs, worktreeId, COMMIT_REQUEST_MESSAGE);
-      if (!asked.sent) return done('failed', `commit request failed: ${asked.note}`);
+      if (!asked.sent) return budgetCutoff() ?? done('failed', `commit request failed: ${asked.note}`);
       turns += 1;
       continue;
     }
@@ -2494,7 +2983,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
         return done('failed', `no work evidence after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap`);
       }
       const nudged = await sendAndConfirm(inputs, worktreeId, NUDGE_MESSAGE);
-      if (!nudged.sent) return done('failed', `nudge failed: ${nudged.note}`);
+      if (!nudged.sent) return budgetCutoff() ?? done('failed', `nudge failed: ${nudged.note}`);
       turns += 1;
       continue;
     }
@@ -2521,7 +3010,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
         );
       }
       const resent = await sendAndConfirm(inputs, worktreeId, buildVerifyReinstruction(failing.failing));
-      if (!resent.sent) return done('failed', `re-instruction failed: ${resent.note}`);
+      if (!resent.sent) return budgetCutoff() ?? done('failed', `re-instruction failed: ${resent.note}`);
       turns += 1;
       continue;
     }
@@ -2543,15 +3032,45 @@ async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMes
 
   const sent0 = await sendAndConfirm(inputs, worktreeId, initialMessage);
   if (!sent0.sent) {
-    return { state: 'failed', promptExcerpt: null, nudges: 0, autoResponded, note: `dispatch failed: ${sent0.note}` };
+    // As on the contract path: a send the budget killed is a stopped clock.
+    const cutShort = wallClockExhausted();
+    return {
+      state: cutShort ? 'timeout' : 'failed', promptExcerpt: null, nudges: 0, autoResponded,
+      note: cutShort
+        ? 'the --wall-clock-budget was exhausted before this worker was dispatched'
+        : `dispatch failed: ${sent0.note}`,
+    };
   }
   let turns = 1;
+  const budgetCutoff = () => (wallClockExhausted()
+    ? {
+      state: 'timeout', promptExcerpt: null, nudges: turns - 1, autoResponded,
+      note: `the --wall-clock-budget was exhausted during turn ${turns}; this worker was left mid-supervision`,
+    }
+    : null);
 
   // A hard bound on wait iterations, above the turn cap, so an unexpected
   // prompt/respond ping-pong under --auto-yes can never spin forever.
   const hardIterations = inputs.maxTurns * 4 + 8;
   for (let i = 0; i < hardIterations; i += 1) {
+    // The wall-clock budget (Issue #122), on the fallback path too: the profile
+    // baseline this path is judged by is the very command with no timeout of its
+    // own, so a run without this check would sit inside it past its deadline.
+    if (wallClockExhausted()) {
+      return {
+        state: 'timeout', promptExcerpt: null, nudges: turns - 1, autoResponded,
+        note: `the --wall-clock-budget was exhausted after ${turns} turn(s); supervision stopped without waiting for this worker`,
+      };
+    }
     const waited = await runCmAsync(inputs, ['wait', worktreeId, '--timeout', String(inputs.waitTimeout)]);
+    // As on the contract path: a `wait` killed by the budget's own timeout is a
+    // stopped clock, not a failed worker.
+    if (wallClockExhausted()) {
+      return {
+        state: 'timeout', promptExcerpt: null, nudges: turns - 1, autoResponded,
+        note: `the --wall-clock-budget was exhausted during turn ${turns}; the pending \`commandmate wait\` was cut short and this worker was left mid-supervision`,
+      };
+    }
     if (!waited.ok && waited.status === WAIT_EXIT_PROMPT) {
       const promptExcerpt = await capturePrompt(inputs, worktreeId);
       if (inputs.autoYes) {
@@ -2585,6 +3104,8 @@ async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMes
     }
     const nudged = await sendAndConfirm(inputs, worktreeId, NUDGE_MESSAGE);
     if (!nudged.sent) {
+      const cutShort = budgetCutoff();
+      if (cutShort) return cutShort;
       return { state: 'failed', promptExcerpt: null, nudges: turns - 1, autoResponded, note: `nudge failed: ${nudged.note}` };
     }
     turns += 1;
@@ -2760,11 +3281,16 @@ function emptyReport(inputs, plan, outDir) {
 // `<run-dir>/resume-attempt-<n>/` on a resume — so every artifact this function
 // writes lands beside the report that describes it and nothing an earlier
 // attempt wrote is touched.
-async function runDispatch(inputs, plan, outDir, preflight = null, preparation = null, resume = null) {
+async function runDispatch(inputs, plan, outDir, preflight = null, preparation = null, resume = null, lockKeys = []) {
   const promptsDir = join(outDir, 'prompts');
   mkdirSync(promptsDir, { recursive: true });
 
   const report = emptyReport(inputs, plan, outDir);
+  // The mode of the whole invocation, stated first: everything below is read
+  // against it (Issue #122 / ADR section 7.2). Nothing is pushed when the flag
+  // was not passed, which is what keeps a run without it byte-identical to a run
+  // from before the flag existed.
+  if (inputs.unattended) report.limitations.push(unattendedModeLimitation(inputs, lockKeys));
   // Stated before anything else the run says: which attempt this is, what it
   // carried, and what it re-dispatched. Every other line of the report is read
   // against that.
@@ -2875,6 +3401,16 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   const verificationUnrecorded = new Set();
 
   for (let waveIndex = 0; waveIndex < plan.waves.length && !stopped; waveIndex += 1) {
+    // The budget, checked before a wave is STARTED as well as between turns
+    // (Issue #122 / ADR section 14.2): a wave is the largest mutating unit this
+    // runner has, and starting one it cannot finish inside the budget is how a
+    // run ends with workers nobody ever came back for.
+    if (wallClockExhausted()) {
+      halt('partial', 'timeout', 'wall_clock_budget_exhausted',
+        `--wall-clock-budget ${inputs.wallClockBudget}s was exhausted before wave ${waveIndex + 1} was dispatched; `
+          + 'the remaining waves were not started. This is a stop, not a success: re-run with --resume once the cause of the slowness is understood');
+      break;
+    }
     const waveIssues = plan.waves[waveIndex];
     // 0. The resume split (Issue #98), before anything is probed. The issues a
     //    prior attempt completed AND verified are not dispatched again; their
@@ -3133,6 +3669,16 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
         });
       }
 
+      // The undo baseline (Issue #122 / ADR section 7.2), read HERE: after the
+      // runner has decided to dispatch this issue and before the first message
+      // reaches its worker, so the SHA really is the state the worker started
+      // from. Only under `--unattended` — a run with a human present has a
+      // person who can read `git reflog`, and this costs one `git rev-parse` per
+      // issue that a run without the flag must not pay.
+      if (inputs.unattended) {
+        report.limitations.push(unattendedBaselineLimitation(res.issue, await worktreeHeadSha(inputs, res.worktreePath)));
+      }
+
       workers.push(worker);
       supervisable.push({ worker, worktreeId: res.resolved.id, worktreePath: res.worktreePath, prompt, contractPath, requiredGates });
     }
@@ -3265,6 +3811,19 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
         report.human_required = true;
         halt('partial', 'dispatch_error', 'verification_not_judged',
           `#${unjudged.issue}: verification exited ${VERIFY_EXIT_NO_VERDICT} — the run ended error/cancelled, so no gate judged the work. Halted for a human; not re-instructed as a verification failure (exit ${VERIFY_EXIT_FAILED}) and not rounded to a pass`);
+      } else if (wallClockExhausted()) {
+        // Ranked below the two human_required stops and above everything else
+        // (Issue #122). A worker abandoned because the clock ran out looks like
+        // `failed`/`timeout` from the inside, and reporting it as a worker
+        // failure would send the operator into a worktree to debug a worker that
+        // was doing nothing wrong. Ranked below the prompt and the 99 because
+        // those two are findings the run really made and re-running cannot
+        // resolve, while this one says only "there was not enough time".
+        // `timeout` is reused rather than a new stop_reason value invented: the
+        // enum is a schema-versioned closed set (ADR section 11).
+        halt('partial', 'timeout', 'wall_clock_budget_exhausted',
+          `--wall-clock-budget ${inputs.wallClockBudget}s was exhausted during wave ${waveIndex + 1}; the workers of this wave were left mid-supervision `
+            + 'and the next wave was not dispatched. The worktree branches are where their workers left them (the unattended_baseline limitation records where each one started)');
       } else if (unresolvedWorktrees.length > 0) {
         // Ranked above worker_failed (Issue #90). Both are `worker_state:
         // 'failed'`, but they are opposite findings: worker_failed means a
@@ -3443,6 +4002,23 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
     lines.push('');
   }
 
+  // The unattended section (Issue #122). Printed only when the operator opted
+  // in, so a run without `--unattended` reads exactly as it did before the flag
+  // existed — including this summary. It is placed before the waves because it
+  // is the frame every line below is read in: what was declared, what that
+  // implied, and where each worktree stood before this run touched it.
+  const unattendedDeclared = report.limitations.find((entry) => entry.code === 'unattended_mode');
+  if (unattendedDeclared) {
+    const baselines = report.limitations.filter((entry) => entry.code === 'unattended_baseline');
+    lines.push('## 無人運転（unattended）');
+    lines.push(`- 宣言: ${unattendedDeclared.detail}`);
+    lines.push(baselines.length === 0
+      ? '- 取り消しの起点: なし（1件も dispatch していないので、この run が動かした worktree は無い）。'
+      : `- 取り消しの起点: ${baselines.length} 件の worktree について branch と開始時 SHA を記録した（unattended_baseline）。**untracked file・merge/push 済みの変更・gc 済みの object は戻らない**（SKILL.md 第5節）。`);
+    lines.push('- **`--unattended` は mutation の許可ではない。** merge / uat を無人で回すなら `--approve` を別に書く。');
+    lines.push('');
+  }
+
   // The method section (Issue #128 / ADR section 9). Printed only when the
   // operator opted in, so a run without `--worker-method` reads exactly as it
   // did before the flag existed — including this summary.
@@ -3502,7 +4078,11 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
     for (const reason of report.blocking_reasons) lines.push(`- blocking: ${reason.code} — ${reason.detail}`);
     for (const limitation of report.limitations) lines.push(`- limitation: ${limitation.code} — ${limitation.detail}`);
     if (haltedOnQuestions) {
-      lines.push('- next: 上記 open question を Issue 本文に反映して plan を作り直す。回答せずに進めると判断したなら `--allow-questions` を明示して再実行する（owner: human）。');
+      lines.push(report.limitations.some((entry) => entry.code === 'unattended_mode')
+        // Same reason as the contract line below: `--allow-questions` is a
+        // refused input under `--unattended`, so it is not an option to offer.
+        ? '- next: 上記 open question を Issue 本文に反映して plan を作り直す。`--unattended` は `--allow-questions` を拒否するので、未回答のまま押し通す道は無い（引き受ける人が居ないときに立てられる旗ではない）（owner: human）。'
+        : '- next: 上記 open question を Issue 本文に反映して plan を作り直す。回答せずに進めると判断したなら `--allow-questions` を明示して再実行する（owner: human）。');
     }
     if (report.human_required && !haltedOnQuestions && !report.blocking_reasons.some((reason) => reason.code === 'verification_not_judged')) {
       lines.push('- next: 提示した prompt を human が確認し、承認のうえ再開する（owner: human）。');
@@ -3511,7 +4091,23 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
       lines.push('- next: 判定に到達しなかった検証 run（exit 99）を human が調べる。契約が run に束ねられたか・タスクが既に終端でないかを確認する。20（判定して不合格）ではないので worker への再指示ループには流さない（owner: human）。');
     }
     if (report.blocking_reasons.some((reason) => reason.code === 'contract_unsupported')) {
-      lines.push('- next: CommandMate を 0.17.0 以上へ更新して契約経路で再実行するか、`--contract-mode auto` でフォールバック実行する（owner: operator）。');
+      lines.push(report.limitations.some((entry) => entry.code === 'unattended_mode')
+        // `--contract-mode auto` is the advice for an attended run; under
+        // --unattended it is a refused input, so naming it here would send the
+        // operator to a flag combination that exits 3 (Issue #122).
+        ? '- next: CommandMate を 0.17.0 以上へ更新して契約経路で再実行する。`--unattended` は `--contract-mode require` を含意するので、フォールバックへ落とす選択肢は無い（落とすなら `--unattended` を外し、人間が読む運転に戻す）（owner: operator）。'
+        : '- next: CommandMate を 0.17.0 以上へ更新して契約経路で再実行するか、`--contract-mode auto` でフォールバック実行する（owner: operator）。');
+    }
+    // The two unattended-only stops (Issue #122). Both are re-runnable, but for
+    // opposite reasons, and saying which is which is the whole point of the line.
+    if (report.blocking_reasons.some((reason) => reason.code === 'unattended_locked')) {
+      lines.push('- next: 同じ worktree を別の dispatch run が動かしている。**その run の終了を待って同じコマンドを再実行する**（`--out` は消費していない）。lock が残り続けるなら、所有 run の pid が生きているかを確認する（死んでいれば次の run が自動で回収する）（owner: operator）。');
+    }
+    if (report.blocking_reasons.some((reason) => reason.code === 'wall_clock_budget_exhausted')) {
+      lines.push('- next: `--wall-clock-budget` に到達して打ち切った。**成功ではない。** 何に時間を使ったか（baseline / acceptance コマンドは自前の timeout を持たない）を確認し、原因を潰すか budget を実測に合わせて増やしたうえで `--resume` で再開する（owner: operator）。');
+    }
+    if (report.blocking_reasons.some((reason) => reason.code === 'contract_scope_unknown')) {
+      lines.push('- next: 対象 file を1件も宣言していない Issue がある。**Issue 本文に対象ファイルを書いて re-plan する。** `--unattended` は plan 全体を pre-flight で検査するので、1件でも欠けていれば1人も dispatch しない（`--out` は消費していない）（owner: human）。');
     }
     if (report.limitations.some((reason) => reason.code === 'contract_unsupported')) {
       lines.push('- next: 契約非対応の CLI だったため裁定はフォールバック（baseline 再実行）である。契約ゲートで裁定したい場合は CommandMate を 0.17.0 以上へ更新する（owner: operator）。');
@@ -3610,6 +4206,10 @@ async function run(argv) {
   }
 
   const inputs = resolveInputs(parsed);
+  // The clock starts at the top of the run, not at the first wave: the budget is
+  // the invocation's wall clock, and the pre-flight, the contract probe and the
+  // worktree preparation stage are part of what it pays for (Issue #122).
+  startWallClockBudget(inputs.wallClockBudget);
   const rawPlan = loadPlan(inputs.planPath);
   const plan = validatePlan(rawPlan);
 
@@ -3628,6 +4228,45 @@ async function run(argv) {
   // Where THIS attempt's artifacts go — the run directory on a first dispatch,
   // `<run-dir>/resume-attempt-<n>/` on a resume.
   const attemptDir = resume === null ? outDir : resume.attemptDir;
+
+  // ---- unattended: exclusivity, then the plan-only gates (Issue #122) -------
+  //
+  // Both happen BEFORE the pre-flight, and in this order.
+  //
+  // The lock comes first because the window Issue #115 measured opens at process
+  // start: two runs that are both inside their pre-flight have neither created
+  // `--out` nor sent anything, and the `--prepare-worktrees` stage — which
+  // creates worktrees and branches — sits inside exactly that window. A lock
+  // taken after the pre-flight would be taken after the mutation it guards.
+  //
+  // The plan-only refusal comes second because it needs no world at all: an
+  // unanswered planner question and an undeclarable scope are facts about the
+  // plan, and refusing on them before probing anything is what leaves `--out`
+  // unconsumed for the re-run after the re-plan.
+  let lockKeys = [];
+  if (inputs.unattended) {
+    const lockable = resume === null
+      ? (plan.issues ?? [])
+      : (plan.issues ?? []).filter((issue) => !resume.carried.has(issue.number));
+    const locks = acquireUnattendedLocks(plan, lockable);
+    if (!locks.ok) {
+      const report = unattendedRefusalReport(inputs, plan, locks.reasons, { humanRequired: false, resume });
+      process.stderr.write(`nothing was dispatched; another run holds the worktree lock, so ${attemptDir} was not created — re-run once it has finished\n`);
+      return { exitCode: 1, stdout: `${JSON.stringify(report, null, 2)}\n` };
+    }
+    lockKeys = locks.keys;
+
+    const planReasons = unattendedPlanReasons(plan);
+    if (planReasons.length > 0) {
+      // human_required: these are not re-dispatchable. The fix is an edit to the
+      // issue body followed by a re-plan, which is what the field means (the
+      // schema says "None of the three is resolvable by re-dispatching"), and it
+      // is what stops a CI job from retrying the same plan forever.
+      const report = unattendedRefusalReport(inputs, plan, planReasons, { humanRequired: true, lockKeys, resume });
+      process.stderr.write(`nothing was dispatched; ${attemptDir} was not created, so the same command can be re-run once the issues are fixed and re-planned\n`);
+      return { exitCode: 1, stdout: `${JSON.stringify(report, null, 2)}\n` };
+    }
+  }
 
   // Blocking pre-flight, BEFORE the attempt directory exists (Issue #90).
   // Skipped when the plan alone already refuses the run: the open-questions gate
@@ -3660,7 +4299,7 @@ async function run(argv) {
   }
 
   if (preflight !== null && preflight.blocked) {
-    const report = preflightFailureReport(inputs, plan, preflight, preparation, resume);
+    const report = preflightFailureReport(inputs, plan, preflight, preparation, resume, lockKeys);
     // The advice names what actually blocked. "once the drift is fixed" is the
     // wrong instruction for a missing worker-method Skill, and the operator only
     // gets one line on stderr (Issue #128).
@@ -3673,7 +4312,7 @@ async function run(argv) {
 
   mkdirSync(attemptDir, { recursive: true });
 
-  const report = await runDispatch(inputs, plan, attemptDir, preflight, preparation, resume);
+  const report = await runDispatch(inputs, plan, attemptDir, preflight, preparation, resume, lockKeys);
   writeFileSync(join(attemptDir, DISPATCH_REPORT_FILE), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   writeFileSync(join(attemptDir, DISPATCH_SUMMARY_FILE), `${report.summary_markdown}\n`, 'utf8');
 
