@@ -1436,7 +1436,7 @@
         "guard",
         "bash"
       ],
-      "latest": "0.6.1",
+      "latest": "0.7.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -1584,6 +1584,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-monitor-v0.6.1/cmate-orchestrate-monitor-0.6.1.tar.gz",
             "sha256": "0b9fa0b28c6eef000ac58a642ed61d68014086b7afebada86975abce2e5dab7f",
             "size": 60235,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0. An installed skill was discovered from .claude/skills and matched in the slash palette; the installer writes .agents/skills and .claude/skills byte-identically.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0. It reads SKILL.md from .agents/skills (model self-report of the absolute path, not a mechanical trace). This version does not expose skills as slash commands; invoke by name or run the scripts.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; discovery unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. Readable as a procedure; discovery unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.15.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.7.0",
+          "changelog": "cmate-orchestrate-monitor 0.7.0 — worktree id の突合を直し、監視の沈黙死を可観測にする\n\nCommandMate #1728 への対応。2 つの実害を直す。\n\nworktree id の突合（references/evidence.md 1f）\n- 0.6.1 までの hooks-git.sh は、現行の採番規則で作られた id を 1 件も解決できなかった。\n  突合はブランチ名だけ（<repo>-<branch> / <branch>）で見ていたが、CommandMate が id を\n  採番する規則は deriveWorktreeId()（#1621）＝ checkout の directory 名である。\n  ディレクトリを Issue 番号で採番しているリポジトリでは全件外れる。\n- 解決に失敗すると commits / uncommitted は測定値ではなく恒久 0 になり、「未起動 idle を\n  COMPLETE と誤報しない」STARTED ガードが実質的に無効になる。監視が黙って役に立たなくなる型である。\n- checkout の directory 名で突合するようにし、解決できなかった worker は\n  monitor hooks ERROR: [<wid>] … として stderr に出す。ERROR が出ていたらその worker については\n  何も測れていない、と読める。\n\n監視自身の生存（SKILL.md）\n- 起動行 1 行だけを出した監視が約 25 分後に exit 144 で沈黙終了し、その間ワーカー 2 本が\n  無監視のまま走り続けた実害があった。ログを grep で絞る運用では、監視が死んだこと自体が\n  出力に現れない。\n- monitor: alive (poll=<n>, complete=<d>/<total>) を --heartbeat N ごとに stdout へ出す\n  （既定 10、0 で無効）。alive が途切れた所が最後に生きていたポーリングである。\n- 異常終了時は stderr に理由を出す:\n  monitor: ERROR caught SIG<name> (signal <n>) on poll round <r> — monitoring stops here\n  monitor: ERROR exiting on poll round <r> with <d>/<n> worker(s) complete (rc=<rc>)\n    — the rest are now UNMONITORED\n  正常終了（全 COMPLETE / --max-polls 到達）以外の全ての終了で出る。\n\nfixture は 294 件（run_tests.sh に +324 行）。worker にも tmux にも network にも触れない\n（launcher と tmux は shim に差し替える）ので、この suite は実 tmux を巻き込まない。",
+          "published_at": "2026-08-08T14:01:04Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-monitor-v0.7.0",
+            "commit": "379faf64e2aa3515b87098c8dad148933d7220d5"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-monitor-0.7.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-monitor-v0.7.0/cmate-orchestrate-monitor-0.7.0.tar.gz",
+            "sha256": "d7faa0f5d481df9a8f937e25902b8e4a984befe284fdfb0b183ad74afc7db86e",
+            "size": 70246,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
