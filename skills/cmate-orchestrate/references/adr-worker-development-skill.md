@@ -10,8 +10,9 @@ status: **proposed**（人間のレビュー待ち。この文書が承認され
 この文書は **裁定の記録**であり、契約の正本ではない。実装後の正本は、新 package の
 `SKILL.md` と `references/`（方法論と作業規律）、および
 [dispatch-contract.md](./dispatch-contract.md)（第1節の入力・第3.0節の pre-flight・第5節の停止）と
-[../SKILL.md](../SKILL.md)（第2節の条件付き依存・第3.2節の flag・第4節の limitation code・
-第5節の対処表）にある。ここに書いた形が実装で変わったなら、**正本を直したうえでこの文書に
+[../SKILL.md](../SKILL.md)（第2節の条件付き依存・第3.2節の flag）と
+[runner-operations.md](./runner-operations.md) 第5節・
+[codes-and-recovery.md](./codes-and-recovery.md)（第3節の limitation code・第4節の対処表）にある。ここに書いた形が実装で変わったなら、**正本を直したうえでこの文書に
 「なぜ変えたか」を追記する**（[release-notes.md](./release-notes.md) と同じ運用）。
 
 本文中の行番号は **main = `ced8f78` 時点**の実測値である。Issue #103 本文が引用している
