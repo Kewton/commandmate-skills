@@ -35,6 +35,8 @@ CommandMate の exit code へ移しただけで、report 上の表現（field �
 | `--git <path>` | 任意 | `git` | drift 確認に使う git |
 | `--gh <path>` | 任意 | `gh` | repo 到達性確認に使う gh |
 | `--auto-yes` | 任意 | off | worker prompt を自動応答する。既定 off（prompt で停止し human へ提示） |
+| `--unattended` | 任意 | **off** | **この invocation に人間が居ないことの宣言**（第3.0.3節）。mutation の権限は1つも足さず、**`--approve` を含意しない**。含意するのは締め付けだけ: `--contract-mode require` / pre-flight の scope 検査（all-or-nothing・`--out` 未消費）/ worktree 単位の排他 lock / `--wall-clock-budget` の明示必須 / `unattended_baseline` の記録。緩和フラグ（`--auto-yes` / `--allow-questions` / `--contract-mode off｜auto`）との併用は `invalid_input`（exit 3）で拒否する |
+| `--wall-clock-budget <sec>` | 任意（`--unattended` では**必須**）| なし（off） | run 全体の壁時計上限（第3.0.4節）。**残り budget は run が起動する子プロセスすべての timeout でもある**（profile baseline と acceptance コマンドは自前の timeout を持たない）。到達は `partial` / `stop_reason: timeout` であって成功ではない |
 | `--prepare-worktrees` | 任意 | **off** | pre-flight で未解決だった worktree を `cmate-worktree-setup` provider に作らせてから dispatch する（第3.0.1節）。既定 off＝従来どおり停止する |
 | `--worktree-setup <launcher>` | 任意（`--prepare-worktrees` 指定時は実質必須） | なし | 上記 provider のランチャー（`--cli` と同じ argv 規約・同じ guard。シェルは経由しない）。`--prepare-worktrees` 無しに渡すと `invalid_input` |
 | `--worker-method <skill-id>` | 任意 | **なし（off）** | worker が従うべき開発スキルの id（例 `cmate-worker-development`）。指定すると、dispatch 対象 worktree に**その skill が install されていることを実測**してから dispatch し、契約 goal と worker prompt の**両方**に `## Method` 節を1つ足す（第3.0.2節）。**指定しない run は、この flag が存在しなかった頃と byte 一致する。** id は `^[a-z0-9][a-z0-9-]{0,63}$`（path に展開されるので、それ以外は `invalid_input`） |
@@ -272,6 +274,14 @@ pass を得た worker に対して `--verify` を**二度と付けない**。付
 
 どのモードでも `summary_markdown` の冒頭に「どちらの裁定機構で判定したか」を書く。
 
+**`--unattended` は `require` を含意する**（第3.0.3節）。理由は「厳しいほうが良い」ではない ——
+フォールバック経路には `success.requireScopeClean` が**存在しない**（契約が無いのだから scope ゲート
+という概念自体が無い）ので、**scope.allow を必須にすることは契約経路を必須にすることと同義**であり、
+片方だけでは空文になる。`auto` の既定は「契約が無ければ弱い裁定に落ちて続行し、人間が summary 冒頭で
+それを読む」という劣化であり、無人ではその読み手が居ない。したがって `--unattended` と
+`--contract-mode off｜auto` の併用は黙って上書きせず `invalid_input` で拒否する（`require` を明示的に
+書き添えるのは矛盾ではないので受理する）。
+
 ### 2.8 ランチャー解決（Issue #37）
 
 `--cli` が受け取るのは実行ファイル名ではなく**ランチャー**である。解決順は 1つだけ:
@@ -374,6 +384,12 @@ pre-flight の blocking 判定は2種類あり、`stop_reason` が違う。
 |---|---|---|
 | drift（branch / HEAD / 権限 / worktree 解決） | `drift_<check>` / `worktree_unresolved` | `drift` |
 | 条件付き依存の Skill が呼べない（`--prepare-worktrees` / `--worker-method`） | `worktree_setup_unavailable` 等 / `worker_method_unavailable` | `dispatch_error` |
+| 無人運転の宣言と plan が食い違う（`--unattended`。第3.0.3節） | `unattended_locked` / `contract_scope_unknown` / `open_questions` | `dispatch_error` |
+
+**`--unattended` の3つは世界を probe する前**（`commandmate ls` の前）に判定する。lock は
+mutation の窓そのものを閉じるものなので pre-flight より前に取り、scope と open question は
+plan だけで決まるので世界を見る必要がない —— 答えが何も変えられない probe は副作用でしかない、
+という上の規律をそのまま適用したものである。
 
 **どちらも `stop_reason` の enum に値を足していない。** 後者は drift ではない
 （branch も base も権限も動いていない）が、`dispatch_error` が schema に既に持っている
@@ -483,6 +499,122 @@ worker が構造的に開けない file を「これを読め」と契約に書�
 **「worker が実際に方法論に従ったか」は測っていない。**「適用された」と「守られた」は
 別の事実であり、report もその区別を明記する。
 
+### 3.0.3 無人運転（`--unattended`。既定 off）
+
+`--unattended` は **「この invocation に人間は居ない」という入力の宣言**である。
+mutation の権限を与えるフラグではない（裁定の記録は
+[adr-unattended-mode.md](./adr-unattended-mode.md) 第2節「裁定 0」、実測は同 第14節）。
+段階 A で受け付けるのは **dispatch runner だけ**であり、merge / uat に渡すと
+`invalid_input` で落ちる（受理して無視すると、CI は自分が守られていると誤解する）。
+
+不変条件は4つで、**どれも「緩めない」側にしか働かない**。
+
+1. **ゲートを1つも無効化せず、blocking を limitation に格下げせず、status を1段も上げない。**
+   停止理由・status・exit の写像（第5節）は1文字も変わらない。
+2. **緩和フラグとの併用を拒否する。** `--auto-yes` / `--allow-questions` /
+   `--contract-mode off｜auto` との併用は `invalid_input`（exit 3）である。**黙って上書きしない**
+   —— 自己矛盾した2つの宣言のうち片方が黙って勝つと、report の読み手（無人運転では次の job）は
+   どちらが勝ったかを判定できない。
+3. **`--approve` を含意しない。** dispatch には外すべき承認フラグがそもそも無く、
+   merge / uat を無人で回す CI は `--unattended` と `--approve` の**両方**を書く。
+4. **runner は次の phase を始めない。** 無人運転の driver は CI の job 定義（または cron script）で
+   あって runner ではない。
+
+含意する締め付けは次の5つである。
+
+| 締め付け | 内容 |
+|---|---|
+| 契約経路の必須化 | `--contract-mode require` を含意する（第2.7節） |
+| pre-flight の scope 検査 | **plan の全 Wave の全 Issue**について、その Issue の実行契約が `scope.allow` を宣言できることを、**`--out` を作る前**に確かめる。1件でも空なら **1人も dispatch せず** `blocking_reasons` に `contract_scope_unknown` を Issue ごとに1件、`stop_reason: dispatch_error` / `status: failure`（exit 1）で停止する。判定は plan の `suspected_files` そのものではなく **契約が受理できるパターンが1つ以上残るか**（絶対 path・`..` 脱出・長すぎる pattern 等は契約の parser が拒否するので落とす）。同じ pre-flight で **未回答の planner question も同時に**報告する（`open_questions`。`--allow-questions` は拒否されるので、この停止を押し通す道は無い）。**この停止も `--out` を消費しない** |
+| 排他 lock | 下記 |
+| wall-clock budget | `--wall-clock-budget` の明示が必須（第3.0.4節） |
+| 取り消しの起点 | dispatch する worktree ごとに、**最初の send の前**の HEAD を `limitations` の `unattended_baseline`（Issue ごとに1件）に **branch 名と短縮 SHA**で記録する。**絶対 path は書かない** —— worktree が既に片付いていると `git reset --hard` は exit 128 で使えず、`git branch -f <branch> <sha>` だけが残るからで、それに要るのは path ではなく branch 名である（[#115](https://github.com/Kewton/commandmate-skills/issues/115) の実測。ADR 第14.4節）。**baseline が担保するのは worktree branch の1段だけ**で、効かない4条件は [../SKILL.md](../SKILL.md) 第5節にある |
+
+宣言そのものは `limitations` の **`unattended_mode`（run 全体で1件）** に載る。停止した run にも
+残す（何を前提にした run だったかが report 単体で読めるように）。**`dispatch_schema_version` は
+1 のまま、field も enum 値も足していない。**
+
+#### 排他（worktree 単位の lock）
+
+`--out` は mutex にならない。[#115](https://github.com/Kewton/commandmate-skills/issues/115) は、
+700 ms ずらして起動した2本の run が**どちらも pre-flight を通り、どちらも
+`--prepare-worktrees` の provider を呼び、同じ worktree に交互に `send` する**状態を実測した
+（ADR 第14.1節）。`out_exists` が効くのは「先行 run が既に `--out` を作り終えている」場合だけで、
+**pre-flight 実行中・`--out` が run ごとに変わる cron・`--resume`** の3経路では成立しない。
+
+したがって **runner が lock を持つ**（ADR 第14.1節の候補 A）。
+
+- **粒度は worktree 単位。** 害は「同じ worktree に2人の supervisor」であって「同じ plan が2回」
+  ではない（別の plan が同じ worktree を名指すことは起こりうる）。key は
+  `(repository, branch)` から導く —— CommandMate が worktree id を導くのと同じ組で、
+  `commandmate ls` を叩く**前**（＝ pre-flight の前）に決まる唯一の識別子である。
+- **取るのは pre-flight の前**、対象は**この attempt が dispatch しうる Issue 全部**
+  （`--resume` では引き継がない Issue だけ）。**all-or-nothing** で、1つでも取れなければ
+  取った分を返して停止する。
+- **原子性は `mkdirSync`（`recursive` 無し）の EEXIST に依る。** read してから write する窓
+  （TOCTOU）を作らない。所有者情報（host / pid / plan run_id）は lock を取った**あと**に書く。
+- **`--out` を lock に流用しない。** [#90](https://github.com/Kewton/commandmate-skills/issues/90) が
+  「pre-flight で止まった run は `--out` を消費しない」と決めており、流用はその決定を壊す。
+- 置き場所は `$CMATE_ORCHESTRATE_LOCK_DIR`、未設定なら `$TMPDIR/cmate-orchestrate-locks/<key>`。
+  **run ごとに違う値を指すと排他は効かない**（job 定義で per-job の一時ディレクトリを指さないこと）。
+- 拒否は `blocking_reasons` の **`unattended_locked`**、`stop_reason: dispatch_error` /
+  `status: failure`（exit 1）、**`--out` は未作成**。**`human_required` は false** である ——
+  人間の判断を要する停止ではなく、先行 run の終了を待てば同じコマンドで解ける停止だからで、
+  CI が読むべき signal もそれである。
+
+**stale lock（`kill -9` された run）の回収規則**（4つ。これを決めないと、回収できない lock は
+lock が無いより悪い）:
+
+| lock の所有者情報 | 判定 |
+|---|---|
+| **この host の生きた pid** | 保持中。**拒否する** |
+| **この host の死んだ pid** | **stale。回収して取り直す**（`kill -9` は release を走らせないので、この経路が既定の回収路である） |
+| **別 host** | **拒否する。** 別の機械の pid の生死をこのプロセスは判定できない |
+| **読めない / 壊れている** | 猶予（60 秒）を過ぎていれば回収、過ぎていなければ拒否。`mkdirSync` と所有者情報の書き込みの間はマイクロ秒なので、**新しい**読めない lock は「今まさに起動中の run」である |
+
+回収の取り直しは**1回だけ**試みる（負けたら拒否する。ここでループすると、避けたはずの
+TOCTOU を自分で作ることになる）。**拒否は常に安全側の誤りである** —— 代償は再実行1回だが、
+生きた lock を誤って回収する代償は「1つの worktree に2人の supervisor」そのものである。
+
+**塞げていない穴を明示する:** lock を取るのは `--unattended` の run だけである。
+`--unattended` を渡さない run は**この機能が存在しなかった頃と 1 bit も変わらない**（第7節の
+互換規律）ため、**人間がローカルで叩いた素の run と cron の衝突は runner 側では防げない**。
+その組み合わせを閉じたい運用は job 定義側（`flock`・GitHub Actions の `concurrency:`）を併せて使う。
+サーバ側（CommandMate が live な task を持つ worktree への2本目の `send` を拒否する）は
+上流の変更であり、本リポジトリでは決められない。
+
+### 3.0.4 wall-clock budget（`--wall-clock-budget`。既定 off）
+
+**回数は既に有界だが、時計は有界でない。** `--max-turns` は worker 1人あたりのターン数を、
+`--max-attempts`（uat）は修正回数を縛るが、[#115](https://github.com/Kewton/commandmate-skills/issues/115)
+は**時計の上限が構造的に存在しない経路**を実測した（ADR 第14.2節）: profile baseline と
+acceptance コマンドは `execFileSync` に `timeout` を渡さずに実行されるので、
+`baseline: ["sleep 6"]` の profile は `--wait-timeout 1 --max-turns 1` でも 12.9 秒かかる。
+**`--wait-timeout` はこの時間に一切効かない。**
+
+したがって budget は**2箇所で同じ1つの規則として**効く。
+
+1. **残り budget は、この run が起動する子プロセスすべての timeout である。**
+   呼び出し側が自分で `timeout` を決めている子はそのままにする（この規則が縛るのは
+   「上限を持たない子」であって、意図して選ばれた上限を伸ばすものではない）。
+2. **判定点は Wave の開始前と、各 worker のターン境界（`wait` の前後）**である。
+   `wait` の後にも見るのは、budget 自身の timeout で殺された `wait` を
+   「worker の失敗」と読み替えないためである（時計を止めたのは runner であって worker ではない）。
+
+到達したときの扱い:
+
+| 項目 | 値 |
+|---|---|
+| status | **`partial`（exit 7）**。第5節の写像を変えない。「途中停止。成功ではない」がそのまま当てはまる |
+| stop_reason | **`timeout`（既存 enum の再利用）。新しい値を足さない** —— 新値は `dispatch_schema_version` を上げる（第7節） |
+| 名指し | `blocking_reasons` の **`wall_clock_budget_exhausted`** を1件 |
+| 打ち切られた worker | `worker_state: timeout`、note に「budget を使い切った」旨。**mutation の記録は新機構を要さない** —— `unattended_baseline`（開始時 SHA）と `waves[].workers[].state` が「どこまで進んだか」を既に持っている |
+
+`--unattended` で明示を必須にしているのは、**「何分まで機械に走らせてよいか」を誰かが決めた、
+という事実**を残すためである。人間が居る運転では既定を黙認した人がその決定者になるが、
+無人ではその瞬間が無く、**job 定義を書く時点でしか決められない**（uat の `--max-attempts` を
+明示必須にしたのと同じ型。ADR 第5節）。
+
 ### 3.1 Wave ループ
 
 各 Wave について、plan の順に次を行う。
@@ -579,7 +711,7 @@ worktree の場合である。この停止は既に dispatch した Wave があ�
 |---|---|---|
 | `success` | 全 Wave dispatch、全 worker completed、全 verification pass、prompt なし | 0 |
 | `partial` | 途中停止（worker 失敗・timeout・verification 失敗・prompt・drift） | 7 |
-| `failure` | 1件も dispatch できない（plan 不正・最初の Wave 前 drift（worktree 未解決を含む）・CLI 不在・`--contract-mode require` で契約非対応・`--prepare-worktrees` の準備段が worktree を用意できなかった） | 1 |
+| `failure` | 1件も dispatch できない（plan 不正・最初の Wave 前 drift（worktree 未解決を含む）・CLI 不在・`--contract-mode require` で契約非対応・`--prepare-worktrees` の準備段が worktree を用意できなかった・`--unattended` の pre-flight 検査（scope 未宣言 / 未回答 question / 排他 lock）） | 1 |
 
 失敗時も stdout に `status: failure` の report を出す。実行結果を推測で埋めない。
 pre-flight（第3.0節）で停止した failure は artifact を書かないので `out_dir` は `null` である
@@ -599,6 +731,9 @@ pre-flight（第3.0節）で停止した failure は artifact を書かないの
 | `dispatch_error` | `resume_invalid` | `--resume` 先の report が `dispatch-report.v1` として読めない（JSON 破損・schema version 不一致・必要 field 欠落）。第8節 |
 | `dispatch_error` | `not_dispatched` | runner が起動を拒否した（scope 未宣言・unsafe worktree target 等） |
 | `dispatch_error` | `wave_not_advanced` | 上のどれでもない理由で Wave が advance しなかった（防御的な既定） |
+| `dispatch_error` | `open_questions` / `contract_scope_unknown` | **`--unattended` のとき**、pre-flight で plan 全体を検査して停止した（第3.0.3節）。`--out` は未作成、`human_required: true`（Issue 本文の編集と re-plan でしか解けない）。`--unattended` 無しの run では前者は従来どおり `--out` を作って停止し、後者は **limitation** のまま wave の中で当該 Issue だけを拒否する |
+| `dispatch_error` | `unattended_locked` | **`--unattended` のとき**、同じ worktree を別の dispatch run が動かしている（第3.0.3節）。`--out` は未作成、**`human_required: false`**（先行 run の終了を待てば同じコマンドで解ける） |
+| `timeout` | `wall_clock_budget_exhausted` | `--wall-clock-budget` に到達して打ち切った（第3.0.4節）。status は `partial`。**`stop_reason` の enum に値を足していない** |
 | `drift` | `worktree_unresolved` | 対象 Issue の worktree が解決できない。**未解決 Issue ごとに1件**出る（第3.1節） |
 | `drift` | `drift_<check>` | それ以外の blocking drift（`drift_cli_available`・`drift_repo_access`・`drift_base_resolvable`・`drift_branch_matches`） |
 | `human_required` | `human_input_required` | worker が prompt を出した（自動応答していない） |

@@ -1,0 +1,61 @@
+{
+  "description": "Issue #122 停止系（裁定不能 / exit 99）: 検証 run が error/cancelled に終わり、どのゲートもこの作業を判定していない。無人でも pass に丸めず、20（判定して不合格）として worker への再指示ループにも流さず、`verification_not_judged` で `human_required: true` のまま停止する。**再 dispatch では解けない停止**であり、緩和フラグを1つも受け付けない unattended でも、この経路の扱いは通常 run と1文字も変わらない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3",
+    "--unattended",
+    "--wall-clock-budget",
+    "600"
+  ],
+  "unattended_parity": {
+    "dispatch_args": [
+      "--expect-branch",
+      "feature/integration",
+      "--max-turns",
+      "3"
+    ]
+  },
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "dispatch_error",
+    "human_required": true,
+    "waves_count": 1,
+    "advanced": [false],
+    "no_respond": true,
+    "sent": [201],
+    "never_sent": [200],
+    "worker_states": {
+      "201": "completed"
+    },
+    "verification_outcomes": {
+      "201": "not_run"
+    },
+    "blocking_codes": ["verification_not_judged"],
+    "limitation_codes": ["unattended_mode", "unattended_baseline"],
+    "limitation_code_counts": {
+      "unattended_mode": 1,
+      "unattended_baseline": 1
+    },
+    "wave0_all_workers_completed": true,
+    "wave0_all_verifications_passed": false,
+    "verify_calls": 0,
+    "wait_verify_calls_min": 1
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "description": "Issue #122 停止系（open question）: #220 が未回答の planner question を持つ plan を `--unattended` で渡す。1人も dispatch せず停止するのは従来どおりだが、**pre-flight で止まるので `--out` を作らない**（`out_dir: null`）—— 原因を Issue 本文に書いて re-plan したあと、同じコマンドをそのまま再実行できる。`--allow-questions` は unattended では `invalid_input` なので、この停止を押し通す道は無い（質問を引き受ける主体が居ないときに立てられる旗ではない）。summary は質問の本文をそのまま出し、next action からも `--allow-questions` の選択肢を落とす。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-open-questions.json",
+    "orchestrate_args": [
+      "220",
+      "221",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--unattended",
+    "--wall-clock-budget",
+    "600"
+  ],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": true,
+    "waves_count": 0,
+    "never_sent": [220, 221],
+    "no_respond": true,
+    "no_contract_calls": true,
+    "out_dir_created": false,
+    "completion_check_passed": false,
+    "blocking_codes": ["open_questions"],
+    "absent_blocking_codes": ["contract_scope_unknown"],
+    "blocking_details_include": [
+      "#220: Acceptance criteria are unclear; add 1-3 concrete completion checks.",
+      "--out was not created",
+      "--allow-questions is refused under --unattended"
+    ],
+    "limitation_codes": ["unattended_mode"],
+    "limitation_code_counts": {
+      "unattended_mode": 1,
+      "unattended_baseline": 0
+    },
+    "summary_includes": [
+      "## open question",
+      "- #220: Acceptance criteria are unclear; add 1-3 concrete completion checks.",
+      "worker を 1 人も dispatch せずに停止した",
+      "## 無人運転（unattended）",
+      "取り消しの起点: なし"
+    ],
+    "summary_excludes": ["`--allow-questions` を明示して再実行する"]
+  }
+}

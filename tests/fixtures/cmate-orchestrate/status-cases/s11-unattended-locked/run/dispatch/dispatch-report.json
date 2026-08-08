@@ -1,0 +1,69 @@
+{
+  "dispatch_schema_version": 1,
+  "skill_id": "cmate-orchestrate",
+  "skill_version": "0.13.0",
+  "status": "failure",
+  "stop_reason": "dispatch_error",
+  "human_required": false,
+  "plan_run_id": "plan",
+  "out_dir": null,
+  "auto_yes": false,
+  "max_parallel": 3,
+  "profile": {
+    "id": "node-fake",
+    "repository": "Kewton/CommandMate",
+    "base": "origin/develop",
+    "verified": true
+  },
+  "drift_checks": [],
+  "waves": [],
+  "blocking_reasons": [
+    {
+      "code": "unattended_locked",
+      "detail": "#201: the worktree lock \"commandmate-feature-issue-201-feat-add-base-configuration-loader\" is held — its owner (pid 4242, plan plan) is still running. Another dispatch run is driving this worktree"
+    }
+  ],
+  "limitations": [
+    {
+      "code": "unattended_mode",
+      "detail": "--unattended（段階 A（dispatch のみ））: この invocation に人間は居ない、という入力の宣言である。締め付けだけを含意し、権限は1つも足していない — **`--approve` は含意しない**、prompt には答えない、ゲートを無効化せず、blocking を limitation に格下げせず、status を1段も上げない。含意した締め付け: --contract-mode require / pre-flight で全 Issue の scope 宣言を all-or-nothing 検査（--out を作る前）/ --wall-clock-budget 3600s / worktree 単位の排他 lock 2 件。拒否する緩和フラグ: --auto-yes / --allow-questions / --contract-mode off|auto（invalid_input, exit 3）。"
+    }
+  ],
+  "redactions": [],
+  "completion_check": {
+    "passed": false,
+    "checks": [
+      {
+        "id": "plan_approved",
+        "passed": true,
+        "detail": "an approved plan was loaded and validated"
+      },
+      {
+        "id": "drift_reconfirmed",
+        "passed": false,
+        "detail": "no drift check ran"
+      },
+      {
+        "id": "parallelism_bounded",
+        "passed": true,
+        "detail": "no wave dispatched more than max_parallel workers"
+      },
+      {
+        "id": "barrier_enforced",
+        "passed": true,
+        "detail": "the next wave dispatched only after completion AND verification"
+      },
+      {
+        "id": "no_auto_prompt_response",
+        "passed": true,
+        "detail": "no prompt was answered without explicit --auto-yes"
+      },
+      {
+        "id": "verification_recorded",
+        "passed": true,
+        "detail": "every completed worker carries the verification verdict that judged it"
+      }
+    ]
+  },
+  "summary_markdown": "## 対象と結論\nplan plan を Kewton/CommandMate に dispatch: failure（未実行, stop=dispatch_error）。\n裁定: 1件も dispatch していないため、裁定は行っていない。\n"
+}

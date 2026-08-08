@@ -1,0 +1,74 @@
+{
+  "description": "Issue #122 完走系（二点測定）: 全 gate が pass する世界で `--unattended` を渡す。フラグ無しの同じ run と **status / stop_reason / human_required / waves[] / drift_checks / blocking_reasons / completion_check / redactions がすべて一致**し、差分は limitations の `unattended_mode`（run 全体で1件）と `unattended_baseline`（dispatch した Issue ごとに1件）**だけ**であることを assert する。これが「unattended は緩めない」の機械的証明である —— runner が自分で「緩めていない」と主張する boolean は、緩めた実装でも true を書ける。`--unattended` は `--contract-mode require` を含意するので裁定は契約経路のまま、Auto-Yes は off のまま、wave barrier も verification gate もそのまま働く。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--unattended",
+    "--wall-clock-budget",
+    "600"
+  ],
+  "unattended_parity": {
+    "dispatch_args": [
+      "--expect-branch",
+      "feature/integration"
+    ]
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "no_respond": true,
+    "sent": [201, 200],
+    "send_counts": {
+      "201": 1,
+      "200": 1
+    },
+    "worker_states": {
+      "201": "completed",
+      "200": "completed"
+    },
+    "verification_outcomes": {
+      "201": "pass",
+      "200": "pass"
+    },
+    "task_ids": {
+      "201": "task-issue-201",
+      "200": "task-issue-200"
+    },
+    "out_dir_created": true,
+    "completion_check_passed": true,
+    "limitation_codes": ["unattended_mode", "unattended_baseline"],
+    "limitation_code_counts": {
+      "unattended_mode": 1,
+      "unattended_baseline": 2
+    },
+    "limitation_details_include": [
+      "--approve` は含意しない",
+      "--contract-mode require",
+      "branch feature/issue-201-",
+      "branch feature/issue-200-"
+    ],
+    "absent_limitation_codes": ["contract_unsupported", "contract_disabled", "auto_yes_used"],
+    "dispatch_schema_version": 1,
+    "summary_includes": ["## 無人運転（unattended）", "取り消しの起点: 2 件"],
+    "verify_calls": 0,
+    "wait_verify_calls_min": 2
+  }
+}

@@ -542,6 +542,19 @@ function fail(message, code = 1) {
   process.exit(code);
 }
 
+// A scenario's `delay_ms` makes a subcommand take real time — the one thing a
+// local fake otherwise cannot model. `commandmate wait` blocks on a worker turn
+// and the profile baseline runs a repository's whole test suite; both collapse
+// to zero here, so a wall-clock budget (#122) would never be reached and its
+// fixture would prove nothing. Written as `{"delay_ms": {"wait": 400}}`, keyed by
+// subcommand. The sleep is synchronous on purpose: the runner measures the child
+// process's elapsed time, and the child is this process.
+function applyDelay(spec) {
+  const ms = Number((spec.delay_ms ?? {})[sub] ?? 0);
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function main() {
   logInvocation();
   enforceContract();
@@ -559,6 +572,9 @@ function main() {
     process.exit(0);
   }
   refuseGatedFlags(spec);
+  // After the --help gate, so the version probe stays instant and only the calls
+  // a real run spends its clock on are slowed.
+  applyDelay(spec);
 
   // --- commandmate availability probe -------------------------------------
   if (sub === '--version') {

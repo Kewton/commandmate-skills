@@ -129,6 +129,15 @@ plan / merge はどの Skill にも依存しない。dispatch が `cmate-worktre
 **plan → （人間の承認）→ dispatch → merge / uat** の順に、別々の invocation で呼ぶ。
 1つの runner が次の phase を勝手に始めることはない。
 
+**承認つき運転が既定である。** 人間が plan を読んでから dispatch を叩き、mutation を許すのは
+`--approve` を書いた invocation だけ、という運転がこの Skill の標準形である。
+`--unattended`（第3.2節）はその**代替ではなく、同じ規律を人間の居ない環境で成り立たせるための宣言**で
+あって、**外すのは「人間の待ち」だけ・ゲートは1つも外さない**。承認つき運転が守っていたのは
+「人間が読む」ことそのものではなく **人間が読むまで壊れた状態が下流へ流れないこと**であり、
+無人でそれを維持する方法は承認を機械に代行させることではなく、
+**人間に提示して待つ経路を、その場で止まる経路に変換すること**である。
+**無人運転の driver は CI の job 定義（または cron script）であって runner ではない。**
+
 ### 3.1 plan（dry-run。既定の入り口）
 
 ```
@@ -173,6 +182,8 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 | `--cli` / `--git` / `--gh <path>` | `commandmate`/`git`/`gh` | 実行する CLI |
 | `--auto-yes` | **off** | worker prompt を自動応答する。既定は停止して human へ提示 |
 | `--allow-questions` | **off** | 未回答 question を持つ Issue を含む plan を dispatch する |
+| `--unattended` | **off** | **人間が居ないことの宣言。締め付けだけを含意し、権限は1つも足さない**（後述）。`--approve` を含意しない。緩和フラグとの併用は `invalid_input` |
+| `--wall-clock-budget <sec>` | **off** | run 全体の壁時計上限。到達で `partial` / `stop_reason: timeout`。`--unattended` では**必須** |
 | `--prepare-worktrees` | **off** | pre-flight で未解決だった worktree を `cmate-worktree-setup` に作らせてから続行する。既定 off＝従来どおり停止 |
 | `--worktree-setup <launcher>` | — | 上記 provider の呼び出し口（`--cli` と同じ argv 規約）。`--prepare-worktrees` 無しに渡すと `invalid_input` |
 | `--worker-method <skill-id>` | **off** | worker が従うべき開発スキル（例 `cmate-worker-development`）を名指しする。**install を実測してから** dispatch し、無ければ停止する。契約 goal と worker prompt の**両方**に `## Method` 節が入る。**渡さない run は 1 bit も変わらない** |
@@ -298,6 +309,41 @@ dispatch 側の規約は [dispatch-contract.md](./references/dispatch-contract.m
 `--contract-mode require` なら停止する。**どちらの裁定機構で判定したかは常に report と summary に
 明示される**（黙って劣化しない）。
 
+**無人運転（`--unattended`。既定 off）** — CI / cron から人間の居ない環境で dispatch を回すための
+**入力の宣言**である。**mutation の権限を与えるフラグではない。**
+
+- **含意するのは締め付けだけである。** ゲートを1つも無効化せず、blocking を limitation に格下げせず、
+  status を1段も上げない。停止理由・status・exit の写像（第4節）は1文字も変わらない。
+  全 gate が pass する世界では、**フラグ無しの run と同じ `status` / `stop_reason` / `waves[]` になり、
+  差分は下の2つの limitation だけ**である（fixture で機械的に固定してある）。
+- **`--approve` を含意しない。** merge / uat を無人で回す CI は**両方**書く。
+  「無人だから安全側に倒したい」つもりで付けたフラグに mutation 権限が付いてくることは無い。
+- **緩和フラグとの併用は `invalid_input`（exit 3）で拒否する。** `--auto-yes`（prompt 停止が
+  構造的に到達不能になる）・`--allow-questions`（引き受ける主体が居ないときに立てられる旗ではない）・
+  `--contract-mode off｜auto`。**黙って上書きしない** —— どちらの宣言が勝ったかを、report の読み手
+  （無人運転では次の job）が判定できなくなる。
+- 含意する締め付けは5つ: **①`--contract-mode require`**（フォールバック経路には scope ゲートが
+  存在しないので、scope 必須化と契約必須化は同義である）／**②pre-flight で plan 全 Issue の scope 宣言を
+  all-or-nothing 検査**（1件でも欠ければ **1人も dispatch せず・`--out` も作らずに**停止。未回答 question も
+  同じ pre-flight で報告する）／**③worktree 単位の排他 lock**（2本目の run を拒否する。`--out` は
+  mutex にならない）／**④`--wall-clock-budget` の明示必須**（回数は有界でも時計は有界でない）／
+  **⑤`unattended_baseline` の記録**（各 worktree の開始時 HEAD を branch 名と短縮 SHA で残す）。
+- **runner は次の phase を始めない。** 無人運転の driver は **CI の job 定義（cron script）**であって
+  runner ではない。plan → dispatch → merge → uat を1コマンドで回す5つ目の runner は作らない。
+- **job 定義側で置くべき環境変数が2つある。** `GH_TOKEN`（または `GH_ENTERPRISE_TOKEN`）と
+  **`GIT_TERMINAL_PROMPT=0`**。実測（[#115](https://github.com/Kewton/commandmate-skills/issues/115)）に
+  よれば `gh` は TTY が無いことを自分で判定して待たずに落ちるので停止を足す必要は無いが、
+  **`git push` の資格情報プロンプトだけは別**で、制御端末を持つ起動元（tmux ペインから起動した cron 等）
+  では「止まる」ではなく**無言で待つ**に化ける。runner はこれを検査しない（別プロセスの環境を
+  runner は保証できない）。
+- 証跡は `dispatch_schema_version` を上げずに `limitations[]` で運ぶ: `unattended_mode`（run 全体で1件。
+  停止した run にも残る）と `unattended_baseline`（Issue ごとに1件）。
+
+規約の正本は [dispatch-contract.md](./references/dispatch-contract.md) 第3.0.3節・第3.0.4節、
+裁定の記録と実測は [adr-unattended-mode.md](./references/adr-unattended-mode.md)（特に第2節の裁定 0、
+実測の第14節、実装差分の第15節）。**段階 A は dispatch のみ**で、merge / uat に `--unattended` を
+渡すと `invalid_input` で落ちる（受理して無視すると、CI は自分が守られていると誤解する）。
+
 **監視の一次はこの `wait` ループである**（[cmate-orchestrate-monitor](../cmate-orchestrate-monitor/)
 との境界）。契約付き dispatch の裁定と nudge はこの runner が行う: ブロッキングな
 `wait --on-prompt agent --verify` の **exit code 分岐**（0 / 10 / 20 / 21 / 99 / 124）で判定し、
@@ -307,6 +353,17 @@ dispatch 側の規約は [dispatch-contract.md](./references/dispatch-contract.m
 プロンプト、契約なし委任や他所から投げた worker、`wait` がブロックしている間の可観測性——の
 回収に使う。**統合も廃止もしない。** 併用するなら monitor 側に `--no-auto-approve` を付ける
 （prompt に答えてよいかを決めるのは契約の autoYes ポリシーであって監視ループではない）。
+
+**`--unattended` と monitor を併用するなら、monitor 側の `--no-auto-approve` は推奨ではなく要件である。**
+[#115](https://github.com/Kewton/commandmate-skills/issues/115) が実測した理由による: 契約の
+`autoYes: mode: off` は**サーバ自身の**自動応答を確かに止めるが、monitor の Enter は `tmux send-keys` で
+ペインへ直接届くのでその方針の外側にある。しかも monitor がその方針を読んで手を止められるのは
+`capture --json` に `autoYes.lastSuppression` が在るときだけで、それが書かれるのは**サーバ側 Auto-Yes が
+有効なとき** —— すなわち **unattended が禁じているまさにその状態のとき**だけである。
+unattended dispatch が実際に作る payload（`autoYes.enabled: false`）に対する monitor の判定は
+**`approve`**（＝ `rm -rf` の確認プロンプトにも Enter を送る）になることが実測されている。
+**「サーバ側が最後の砦になる」という緩和はできない。** dispatch runner はこれを検出しない
+（別プロセス・別 Skill・別 install であり、検出できないものを検出したふりをしない）。
 
 ### 3.3 merge（PR 作成 / guarded merge）
 
@@ -565,6 +622,8 @@ limitation は個々の report の語彙で、status runner はそれらを phas
 | `worktree_sync_rescanned` | dispatch | 準備段のため `commandmate sync` を2回実行した（解決時の1回＋作成後の強制1回） |
 | `worker_method_declared` | dispatch | `--worker-method <id>` 付きの run である。**run 全体で1件。** 停止した run にも残る（何を前提にした run だったかが読めるように） |
 | `worker_method_applied` | dispatch | その Issue の worktree に skill が在り、task text に `## Method` 節を書いた。**Issue ごとに1件。** 「適用された」であって「守られた」ではない |
+| `unattended_mode` | dispatch | `--unattended` 付きの run である。**run 全体で1件。** 停止した run にも残る。含意した締め付け（contract require / pre-flight の scope 検査 / wall-clock budget / worktree lock）と拒否する緩和フラグを detail に記録する |
+| `unattended_baseline` | dispatch | その Issue の worktree が dispatch 開始時どこに居たか（**branch 名と短縮 SHA**。絶対 path は書かない）。**Issue ごとに1件。** 取り消しの起点であり、**担保するのは worktree branch の1段だけ**である（第5節） |
 | `verification_unrecorded` | dispatch | completed した worker に裁定が1つも記録されなかった（runner 側の欠陥。`verification_recorded` completion check も落ちる） |
 | `verification_gates_unrecorded` | dispatch | verification は pass だが `GATE` 行を読めず、pass の根拠となった gate を report が名指しできない |
 | `drift_<check>` | dispatch | 非 blocking な drift（`integration_clean` / `worktrees_present`）を記録して続行した |
@@ -619,13 +678,44 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | dispatch `resume_plan_mismatch`（`stop_reason: dispatch_error`） | `--resume` 先の report が**別 plan**のものだった（`run_id` / repository / base 不一致） | その plan 自身の dispatch ディレクトリを `--resume` に渡す。新規に走らせるなら `--out` で始める。**何も dispatch していないので、直して同じコマンドを再実行してよい** |
 | dispatch `resume_invalid`（同上） | `--resume` 先の report が `dispatch-report.v1` として読めない（schema version 違い / JSON 破損） | detail が「何がどう合わないか」を名指ししている。報告どおりの report を指すか、`--out` で新規 run にする。**壊れた report を半分だけ信じて引き継がない** |
 | dispatch `resume_no_work`（`status: success`） | 再実行対象が1件も無い（全 Issue が completed かつ pass） | 停止ではない。その attempt の report をそのまま merge / uat に渡す |
-| dispatch `contract_unsupported` + `require` | CLI が実行契約に非対応 | CommandMate を 0.17.0 以上に上げるか、弱い裁定を承知のうえで `auto` に落とす |
+| dispatch `contract_unsupported` + `require` | CLI が実行契約に非対応 | CommandMate を 0.17.0 以上に上げるか、弱い裁定を承知のうえで `auto` に落とす。**`--unattended` の run では `auto` は選べない**（`require` を含意する。落とすなら `--unattended` を外して人間が読む運転に戻す） |
+| dispatch `contract_scope_unknown`（`stop_reason: dispatch_error`。**`--unattended` のとき**） | 対象 file を1件も宣言していない Issue が plan に在る。**1人も dispatch していない**（`--out` も未作成） | **Issue 本文に対象ファイルを書いて re-plan する。** フラグ無しの run では同じ Issue が wave の中で1人ずつ拒否される（そのときは他 Issue の worker が既に走っている）。無人ではその始末をする読み手が居ないので、pre-flight で全 Issue を検査している |
+| dispatch `unattended_locked`（同上） | 同じ worktree を**別の dispatch run が動かしている**（`--out` も未作成・`human_required: false`） | **先行 run の終了を待って、同じコマンドをそのまま再実行する。** lock が残り続けるなら所有 run の pid が生きているかを確認する（`kill -9` された run の lock は次の run が自動で回収する）。lock は `$CMATE_ORCHESTRATE_LOCK_DIR`（既定 `$TMPDIR/cmate-orchestrate-locks/`）に置かれる |
+| dispatch `wall_clock_budget_exhausted`（`stop_reason: timeout` / `partial`） | `--wall-clock-budget` に到達して打ち切った。**成功ではない** | 何に時間を使ったかを確認する（**profile baseline と acceptance コマンドは自前の timeout を持たない**ので、まずそこを疑う）。原因を潰すか budget を実測に合わせてから **`--resume` で再開する**。**打ち切りを success に丸めない** |
 | merge `ci_failed` / `ci_pending` | CI が green でない | CI を直す。**green 無しに merge しない** |
 | merge `pr_missing` / `merge_failed` | PR が無い / conflict | PR の状態を確認し、conflict は手で解消する |
 | merge `issue_autoclose_not_default_branch` | base がデフォルトブランチでない | merge 後に **Issue を手動でクローズする** |
 | uat `acceptance_conditional` | 受入判定が `conditional_go` | **条件を読んで人間が判断する。** 自動修正の対象ではない |
 | uat `blocked` / `max_attempts_reached` | 上限まで直しても不合格 | `unresolved_issues` と `next_actions` を読む。**success に丸めない** |
 | uat `acceptance_not_run` | 意味ゲートを掛けずに baseline だけで裁定した | cmate-acceptance-test を入れて result を用意し、必要なら `--require-acceptance` で必須にする |
+
+### 無人 run を取り消す（`unattended_baseline` の読み方）
+
+`--unattended` の run は、dispatch した worktree ごとに開始時の HEAD を
+`limitations` の `unattended_baseline` に **branch 名と短縮 SHA** で残す。取り消しはそれを起点に、
+**上流から順に**行う。
+
+1. `git reset --hard <sha>`（worktree が残っている場合）。
+2. worktree が既に片付いていれば **`git branch -f <branch> <sha>`**。
+   `git reset` は exit 128 で使えない。**baseline を branch 名で書いてあるのはこのためで、
+   絶対 path では手が届かない。**
+
+**この起点が担保するのは worktree branch の1段だけである。** 次の4つでは足りない
+（[#115](https://github.com/Kewton/commandmate-skills/issues/115) の実測）:
+
+1. **untracked file は `git reset --hard` で戻らない**（`.commandmate/tasks/*.yaml` を含む）。
+   完全に戻すには `git clean -fdx` が要るが、それは worker の成果物も消す ——
+   **無人で機械にやらせる操作ではない。**
+2. **既に merge / push されていたら戻らない。** 下流から先に取り消す（PR を close し、
+   remote branch を消し、必要なら revert PR を立てる）。**force push で歴史を消さない。**
+3. **worktree が片付いていると `git reset` は使えない**（上の 2）。
+4. **branch も消えて `git gc --prune=now` が走ると object ごと消える。** baseline が base branch から
+   到達可能なら生き残るので、危ないのは **baseline が base から到達できないとき** ——
+   `--prepare-worktrees` が既存 worktree を再利用した場合や、前の run の commit の上に
+   baseline が乗っている場合である。
+
+**取り消せるのはリポジトリの状態であって、送られた通知ではない。** push は対象リポジトリの CI を
+起動し（実行時間・課金・通知）、PR 作成は reviewer に通知を出す。
 
 `worktree_setup_unavailable` / `worktree_setup_failed` / `worktree_profile_mismatch` と
 `resume_attempt` / `resume_no_work` / `resume_invalid` / `resume_plan_mismatch` は、

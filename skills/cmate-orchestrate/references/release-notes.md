@@ -558,6 +558,25 @@ runner に方法論の要約を埋め込む案は、正本が2つになる・方
 
 第14.7節に**測らなかったこと**を明記してある。
 
+### #122 — 無人運転の停止は在ったが、二重起動と時計の穴が開いたままだった
+
+[#115](https://github.com/Kewton/commandmate-skills/issues/115) の実測（ADR 第14節）が2つの穴を
+確定させた。**`out_exists` は mutex ではない** —— pre-flight 実行中・`--out` が run ごとに変わる cron・
+`--resume` の3経路では成立せず、700 ms ずらして起動した2本の run が同じ worktree に交互に `send` した。
+そして **時計の上限が構造的に存在しない経路が在る** —— profile baseline と acceptance コマンドは
+`timeout` 無しで実行されるので、`--wait-timeout` はその時間に一切効かない。
+
+→ 段階 A（dispatch のみ）を実装した。`--unattended` は**締め付けだけ**を含意する:
+`--contract-mode require`、pre-flight での全 Issue scope 検査（`--out` 未消費・all-or-nothing）、
+**worktree 単位の排他 lock**（`mkdirSync` の EEXIST に依る。`kill -9` された run の lock は
+死んだ pid を見て回収する）、**`--wall-clock-budget` の明示必須**（残り budget は子プロセスすべての
+timeout でもあるので、timeout を持たない baseline も打ち切れる）、`unattended_baseline` の記録。
+緩和フラグとの併用は `invalid_input`。**`stop_reason` の enum にも field にも1つも足していない**
+（打ち切りは既存の `timeout` を再利用し、事実は `limitations` / `blocking_reasons` の自由文字列で運ぶ）。
+`--unattended` を渡さない run が 1 bit も変わらないことは、**同じ世界を2回 dispatch して
+report を突き合わせる fixture**で機械的に固定してある。実装で形が変わった点は
+[adr-unattended-mode.md](./adr-unattended-mode.md) 第15節にある。
+
 ---
 
 ## パッケージ

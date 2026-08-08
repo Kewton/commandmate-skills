@@ -1,0 +1,52 @@
+{
+  "description": "Issue #122 停止系（prompt / exit 10）: 無人でも prompt では止まる。`--unattended` は「人間が居ない」の宣言であって「prompt に答えてよい」の宣言ではないので、`respond` は1回も飛ばず、`human_required: true` のまま partial で停止し、次 Wave も dispatch しない。**無人だから human_required を false にする、はしない** —— この field は「人間が今そこに居る」ではなく「人間の介入なしには解けない」の意味で、CI はそれを「再実行しても無駄である」の signal として読む。prompt 本文の token は無人 run でも redaction される。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--unattended",
+    "--wall-clock-budget",
+    "600"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "human_required",
+    "human_required": true,
+    "waves_count": 1,
+    "advanced": [false],
+    "no_respond": true,
+    "sent": [201],
+    "never_sent": [200],
+    "prompt_detected": [201],
+    "worker_states": {
+      "201": "prompt"
+    },
+    "verification_outcomes": {
+      "201": "not_run"
+    },
+    "blocking_codes": ["human_input_required"],
+    "limitation_codes": ["unattended_mode", "unattended_baseline"],
+    "limitation_code_counts": {
+      "unattended_mode": 1,
+      "unattended_baseline": 1
+    },
+    "absent_limitation_codes": ["auto_yes_used"],
+    "redaction_token": "ghp_FAKEtokenNOTAREALSECRET00",
+    "redaction_kind": "token",
+    "verify_calls": 0
+  }
+}

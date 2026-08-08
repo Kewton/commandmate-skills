@@ -1,0 +1,68 @@
+{
+  "description": "Issue #122（wall-clock budget）: `--wall-clock-budget` に到達した run。#201 の worker は毎ターン work-evidence 不合格（exit 21）を返し続け、`wait` と `send` が実時間を食う世界にしてある。回数の上限（`--max-turns`）はまだ残っているのに時計が尽きるので、run は **`partial` / `stop_reason: timeout`** で打ち切られ、`blocking_reasons` に `wall_clock_budget_exhausted` が1件出る。**`stop_reason` の enum に新しい値は足していない**（`timeout` の再利用。新値は schema version を上げる）。決め手は「40分が長い」ことではなく、profile baseline / acceptance コマンドのように**時計の上限が構造的に存在しない経路**が在ることなので、残り budget は run が起動する子プロセスすべての timeout でもある。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "8",
+    "--unattended",
+    "--wall-clock-budget",
+    "4"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "timeout",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      201
+    ],
+    "never_sent": [
+      200
+    ],
+    "out_dir_created": true,
+    "worker_states": {
+      "201": "timeout"
+    },
+    "blocking_codes": [
+      "wall_clock_budget_exhausted"
+    ],
+    "limitation_codes": [
+      "unattended_mode",
+      "unattended_baseline"
+    ],
+    "limitation_code_counts": {
+      "unattended_mode": 1,
+      "unattended_baseline": 1
+    },
+    "worker_notes_include": {
+      "201": [
+        "--wall-clock-budget was exhausted"
+      ]
+    },
+    "summary_includes": [
+      "**成功ではない。**",
+      "`--wall-clock-budget` に到達して打ち切った"
+    ],
+    "dispatch_schema_version": 1
+  }
+}

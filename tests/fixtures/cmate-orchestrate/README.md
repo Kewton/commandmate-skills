@@ -97,6 +97,16 @@ exit code の列。`0` / `20` / `21` / `99`）で、`failed_gates` が `commandm
 
 **受入ゲート（#114）**: `verify_exits` は「fake がこう答えろと言われた」でしかないので、
 **受入ゲートが何かを測っている証拠にはならない** — 成果物が壊れていようがいまいが 20 を返す。
+**時間（#122）**: scenario の `delay_ms`（`{"wait": 900, "send": 300}`。subcommand ごとの
+ミリ秒）は、その subcommand を**実時間だけ遅らせる**。実 CLI では `wait` は worker の1ターン、
+baseline はリポジトリのテスト一式だが、ローカルの fake ではどちらも 0 秒に潰れるので、
+これが無いと wall-clock budget の case は「到達しない budget」を測ることになる。
+
+**排他 lock（#122）**: dispatch runner は `--unattended` のとき worktree ごとの lock を取る。
+harness は run ごとに `CMATE_ORCHESTRATE_LOCK_DIR` を work ディレクトリ配下へ向けるので、
+case 同士も、開発機の実 run も巻き込まない（`unattendedLockTest` だけが**共有の**根を渡して
+2本目の衝突を作る）。
+
 そこで受入ゲートの case だけは `run_declared_gates: true` を使う。この scenario では fake が
 本物と同じことをする: worktree の `.commandmate/verify.yaml` を読み、各ゲートの command を
 その worktree で `sh -c` で**実際に実行し**、exit status から PASS/FAIL と run の verdict を
@@ -136,6 +146,14 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 | `d41-acceptance-gate-command-missing` | ゲートのコマンドが起動不能（binary 不在→exit 127）のとき赤になり、report がその事実を名指しするか。**この case を d38 の変異側に流用してはならない**（打ち間違えた偽ゲートは成果物が正しくても 127 で赤くなる） |
 | `d42-acceptance-gate-union` | `--verify-gates` と Issue の `require:` の**和集合**（sort + 重複除去）を契約に書くか。素朴な書き出しは lint を止め、operator の列挙をそのまま使うと Issue の要求が落ちる |
 | `d43-acceptance-gates-not-enforceable` | 実行契約の無い run（`--contract-mode off`）で受入ゲートを宣言した Issue を dispatch しないか（裁定に運ぶ口が無いので fail-closed） |
+| `d49-unattended-two-waves-parity` | **無人運転の二点測定（#122）。** 同じ世界を `--unattended` 有り／無しで2回 dispatch し、`status` / `stop_reason` / `waves[]` / `drift_checks` / `blocking_reasons` / `completion_check` / `redactions` が**一致**し、差分は limitation の `unattended_mode` / `unattended_baseline` **だけ**であることを assert する（「緩めない」の機械的証明。self-report の boolean より強い） |
+| `d50-unattended-prompt-halts` | 無人でも prompt（exit 10）で止まり、`respond` を送らず `human_required: true` のままか。**無人だから human_required を false にする、はしない** |
+| `d51-unattended-not-judged` | 無人でも exit 99 を pass に丸めず、20 の再指示ループにも流さないか。フラグ無しの run との二点測定つき |
+| `d52-unattended-open-questions` | 未回答 question を持つ plan を pre-flight で拒否し、**`--out` を作らない**か（フラグ無しの run は従来どおり `--out` を作って停止する）。`--allow-questions` の案内を出さないことも固定する |
+| `d53-unattended-scope-preflight` | scope を宣言できない Issue を含む plan で、**worktree を1つも probe せず・1人も dispatch せず・`--out` も作らずに** all-or-nothing で止まるか。`contract_scope_unknown` が limitation ではなく blocking であること |
+| `d54-scope-refused-without-unattended` | **d53 の対（二点測定のフラグ無し側）。** 同じ plan・同じ世界で、`--unattended` 無しなら他 Issue は従来どおり dispatch される（＝ d53 の停止は新しい拒否ではなく**検出時点を早めた**もの）ことを示す |
+| `d55-unattended-contract-required` | `--contract-mode` を渡していないのに `require` が含意され、契約非対応 CLI が limitation ではなく blocking になるか（scope 必須化と契約必須化は同義） |
+| `d56-unattended-wall-clock-budget` | `--wall-clock-budget` 到達で `partial` / `stop_reason: timeout` になり、**`stop_reason` の enum に新値を足していない**か。`scenario.delay_ms` で `wait` / `send` に実時間を持たせている |
 
 ## merge case 一覧
 
@@ -215,6 +233,8 @@ checked-in artifact が古い形のまま緑になり続けることを防ぐた
 | `s06-unreadable-plan` | plan.json が読めないとき Issue 集合と run_id を下流 artifact から復元し、plan phase だけを落とすか |
 | `s07-blocking-hints` | blocking/limitation の code を §5 対処表にマップし、Issue を名指しした reason だけをその行に出し、未登録 code を推測しないか |
 | `s08-uat-blocked` | 上限到達の blocked と Issue ごとの fix attempt 数、未承認 merge の `previewed` を丸めずに出すか |
+| `s10-unattended-budget` | wall-clock budget で打ち切った無人 run。**新しい `stop_reason` 値を足していない**ので既存の `timeout` の hint が引かれ、何が起きたかは blocking の `wall_clock_budget_exhausted` が名指しする。run 全体の宣言と Issue ごとの取り消し起点が、それぞれ run 行と Issue 行に分かれるか |
+| `s11-unattended-locked` | 排他 lock で拒否された無人 run（何も書いていないので `out_dir: null`・wave 0件）。hint が「先行 run の終了を待って同じコマンドを再実行する」になり、**`human_required` は false** であるか |
 ## profile-init case 一覧
 
 `profile-init-cases/<id>/repo/` は、`profile-init.mjs` に読ませる**小さな本物のリポジトリ**である
@@ -255,6 +275,16 @@ plan は入力の純粋関数なので、Agent の種類によらず同じ plan 
 実機での確認は、対象 Agent に `SKILL.md` を読ませて runner を
 `--issue-json cases/<id>/issues.json` で回させ、得た plan.json を
 同 case の期待値（`--run-id fixture` を付ければ golden）と diff するだけでよい。
+
+## その他の suite（case ディレクトリを持たないもの）
+
+| suite | 何を見るための suite か |
+|---|---|
+| contract parity | runner が叩く `commandmate` の subcommand と flag が `commandmate-cli-contract.json` の範囲内か（実 CLI が在れば実物とも突き合わせる） |
+| launcher resolution | `--cli` の多トークン展開・`$CM` へのフォールバック・起動不能な launcher の拒否（#37） |
+| worktree-setup input | `--worktree-setup` の二重指定・shell 構文を、世界に触れる前に `invalid_input` で拒否するか（#93） |
+| **unattended input**（#122） | `--unattended` と緩和フラグ（`--auto-yes` / `--allow-questions` / `--contract-mode off｜auto`）の併用、および `--wall-clock-budget` 欠落を **exit 3・CLI 呼び出し 0 回**で拒否するか。**`--contract-mode require` を明示した併用は受理される**（この対照が無いと「`--unattended` を常に拒否する実装」でも緑になる）。段階 A は dispatch のみなので、`merge.mjs --unattended` が拒否されることも固定する |
+| **unattended exclusivity**（#122） | worktree lock の4規則 —— 生きた所有者は拒否（`--out` も作らず CLI も叩かない）／`kill -9` された所有者（死んだ pid）の lock は回収／別 host の lock は回収せず拒否／完走した run は自分の lock を返す。**`--unattended` を渡さない run は lock をまったく見ない**ことも同じ suite で固定する |
 
 ## 実機評価の記録
 

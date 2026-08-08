@@ -11,9 +11,9 @@
 //
 // Node stdlib only. Not part of the release pipeline; run on demand.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -99,6 +99,12 @@ function readPlan(planPath) {
 function baseEnv() {
   const env = { ...process.env };
   delete env.CM;
+  // The unattended exclusivity lock root (Issue #122). Deleted for the same
+  // reason as CM: a developer who exported it would otherwise change which
+  // directory these tests lock in — and every runDispatchRunner call below sets
+  // it explicitly to a per-run temp directory, so the suite never touches the
+  // shared default ($TMPDIR/cmate-orchestrate-locks).
+  delete env.CMATE_ORCHESTRATE_LOCK_DIR;
   return env;
 }
 
@@ -257,7 +263,16 @@ function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, lo
   writeFileSync(scenarioPath, `${JSON.stringify(scenario, null, 2)}\n`);
   const stateDir = opts.state ?? work;
   mkdirSync(stateDir, { recursive: true });
-  const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_STATE: stateDir, ...(opts.env ?? {}) };
+  const env = {
+    ...baseEnv(),
+    CMATE_FAKE_SCENARIO: scenarioPath,
+    CMATE_FAKE_STATE: stateDir,
+    // Per-run by default so an unattended case cannot collide with another case
+    // (or with a real run on the developer's machine); the exclusivity suite
+    // overrides it with a SHARED root, which is what makes a second run collide.
+    CMATE_ORCHESTRATE_LOCK_DIR: join(work, 'locks'),
+    ...(opts.env ?? {}),
+  };
   if (logPath) env.CMATE_FAKE_LOG = logPath;
   const launcher = 'launcher' in opts ? opts.launcher : FAKE_CLI;
   // A case's dispatch_args may need the fake's own path (the `--worktree-setup`
@@ -892,6 +907,54 @@ function runDispatchCase(caseId) {
       check(rerunReport.limitations.some((entry) => entry.code === 'worker_method_applied'),
         'the re-run dispatched without recording worker_method_applied');
       check(existsSync(join(outDir, 'dispatch-report.json')), 'the re-run wrote no dispatch-report.json');
+    }
+  }
+
+  // The two-point measurement `--unattended` has to survive (Issue #122 /
+  // ADR §12.1 (2)). The SAME world is dispatched twice — once with the flag and
+  // once with `spec.unattended_parity.dispatch_args`, which is the same argv
+  // minus the unattended-only flags — and the two reports must agree on
+  // everything except the two limitations the mode records.
+  //
+  // This is the mechanical proof of "unattended relaxes nothing", and it is
+  // strictly stronger than any self-report: a runner that quietly downgraded a
+  // blocking reason, skipped a gate, advanced a wave it should not have or
+  // rounded a status up would differ here, while a `relaxed_nothing: true`
+  // field would still be written by the implementation that did all four.
+  if (spec.unattended_parity) {
+    const parityWork = mkdtempSync(join(tmpdir(), 'cmate-disp-parity-'));
+    const parity = runDispatchRunner(
+      planPath, scenarioObject, parityWork, join(parityWork, 'dispatch'), spec.unattended_parity.dispatch_args, null,
+    );
+    let plain = null;
+    try {
+      plain = JSON.parse(parity.stdout);
+    } catch {
+      check(false, `the without-flag twin printed no report (exit ${parity.exit}): ${parity.stdout.slice(0, 200)}`);
+    }
+    if (plain) {
+      check(parity.exit === exit, `unattended exit ${exit} !== the without-flag twin's ${parity.exit}`);
+      check(plain.status === report.status, `unattended status "${report.status}" !== the twin's "${plain.status}"`);
+      check(plain.stop_reason === report.stop_reason, `unattended stop_reason "${report.stop_reason}" !== the twin's "${plain.stop_reason}"`);
+      check(plain.human_required === report.human_required, `unattended human_required ${report.human_required} !== the twin's ${plain.human_required}`);
+      check(deepEqual(plain.waves, report.waves), 'unattended waves[] differ from the without-flag twin');
+      check(deepEqual(plain.blocking_reasons, report.blocking_reasons), 'unattended blocking_reasons differ from the without-flag twin');
+      check(deepEqual(plain.drift_checks, report.drift_checks), 'unattended drift_checks differ from the without-flag twin');
+      check(deepEqual(plain.completion_check, report.completion_check), 'unattended completion_check differs from the without-flag twin');
+      // A redaction the twin did not make would mean the mode wrote an absolute
+      // path (or a token) into the report — the one way these two limitations
+      // could smuggle in a third difference.
+      check(deepEqual(plain.redactions, report.redactions), 'unattended redactions differ from the without-flag twin');
+
+      const key = (entry) => `${entry.code} ${entry.detail}`;
+      const twinKeys = new Set(plain.limitations.map(key));
+      const runKeys = new Set(report.limitations.map(key));
+      const missing = plain.limitations.filter((entry) => !runKeys.has(key(entry)));
+      check(missing.length === 0,
+        `unattended dropped limitation(s) the twin recorded: ${JSON.stringify(missing.map((entry) => entry.code))}`);
+      const extraCodes = [...new Set(report.limitations.filter((entry) => !twinKeys.has(key(entry))).map((entry) => entry.code))].sort();
+      check(deepEqual(extraCodes, ['unattended_baseline', 'unattended_mode']),
+        `the only limitations --unattended may add are unattended_mode / unattended_baseline; it added ${JSON.stringify(extraCodes)}`);
     }
   }
 
@@ -2601,6 +2664,194 @@ function worktreeSetupInputTest() {
   }
 }
 
+// =============================================================================
+// Unattended: refused inputs and the exclusivity lock (Issue #122)
+// =============================================================================
+//
+// The world every unattended run below expects: a contract-capable CLI (the mode
+// implies `--contract-mode require`) whose two workers complete and pass.
+const UNATTENDED_SCENARIO = {
+  cli_available: true,
+  cli_contract: true,
+  git: { branch: 'feature/integration', dirty: false },
+  gh: { repo_access: true },
+  workers: {
+    201: { state: 'completed', verify_exits: [0] },
+    200: { state: 'completed', verify_exits: [0] },
+  },
+};
+
+const UNATTENDED_ARGS = ['--expect-branch', 'feature/integration', '--unattended', '--wall-clock-budget', '600'];
+
+function unattendedPlan(prefix) {
+  const runsDir = mkdtempSync(join(tmpdir(), prefix));
+  const spec = { plan: { issues_fixture: 'cases/02-explicit-dependency/issues.json', orchestrate_args: ['200', '201', '--max-parallel', '3', '--run-id', 'plan'] } };
+  return generatePlan(spec, runsDir);
+}
+
+// The refused combinations (ADR §2 invariant 2 / §12.1 (5)). Checked here rather
+// than as dispatch cases because what is asserted is that the invocation is
+// refused BEFORE it reaches a world: exit 3, `invalid_input`, no output
+// directory, and — the part a status code alone would not show — not one call to
+// any CLI. "Nothing was mutated" is the claim; the empty invocation log is the
+// evidence.
+//
+// The last row is the control that keeps this suite honest: `--unattended
+// --contract-mode require` states the SAME mode the flag implies and is
+// accepted. Without it, a runner that refused `--unattended` outright would pass
+// every other row.
+function unattendedInputTest() {
+  log('  unattended input (#122)');
+  const planPath = unattendedPlan('cmate-unattended-plan-');
+  if (!check(existsSync(planPath), 'unattended: plan.json was not generated')) return;
+
+  const refusals = [
+    ['--unattended with --auto-yes', [...UNATTENDED_ARGS, '--auto-yes'], 'cannot both hold'],
+    ['--unattended with --allow-questions', [...UNATTENDED_ARGS, '--allow-questions'], '--allow-questions declares'],
+    ['--unattended with --contract-mode off', [...UNATTENDED_ARGS, '--contract-mode', 'off'], 'implies --contract-mode require'],
+    ['--unattended with an explicit --contract-mode auto', [...UNATTENDED_ARGS, '--contract-mode', 'auto'], 'implies --contract-mode require'],
+    ['--unattended with no --wall-clock-budget', ['--expect-branch', 'feature/integration', '--unattended'], 'requires --wall-clock-budget'],
+  ];
+  for (const [label, args, needle] of refusals) {
+    const work = mkdtempSync(join(tmpdir(), 'cmate-unattended-'));
+    const outDir = join(work, 'dispatch');
+    const logPath = join(work, 'cli.log');
+    const result = runDispatchRunner(planPath, UNATTENDED_SCENARIO, work, outDir, args, logPath);
+    const report = launcherReport(result);
+    const detail = (report?.blocking_reasons ?? []).map((entry) => `${entry.code} ${entry.detail}`).join(' ');
+    check(result.exit === 3, `${label}: expected exit 3, got ${result.exit}: ${result.stdout.slice(0, 200)}`);
+    check(detail.includes('invalid_input'), `${label}: expected an invalid_input error, got: ${detail.slice(0, 200)}`);
+    check(detail.includes(needle), `${label}: the error should say "${needle}", got: ${detail.slice(0, 300)}`);
+    check(!existsSync(outDir), `${label}: a refused invocation created ${outDir}`);
+    check(readCliLog(logPath).length === 0, `${label}: a refused invocation called the CLI ${readCliLog(logPath).length} time(s)`);
+  }
+
+  // The control: stating the implied mode explicitly is agreement, not conflict.
+  const work = mkdtempSync(join(tmpdir(), 'cmate-unattended-ok-'));
+  const accepted = runDispatchRunner(
+    planPath, UNATTENDED_SCENARIO, work, join(work, 'dispatch'), [...UNATTENDED_ARGS, '--contract-mode', 'require'], null,
+  );
+  check(accepted.exit === 0,
+    `--unattended --contract-mode require should dispatch (it states the implied mode), exited ${accepted.exit}: ${accepted.stdout.slice(0, 300)}`);
+
+  // Stage A is dispatch only (ADR §8). merge and uat must REFUSE the flag rather
+  // than accept and ignore it: a CI that passes `--unattended` to a runner that
+  // shrugs believes it is being guarded when it is not. Their parseArgs has no
+  // such option, so the refusal is `invalid_input` — asserted here so a later
+  // stage cannot quietly start accepting it without a fixture saying so.
+  const merged = runMerge(planPath, '/dev/null', join(work, 'merge'), '--create-prs', ['--unattended'], baseEnv(), work);
+  check(merged.exit === 3, `merge.mjs --unattended should be refused with exit 3 (stage A is dispatch only), exited ${merged.exit}`);
+}
+
+// The exclusivity lock (ADR §14.1 candidate A). Issue #115 reproduced two runs
+// driving one worktree by starting them 700 ms apart; reproducing that timing in
+// a fixture would be a flaky test of a sleep. What is asserted instead is the
+// STATE that race produces — a lock directory whose owner is alive — plus the
+// two reclamation rules, which is what the timing test could not have pinned:
+//
+//   1. a live owner on this host        -> refused, nothing probed, no --out;
+//   2. an owner that was killed (`kill -9` leaves no release) -> reclaimed;
+//   3. an owner on another host         -> refused (this process cannot judge the
+//      liveness of a pid on a machine it is not on);
+//   4. a run that finishes              -> releases every lock it took.
+function unattendedLockTest() {
+  log('  unattended exclusivity lock (#122)');
+  const planPath = unattendedPlan('cmate-unattended-lock-plan-');
+  if (!check(existsSync(planPath), 'unattended lock: plan.json was not generated')) return;
+  const plan = readPlan(planPath);
+
+  // The key the runner derives, mirrored here from (repository, branch) — the
+  // same pair CommandMate derives a worktree id from, which is what makes the
+  // granularity "one lock per worktree" rather than "one per plan".
+  const keyFor = (number) => worktreeIdFor(plan.profile.repository, plan.issues.find((issue) => issue.number === number).branch);
+
+  const seedLock = (lockRoot, number, owner) => {
+    const dir = join(lockRoot, keyFor(number));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'owner.json'), `${JSON.stringify(owner, null, 2)}\n`, 'utf8');
+    return dir;
+  };
+
+  // A pid that is certainly gone: a process this suite started and waited for.
+  const deadPid = spawnSync('node', ['-e', 'process.exit(0)']).pid;
+
+  // --- 1. a live owner refuses the second run -------------------------------
+  {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'cmate-unattended-locks-'));
+    seedLock(lockRoot, 201, { host: hostname(), pid: process.pid, plan_run_id: 'other-run', stage: 'A' });
+    const work = mkdtempSync(join(tmpdir(), 'cmate-unattended-held-'));
+    const outDir = join(work, 'dispatch');
+    const logPath = join(work, 'cli.log');
+    const result = runDispatchRunner(planPath, UNATTENDED_SCENARIO, work, outDir, UNATTENDED_ARGS, logPath, {
+      env: { CMATE_ORCHESTRATE_LOCK_DIR: lockRoot },
+    });
+    const report = launcherReport(result);
+    check(result.exit === 1, `a held worktree lock should refuse the second run with exit 1, exited ${result.exit}`);
+    check(report?.status === 'failure', `a refused run should report failure, got ${report?.status}`);
+    check(report?.stop_reason === 'dispatch_error', `a refused run should stop with dispatch_error, got ${report?.stop_reason}`);
+    check((report?.blocking_reasons ?? []).some((entry) => entry.code === 'unattended_locked'),
+      `the refusal should name unattended_locked, got ${JSON.stringify(report?.blocking_reasons)}`);
+    check((report?.blocking_reasons ?? []).some((entry) => entry.detail.includes('is still running')),
+      'the refusal should say the owning run is still running');
+    // Nothing was probed, nothing was prepared, nothing was sent — the stop is
+    // BEFORE the pre-flight, which is the window Issue #115 measured.
+    check(report?.out_dir === null, `a refused run must not consume --out, got ${JSON.stringify(report?.out_dir)}`);
+    check(!existsSync(outDir), 'a refused run created the output directory');
+    check(readCliLog(logPath).length === 0, `a refused run called the CLI ${readCliLog(logPath).length} time(s)`);
+    // The lock it did not take is still the FIRST run's, untouched.
+    check(existsSync(join(lockRoot, keyFor(201), 'owner.json')), 'the refused run removed the lock it did not own');
+    // All-or-nothing: the lock it DID take for the other issue is given back, so
+    // a partially-locked run leaves nothing behind for the next one to trip on.
+    check(!existsSync(join(lockRoot, keyFor(200))), 'the refused run kept a lock it took before hitting the held one');
+  }
+
+  // --- 2. a killed owner's lock is reclaimed, and a finished run releases ----
+  {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'cmate-unattended-locks-'));
+    seedLock(lockRoot, 201, { host: hostname(), pid: deadPid, plan_run_id: 'killed-run', stage: 'A' });
+    const work = mkdtempSync(join(tmpdir(), 'cmate-unattended-stale-'));
+    const result = runDispatchRunner(planPath, UNATTENDED_SCENARIO, work, join(work, 'dispatch'), UNATTENDED_ARGS, null, {
+      env: { CMATE_ORCHESTRATE_LOCK_DIR: lockRoot },
+    });
+    const report = launcherReport(result);
+    check(result.exit === 0, `a stale lock should be reclaimed and the run should dispatch, exited ${result.exit}: ${result.stdout.slice(0, 300)}`);
+    check(report?.status === 'success', `the reclaiming run should succeed, got ${report?.status}`);
+    check(!existsSync(join(lockRoot, keyFor(201))) && !existsSync(join(lockRoot, keyFor(200))),
+      'a finished run left its worktree locks behind');
+  }
+
+  // --- 3. an owner on another host is refused, not reclaimed ----------------
+  {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'cmate-unattended-locks-'));
+    // Dead pid AND a foreign host: the pid alone would be reclaimable, so this
+    // isolates the host rule rather than measuring the same thing twice.
+    seedLock(lockRoot, 201, { host: `${hostname()}-somewhere-else`, pid: deadPid, plan_run_id: 'other-host', stage: 'A' });
+    const work = mkdtempSync(join(tmpdir(), 'cmate-unattended-foreign-'));
+    const result = runDispatchRunner(planPath, UNATTENDED_SCENARIO, work, join(work, 'dispatch'), UNATTENDED_ARGS, null, {
+      env: { CMATE_ORCHESTRATE_LOCK_DIR: lockRoot },
+    });
+    const report = launcherReport(result);
+    check(result.exit === 1, `a lock owned by another host should refuse the run, exited ${result.exit}`);
+    check((report?.blocking_reasons ?? []).some((entry) => entry.detail.includes('another host')),
+      `the refusal should say the lock belongs to another host, got ${JSON.stringify(report?.blocking_reasons)}`);
+  }
+
+  // --- 4. a run WITHOUT --unattended takes no lock at all --------------------
+  // The non-regression half: the lock is part of the unattended contract, so a
+  // run without the flag must be byte-for-byte what it was before this existed —
+  // including creating no lock directory and being refused by none.
+  {
+    const lockRoot = mkdtempSync(join(tmpdir(), 'cmate-unattended-locks-'));
+    seedLock(lockRoot, 201, { host: hostname(), pid: process.pid, plan_run_id: 'other-run', stage: 'A' });
+    const work = mkdtempSync(join(tmpdir(), 'cmate-attended-'));
+    const result = runDispatchRunner(planPath, UNATTENDED_SCENARIO, work, join(work, 'dispatch'), ['--expect-branch', 'feature/integration'], null, {
+      env: { CMATE_ORCHESTRATE_LOCK_DIR: lockRoot },
+    });
+    check(result.exit === 0, `a run without --unattended must ignore the lock entirely, exited ${result.exit}`);
+    check(readdirSync(lockRoot).length === 1, 'a run without --unattended created or removed a lock');
+  }
+}
+
 function launcherTest() {
   log('  launcher resolution (#37)');
   const runsDir = mkdtempSync(join(tmpdir(), 'cmate-launcher-plan-'));
@@ -3032,12 +3283,16 @@ function main() {
   log('  -- worktree-setup input --');
   worktreeSetupInputTest();
 
+  log('  -- unattended --');
+  unattendedInputTest();
+  unattendedLockTest();
+
   log('');
   if (failures > 0) {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution, worktree-setup input`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution, worktree-setup input, unattended input + exclusivity`);
 }
 
 main();
