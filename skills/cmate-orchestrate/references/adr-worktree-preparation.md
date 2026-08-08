@@ -9,7 +9,9 @@ status: **proposed**（人間のレビュー待ち。実装は本 ADR の裁定�
 
 この文書は **裁定の記録**であり、契約の正本ではない。実装後の正本は
 [dispatch-contract.md](./dispatch-contract.md)（第1節の入力・第3.0節の pre-flight）と
-[../SKILL.md](../SKILL.md)（第2節の条件付き依存・第3.2節の flag・第5節の対処表）にある。
+[../SKILL.md](../SKILL.md)（第2節の条件付き依存・第3.2節の flag）と
+[runner-operations.md](./runner-operations.md) 第4節・
+[codes-and-recovery.md](./codes-and-recovery.md) 第4節の対処表にある。
 ここに書いた形が実装で変わったなら、**正本を直したうえでこの文書に「なぜ変えたか」を追記する**
 （[release-notes.md](./release-notes.md) と同じ運用）。
 

@@ -16,10 +16,11 @@ What it proves, in the order it proves it:
 5. no known credential shape and no plaintext `http://` link ships;
 6. a `SKILL_VERSION` constant shipped in `scripts/lib.mjs` agrees with the
    manifest version;
-7. the artifact the package builds into is accepted by the strict reader;
-8. building it twice produces byte-identical output.
+7. `SKILL.md` is small enough for CommandMate's slash-command palette to load;
+8. the artifact the package builds into is accepted by the strict reader;
+9. building it twice produces byte-identical output.
 
-Exit status is 0 only when every package passes all eight.
+Exit status is 0 only when every package passes all nine.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ import sys
 from pathlib import Path
 
 import _bootstrap  # noqa: F401  (path setup)
+from cmate_skills.constants import SKILL_MD_FILENAME
 from cmate_skills.errors import ContractError, Finding
 from cmate_skills.package import sha256_hex
 from cmate_skills.repo import build_and_verify, check_package, discover_skill_dirs
@@ -46,9 +48,33 @@ REPRODUCIBILITY_MISMATCH = "SKILLS_REPRODUCIBILITY_MISMATCH"
 CATALOG_UNREADABLE = "SKILLS_CATALOG_UNREADABLE"
 GOVERNANCE_MISSING = "SKILLS_GOVERNANCE_MISSING"
 VERSION_CONSTANT_MISMATCH = "SKILLS_VERSION_CONSTANT_MISMATCH"
+SKILL_MD_TOO_LARGE = "SKILLS_SKILL_MD_TOO_LARGE"
 
 #: The one payload file a package may state its own version in a second time.
 SKILL_LIB_PATH = "scripts/lib.mjs"
+
+#: Ceiling on a shipped `SKILL.md`, in bytes.
+#:
+#: CommandMate's slash-command palette reads every installed `SKILL.md` through
+#: `parseSkillFile()`, which stats the file first and returns `null` above
+#: `MAX_SKILL_FILE_SIZE_BYTES` (65536). The Skill still installs, the skills API
+#: still lists it, and the agent still reads it — only the palette entry is gone,
+#: with nothing but a `logger.warn` to say why (Issue #135, measured on
+#: `cmate-orchestrate` 0.20.0 at 71,383 bytes).
+#:
+#: That constant belongs to upstream, so this one deliberately sits below it: a
+#: package that is growing is stopped here, while there is still room to land the
+#: fix, rather than at the cliff edge where the next paragraph breaks the palette.
+SKILL_MD_MAX_SIZE = 60_000
+
+#: What to do about it. `SKILL.md` answers "when do I use this, how do I call it,
+#: how do I read the output, what do I do when it stops"; everything else belongs
+#: in `references/` behind a one-way link. That split is the package convention
+#: since 0.14.0 — see the `references/release-notes.md` entry that introduced it.
+SKILL_MD_REMEDY = (
+    "move the mechanism detail into references/ and link to it one-way "
+    "(the 0.14.0 convention; see references/release-notes.md)"
+)
 
 #: `export const SKILL_VERSION = '0.17.0';` as it stands in that file. Quotes and
 #: spacing are loose because the constant is authored by hand, but the name is
@@ -166,6 +192,44 @@ def check_version_constant(check, out: list[Finding]) -> None:
         )
 
 
+def check_skill_md_size(check, out: list[Finding]) -> None:
+    """Require the shipped `SKILL.md` to stay under `SKILL_MD_MAX_SIZE`.
+
+    An oversized `SKILL.md` fails in the one place nothing else looks: the
+    package validates, builds, installs and runs, and the only symptom is that
+    the slash command never appears in the palette. Nobody notices until someone
+    goes looking for it, which is what happened with `cmate-orchestrate` 0.20.0.
+    So the check runs here, where `.commandmate/verify.yaml` and both CI jobs
+    already run it, and where a release therefore cannot get past it — the same
+    shape as the `SKILL_VERSION` check above.
+
+    The measurement is `len(entry.data)` over `check.payload`, the bytes the
+    build will pack, rather than a `stat()` of the working tree: the two agree
+    today, but only the former is the file a user ends up installing.
+
+    A package whose tree could not be read has no payload to measure and is
+    already failing on that; `SKILL.md` itself being absent is reported by
+    `check_package`.
+    """
+    if check.payload is None:
+        return
+
+    entry = next((f for f in check.payload if f.path == SKILL_MD_FILENAME), None)
+    if entry is None:
+        return
+
+    size = len(entry.data)
+    if size > SKILL_MD_MAX_SIZE:
+        out.append(
+            Finding(
+                SKILL_MD_TOO_LARGE,
+                SKILL_MD_FILENAME,
+                f"SKILL.md is too large for the slash-command palette to load: {SKILL_MD_REMEDY}",
+                {"size": size, "maxSize": SKILL_MD_MAX_SIZE, "over": size - SKILL_MD_MAX_SIZE},
+            )
+        )
+
+
 def validate_catalogs(catalog_root: Path) -> tuple[int, int]:
     """Validate every Catalog JSON under `catalog/`."""
     failures = 0
@@ -244,6 +308,7 @@ def main() -> int:
         check = check_package(directory, repo_root)
         findings = list(check.findings)
         check_version_constant(check, findings)
+        check_skill_md_size(check, findings)
 
         artifact = None
         if check.manifest is not None and not findings:

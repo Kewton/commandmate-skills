@@ -1195,14 +1195,17 @@ status は `partial`（exit 7）、`stop_reason` は既存 enum の **`timeout` 
 ### 15.4 `gh` には停止を足していない（第14.5節どおり）
 
 **第6.3節に足した停止は無い。** 代わりに job 定義側の環境変数（`GH_TOKEN` /
-`GIT_TERMINAL_PROMPT=0`）を [../SKILL.md](../SKILL.md) 第3.2節に書いた。第14.5節の実測どおり、
+`GIT_TERMINAL_PROMPT=0`）を [runner-operations.md](./runner-operations.md) 第10節に書いた
+（#135 の移送前は [../SKILL.md](../SKILL.md) 第3.2節）。第14.5節の実測どおり、
 無人運転を実際に止めるのは `gh` ではなく **`git push` の資格情報プロンプト**であり、
 それは「止まる」ではなく**無言で待つ**に化ける唯一の経路である。**runner はこれを検査しない**
 （別プロセスの環境を runner は保証できない。第4節の monitor と同じ理由）。
 
 ### 15.5 `--no-auto-approve` は要件として SKILL.md に書いた（第14.6節どおり）
 
-第4節の「サーバ側の最後の砦」は第14.6節が訂正済みで、砦は無い。SKILL.md 第3.2節の monitor 境界に、
+第4節の「サーバ側の最後の砦」は第14.6節が訂正済みで、砦は無い。
+[runner-operations.md](./runner-operations.md) 第11節の monitor 境界に（#135 の移送前は
+SKILL.md 第3.2節）、
 **unattended と併用するなら monitor 側の `--no-auto-approve` は要件である**ことと、その理由
 （`autoYes.lastSuppression` はサーバ側 Auto-Yes が有効なときしか書かれず、unattended はまさにその状態を
 禁じているので、monitor の判定は `approve` になる）を書いた。**runner は検出しない。**
