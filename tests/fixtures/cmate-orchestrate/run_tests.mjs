@@ -2957,6 +2957,53 @@ function unattendedLockTest() {
     check(result.exit === 0, `a run without --unattended must ignore the lock entirely, exited ${result.exit}`);
     check(readdirSync(lockRoot).length === 1, 'a run without --unattended created or removed a lock');
   }
+
+  // --- 5. a --reverify run takes the lock too (Issue #121) -------------------
+  // Adjudicated in dispatch-contract.md §8.5.6. The flag sends nothing, so no
+  // second SUPERVISOR appears — but `commandmate verify` RUNS THE REPOSITORY'S
+  // GATES INSIDE THE WORKTREE, and the verdict it produces is written into the
+  // report merge reads as eligibility. Judging a tree another run's worker is
+  // still writing to yields a verdict about a state nobody delivered, and then
+  // delivers it. Pinned here so "it only reads, so it needs no lock" cannot come
+  // back as an optimisation.
+  {
+    // #201 times out, so the reverify has one not-carried issue — and therefore
+    // exactly one lock to take. #200 is carried: its worktree is never touched,
+    // so no lock is taken for it, exactly as on a resume.
+    const scenario = {
+      ...UNATTENDED_SCENARIO,
+      workers: { 200: { state: 'completed', verify_exits: [0] }, 201: { state: 'timeout' } },
+    };
+    const work = mkdtempSync(join(tmpdir(), 'cmate-reverify-lock-'));
+    const outDir = join(work, 'dispatch');
+    const first = runDispatchRunner(planPath, scenario, work, outDir, UNATTENDED_ARGS, null, {
+      env: { CMATE_ORCHESTRATE_LOCK_DIR: mkdtempSync(join(tmpdir(), 'cmate-unattended-locks-')) },
+      state: join(work, 'state-1'),
+    });
+    check(first.exit === 7, `the seeding dispatch should stop partial (#201 timed out), exited ${first.exit}: ${first.stdout.slice(0, 200)}`);
+
+    const lockRoot = mkdtempSync(join(tmpdir(), 'cmate-unattended-locks-'));
+    seedLock(lockRoot, 201, { host: hostname(), pid: process.pid, plan_run_id: 'other-run', stage: 'A' });
+    const logPath = join(work, 'reverify.log');
+    const result = runDispatchRunner(planPath, scenario, work, outDir, UNATTENDED_ARGS, logPath, {
+      reverifyDir: outDir,
+      env: { CMATE_ORCHESTRATE_LOCK_DIR: lockRoot },
+      state: join(work, 'state-2'),
+    });
+    const report = launcherReport(result);
+    check(result.exit === 1, `--unattended --reverify should be refused by a held worktree lock, exited ${result.exit}: ${result.stdout.slice(0, 300)}`);
+    check((report?.blocking_reasons ?? []).some((entry) => entry.code === 'unattended_locked'),
+      `the refusal should name unattended_locked, got ${JSON.stringify(report?.blocking_reasons)}`);
+    // Refused BEFORE anything: no gate was run in anybody's worktree, and the
+    // attempt directory the reverify would have appended was not created.
+    check(readCliLog(logPath).length === 0, `a refused reverify called the CLI ${readCliLog(logPath).length} time(s)`);
+    check(!existsSync(join(outDir, 'resume-attempt-2')), 'a refused reverify created its attempt directory');
+    check(!existsSync(join(lockRoot, keyFor(200))), 'the reverify took a lock for an issue it carries over and never touches');
+    // The report still says what the attempt WAS, and that it re-judges rather
+    // than re-dispatches — a refusal must not read as a resume.
+    check((report?.limitations ?? []).some((entry) => entry.code === 'reverify_attempt'),
+      `a refused reverify should still record reverify_attempt, got ${JSON.stringify((report?.limitations ?? []).map((entry) => entry.code))}`);
+  }
 }
 
 function launcherTest() {
