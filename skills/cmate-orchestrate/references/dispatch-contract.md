@@ -233,6 +233,7 @@ runner は承認済み plan **だけ**から契約を組み立てる。時刻・
   `verification_failed` ではない。走っていない worker を「検証に落ちた」と報告すると、
   plan の欠落を worktree の不具合として調査させることになる。
 
+
 ### 2.5 pass は再検証しない
 
 exit 0 の run は契約タスクを `succeeded`（終端）へ遷移させる。その後に同じ worktree で検証 run を
@@ -349,6 +350,41 @@ lint も test も走らない契約になる。**受入条件を足したつも�
 いずれも `send --contract` の exit 2 に頼らない。理由は `contract_scope_unknown` と同じで、
 走っていない worker を「契約が不正だった」と報告するより、**何が足りないかを名指しして止める**
 ほうが解ける。当該 worker は `not_dispatched` のまま残り、wave は advance しない。
+
+### 2.10 `--auto-yes` が動かす2つのもの（#136）
+
+**契約のポリシーと worktree の auto-yes 状態は別物である。`--auto-yes` は両方を動かす。**
+片方だけでは prompt は1つも自動応答されない。
+
+| | 何か | どこで設定されるか | `capture --json` に出るか |
+|---|---|---|---|
+| 契約の `autoYes` | **その task に許す prompt 型の宣言** | 契約 yaml（この runner が書く） | 出ない |
+| worktree の auto-yes 状態 | サーバーが poller を回すかどうか | `send --auto-yes`（この runner が渡す） | **出る**（`autoYes.enabled`） |
+
+#### 契約に何を書くか
+
+- `--auto-yes` **無し** → `mode: off`（積極的な禁止）
+- `--auto-yes` **有り** → `mode: allow-listed` ＋ `allowPromptTypes: [yes_no, multiple_choice]`
+
+**`mode: safe` は書かない。** CommandMate の resolver は `safe` のとき `yes_no` 以外を
+`type-not-allowed` で抑止するが、**Claude の許可プロンプト（`Do you want to make this edit to X?`）は
+`multiple_choice`** なので必ず弾かれる。`--auto-yes` を指定した run が Claude で1つも応答しない、
+という状態がこれだった。
+
+**autoYes ブロックを書かない案（`mode: null`＝制約なし）も採らない。** この runner が `mode: off` を
+書くのは「積極的な禁止」と「省略」が別物だからであり、**許可についても同じ理屈が当てはまる** ——
+省略すると run の authorisation が読めなくなる。`denyPatterns` は空のままにする
+（CommandMate #1699: pane の scrollback に照合されて過去の承認が以後を恒久抑止した実害がある）。
+
+#### なぜ `send` にも渡すのか
+
+サーバーの Auto-Yes poller は **worktree の auto-yes 状態が有効でなければ起動しない**。
+起動しなければ、契約が何を許可していても応答は起きず、**抑止された事実すら記録されない**
+（`autoYes.lastSuppression` は poller の中でしか書かれない）。`--duration` は
+`--wait-timeout` × `--max-turns` × wave 数から算出する（既定 1h では run の途中で失効しうる）。
+
+> **`enabled: true` だけを見て「効いている」と判断しないこと。** 契約が型を許していなければ、
+> トグルが on でも1つも応答されない。判定しているのは契約のポリシーである。
 
 ## 3. 監督ループと gate
 

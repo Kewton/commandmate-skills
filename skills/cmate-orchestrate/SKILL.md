@@ -156,7 +156,7 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 | `--resume <dir>` | — | 部分失敗した run の再開。`<dir>` は再開対象の `--out`。**pass 済みは再 dispatch せず記録だけ引き継ぐ**（[運転ノート](./references/runner-operations.md) 第7節） |
 | `--reverify <dir>` | — | **`send` を1回も呼ばずに**裁定だけ取り直す。`<dir>` は対象 run の `--out`。作業が既に worktree に在るのに裁定が古い、という状態のための経路（[運転ノート](./references/runner-operations.md) 第8節）。`--out` / `--resume` とは排他 |
 | `--cli` / `--git` / `--gh <path>` | `commandmate`/`git`/`gh` | 実行する CLI |
-| `--auto-yes` | **off** | worker prompt を自動応答する。既定は停止して human へ提示 |
+| `--auto-yes` | **off** | worker prompt を自動応答する。既定は停止して human へ提示。**契約のポリシーと worktree の auto-yes 状態は別物で、この flag は両方を動かす**（片方だけでは1つも応答されない。[dispatch-contract.md](./references/dispatch-contract.md) 第2.10節）|
 | `--allow-questions` | **off** | 未回答 question を持つ Issue を含む plan を dispatch する |
 | `--unattended` | **off** | **人間が居ないことの宣言。締め付けだけを含意し、権限は1つも足さない**（[運転ノート](./references/runner-operations.md) 第10節）。`--approve` を含意しない。緩和フラグとの併用は `invalid_input` |
 | `--wall-clock-budget <sec>` | **off** | run 全体の壁時計上限。到達で `partial` / `stop_reason: timeout`。`--unattended` では**必須** |
