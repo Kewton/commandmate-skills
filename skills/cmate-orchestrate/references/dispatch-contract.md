@@ -131,7 +131,8 @@ commit を要求する（下流の PR 作成は commit を必要とする）。
 **report 単体で「何が pass の根拠か」が読める**ようにするため）。`outcome: pass` なのに `gates` が
 空になった場合は、**拾えなかったこと自体**を limitation `verification_gates_unrecorded` と `checks`
 の1行に記録する。planner の `unrecognized_file_extension` と同型で、空のリストを「何も走らなかった」
-と読ませない。
+と読ませない。**`--unattended` ではこれが blocking になる**（段階 C。第3.0.3節）——
+裁定（exit code）は pass のままだが、根拠を名指しできない pass の上に無人 merge を積まない。
 
 ### 2.1.1 裁定の記録（Issue #83）
 
@@ -543,9 +544,10 @@ mutation の権限を与えるフラグではない（裁定の記録は
 [adr-unattended-mode.md](./adr-unattended-mode.md) 第2節「裁定 0」、実測は同 第14節）。
 段階 A で受け付けたのは **dispatch runner だけ**だった。段階 B
 （[#134](https://github.com/Kewton/commandmate-skills/issues/134)）で **merge runner の
-`--create-prs`** が加わっている（[merge-contract.md](./merge-contract.md) 第5.3節）。**その外
-—— merge `--merge-prs` と uat —— に渡すと `invalid_input` で落ちる**（受理して無視すると、
-CI は自分が守られていると誤解する）。**フラグは runner ごとに独立の宣言であり、
+`--create-prs`** が、段階 C（[#142](https://github.com/Kewton/commandmate-skills/issues/142)）で
+**merge `--merge-prs` と uat runner** が加わり、**3 runner すべてが受け付ける**
+（[merge-contract.md](./merge-contract.md) 第5.3節 / [uat-contract.md](./uat-contract.md) 第5.2節）。
+**フラグは runner ごとに独立の宣言であり、
 runner 間で伝播しない**（同 ADR 第8節）: この runner が unattended だったかを merge / uat が
 読むことはなく、merge / uat が dispatch report から読むのは従来どおり `worker_state` と
 `verification.outcome` の2 field だけである。
@@ -563,11 +565,12 @@ runner 間で伝播しない**（同 ADR 第8節）: この runner が unattende
 4. **runner は次の phase を始めない。** 無人運転の driver は CI の job 定義（または cron script）で
    あって runner ではない。
 
-含意する締め付けは次の5つである。
+含意する締め付けは次の6つである。
 
 | 締め付け | 内容 |
 |---|---|
 | 契約経路の必須化 | `--contract-mode require` を含意する（第2.7節） |
+| 裁定の根拠の要求 | **`verification_gates_unrecorded` を limitation ではなく blocking として扱う**（段階 C。第2.1.1節 / ADR 第6.5節）。契約 pass なのに `GATE <id> PASS|FAIL` 行を1本も読めなかった Issue が1つでもあれば、その wave を最後に **次の wave を dispatch せずに停止**する（`partial` / exit 7 / `stop_reason: dispatch_error`）。**裁定そのものは書き換えない** —— exit code の pass はそのまま `verification.outcome: pass` で残り、barrier の `advanced` も true のままである。変わるのは「その run が先へ進むか」だけである。**`human_required` は false**（GATE 行を出す CommandMate で再実行すれば解ける） |
 | pre-flight の scope 検査 | **plan の全 Wave の全 Issue**について、その Issue の実行契約が `scope.allow` を宣言できることを、**`--out` を作る前**に確かめる。1件でも空なら **1人も dispatch せず** `blocking_reasons` に `contract_scope_unknown` を Issue ごとに1件、`stop_reason: dispatch_error` / `status: failure`（exit 1）で停止する。判定は plan の `suspected_files` そのものではなく **契約が受理できるパターンが1つ以上残るか**（絶対 path・`..` 脱出・長すぎる pattern 等は契約の parser が拒否するので落とす）。同じ pre-flight で **未回答の planner question も同時に**報告する（`open_questions`。`--allow-questions` は拒否されるので、この停止を押し通す道は無い）。**この停止も `--out` を消費しない** |
 | 排他 lock | 下記 |
 | wall-clock budget | `--wall-clock-budget` の明示が必須（第3.0.4節） |

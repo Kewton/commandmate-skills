@@ -370,7 +370,9 @@ report を読む人が補える欠落が、無人では**そのまま merge の�
 | `acceptance_not_run`（limitation・uat） | **起こさない** | 段階 C の uat 無人化は `--require-acceptance` を含意する（第8節）。意味ゲート無しの無人 UAT は baseline 再実行にすぎず、「受入を確認した」という主張ができない |
 
 段階 A / B ではいずれも limitation のままである。昇格は**無人で不可逆な操作をするとき**にだけ
-正当化される。
+正当化される。実装は[#142](https://github.com/Kewton/commandmate-skills/issues/142)（第17節）——
+`verification_gates_unrecorded` の二点測定を何と何で測ったかは第17.1節、裁定そのものを書き換えない
+ことは第17.2節、`acceptance_not_run` の「起こさない」を構造で保証したことは第17.6節にある。
 
 > **訂正（[#134](https://github.com/Kewton/commandmate-skills/issues/134) 実装時。第16節）。**
 > 直前の1文と本節の見出しは、`change_evidence_unavailable` について**第8節の段階表と矛盾していた**
@@ -500,7 +502,8 @@ worktree が既に片付いていると `git reset --hard` は exit 128 で使�
 
 を確かめ、外れていれば **1 つも fix worktree を作らずに停止する**。dispatch が
 `branch_matches` drift check で既に持っている形をそのまま置けばよく、新しい停止語彙は要らない
-（`preflight_failed` 相当で足りる）。
+（`preflight_failed` 相当で足りる）。**実装は第17節**（比較対象の branch をどこから取るかは
+本節が書いていなかった —— `--expect-branch` を足した。第17.4節）。
 
 ### 段階 A で dispatch の `--unattended` は何を足すのか
 
@@ -564,6 +567,8 @@ PR は人間が読む場所である——#97 が PR 本文に検証証拠を載
 
 段階 C の着手条件はこの 3 つであり、実装フェーズの表（第12節）でもそう書く。
 **#100 が承認されないまま段階 C を出さない。**
+条件 2 を実装がどう解いたか（plan だけを読む・id の実在は問わない・停止であって除外ではない）は
+第17.7節にある。
 
 ---
 
@@ -621,7 +626,7 @@ PR は人間が読む場所である——#97 が PR 本文に検証証拠を載
 | 5 | fixtures（第12.1節） | 3〜4 と同一リリース |
 | 6 | `status.mjs` の hint map に unattended の停止を追加 | 同上（追随できなければ「detail を読む」に落ちる。#93 と同じ扱い） |
 | 7 | **段階 B（別 Issue）**: `merge.mjs --create-prs --unattended`、`change_evidence_unavailable` の昇格 | 別リリース |
-| 8 | **段階 C（別 Issue）**: `merge.mjs --merge-prs` と `uat.mjs --create-uat-fix-worktrees`。**#100 段階1 の実装後**（第9節の 3 条件） | 別リリース |
+| 8 | **段階 C**（[#142](https://github.com/Kewton/commandmate-skills/issues/142)。**着地済み**。第17節）: `merge.mjs --merge-prs` と `uat.mjs`。**#100 段階1 の実装後**（第9節の 3 条件） | 別リリース |
 
 ### 12.1 fixture に要求すること
 
@@ -916,6 +921,9 @@ pre-flight 検査**が要る。**第8節の段階 C の前提にこれを足し�
 **未測定:** 実際の CI（GitHub Actions）で `actions/checkout` がどちらの形を作るかは、
 リポジトリと trigger の設定次第であり、本 spike では確かめていない。上の裁定はそれに依らない ——
 **どちらの形でも壊れる**ので、検査する側に倒すのが答えである。
+
+**実装は [#142](https://github.com/Kewton/commandmate-skills/issues/142)（第17.4〜17.5節）。**
+`git symbolic-ref -q HEAD` 1回で両方を答え、比較対象は新設の `--expect-branch` である。
 
 ### 14.4 (4) `unattended_baseline` — **効かない条件が 4 つある**
 
@@ -1332,5 +1340,143 @@ dispatch の緩和フラグ（`--auto-yes` / `--allow-questions` / `--contract-m
 ### 16.7 version は上げていない（第15.8節と同じ理由）
 
 #134 の受入条件は minor bump（`commandmate.skill.yaml` と `scripts/lib.mjs` の**両方**）を求めて
+いるが、**本 Issue の実行契約は `scripts/lib.mjs` を変更対象に含めておらず、`version:` 行の変更も
+禁じている**ため、bump は行っていない。**リリース時に両方を同一 commit で上げること。**
+
+---
+
+## 17. 実装で変えたこと（Issue [#142](https://github.com/Kewton/commandmate-skills/issues/142)。第12節 段 8 ＝ 段階 C）
+
+段階 C は **`merge.mjs --merge-prs --unattended`** と **`uat.mjs --unattended`** である。正本は
+[merge-contract.md](./merge-contract.md) 第5.3節、[uat-contract.md](./uat-contract.md) 第5.1〜5.2節、
+[dispatch-contract.md](./dispatch-contract.md) 第2.1.1節・第3.0.3節、
+[codes-and-recovery.md](./codes-and-recovery.md) 第3〜4節、[../SKILL.md](../SKILL.md) 第3.3節・第5節。
+**裁定 0（第2節）と第6.1節の写像は1文字も変えていない。**
+
+第8節の段階表が段階 C に割り当てたものは4つで、実装もその4つだけである。
+
+1. `verification_gates_unrecorded` の blocking 昇格（dispatch）
+2. uat の `--require-acceptance` と `--max-attempts` の明示
+3. invocation cwd の pre-flight 検査（uat）
+4. 受入ゲートブロックを持たない Issue を無人 merge の対象にしない（第9節 条件2）
+
+**`dispatch_schema_version` / `merge_schema_version` / `uat_schema_version` はすべて 1 のまま、
+どの `stop_reason` enum にも値を足していない。** 昇格した停止は既存の `dispatch_error` /
+`preflight_failed` で受け、何が起きたかを名指しするのは `blocking_reasons[]` の code である
+（第15.2節が `wall_clock_budget_exhausted` に、第16節が段階 B に採ったのと同じ形）。
+
+**`change_evidence_unavailable` は二重に昇格させていない。** 第6.5節の訂正どおり段階 B で
+昇格済みであり、本 Issue は触れていない。dispatch 側にこの code は存在せず、merge 側では昇格が
+1件だけであることを fixture が数えている。
+
+以下は本 ADR から**形が変わった点**と、ADR が明示していなかった点をどう裁定したかである。
+
+### 17.1 「段階 A / B では limitation のまま」の二点測定は、フラグ無しの twin で測る
+
+第6.5節は昇格を「段階 C でだけ」と書き、Issue の受入条件は二点測定を求めている。ところが
+**段階は release であって invocation 単位の selector ではない** —— dispatch に「段階 A として振る舞え」
+と言う入力は無いし、あってはならない（あれば締め付けを外す入力になる）。したがって測れる二点は
+
+- **フラグ無しの run** — `verification_gates_unrecorded` は limitation で、run は完走する。
+  これは段階 A / B が出荷した読み方**そのもの**である（両段階とも、この昇格を持たない）。
+- **`--unattended` の run** — blocking で、次の wave を dispatch せずに停止する。
+
+の 2 つであり、fixture はこの対で固定した。第16.1節の裁定（昇格は `--unattended` に紐づく。
+別の job が後で何をするかで宣言の意味が変わってはならない）を dispatch にも適用した結果でもある。
+**`--unattended` を渡さない run は、この機能が存在しなかった頃と 1 bit も変わらない**（第11節）ので、
+段階 A / B の読み方は「過去の release でしか観測できないもの」ではなく、**今も観測できる**。
+
+### 17.2 裁定は書き換えず、「先へ進むか」だけを変える（ADR が明示していなかった点）
+
+`verification_gates_unrecorded` の昇格で **`verification.outcome` を `pass` から動かしていない。**
+Issue #83 が「裁定そのものは exit code なので pass のまま」と決めており、昇格はその決定を
+覆すものではない。wave barrier の `all_verifications_passed` / `advanced` も true のままである
+（barrier が測っているのは completion と verification であって、report が何を示せるかではない）。
+停止は barrier の**外側**に置いた: 既存の停止ランキング（prompt → exit 99 → wall-clock → …）を
+1行も動かさず、その後ろに1つ足してある。**wave が失敗した run では worker 側の原因が先に採られ、
+昇格した reason は `blocking_reasons[]` に残る**（`recordVerification` が起きた時点で書くため、
+ランキングで負けても消えない）。
+
+### 17.3 `human_required` は false（第6.2節の表に足していない）
+
+昇格した停止は **`human_required` を true にしない。** この field が意味するのは
+「**再実行では解けない**」であり（第6.1節）、`GATE` 行を出す CommandMate で回せば解ける。
+`contract_unsupported` と同じ扱いで、CI が読むべき signal も「再実行に意味がある」である。
+
+### 17.4 uat の cwd 検査は `--expect-branch` を要求する（ADR に無いフラグ）
+
+第8節・第14.3節は「HEAD が**期待する integration branch**と一致すること」と書いているが、
+**その branch の出どころを書いていない。** plan には無い —— `profile.base` は **base** であり、
+fix を base に入れることこそこの検査が防ぐ事故である。したがって
+`uat.mjs` に **`--expect-branch <name>` を足し、`--unattended --create-uat-fix-worktrees` では必須**にした
+（欠ければ `invalid_input` / exit 3）。名前も意味も dispatch の同名フラグ（drift check
+`branch_matches`）と同一で、「dispatch が既に持っている形をそのまま置く」という第14.3節の指示に
+沿っている。
+
+検査は `git symbolic-ref -q HEAD` 1回だけで両方を答える: 出力が空なら detached
+（`unattended_cwd_detached`）、`refs/heads/` を剥いだ名前が `--expect-branch` と違えば
+`unattended_cwd_branch_mismatch`。`rev-parse --abbrev-ref HEAD` を使わなかったのは、
+detached のとき文字列 `"HEAD"` を返すため、**magic value との比較**になるからである。
+
+### 17.5 cwd 検査は `fix_uat` だけに掛ける（ADR が phase を名指ししていた点の実装）
+
+第8節の段階表は `uat.mjs --create-uat-fix-worktrees` と phase を名指ししている。実装では
+**`--unattended` は runner として両 phase で受理し、cwd 検査だけを `fix_uat` に掛けた。**
+
+- `--write-uat` は read-only である。worktree を作らず、fix worker を送らず、**再merge をしない**ので、
+  守るべき cwd が無い。そこで止めるゲートは**何も安全にしないまま run を拒否する**。
+- 一方、含意する2つの明示（`--require-acceptance` / `--max-attempts`）は両 phase に掛けた。
+  これは「裁定が何を意味するか」の問題であり、phase に依らない —— 意味ゲート無しの
+  `--write-uat --unattended` も、baseline 再実行を「受入を確認した」と報告する run である。
+
+### 17.6 `acceptance_not_run` は「起こさない」を実装が構造的に保証する
+
+第6.5節の3行目は昇格ではなく「起こさない」である。実装は**専用のコードを1行も書いていない**:
+`--unattended` が `--require-acceptance` を必須にした帰結として、劣化した acceptance document は
+`composeVerdict` で **fail**（`verdict_source: acceptance_required`）になり、
+`acceptance_not_run` を積む `acceptanceDegraded()` が真になる経路が消える。
+fixture は「同じ世界をフラグ無しで読むと limitation が出る」ことと対にして固定している
+（消えたことと、そもそも起きなかったことを区別できない測り方をしない）。
+
+### 17.7 受入条件の検査は plan だけを読み、id の実在は問わない（第9節 条件2 の実装形）
+
+第9節 条件2 は「受入ゲートブロックを持つことを要求する」とだけ書いている。実装は
+**plan の `issues[].acceptance_gates.require`（空・欠落なら `acceptance_gates_required`）と
+`issues[].acceptance_criteria`（空なら planner と同じ code `no_acceptance_criteria`）** の2つを読む。
+**ゲート id が worktree の `verify.yaml` に実在するかは問わない** —— それは worktree を保持している
+dispatch の問い（`acceptance_gate_id_unknown`。第6.6節）であり、merge 段で再判定すると、
+merge 済みで既に消えているかもしれない worktree について**二番目に悪い意見**を出すことになる。
+
+**停止であって除外ではない**ことは fixture の中心に置いた: 条件を満たす Issue も merge されない
+ことを assert している。除外実装は「条件を満たす方だけ merge して success」を返すので、
+停止の assert だけでは区別できない（変異注入で実測した）。
+
+### 17.8 `--create-prs` には掛けていない（段階 B の意味を後から変えない）
+
+段階 B の締め付けリストは1件（`change_evidence_unavailable`）であり、そのままにした。
+同じ受入条件検査を `--create-prs` にも掛けると、**既に出荷した段階 B の意味が後から変わる**。
+PR は人間が読む場所であり、そこに「受入条件が書かれていない Issue の PR」が立つことは
+第9節が明示的に「害ではなく本来の姿」と裁定している。fixture は両方向に固定してある
+（block を持たない plan が `--create-prs --unattended` では PR まで到達すること）。
+
+### 17.9 `preflight[]` には載せていない（schema を上げないことの帰結）
+
+merge / uat の `preflight[]` は `code` が閉じた enum（`cli_available` / `repo_access` /
+`base_resolvable`）である。段階 C の2つの検査（受入条件・cwd）はどちらも pre-flight の性質を持つが、
+**schema version を上げない**という制約が優先するので、`preflight[]` には行を足さず、
+`stop_reason: preflight_failed` ＋ `blocking_reasons[].code` で表している。
+`report.preflight` の3行が ok のまま `stop_reason: preflight_failed` になる report はこの経路である。
+
+### 17.10 status runner の hint は追随させた（第16.6節の欠落を閉じた）
+
+第16.6節が「次に status を触る Issue で表の行をそのまま写すこと」と残した
+merge `change_evidence_unavailable` を `NEXT_ACTION_HINTS` に写し、段階 C の3 code
+（`acceptance_gates_required` / `unattended_cwd_detached` / `unattended_cwd_branch_mismatch`）も
+併せて足した。`no_acceptance_criteria` は planner の code をそのまま再利用しているので、
+**hint は既に在るものがそのまま引かれる**（同じ対処だからこそ同じ code にした）。
+
+### 17.11 version は上げていない（第15.8節・第16.7節と同じ理由）
+
+#142 の受入条件は minor bump（`commandmate.skill.yaml` と `scripts/lib.mjs` の**両方**）を求めて
 いるが、**本 Issue の実行契約は `scripts/lib.mjs` を変更対象に含めておらず、`version:` 行の変更も
 禁じている**ため、bump は行っていない。**リリース時に両方を同一 commit で上げること。**

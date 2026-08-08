@@ -74,7 +74,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | `worktree_sync_rescanned` | dispatch | 準備段のため `commandmate sync` を2回実行した（解決時の1回＋作成後の強制1回） |
 | `worker_method_declared` | dispatch | `--worker-method <id>` 付きの run である。**run 全体で1件。** 停止した run にも残る（何を前提にした run だったかが読めるように） |
 | `worker_method_applied` | dispatch | その Issue の worktree に skill が在り、task text に `## Method` 節を書いた。**Issue ごとに1件。** 「適用された」であって「守られた」ではない |
-| `unattended_mode` | dispatch | `--unattended` 付きの run である。**run 全体で1件。** 停止した run にも残る。含意した締め付け（contract require / pre-flight の scope 検査 / wall-clock budget / worktree lock）と拒否する緩和フラグを detail に記録する |
+| `unattended_mode` | dispatch / merge / uat | `--unattended` 付きの run である。**run 全体で1件。** 停止した run にも残る。**その runner・その phase が含意した締め付け**を detail に記録する（dispatch: contract require / pre-flight の scope 検査 / wall-clock budget / worktree lock / 裁定根拠の要求。merge `--create-prs`: 変更証拠の要求。merge `--merge-prs`: 受入ゲートブロックと受入条件の要求。uat: 意味ゲートと上限の明示＋再merge 先の pre-flight） |
 | `unattended_baseline` | dispatch | その Issue の worktree が dispatch 開始時どこに居たか（**branch 名と短縮 SHA**。絶対 path は書かない）。**Issue ごとに1件。** 取り消しの起点であり、**担保するのは worktree branch の1段だけ**である（本書第5節） |
 | `verification_unrecorded` | dispatch | completed した worker に裁定が1つも記録されなかった（runner 側の欠陥。`verification_recorded` completion check も落ちる） |
 | `verification_gates_unrecorded` | dispatch | verification は pass だが `GATE` 行を読めず、pass の根拠となった gate を report が名指しできない |
@@ -132,6 +132,10 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | uat `acceptance_conditional` | 受入判定が `conditional_go` | **条件を読んで人間が判断する。** 自動修正の対象ではない |
 | uat `blocked` / `max_attempts_reached` | 上限まで直しても不合格 | `unresolved_issues` と `next_actions` を読む。**success に丸めない** |
 | uat `acceptance_not_run` | 意味ゲートを掛けずに baseline だけで裁定した | cmate-acceptance-test を入れて result を用意し、必要なら `--require-acceptance` で必須にする |
+| dispatch `verification_gates_unrecorded`（**`--unattended` では blocking**。`stop_reason: dispatch_error` / `partial`） | 契約 pass なのに `GATE <id> PASS\|FAIL` 行を1本も読めず、**pass の根拠を report が名指しできない**。裁定（exit code）は pass のままで、次の wave を dispatch せずに停止した | **`GATE` 行を出す CommandMate で再実行して根拠を残す。** 人間が読む運転に戻すなら `--unattended` を外せば従来どおり limitation として続行する。**根拠の無い pass の上に無人 merge を積まない** |
+| merge `change_evidence_unavailable`（**`--unattended --create-prs` では blocking**。`stop_reason: pr_create_failed` / `partial`） | branch の実変更を読めず、宣言 scope と対比できない。PR は**開いていない**（本文も書いていない） | 対象 Issue の worktree を復旧して `git diff <base>...<branch>` が答える状態にしてから再実行する。**「読めなかった」を「scope 内だった」と読ませない** |
+| merge `acceptance_gates_required` / `no_acceptance_criteria`（**`--unattended --merge-prs`**。`stop_reason: preflight_failed` / `failure`） | 無人 merge の対象 Issue に**受入ゲートブロック（```acceptance-gates）／受入条件が無い**。**1つも merge していない**（条件を満たす Issue も含めて） | **Issue 本文に書いて re-plan する。** 該当 Issue だけを除外して回す道は用意していない（対象集合を黙って縮めないため）。人間が読む運転に戻すなら `--unattended` を外す |
+| uat `unattended_cwd_detached` / `unattended_cwd_branch_mismatch`（**`--unattended --create-uat-fix-worktrees`**。`stop_reason: preflight_failed` / `failure`） | 再merge（`git merge --no-ff`）は **invocation cwd の branch** に入るのに、cwd が detached HEAD だった／`--expect-branch` と違う branch だった。**fix worktree を1つも作らず、fix worker を1人も送らず、再merge を1度もしていない** | **invocation cwd を `--expect-branch` の integration branch に checkout してから**再実行する。detached のままだと「merged」と報告されながら成果がどの branch にも残らず、base branch のままだと review を経ずに入る（[#115](https://github.com/Kewton/commandmate-skills/issues/115) の実測） |
 
 
 ## 5. 無人 run を取り消す（`unattended_baseline` の読み方）

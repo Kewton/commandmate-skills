@@ -123,6 +123,54 @@ const DEFAULT_POLL_LIMIT = 120;
 const DEFAULT_MAX_TURNS = 8;
 
 // =============================================================================
+// Unattended — the declaration that nobody is watching this invocation
+// (Issue #142 / references/adr-unattended-mode.md sections 2, 6.5, 8, 14.3)
+// =============================================================================
+//
+// `--unattended` is an INPUT DECLARATION, not a permission (ADR "裁定 0"). It
+// disables no gate, downgrades no blocking reason to a limitation and raises no
+// status by one step; in particular it does NOT imply `--approve`, so an
+// unattended fix loop that is meant to repair anything writes both flags.
+//
+// Stage C (Issue #142) is what lets this runner see the flag at all. It implies
+// two things and checks a third:
+//
+//  1. `--require-acceptance` and `--max-attempts` must be stated EXPLICITLY
+//     (ADR section 8). Without the semantic gate an unattended UAT run is a
+//     re-run of the profile baseline the dispatch runner already passed — it
+//     cannot claim "the acceptance conditions were confirmed", only "the same
+//     commands exited zero again". That is also why `acceptance_not_run` is
+//     NOT promoted to blocking (ADR section 6.5, third row): it is made
+//     impossible instead. A degraded acceptance document is a FAILURE under
+//     `--require-acceptance`, so the limitation has nothing to record.
+//     `--max-attempts` is explicit for the reason `--wall-clock-budget` is in
+//     dispatch (section 15.2): a bound nobody typed is a default, and a default
+//     is not a decision anyone made about this run.
+//
+//  2. The invocation cwd is checked BEFORE a single fix worktree is created
+//     (ADR section 14.3, measured in Issue #115). The re-merge below is
+//     `git merge --no-ff --no-edit <fix-branch>` with NO cwd argument, so the
+//     fix lands on whatever branch the invoking process has checked out:
+//       - a CI sitting on `main` gets the UAT fix merged into `main` with no PR,
+//         no CI and no review — irreversible once that `main` is pushed;
+//       - a detached HEAD produces a merge commit no branch can reach, while
+//         `merged.ok` is true and this runner reports `outcome: merged` — a
+//         silent false success no stop in section 6.4 catches.
+//     Both are refused here, in the shape dispatch's `branch_matches` drift check
+//     already has, and with the existing `preflight_failed` vocabulary: no new
+//     stop_reason value, and `blocking_reasons[].code` names which of the two it
+//     was. `--expect-branch` is what the second check compares against; it is
+//     required under `--unattended --create-uat-fix-worktrees` because there is
+//     nothing else in the plan that names the integration branch (`profile.base`
+//     is the BASE, and merging a fix into the base is the very accident this
+//     check exists to prevent).
+//
+// `--write-uat` is read-only — no worktree, no fix, no re-merge — so the cwd
+// check does not apply to it. The two implied flags do: they are about what the
+// adjudication MEANS, and that is the same question in both phases.
+const UNATTENDED_STAGE = 'C（dispatch + merge + uat）';
+
+// =============================================================================
 // Redaction (SkillError, the pattern list and redact/redactionsList are shared
 // with the dispatch and merge runners in lib.mjs)
 // =============================================================================
@@ -177,6 +225,17 @@ Options:
   --require-acceptance   A missing, non-conformant or wrong-issue acceptance result
                          is a FAILURE instead of a recorded limitation. Needs
                          --acceptance-dir.
+  --unattended           Declare that NO HUMAN is watching this invocation (CI /
+                         cron). It grants nothing: it does NOT imply --approve and
+                         it disables no gate. What it adds is tightening — it
+                         requires --require-acceptance and --max-attempts to be
+                         stated explicitly, and (with
+                         --create-uat-fix-worktrees) it refuses to create a single
+                         fix worktree unless HEAD is attached and on
+                         --expect-branch, because the re-merge lands on the
+                         invocation cwd's current branch.
+  --expect-branch <name> Integration branch this run's re-merge must land on.
+                         Required with --unattended --create-uat-fix-worktrees.
   --out <dir>            Where UAT artifacts are written (default: <dispatch-dir>/<phase>).
   --cli <launcher>       The CommandMate launcher to drive: an executable plus
                          fixed leading arguments, split on whitespace and run
@@ -210,6 +269,8 @@ function parseCli(argv) {
         'max-attempts': { type: 'string' },
         'acceptance-dir': { type: 'string' },
         'require-acceptance': { type: 'boolean' },
+        unattended: { type: 'boolean' },
+        'expect-branch': { type: 'string' },
         out: { type: 'string' },
         cli: { type: 'string' },
         git: { type: 'string' },
@@ -263,6 +324,39 @@ function resolveInputs(parsed) {
     throw new SkillError('invalid_input', '--require-acceptance needs --acceptance-dir <dir>: there is nowhere to read an acceptance result from', 3);
   }
 
+  // Stage C's implied flags (Issue #142 / ADR section 8). Refused rather than
+  // silently supplied: `--unattended` implying a flag it then fills in for the
+  // operator would make the report say a bound was chosen when nobody chose it —
+  // the same reasoning dispatch applies to `--wall-clock-budget` (section 15.2).
+  if (values.unattended) {
+    if (!values['require-acceptance']) {
+      throw new SkillError(
+        'invalid_input',
+        '--unattended requires --require-acceptance (with --acceptance-dir): without the semantic gate an unattended UAT run is a re-run of the '
+          + 'profile baseline that dispatch already passed, so it cannot claim the acceptance conditions were confirmed — only that the same commands '
+          + 'exited zero again',
+        3,
+      );
+    }
+    if (values['max-attempts'] === undefined) {
+      throw new SkillError(
+        'invalid_input',
+        `--unattended requires --max-attempts <1-${MAX_ATTEMPTS_CEILING}>: the fix loop is bounded either way, but a bound nobody typed is a default, `
+          + 'and how many times a repair may be attempted with no human present is a decision this run has to state',
+        3,
+      );
+    }
+    if (phases[0] === 'fix_uat' && !values['expect-branch']) {
+      throw new SkillError(
+        'invalid_input',
+        '--unattended --create-uat-fix-worktrees requires --expect-branch <name>: the re-merge runs `git merge --no-ff` with no cwd argument, so it '
+          + 'lands on whatever branch this process has checked out. Naming the integration branch is what lets the pre-flight refuse a run started on '
+          + 'the base branch or on a detached HEAD (references/adr-unattended-mode.md section 14.3)',
+        3,
+      );
+    }
+  }
+
   // Resolved exactly as dispatch.mjs resolves it — one launcher convention for
   // the whole toolchain, and never a program name with a space in it (Issue #37).
   const cliArgv = resolveLauncher(values.cli);
@@ -275,6 +369,8 @@ function resolveInputs(parsed) {
     maxAttempts: positiveInt(values['max-attempts'], 'max-attempts', DEFAULT_MAX_ATTEMPTS, MAX_ATTEMPTS_CEILING),
     acceptanceDir: values['acceptance-dir'] ?? null,
     requireAcceptance: Boolean(values['require-acceptance']),
+    unattended: Boolean(values.unattended),
+    expectBranch: values['expect-branch'] ?? null,
     outDir: values.out ?? null,
     cliArgv,
     cli: cliArgv.join(' '),
@@ -622,6 +718,70 @@ function preflight(inputs, plan) {
   add('base_resolvable', base.ok, base.ok ? `base ${plan.profile.base} resolves` : `base ${plan.profile.base} no longer resolves`);
 
   return checks;
+}
+
+// The stage-C cwd pre-flight (Issue #142 / ADR section 14.3, measured in #115).
+//
+// Reported through `blocking_reasons` rather than as two more `preflight[]`
+// rows because that array's `code` is a closed enum in uat-report.v1 and the
+// schema version is not being bumped for this (ADR section 11): the stop_reason
+// stays `preflight_failed`, and WHICH check failed is named by the reason code.
+//
+// `git symbolic-ref -q HEAD` is the detached-HEAD probe rather than `rev-parse
+// --abbrev-ref HEAD`, which answers the literal string "HEAD" when detached and
+// would therefore have to be compared against a magic value. `-q` makes a
+// detached HEAD an exit-1-with-no-output instead of an error message, so
+// "detached" and "git is broken" are told apart by the presence of output.
+//
+// Returns [] when the cwd is safe to re-merge into.
+function unattendedCwdReasons(inputs) {
+  const head = runCli(inputs.git, ['symbolic-ref', '-q', 'HEAD']);
+  const ref = head.ok ? head.stdout.trim() : '';
+  if (ref === '') {
+    return [{
+      code: 'unattended_cwd_detached',
+      detail: 'the invocation cwd is on a detached HEAD (`git symbolic-ref -q HEAD` named no branch). The fix re-merge is `git merge --no-ff` with no cwd '
+        + 'argument, so it would build a merge commit no branch can reach while still exiting 0 — this runner would report `outcome: merged` for work that '
+        + 'survives nowhere (measured in Issue #115). No fix worktree was created. Check out the integration branch and re-run',
+    }];
+  }
+  const branch = ref.replace(/^refs\/heads\//, '');
+  if (branch !== inputs.expectBranch) {
+    return [{
+      code: 'unattended_cwd_branch_mismatch',
+      detail: `the invocation cwd is on "${redact(branch)}", but --expect-branch names ${redact(String(inputs.expectBranch))}. The fix re-merge is `
+        + '`git merge --no-ff` with no cwd argument, so the fix would land on the checked-out branch instead: a CI sitting on the base branch would take a '
+        + 'UAT fix into it with no PR, no CI and no review, and that is irreversible once pushed (measured in Issue #115). No fix worktree was created',
+    }];
+  }
+  return [];
+}
+
+// The run-wide declaration (mirrors the dispatch and merge runners' entry of the
+// same code). One entry in EVERY unattended report, including the ones that
+// stopped in the pre-flight, so what the run declared — and what that
+// declaration implied — is readable from the report alone.
+//
+// Deliberately free of absolute paths: `redact()` would replace them with
+// `[REDACTED-PATH]` and would tally a redaction a run without the flag does not
+// have, so the "an unattended run differs only by this limitation" property
+// would stop being true.
+const UNATTENDED_MODE_CODE = 'unattended_mode';
+
+function unattendedModeLimitation(inputs) {
+  const cwdClause = inputs.phase === 'fix_uat'
+    ? `再merge 先の pre-flight: HEAD が detached でないこと・HEAD が ${inputs.expectBranch} であること`
+      + '（外れていれば fix worktree を1つも作らずに停止する。`git merge --no-ff` は cwd 指定を持たない）'
+    : '再merge 先の pre-flight は不要（--write-uat は read-only で worktree も再merge も作らない）';
+  return {
+    code: UNATTENDED_MODE_CODE,
+    detail: `--unattended（段階 ${UNATTENDED_STAGE}）: この invocation に人間は居ない、という入力の宣言である。`
+      + '締め付けだけを含意し、権限は1つも足していない — **`--approve` は含意しない**、'
+      + 'ゲートを無効化せず、blocking を limitation に格下げせず、status を1段も上げない。'
+      + `含意した締め付け: --require-acceptance と --max-attempts ${inputs.maxAttempts} の明示 / ${cwdClause}。`
+      + '意味ゲート必須の帰結として `acceptance_not_run` は起こらない（昇格ではなく、起こさない）。'
+      + '`GH_TOKEN` と `GIT_TERMINAL_PROMPT=0` は job 定義側で置くこと（runner は検査しない）。',
+  };
 }
 
 // =============================================================================
@@ -1326,6 +1486,17 @@ function renderSummary(report) {
   lines.push('## preflight');
   for (const c of report.preflight) lines.push(`- ${c.code}: ${c.ok ? 'ok' : 'NG'}`);
   lines.push('');
+  // The unattended section (Issue #142). Printed only when the operator opted in,
+  // so a run without `--unattended` reads exactly as it did before the flag
+  // existed.
+  const unattendedDeclared = report.limitations.find((entry) => entry.code === UNATTENDED_MODE_CODE);
+  if (unattendedDeclared) {
+    lines.push('## 無人運転（unattended）');
+    lines.push(`- 宣言: ${unattendedDeclared.detail}`);
+    lines.push('- **`--unattended` は mutation の許可ではない。** 無人で修正ループを回す CI は `--approve` を別に書く。');
+    lines.push('- **再merge は cwd の branch に入る。** `git merge --no-ff` は cwd 指定を持たないので、invocation cwd を integration branch に置くこと（pre-flight で検査している）。');
+    lines.push('');
+  }
   lines.push('## 未解決と next action');
   // A limitation alone is enough to break the "nothing to report" case: a run that
   // lost its acceptance gate must not read as a clean pass in the human summary.
@@ -1347,6 +1518,9 @@ function renderSummary(report) {
 function runUatPhase(inputs, plan, dispatch, outDir) {
   const eligible = eligibleIssues(plan, dispatch);
   const report = baseReport(inputs, plan, eligible, outDir);
+  // Recorded before anything else so it survives every early return below: a run
+  // that stopped in the pre-flight still says what it had declared.
+  if (inputs.unattended) report.limitations.push(unattendedModeLimitation(inputs));
 
   // Read-only preflight before any mutation.
   report.preflight = preflight(inputs, plan);
@@ -1356,6 +1530,24 @@ function runUatPhase(inputs, plan, dispatch, outDir) {
     report.next_actions.push({ action: 'restore commandmate availability, repo access and base resolution, then re-run', owner: 'operator' });
     finalize(report, inputs);
     return report;
+  }
+
+  // Stage C (Issue #142 / ADR section 14.3). Placed here — after the CLI/repo/base
+  // probes and before EVERYTHING else — because it is the last read-only question
+  // and the first one whose answer decides whether a mutation may be prepared at
+  // all. A `fix_uat` run that stops here has created no fix worktree, sent no fix
+  // worker and re-merged nothing.
+  if (inputs.unattended && inputs.phase === 'fix_uat') {
+    const cwdReasons = unattendedCwdReasons(inputs);
+    if (cwdReasons.length > 0) {
+      for (const reason of cwdReasons) halt(report, 'failure', 'preflight_failed', reason.code, reason.detail);
+      report.next_actions.push({
+        action: `check out ${inputs.expectBranch} in the directory this runner is invoked from (an attached HEAD on the integration branch), then re-run`,
+        owner: 'operator',
+      });
+      finalize(report, inputs);
+      return report;
+    }
   }
 
   if (eligible.length === 0) {
