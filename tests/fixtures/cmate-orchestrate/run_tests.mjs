@@ -2918,16 +2918,27 @@ function unattendedInputTest() {
     `--unattended --contract-mode require should dispatch (it states the implied mode), exited ${accepted.exit}: ${accepted.stdout.slice(0, 300)}`);
 
   // Stage C reaches every runner (ADR §8; Issue #142), so the row that used to
-  // assert "uat.mjs refuses --unattended outright" now asserts the two things
-  // that flag IMPLIES there. Both are refusals of an under-specified invocation,
+  // assert "uat.mjs refuses --unattended outright" now asserts the three things
+  // that flag IMPLIES there. All are refusals of an under-specified invocation,
   // not of the flag: `--unattended` without the semantic gate is a baseline
-  // re-run calling itself an acceptance run, and without an explicit
-  // `--max-attempts` it is a bound nobody chose.
-  for (const [label, args, needle] of [
-    ['uat --unattended with no --require-acceptance', ['--unattended'], 'requires --require-acceptance'],
-    ['uat --unattended with no --max-attempts', ['--unattended', '--acceptance-dir', work, '--require-acceptance'], 'requires --max-attempts'],
+  // re-run calling itself an acceptance run, without an explicit
+  // `--max-attempts` it is a bound nobody chose, and without `--expect-branch`
+  // the cwd pre-flight has nothing to compare HEAD against.
+  //
+  // The third row is a `fix_uat` invocation because that is the only phase the
+  // requirement applies to (`--write-uat` is read-only and re-merges nothing).
+  // It is pinned as its own row rather than left to the pre-flight: with the
+  // refusal removed the run still stops, but on `preflight_failed` naming
+  // `--expect-branch names null` instead of saying which flag is missing —
+  // safe, and unactionable. Mutation-measured: without this row, deleting the
+  // refusal keeps the whole suite green.
+  for (const [label, phase, args, needle] of [
+    ['uat --unattended with no --require-acceptance', '--write-uat', ['--unattended'], 'requires --require-acceptance'],
+    ['uat --unattended with no --max-attempts', '--write-uat', ['--unattended', '--acceptance-dir', work, '--require-acceptance'], 'requires --max-attempts'],
+    ['uat --unattended --create-uat-fix-worktrees with no --expect-branch', '--create-uat-fix-worktrees',
+      ['--unattended', '--acceptance-dir', work, '--require-acceptance', '--max-attempts', '1'], 'requires --expect-branch'],
   ]) {
-    const refused = runUatRunner(planPath, '/dev/null', join(work, 'uat'), '--write-uat', args, baseEnv(), work);
+    const refused = runUatRunner(planPath, '/dev/null', join(work, 'uat'), phase, args, baseEnv(), work);
     check(refused.exit === 3, `${label}: expected exit 3, got ${refused.exit}`);
     let doc = null;
     try { doc = JSON.parse(refused.stdout); } catch { /* a refused invocation still prints a failure envelope */ }
