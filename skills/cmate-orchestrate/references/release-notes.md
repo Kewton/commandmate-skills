@@ -460,6 +460,58 @@ fence 抽出の干渉は**実在した** ／ `GATE` 行に由来は出ない）�
 [../schemas/execution-plan.v2.json](../schemas/execution-plan.v2.json) を新設し v1 は残した。
 fixture の検査は **plan が申告した版**の schema で行う。
 
+### #128 — 方法論を渡す口が無く、ワーカーの流儀が run ごとに変わっていた
+
+`buildContractGoal()` がワーカーへ渡すのは WHAT（目的・受入条件・変更してよいファイル）と制約
+だけで、**HOW（調査・計画・実装の作法）を渡す経路が無かった**。CommandMate リポジトリ内では
+スラッシュコマンドがその穴を埋めていたが、**スラッシュコマンドはリポジトリスコープ**であり、
+外部リポジトリのワーカーには届かない（`Unknown command` で無反応になる。`send` は exit 0 を
+返し composer も空なので気づけない）。
+
+→ `--worker-method <skill-id>` を足した。pre-flight で install を実測し、`## Method` 節を
+**契約 goal と worker prompt の両方**に置く（片方だけだと `--contract-mode auto` の
+フォールバックで方法論が黙って消える）。既定は off で、**指定しない run は 1 bit も変わらない**
+（`d45-worker-method-absent-non-regression` が golden contract の byte 一致で固定している）。
+
+install の判定は **`.claude/skills/<id>/` と `.agents/skills/<id>/` の両方**を要求する。
+理由は臆病さではなく**測定できないこと**である: dispatch は `send --agent` を一度も渡さず、
+`ls --json` の row も id / branch / path しか持たないので、**どの Agent がこのタスクを取るかを
+知らない**。片側を許すと、Codex が読む root に無い契約に「この worktree の Skill を読め」と
+書くことになり、それは dispatch が測れない主張になる。開発機の `cmate-*` install 45 件は
+すべて両置きだった（実測）。
+
+**schema は触っていない。** merge / uat は report から `worker_state` と `verification.outcome` の
+2 field しか読まないので、方法論の事実はそのどちらでもない。`limitations[].code`
+（`worker_method_declared` / `worker_method_applied`）と `blocking_reasons[]`
+（`worker_method_unavailable`）で運ぶ。方法論の正本は別 package
+`cmate-worker-development` にある。
+
+### #121 — timeout 起点の resume が、コードでしか保証されていなかった
+
+`wait --verify` が timeout すると裁定が report に凍結され、その後 worker が完走して commit しても
+report は更新されず、`merge.mjs` の eligible から外れる（#89 の報告）。0.18.0 の `--resume` は
+この回復経路を与えている —— `isCarryable()` は `completed` かつ `verification.outcome === 'pass'`
+だけを引き継ぐので、`timeout` は再実行対象になる。
+
+**しかしそれはコードを読めば分かるだけで、fixture では固定されていなかった。** 既存の resume
+ケースの起点はすべて `verification.outcome: "fail"` であって `worker_state: "timeout"` ではなく、
+**`isCarryable` を将来だれかが緩めても suite は赤にならなかった。**
+
+→ `r06-timeout-resumed` を足した。緩める変異（outcome の検査ごと外して timeout を carryable に
+する）を当てると、#102 が「引き継ぎ」に化けて再 dispatch されなくなり、r01 と併せて 25 assertion が
+赤になる。**#89 の再発形がそのまま出る。**
+
+### #121 の続き — `--reverify` で、送らずに裁定を更新する
+
+`--resume` は回復経路を与えたが**再 dispatch する**。#89 の状況では作業は既に終わって
+commit されているので、必要なのは worker をもう一度走らせることではなく、
+**その worktree の現在の状態をもう一度ゲートにかけること**である。現状は worker のターンを
+1つ消費し、契約を再送するので worker が余計な差分を加える余地も残っていた。
+
+→ `--reverify` を足した。**`send` を1回も呼ばない**（`r07` / `r08` が attempt 2 の
+`sent: []` で固定している）。裁定の取得には既存の `commandmate verify <id> --json` を使い、
+**新しい CLI 表面を要求していない**。
+
 ## merge（`scripts/merge.mjs`）
 
 ### #97 — PR 本文が「検証した」と言うだけで、何を通ったのかは JSON の中だった
@@ -625,6 +677,19 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 ---
 
 ## パッケージ
+
+### 0.20.0 — 方法を渡す口・無人運転・送らない再裁定（#121 / #122 / #128）
+
+ワーカーへ **HOW（開発の方法）を渡す口**が入った（#128）。方法論の正本は別 package
+`cmate-worker-development` にあり、dispatch は `--worker-method` でそれを名指しするだけである。
+
+無人運転は段階A が入った（#122）。**`--unattended` が含意するのは締め付けだけ**で、
+どのゲートも無効化せず `--approve` も含意しない。#115 の実測が ADR を4点訂正しており、
+その訂正どおりに実装してある —— **`gh` にコードの停止は足していない**（前提が逆だった。
+必要なのは `GIT_TERMINAL_PROMPT=0` という job 定義側の環境変数である）。
+
+`--reverify` で **送らずに裁定を更新できる**ようになり、#89 が報告した「timeout で凍結された
+裁定のせいで検証済み成果物が納品経路から外れる」は、回復経路つきで閉じた（#121）。
 
 ### 0.19.0 — 受入条件の機械ゲート化と、無人運転の前提の訂正（#103 / #114 / #115 / #118）
 
