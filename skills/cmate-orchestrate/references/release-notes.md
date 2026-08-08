@@ -512,7 +512,44 @@ commit されているので、必要なのは worker をもう一度走らせ�
 `sent: []` で固定している）。裁定の取得には既存の `commandmate verify <id> --json` を使い、
 **新しい CLI 表面を要求していない**。
 
+### #136 — `--auto-yes` を付けても Claude の許可プロンプトで止まっていた
+
+`dispatch.mjs --auto-yes` を指定しても、ワーカーが `Do you want to make this edit to X?` で止まる。
+**worktree のトグルを手で on にしても効かない。** 原因は2つあり、**両方直さないと動かなかった**。
+
+**(1) 契約の `mode: safe` は `yes_no` しか許さない。** CommandMate の `auto-yes-resolver` は
+`mode: 'safe'` のとき `promptType === 'yes_no'` 以外を `type-not-allowed` で抑止する。
+Claude の許可プロンプトは **`multiple_choice`** なので必ず弾かれる。
+**判定しているのは契約のポリシーであって worktree のトグルではない。**
+しかもこの runner は `off` か `safe` の2択しか書かず、契約 v1 の既定である
+`mode: null`（ポリシー制約なし）を選べなかった —— **`safe` はブロックを書かないより厳しい。**
+
+**(2) `send` に `--auto-yes` が渡っていなかった。** サーバーの Auto-Yes poller は worktree の
+auto-yes 状態が有効でなければ起動しない（`auto-yes not enabled`）。契約に何を書いても、
+poller が回らなければ抑止の記録すら残らない（[#115](https://github.com/Kewton/commandmate-skills/issues/115) の第14.6節と同じ構造）。
+
+→ `--auto-yes` のとき契約は **`mode: allow-listed` ＋ `allowPromptTypes: [yes_no, multiple_choice]`**
+を書き、`send` にも `--auto-yes --duration <算出値>` を渡す。duration は
+`--wait-timeout × --max-turns × wave 数`から出す（推測しない）。
+**autoYes ブロックを書かない案は却下した** —— この runner が `mode: off` を書くのは
+「積極的な禁止」と「省略」が別物だからで、**許可についても同じ理屈が当てはまる**。
+`denyPatterns` は空のまま（CommandMate #1699 の scrollback 汚染を避ける）。
+
 ## merge（`scripts/merge.mjs`）
+
+### #134 — 無人運転の段階 B（`merge --create-prs`）
+
+`--unattended` を `merge.mjs` が受理する。**含意する締め付けは1つだけである:
+`change_evidence_unavailable` を limitation ではなく blocking として扱う。** PR 本文に実変更を
+載せられなかったという事実は、人間が読む運転なら読み手が branch を開いて補える劣化だが、
+無人では**証拠の無い PR が黙って作られる**ことになるので、その Issue の PR を作らずに停止する。
+フラグ無しでは従来どおり limitation で続行する（fixture で二点測定）。
+
+**`--approve` を含意しない**（無人で PR を作る CI は両方書く）。**`--merge-prs` との併用は
+`invalid_input` で拒否する**（段階 C 未実装。受理して無視すると CI は自分が守られていると誤解する）。
+`gh` 由来の停止はコードに足していない —— 実測（#115 第14.5節）どおり
+`GH_TOKEN` と `GIT_TERMINAL_PROMPT=0` は job 定義側の話である。
+
 
 ### #97 — PR 本文が「検証した」と言うだけで、何を通ったのかは JSON の中だった
 
@@ -677,6 +714,15 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 ---
 
 ## パッケージ
+
+### 0.21.0 — パレット復帰・無人運転の段階 B・`--auto-yes` の実効化（#134 / #135 / #136）
+
+**0.20.0 はパレットに出なかった。** `SKILL.md` が 71,383 bytes となり CommandMate の
+64KB 上限を超えて、ローダーが黙って読み飛ばしていた（#135）。0.14.0 の方針へ戻して
+`references/` へ移送し、`validate.py` に**リリース前に止まるサイズガード**を足した。
+
+無人運転は段階 B（`merge --create-prs`）まで来た（#134）。`--auto-yes` は
+**指定しても効いていなかった**ものが実際に効くようになった（#136）。
 
 ### #135 — SKILL.md が 64KB を超え、スラッシュコマンドパレットから消えた
 
