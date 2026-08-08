@@ -1,0 +1,100 @@
+schema_version: 1
+id: cmate-worker-development
+name: cmate-worker-development
+version: 0.1.0
+summary: Issue や実行契約を受け取ったワーカーが、読取・調査・計画・実装・検証・証拠の6段で作業を進めるための方法。権限は足さない。
+description: |-
+  ワーカーへ渡る Issue や実行契約は WHAT（目的・受入条件・境界）と制約だけを伝え、HOW を伝えていない。この Skill はその HOW を、リポジトリにもスラッシュコマンドにも依存しない形で埋める手順である。
+  足すのは「方法」であって「権限」ではない。ゲートを緩めず、scope.allow を広げず、push / PR 作成 / merge を持たず、契約と食い違ったら契約を優先する。install しただけでは何も起きない。
+  A 読取 / B 調査 / C 計画 / D 実装 / E 検証 / F 証拠 の6段で進む。B は cmate-repository-analysis へ、E は cmate-verify へ委譲し、手順を再実装しない。委譲先が未 install でも停止はせず、劣化したことを成果物に明記して続行する。
+  検証は出力の grep ではなく実 exit code で読み、追加したゲートは成果物側へ変異を入れて赤になることまで実測する（二点測定）。機械ゲートで担保されない受入条件は消さず「ゲート外」として残す。
+  作業規律 8 項目は references/work-discipline.md が正本で、各項目に破ったとき何が起きるかと実測根拠がある。証拠の語彙は references/evidence-vocabulary.md が正本で、PR 本文の既存語彙のミラーである。
+capabilities:
+  - 実行契約または Issue から、目的・受入条件・境界・完了条件のコマンド・禁止事項の5つを言い換えずに書き出す
+  - 着手前に clean な base でベースラインを実測し、「元から赤だった」を自己申告にしない
+  - 調査を cmate-repository-analysis へ委譲し、その入力名（objective / roots / focus / budget）を発明しない
+  - 受入条件とゲートを対応付け、どのゲートにも担保されない条件を「ゲート外」として明示する
+  - 検証を cmate-verify へ委譲し、出力の grep ではなく実 exit code（0 / 2 / 20 / 21 / 22）で判定する
+  - 成果物側へ変異を入れて赤を実測し、緑が空振りでないことを二点測定で示す
+  - 委譲先が未 install のとき、停止せずに劣化した旨を成果物へ明記して続行する
+  - 宣言 scope と実変更、Gates と Checks、読めなかった事実を、主張ではなく転記として証拠に残す
+  - 曖昧・破壊的・ブロックのときは推測せず、満たせない完了条件を名指しして止まる
+expected_outcomes:
+  - ワーカーごとに揺れていた開発の作法が、リポジトリ非依存の正本として渡るようになる
+  - 何も測っていないゲートの緑が、二点測定を経ていない完了として報告されなくなる
+  - 機械ゲートで担保されない受入条件が、黙って落とされずに UAT / 人間の確認へ残る
+  - 委譲先の未 install が、黙った質の劣化ではなく成果物に書かれた事実になる
+  - 契約と方法論が食い違ったときに、どちらが勝つかが読み手に一意に決まる
+  - ワーカーが PR を作らないので、検証を通っていない PR が二重に生まれない
+  - 完了報告が「できたと言ったこと」ではなく「証明できる状態」に紐づく
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - worker
+  - development
+  - method
+  - work-discipline
+  - evidence
+  - verification
+  - two-point-measurement
+  - scope
+  - delegation
+  - issue
+  - contract
+compatibility:
+  commandmate: '>=0.11.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.
+    - agent: codex
+      support: native
+      evidence: Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.
+    - agent: gemini
+      support: unknown
+      evidence: Not measured for this version. The package ships instructions only, so the procedure is readable and usable by hand; discovery and reload are unverified.
+    - agent: opencode
+      support: unknown
+      evidence: Not measured for this version. The package ships instructions only, so the procedure is readable and usable by hand; discovery and reload are unverified.
+requirements:
+  commands:
+    - name: git
+    - name: gh
+  network_hosts:
+    - api.github.com
+    - github.com
+declared_permissions:
+  - filesystem_read
+  - filesystem_write
+  - process_execution
+  - network_access
+declared_risk: moderate
+risk_rationale: >-
+  指示文だけで構成され、script も実行可能 file も含まず、install 時に実行されるものは無い。
+  手順が書き込むのは、契約の scope.allow（単独利用なら合意した変更範囲）の内側の file と、
+  証拠の markdown だけである。実行する command は git（read-only query と commit）、
+  gh issue view（読み取りのみ）、および契約やリポジトリが宣言した検証ゲートであり、
+  api.github.com へ到達する。push・PR 作成・merge・force push・履歴書き換え・
+  scope 外の file 削除は手順として禁止している。したがって computed_risk と同じ moderate を申告する。
+files:
+  - path: SKILL.md
+    sha256: d7d7feb905f54672fac5fb1ffc606941898c215ddb08d39b7765786dcd58e168
+    size: 18805
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/evidence-vocabulary.md
+    sha256: 9db8b0b21967c1808667fb686869cd777bd599ae54906e40ca1b22c45f3e791c
+    size: 8315
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/work-discipline.md
+    sha256: 75b3b41c69d6d874000f696b28b504a64747e61ae92be0185d31edcbd688e420
+    size: 18217
+    kind: instruction
+    executable: false
+    script: false
