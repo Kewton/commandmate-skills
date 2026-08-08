@@ -1,0 +1,25 @@
+{
+  "description": "d57 の相方（#136 二点測定）: 世界も plan も d57 と同一で、`--auto-yes` だけを外した run。どの `send` にも `--auto-yes` / `--duration` が付かないことを、初回 dispatch だけでなくその Issue 宛の全 send について固定する。既定 off は #136 の変更後も既定 off であり、これが「フラグを渡していない run は以前と同じ argv を送る」ことの実測点である。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "no_respond": true,
+    "sent": [201, 200],
+    "send_counts": { "201": 1, "200": 1 },
+    "absent_send_args": {
+      "201": ["--auto-yes", "--duration"],
+      "200": ["--auto-yes", "--duration"]
+    },
+    "absent_limitation_codes": ["auto_yes_used", "auto_yes_window_short"]
+  }
+}

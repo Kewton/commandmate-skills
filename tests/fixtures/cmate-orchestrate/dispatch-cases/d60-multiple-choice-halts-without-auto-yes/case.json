@@ -1,0 +1,31 @@
+{
+  "description": "d59 の相方（#136 二点測定）: 世界は d59 と同一で `--auto-yes` だけを外した run。send が worktree の auto-yes を有効にしないので poller はそもそも起動せず（`not-enabled`）、契約は `mode: \"off\"` の明示的禁止のまま。よって multiple_choice の prompt は誰にも自動応答されず、run は human_required で止まる —— 既定 off が #136 の変更後も既定 off であることの実測点である。`--auto-yes` 無しの run が prompt で止まるのは仕様であって不具合ではない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "human_required",
+    "human_required": true,
+    "waves_count": 1,
+    "advanced": [false],
+    "prompt_detected": [201],
+    "worker_states": { "201": "prompt" },
+    "no_respond": true,
+    "never_sent": [200],
+    "sent": [201],
+    "auto_yes_poller": { "201": "not-enabled" },
+    "absent_send_args": { "201": ["--auto-yes", "--duration"] },
+    "contract_issues": [201],
+    "contract_contains": {
+      "201": ["autoYes:", "  mode: \"off\""]
+    },
+    "contract_absent": {
+      "201": ["allowPromptTypes", "denyPatterns"]
+    }
+  }
+}

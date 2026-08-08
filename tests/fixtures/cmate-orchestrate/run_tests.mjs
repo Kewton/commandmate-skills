@@ -696,6 +696,22 @@ function sentIssuesFromLog(cliLog) {
   return sent;
 }
 
+// Every `commandmate send` this run made to one issue's worktree, in order. The
+// first is the send that opened that worker's supervision (Issue #136).
+function sendsTo(cliLog, number) {
+  return cliLog.filter((entry) => entry.sub === 'send' && /issue-(\d+)/.exec(entry.args[0] ?? '')?.[1] === String(number));
+}
+
+// Does `args` contain `tokens` as a contiguous run, in order? Used to assert a
+// flag AND its value (`--duration 1h`) rather than the flag alone.
+function containsSequence(args, tokens) {
+  if (tokens.length === 0) return true;
+  for (let i = 0; i + tokens.length <= args.length; i += 1) {
+    if (tokens.every((token, offset) => args[i + offset] === token)) return true;
+  }
+  return false;
+}
+
 // The issues a run handed to `commandmate verify <worktree-id> --json`. On the
 // ordinary path that is only the confirming run after an exit-20 wait; on a
 // `--reverify` attempt it IS the adjudication, so the list is what "which issues
@@ -1027,6 +1043,59 @@ function runDispatchCase(caseId) {
       );
     }
   }
+  // The argv of the send that OPENED a worker's supervision (Issue #136). The
+  // worktree auto-yes state — the one the server's Auto-Yes poller checks before
+  // it reads any policy at all (ADR §14.6) — is enabled by `commandmate send
+  // --auto-yes` and by nothing else, so the contract's `autoYes.mode` cannot be
+  // the evidence that `--auto-yes` did anything. What the fake CLI received can.
+  //
+  // The tokens are matched IN ORDER and CONTIGUOUSLY, which is what makes
+  // `--duration <value>` a measurement of the value rather than of the flag: a
+  // runner that armed 8h where the case says 1h fails here.
+  if (expect.dispatch_send_args) {
+    for (const [num, tokens] of Object.entries(expect.dispatch_send_args)) {
+      const sends = sendsTo(cliLog, num);
+      if (!check(sends.length > 0, `#${num} was never sent, so no send argv can carry ${JSON.stringify(tokens)}`)) continue;
+      check(containsSequence(sends[0].args, tokens),
+        `#${num}: the dispatch send argv ${JSON.stringify(sends[0].args)} does not contain ${JSON.stringify(tokens)} in order`);
+    }
+  }
+  // What the SERVER's Auto-Yes poller did with a prompt (Issue #136). This is the
+  // assertion the issue's correction is about: `--auto-yes` on the send enables
+  // the state, but the contract's policy decides the prompt's TYPE, and
+  // `mode: safe` refuses `multiple_choice` — the type Claude's permission menu
+  // raises. The verdicts are the resolver's own vocabulary: `answered`,
+  // `type-not-allowed`, `mode-off`, `not-answerable`, `not-enabled`.
+  //
+  // A prompt the poller answered never reaches the runner, so this cannot be
+  // confused with the runner's own `--auto-yes` path (`no_respond` pins that half).
+  if (expect.auto_yes_poller) {
+    for (const [num, verdict] of Object.entries(expect.auto_yes_poller)) {
+      const events = cliLog.filter((entry) => entry.sub === 'auto-yes-poller'
+        && /issue-(\d+)/.exec(entry.args[0] ?? '')?.[1] === String(num));
+      if (!check(events.length > 0, `#${num}: the auto-yes poller never judged a prompt`)) continue;
+      const last = events[events.length - 1];
+      check(last.args[1] === verdict,
+        `#${num}: the poller's verdict was "${last.args[1]}" (type ${last.args[2]}, contract mode ${last.args[3]}) !== "${verdict}"`);
+    }
+  }
+
+  // The other half of the two-point measurement: a run that did NOT ask for
+  // auto-yes must not arm it on any send — not on the dispatch send, not on a
+  // nudge, not on a re-instruction. Asserted over every send to the issue, so a
+  // runner that armed "just once more, later" is caught too.
+  if (expect.absent_send_args) {
+    for (const [num, tokens] of Object.entries(expect.absent_send_args)) {
+      const sends = sendsTo(cliLog, num);
+      if (!check(sends.length > 0, `#${num} was never sent, so the absence of ${JSON.stringify(tokens)} would be vacuous`)) continue;
+      for (const token of tokens) {
+        const carrying = sends.filter((entry) => entry.args.includes(token));
+        check(carrying.length === 0,
+          `#${num}: ${carrying.length} send(s) carry ${token} on a run that never asked for it: ${JSON.stringify(carrying[0]?.args ?? [])}`);
+      }
+    }
+  }
+
   // Per-issue worker_state: a worker that never commits within --max-turns is
   // recorded as failed (an honest non-completion), never as completed.
   if (expect.worker_states) {
@@ -2556,6 +2625,13 @@ function liveContractCheck(contract) {
         continue;
       }
       check(help.includes(flag), `real commandmate ${sub} --help does not list ${flag} — the contract drifted from the CLI`);
+      // A flag whose argument is an enum is only useful if the enum is right: the
+      // runner picks ONE of these values and a wrong one aborts the dispatch
+      // (Issue #136). The real `--help` prints them ("Auto-yes duration (1h, 3h,
+      // 8h)"), so drift in the set is visible here rather than in production.
+      for (const value of spec.flag_values?.[flag] ?? []) {
+        check(help.includes(value), `real commandmate ${sub} --help does not offer ${flag} ${value} — the contract's value set drifted`);
+      }
     }
   }
 }
@@ -2852,6 +2928,98 @@ function unattendedInputTest() {
   // both rows are checked rather than assuming one covers the other.
   const uatRefused = runUatRunner(planPath, '/dev/null', join(work, 'uat'), '--write-uat', ['--unattended'], baseEnv(), work);
   check(uatRefused.exit === 3, `uat.mjs --unattended should be refused with exit 3 (stage C is not implemented), exited ${uatRefused.exit}`);
+}
+
+// The auto-yes arming table (Issue #136).
+//
+// `--auto-yes` names two things that are not the same thing: the contract's
+// `autoYes.mode`, which is a POLICY the server only ever reads from inside its
+// Auto-Yes poller, and the worktree's auto-yes STATE, which is what decides
+// whether that poller starts at all (`if (!autoYesState?.enabled) return {
+// started: false, reason: 'auto-yes not enabled' }`, ADR §14.6). d57/d58 pin the
+// presence/absence pair; what no single case can pin is the DURATION, because the
+// window is a function of the run's own `--max-turns × --wait-timeout` and every
+// row below is therefore a different run.
+//
+// The rows ARE the arbitration, written as measurements: the smallest of the
+// CLI's three windows (1h/3h/8h — DURATION_MAP accepts nothing else, and an
+// unlisted value aborts the send before it happens) that covers the per-worker
+// supervision ceiling, compared STRICTLY, so a need that reaches a window's exact
+// length takes the next one up. The last row is the only one that cannot be
+// covered at all, and it must say so in the report rather than silently arm 8h
+// for a 15-hour run.
+//
+// Each row also re-reads the contract this same run wrote: the division of labour
+// only holds if BOTH halves are there, and a change that moved the arming into
+// the contract (or dropped the policy line now that the flag rides on the send)
+// would still pass an assertion that looked at one of them.
+function autoYesWindowTest() {
+  log('  auto-yes arming and window (#136)');
+  const planPath = unattendedPlan('cmate-auto-yes-plan-');
+  if (!check(existsSync(planPath), 'auto-yes: plan.json was not generated')) return;
+  const scenario = {
+    cli_available: true,
+    cli_contract: true,
+    git: { branch: 'feature/integration', dirty: false },
+    gh: { repo_access: true },
+    workers: {
+      201: { state: 'completed', verify_exits: [0] },
+      200: { state: 'completed', verify_exits: [0] },
+    },
+  };
+
+  const rows = [
+    { label: 'the defaults (8 × 300 s = 40 min)', args: ['--auto-yes'], duration: '1h', capped: false },
+    { label: 'a need that REACHES 1h (8 × 450 s) takes the next window', args: ['--auto-yes', '--wait-timeout', '450'], duration: '3h', capped: false },
+    { label: '8 × 600 s = 80 min', args: ['--auto-yes', '--wait-timeout', '600'], duration: '3h', capped: false },
+    { label: 'the run reported in #136 (10 × 2700 s = 7 h 30 min)', args: ['--auto-yes', '--wait-timeout', '2700', '--max-turns', '10'], duration: '8h', capped: false },
+    { label: 'past the longest window (20 × 2700 s = 15 h)', args: ['--auto-yes', '--wait-timeout', '2700', '--max-turns', '20'], duration: '8h', capped: true },
+  ];
+
+  for (const row of rows) {
+    const work = mkdtempSync(join(tmpdir(), 'cmate-auto-yes-'));
+    const outDir = join(work, 'dispatch');
+    const logPath = join(work, 'cli.log');
+    const result = runDispatchRunner(planPath, scenario, work, outDir, row.args, logPath);
+    if (!check(result.exit === 0, `${row.label}: dispatch exited ${result.exit}: ${result.stdout.slice(0, 300)}`)) continue;
+    const cliLog = readCliLog(logPath);
+    for (const number of [201, 200]) {
+      const sends = sendsTo(cliLog, number);
+      if (!check(sends.length > 0, `${row.label}: #${number} was never sent`)) continue;
+      check(containsSequence(sends[0].args, ['--auto-yes', '--duration', row.duration]),
+        `${row.label}: #${number} was dispatched with ${JSON.stringify(sends[0].args)}, expected --auto-yes --duration ${row.duration}`);
+    }
+    const report = launcherReport(result);
+    const short = (report?.limitations ?? []).some((entry) => entry.code === 'auto_yes_window_short');
+    check(short === row.capped,
+      `${row.label}: auto_yes_window_short was ${short ? 'recorded' : 'not recorded'}, expected ${row.capped ? 'recorded' : 'not recorded'}`);
+    const contractPath = join(outDir, 'contracts', 'issue-201.yaml');
+    if (check(existsSync(contractPath), `${row.label}: no contract was written for #201`)) {
+      const contract = readFileSync(contractPath, 'utf8');
+      check(/^ {2}mode: "allow-listed"$/m.test(contract),
+        `${row.label}: the contract stopped declaring autoYes.mode "allow-listed" — the send arms the state, the contract still states the policy`);
+      check(/^ {4}- "multiple_choice"$/m.test(contract),
+        `${row.label}: the contract does not authorise multiple_choice, the type Claude's permission menu raises`);
+    }
+  }
+
+  // The control, and the other half of the two-point measurement d58 makes on the
+  // argv: without the flag, the contract must go on PROHIBITING auto-yes. A run
+  // that armed nothing and also declared nothing would pass every "no --auto-yes
+  // on the send" assertion while quietly dropping the prohibition.
+  const plainWork = mkdtempSync(join(tmpdir(), 'cmate-auto-yes-off-'));
+  const plainOut = join(plainWork, 'dispatch');
+  const plainLog = join(plainWork, 'cli.log');
+  const plain = runDispatchRunner(planPath, scenario, plainWork, plainOut, [], plainLog);
+  check(plain.exit === 0, `without --auto-yes: dispatch exited ${plain.exit}: ${plain.stdout.slice(0, 300)}`);
+  const plainSends = readCliLog(plainLog).filter((entry) => entry.sub === 'send');
+  const armed = plainSends.filter((entry) => entry.args.includes('--auto-yes') || entry.args.includes('--duration'));
+  check(armed.length === 0, `without --auto-yes: ${armed.length} send(s) armed it anyway: ${JSON.stringify(armed[0]?.args ?? [])}`);
+  const plainContract = join(plainOut, 'contracts', 'issue-201.yaml');
+  if (check(existsSync(plainContract), 'without --auto-yes: no contract was written for #201')) {
+    check(/^ {2}mode: "off"$/m.test(readFileSync(plainContract, 'utf8')),
+      'without --auto-yes: the contract must still declare autoYes.mode "off" — an active prohibition, not an omission');
+  }
 }
 
 // The exclusivity lock (ADR §14.1 candidate A). Issue #115 reproduced two runs
@@ -3642,6 +3810,9 @@ function main() {
   log('  -- reverify input --');
   reverifyInputTest();
 
+  log('  -- auto-yes arming --');
+  autoYesWindowTest();
+
   log('  -- unattended --');
   unattendedInputTest();
   unattendedLockTest();
@@ -3652,7 +3823,7 @@ function main() {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution, worktree-setup input, reverify input, unattended input + exclusivity + merge`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution, worktree-setup input, reverify input, auto-yes arming, unattended input + exclusivity + merge`);
 }
 
 main();

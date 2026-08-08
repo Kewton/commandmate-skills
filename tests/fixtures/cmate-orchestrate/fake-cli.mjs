@@ -13,7 +13,10 @@
 // against commandmate-cli-contract.json (the real CLI surface transcribed from
 // `commandmate <cmd> --help`). A subcommand or flag the real CLI does not accept
 // makes the fake exit non-zero — so a runner that reaches for a fictional flag
-// fails the suite here, not only in production. The real CLI is worktree-id based:
+// fails the suite here, not only in production. A flag whose argument is an enum
+// carries its values in the contract's `flag_values` and is checked the same way
+// (Issue #136: `send --duration` takes 1h/3h/8h, and the real CLI rejects anything
+// else before it sends). The real CLI is worktree-id based:
 // `send <worktree-id> <message>`, `wait <worktree-ids...>`, `capture <worktree-id>
 // --json`, `respond <worktree-id> <answer>`, `ls --json`. There is no `--json
 // --worktree --prompt-file` on send, no `--task` anywhere, and no `verify`/`uat`
@@ -71,6 +74,18 @@
 // the node-fake profile whose baseline is `cat cmate-verify-ok`, so a worktree
 // "passes" iff it contains that marker file. This fake writes the marker into a
 // fix worktree it creates when the scenario says that fix should succeed.
+//
+// Auto-Yes (Issue #136). Answering a prompt automatically takes TWO things that
+// live in different places: the worktree's auto-yes STATE (enabled by `send
+// --auto-yes`, without which the server's poller does not start) and the
+// contract's autoYes POLICY (which decides whether the prompt's TYPE may be
+// answered — `mode: safe` allows `yes_no` only, so Claude's `multiple_choice`
+// permission menu is refused). A scenario with `auto_yes_poller: true` models the
+// server getting to the prompt first: the fake then applies both gates itself,
+// answers when they allow it, and records the verdict in the invocation log as an
+// `auto-yes-poller` event. Without the knob, `wait` returns the prompt to the
+// caller exactly as before, which is the other real ordering. `workers.<n>.
+// prompt_type` chooses the type the policy is judged against (default `yes_no`).
 //
 // A PR number in this fake is always equal to its issue number, so that
 // `pr view` (keyed by branch) and `pr checks`/`pr merge` (keyed by number) can
@@ -167,12 +182,26 @@ function enforceContract() {
     process.exit(2);
   }
   const allowed = new Set(spec.flags ?? []);
-  for (const token of argv.slice(1)) {
+  const enums = spec.flag_values ?? {};
+  const tokens = argv.slice(1);
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
     if (typeof token !== 'string' || !token.startsWith('--')) continue;
-    const flag = token.split('=')[0];
+    const [flag, inline] = [token.split('=')[0], token.includes('=') ? token.slice(token.indexOf('=') + 1) : null];
     if (!allowed.has(flag)) {
       process.stderr.write(`fake-cli: contract violation: commandmate ${sub} does not accept ${flag}\n`);
       process.exit(2);
+    }
+    // A flag whose argument is an enum (Issue #136: `send --duration` takes
+    // 1h/3h/8h and nothing else). The real CLI validates BEFORE it sends, and its
+    // failure is the whole dispatch, so the fake refuses the same way instead of
+    // accepting a value that would have aborted the run in production.
+    const values = enums[flag];
+    if (!values) continue;
+    const given = inline ?? tokens[i + 1] ?? null;
+    if (given === null || !values.includes(given)) {
+      process.stderr.write(`Error: Invalid ${flag.replace(/^--/, '')}. Must be one of: ${values.join(', ')}\n`);
+      process.exit(1);
     }
   }
 }
@@ -224,6 +253,151 @@ function fixWorktreePasses(spec, issue, attempt) {
 function respondedMarkerPath(issue) {
   const dir = process.env.CMATE_FAKE_STATE;
   return dir ? join(dir, `responded-${issue}`) : null;
+}
+
+// ============================================================================
+// The server-side Auto-Yes poller (Issue #136)
+// ============================================================================
+//
+// Two independent gates decide whether a prompt is answered by the SERVER, and
+// the runner has to satisfy both. Modelling them here is what makes the fixtures
+// able to tell "auto-yes worked" from "the runner answered the prompt itself",
+// which is precisely the difference the issue is about.
+//
+//   1. worktree state — `auto-yes-poller.js`: `if (!autoYesState?.enabled)
+//      return { started: false, reason: 'auto-yes not enabled' }`. The state is
+//      enabled by `commandmate send --auto-yes` (or `auto-yes --enable`), so the
+//      marker below is written by the send handler and by nothing else.
+//   2. contract policy — `polling/auto-yes-resolver.js`,
+//      `evaluatePolicyAgainstTexts`: `off` refuses everything, `safe` allows
+//      `yes_no` ONLY (the allow list is not consulted), `allow-listed` allows the
+//      listed types, and no `autoYes` block at all means no constraint. Under
+//      that, `resolveBaseAnswer` can only ever answer `yes_no` and
+//      `multiple_choice`; the other four PROMPT_TYPES resolve to null first.
+//
+// A scenario opts in with `auto_yes_poller: true`, which models the ordering
+// where the poller reaches the prompt BEFORE `wait --on-prompt agent` returns it
+// to the caller. The other ordering — `wait` returns exit 10 and the runner
+// answers with `commandmate respond` — is what every scenario without the knob
+// models, and both really happen: the poller runs on an interval, `wait` does
+// not. What is NOT a race is a suppressed prompt: no poller answer is coming, so
+// the prompt stands until a human (or the runner's own --auto-yes path) answers.
+const AUTO_YES_ANSWERABLE_TYPES = new Set(['yes_no', 'multiple_choice']);
+
+// The question a prompting worker shows. Kept in one place so `wait` and
+// `capture` cannot disagree about what the worker is asking.
+function promptQuestion(worker) {
+  if (worker.prompt) return worker.prompt;
+  return (worker.prompt_type ?? 'yes_no') === 'multiple_choice'
+    ? 'Do you want to make this edit to src/base.ts?'
+    : 'Proceed? [y/N]';
+}
+
+function autoYesMarkerPath(issue) {
+  const dir = process.env.CMATE_FAKE_STATE;
+  return dir && issue != null ? join(dir, `auto-yes-${issue}`) : null;
+}
+function enableAutoYes(issue) {
+  const path = autoYesMarkerPath(issue);
+  try {
+    if (path) writeFileSync(path, optionValue('--duration') ?? '1h');
+  } catch {
+    // best effort; the poller simply stays "not enabled" if we cannot record it
+  }
+}
+function contractMarkerPath(issue) {
+  const dir = process.env.CMATE_FAKE_STATE;
+  return dir && issue != null ? join(dir, `contract-${issue}`) : null;
+}
+function recordContractPath(issue, absolute) {
+  const path = contractMarkerPath(issue);
+  try {
+    if (path) writeFileSync(path, absolute);
+  } catch {
+    // best effort; without it the fake reads "no contract", i.e. no policy
+  }
+}
+
+// The `autoYes` block of the contract this worktree was dispatched with, read
+// without a YAML parser (this fixture tree is Node stdlib only, and the generator
+// writes a fixed, flat shape). Null when no contract was sent — which the
+// resolver treats as "no policy", not as "off".
+function contractAutoYesPolicy(issue) {
+  const marker = contractMarkerPath(issue);
+  if (!marker || !existsSync(marker)) return null;
+  let text;
+  try {
+    text = readFileSync(readFileSync(marker, 'utf8'), 'utf8');
+  } catch {
+    return null;
+  }
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => line === 'autoYes:');
+  if (start < 0) return null;
+  const policy = { mode: null, allowPromptTypes: [] };
+  let inAllowList = false;
+  for (const line of lines.slice(start + 1)) {
+    if (/^\S/.test(line)) break; // the next top-level key ends the block
+    const mode = /^ {2}mode:\s*"?([a-z-]+)"?\s*$/.exec(line);
+    if (mode) {
+      policy.mode = mode[1];
+      inAllowList = false;
+      continue;
+    }
+    if (/^ {2}allowPromptTypes:\s*$/.test(line)) {
+      inAllowList = true;
+      continue;
+    }
+    const entry = /^ {4}- "?([a-z_]+)"?\s*$/.exec(line);
+    if (inAllowList && entry) {
+      policy.allowPromptTypes.push(entry[1]);
+      continue;
+    }
+    if (/^ {2}\S/.test(line)) inAllowList = false;
+  }
+  return policy;
+}
+
+// `evaluatePolicyAgainstTexts` + `resolveBaseAnswer`, transcribed. Returns null
+// when the server would answer, or the reason it would not.
+function autoYesSuppression(policy, promptType) {
+  if (!AUTO_YES_ANSWERABLE_TYPES.has(promptType)) return 'not-answerable';
+  if (!policy) return null; // no contract => no policy => no constraint
+  if (policy.mode === 'off') return 'mode-off';
+  if (policy.mode === 'safe') return promptType === 'yes_no' ? null : 'type-not-allowed';
+  if (policy.mode === 'allow-listed') {
+    return policy.allowPromptTypes.includes(promptType) ? null : 'type-not-allowed';
+  }
+  return null; // mode null: the contract states no constraint
+}
+
+// What the poller did with this prompt, as one log line the tests can read. It is
+// deliberately NOT a commandmate subcommand: the poller is server-side, so it
+// appears in the invocation log as an event, and the CLI-contract parity check
+// (which filters on the real subcommands) never sees it.
+function recordPollerVerdict(worktreeId, verdict, promptType, mode) {
+  const path = process.env.CMATE_FAKE_LOG;
+  if (!path) return;
+  try {
+    appendFileSync(path, `${JSON.stringify({ sub: 'auto-yes-poller', args: [worktreeId, verdict, promptType, mode ?? 'none'] })}\n`);
+  } catch {
+    // as with logInvocation: a logging failure must not change behaviour
+  }
+}
+
+// Would the server have answered this prompt before `wait` returned it? Records
+// the verdict either way, so a fixture can assert WHY nothing was answered.
+function serverAnswersPrompt(spec, issue, worktreeId, promptType) {
+  if (spec.auto_yes_poller !== true) return false;
+  const policy = contractAutoYesPolicy(issue);
+  const enabled = markerExists(autoYesMarkerPath(issue));
+  if (!enabled) {
+    recordPollerVerdict(worktreeId, 'not-enabled', promptType, policy?.mode);
+    return false;
+  }
+  const suppression = autoYesSuppression(policy, promptType);
+  recordPollerVerdict(worktreeId, suppression ?? 'answered', promptType, policy?.mode);
+  return suppression === null;
 }
 
 // Per-issue turn counter (Issue #1468). Every `send` — the initial dispatch and
@@ -888,9 +1062,18 @@ function main() {
         fail(`Error: invalid task contract:\n  - ${contractPath}: contract file not found in the worktree`, 2);
       }
       const taskId = `task-issue-${issue}`;
+      // The contract this send RECORDED is what the server's Auto-Yes poller
+      // later reads its policy out of (Issue #136), so the path is remembered
+      // exactly as the real server remembers the task's contract snapshot.
+      recordContractPath(issue, absolute);
       process.stderr.write(`Task created: ${taskId}\n`);
       process.stdout.write(`${taskId}\n`);
     }
+    // `--auto-yes` enables auto-yes on the worktree BEFORE sending (Issue #136;
+    // the real CLI's send.js posts /api/worktrees/<id>/auto-yes first). Without
+    // that state the poller does not start at all, whatever the contract says, so
+    // this marker is the fake's `autoYesState.enabled`.
+    if (argv.includes('--auto-yes')) enableAutoYes(issue);
     // A successful send drives the worker one more turn (Issue #1468).
     bumpSends(issue);
     process.stderr.write('Message sent.\n');
@@ -910,6 +1093,25 @@ function main() {
     // Once a prompt has been answered (auto-yes), the worker moves on.
     const marker = respondedMarkerPath(issue);
     if (state === 'prompt' && marker && existsSync(marker)) state = 'completed';
+    // The prompt's TYPE is what the contract's autoYes policy is judged against
+    // (Issue #136). `yes_no` is the default so every scenario written before this
+    // behaves exactly as it did; Claude's permission menu is `multiple_choice`,
+    // the type `mode: safe` refuses.
+    const promptType = worker.prompt_type ?? 'yes_no';
+    // The server-side poller may answer the prompt BEFORE this wait returns it.
+    // When it does, the caller never sees exit 10 at all — which is what
+    // "--auto-yes worked" looks like from the runner's side, and the only thing
+    // that distinguishes it from the runner answering the prompt itself.
+    if (state === 'prompt' && serverAnswersPrompt(spec, issue, worktreeId, promptType)) {
+      if (marker) {
+        try {
+          writeFileSync(marker, 'auto-yes-poller');
+        } catch {
+          // best effort; the worker simply raises the same prompt again
+        }
+      }
+      state = 'completed';
+    }
     if (state === 'completed') {
       if (!argv.includes('--verify')) process.exit(WAIT_COMPLETED);
       // Issue #114: with `run_declared_gates` the verdict is not a knob — the
@@ -950,7 +1152,21 @@ function main() {
       process.exit(exit);
     }
     if (state === 'prompt') {
-      process.stdout.write(`${JSON.stringify({ worktreeId, cliToolId: 'claude', type: 'confirm', question: worker.prompt ?? 'Proceed? [y/N]', options: [], status: 'pending' })}\n`);
+      // `confirm` is what this fake has always emitted for a yes/no prompt; a
+      // `multiple_choice` scenario emits the detector's own vocabulary and the
+      // shape of Claude's permission menu, because that is the prompt whose type
+      // the policy decides (Issue #136).
+      const promptJson = promptType === 'multiple_choice'
+        ? {
+          worktreeId,
+          cliToolId: 'claude',
+          type: 'multiple_choice',
+          question: promptQuestion(worker),
+          options: ['1. Yes', '2. Yes, and don\'t ask again this session', '3. No, and tell Claude what to do differently'],
+          status: 'pending',
+        }
+        : { worktreeId, cliToolId: 'claude', type: 'confirm', question: promptQuestion(worker), options: [], status: 'pending' };
+      process.stdout.write(`${JSON.stringify(promptJson)}\n`);
       process.exit(WAIT_PROMPT);
     }
     if (state === 'timeout') process.exit(WAIT_TIMEOUT);
@@ -1033,13 +1249,13 @@ function main() {
     const marker = respondedMarkerPath(issue);
     const responded = Boolean(marker && existsSync(marker));
     if (worker.state === 'prompt' && !responded) {
-      const prompt = worker.prompt ?? 'Proceed? [y/N]';
+      const prompt = promptQuestion(worker);
       emit({
         isRunning: true,
         isGenerating: false,
         isPromptWaiting: true,
         content: prompt,
-        promptData: { type: 'confirm', question: prompt, options: [], status: 'pending' },
+        promptData: { type: (worker.prompt_type ?? 'yes_no') === 'multiple_choice' ? 'multiple_choice' : 'confirm', question: prompt, options: [], status: 'pending' },
         sessionStatus: 'waiting',
       });
     }

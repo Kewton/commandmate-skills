@@ -1,0 +1,32 @@
+{
+  "description": "#136 の本丸: Claude の permission prompt（`❯ 1. / 2. / 3.` = `multiple_choice`）が **サーバ側で自動応答される**ことを固定する。成立には2つが同時に要る —— (1) `send --auto-yes` で worktree の auto-yes 状態が有効であること（無ければ poller が起動しない）、(2) 契約の autoYes ポリシーがその**型**を許していること。旧実装の `mode: safe` は `yes_no` のみ許可（allowPromptTypes は参照されない）なので、この case では `type-not-allowed` で抑止され赤になる。poller が答えた prompt は runner まで届かないので `no_respond` が同時に立つ —— runner 自身の exit 10 → respond 経路で通ってしまった run と区別できる。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--auto-yes"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "no_respond": true,
+    "sent": [201, 200],
+    "auto_yes_poller": { "201": "answered" },
+    "dispatch_send_args": {
+      "201": ["--auto-yes", "--duration", "1h"],
+      "200": ["--auto-yes", "--duration", "1h"]
+    },
+    "contract_issues": [201],
+    "contract_contains": {
+      "201": ["autoYes:", "  mode: \"allow-listed\"", "    - \"yes_no\"", "    - \"multiple_choice\""]
+    },
+    "contract_absent": {
+      "201": ["mode: \"safe\"", "denyPatterns"]
+    },
+    "absent_limitation_codes": ["auto_yes_used", "auto_yes_window_short"]
+  }
+}

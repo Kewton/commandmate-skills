@@ -2329,6 +2329,52 @@ function buildContractGoal(plan, issue, requiredGates = [], workerMethod = null)
   return `${redacted.slice(0, MAX_CONTRACT_GOAL - marker.length)}${marker}`;
 }
 
+// The prompt types the contract authorises under `--auto-yes`, and why the runner
+// stopped writing `mode: safe` (Issue #136, the correction on the issue).
+//
+// MEASURED, in the installed CommandMate 0.22.1:
+//   - `dist/server/src/lib/polling/auto-yes-resolver.js`, `evaluatePolicyAgainstTexts`:
+//       mode 'off'          -> {reason: 'mode-off'} for everything;
+//       mode 'safe'         -> `promptType === 'yes_no' ? null : {reason: 'type-not-allowed'}`
+//                              — the allow list is NOT consulted, `yes_no` is hardcoded;
+//       mode 'allow-listed' -> `policy.allowPromptTypes.includes(promptType)`;
+//       mode null (no block)-> falls through to `return null`, i.e. no constraint.
+//   - `dist/server/src/lib/detection/prompt-detect-multiple-choice.js`: Claude's
+//     permission menu (`❯ 1.` / `2.` / `3.`) is detected as `multiple_choice`.
+//   - `dist/server/src/lib/tasks/contract-parser.js`: AUTO_YES_MODES is
+//     ['off','safe','allow-listed'] and PROMPT_TYPES is ['yes_no','multiple_choice',
+//     'approval','choice','input','continue'].
+//   - the same resolver's `resolveBaseAnswer`: an answer is only ever produced for
+//     `yes_no` ('y') and `multiple_choice` (the default option, else the first).
+//     The other four types resolve to null before any policy is consulted.
+//
+// So `mode: safe` suppressed the ONE type that a Claude worker raises most —
+// which is the bug: `--auto-yes` promised "prompts do not stop this run" and then
+// wrote the policy that stops it on every edit approval.
+//
+// DECISION: under `--auto-yes` the contract states `mode: allow-listed` with
+// exactly the two types the resolver can answer at all. The two alternatives were
+// weighed against this:
+//   - writing NO autoYes block (mode null, "no constraint") would work today, and
+//     is rejected because it makes the run's authorisation unreadable: this runner
+//     writes `mode: off` precisely because an active prohibition and an omission
+//     are different things, and the same argument applies to permission. A null
+//     policy also silently inherits whatever a future CommandMate teaches the base
+//     rules to answer, without this Skill ever deciding to grant it.
+//   - listing all six PROMPT_TYPES would grant four types that `resolveBaseAnswer`
+//     never answers — a contract claiming an authorisation nobody can use, which
+//     is exactly the kind of line a reader would later take as evidence.
+// Under no `--auto-yes` the block stays `mode: off`: the safe default is an active
+// prohibition, unchanged (ADR §4).
+//
+// `denyPatterns` is deliberately NEVER written. CommandMate #1699 measured what a
+// deny list costs when it is matched against pane text: a command approved several
+// turns earlier stayed inside the scrollback window and went on suppressing every
+// later prompt — the run looked hung, and nothing said why. The scope gate and the
+// verification gates are where this Skill constrains a worker; the parser's
+// default (an empty list) is what the contract carries.
+const AUTO_YES_ALLOWED_PROMPT_TYPES = ['yes_no', 'multiple_choice'];
+
 // The contract document for one issue. Field order is fixed, so is every list.
 //
 // `requiredGates` is the issue's resolved `require:` list (empty when the issue
@@ -2365,8 +2411,22 @@ function buildTaskContract(plan, issue, inputs, requiredGates = [], workerMethod
   // The contract states the same Auto-Yes stance the runner itself takes, so the
   // server-side policy and the supervision loop cannot disagree. `off` is an
   // active prohibition (distinct from omitting the block, which says nothing).
+  //
+  // These lines are a POLICY DECLARATION and nothing else (Issue #136): the
+  // server's Auto-Yes poller reads them only after it has already started, and it
+  // starts only when the WORKTREE's auto-yes state is enabled. Enabling that state
+  // is the separate job of `send --auto-yes` (autoYesSendFlags). BOTH are needed —
+  // the policy decides which prompts may be answered, the state decides whether
+  // anything is looking — and neither one alone answers a single prompt.
+  //
+  // Which types are authorised, and why not `safe`, is decided at
+  // AUTO_YES_ALLOWED_PROMPT_TYPES above.
   lines.push('autoYes:');
-  lines.push(`  mode: ${yamlString(inputs.autoYes ? 'safe' : 'off')}`);
+  lines.push(`  mode: ${yamlString(inputs.autoYes ? 'allow-listed' : 'off')}`);
+  if (inputs.autoYes) {
+    lines.push('  allowPromptTypes:');
+    for (const type of AUTO_YES_ALLOWED_PROMPT_TYPES) lines.push(`    - ${yamlString(type)}`);
+  }
   lines.push('success:');
   lines.push('  requireWorkEvidence: true');
   // Always true (Issue #50). It used to be `allow.length > 0`, which turned an
@@ -2792,6 +2852,82 @@ async function worktreeHeadSha(inputs, worktreePath) {
   return sha.length > 0 ? sha : null;
 }
 
+// The auto-yes window `commandmate send --auto-yes` opens, and why this runner
+// names one instead of taking the CLI's default (Issue #136).
+//
+// MEASURED, in the installed CommandMate 0.22.1 — the same bundle ADR §14.6 read
+// the poller out of:
+//   - `dist/cli/config/duration-constants.js`: `DURATION_MAP = {'1h': 3600000,
+//     '3h': 10800000, '8h': 28800000}` and `parseDurationToMs` returns null for
+//     anything else; `dist/cli/commands/send.js` then prints "Error: Invalid
+//     duration. Must be one of: 1h, 3h, 8h" and exits BEFORE any side effect. The
+//     window is therefore not a free number — it is one of exactly three, and a
+//     computed "seconds" value would abort the dispatch rather than widen it.
+//   - `dist/cli/commands/send.js`: `DEFAULT_AUTO_YES_DURATION = '1h'` when
+//     `--duration` is omitted. Omitting it is a choice of 1h, not a choice of
+//     "no expiry".
+//
+// WHAT HAS TO BE COVERED is one worker's supervision in ONE worktree. The state
+// `send --auto-yes` enables is per worktree and every issue in a plan has its own,
+// so neither the wave count nor the wave width multiplies the need (ADR §14.2
+// measured that wave width does not move the wall clock either: a wave is
+// supervised concurrently, so 3 issues cost the same 8×`--wait-timeout` as 1).
+// The per-worker ceiling that section measured is `--max-turns × --wait-timeout`:
+//   - defaults, 8 × 300 s = 40 min      → 1h covers it with 20 min to spare;
+//   - the run in #136, 10 × 2700 s = 7 h 30 min → the default 1h is gone during the
+//     second wait, which is this same bug wearing different clothes.
+//
+// DECISION: arm the SMALLEST of the three windows that covers `--max-turns ×
+// --wait-timeout`, and never a flat 8h. Two reasons, and the second is what rules
+// out "just always take the widest":
+//   1. the window OUTLIVES this process. Auto-yes is server-side worktree state;
+//      revoking it is not on the CLI surface these runners are allowed to use
+//      (commandmate-cli-contract.json has no `auto-yes` subcommand), and a run
+//      that is killed mid-wave would not get to revoke anything anyway. Hours of
+//      auto-yes nobody asked for means answered prompts for whoever opens that
+//      worktree next.
+//   2. expiry is NOT fatal. The prompt path this runner drives itself — `wait
+//      --on-prompt agent` → exit 10 → `commandmate respond` under `--auto-yes` —
+//      does not consult the worktree state at all, so a window that closes early
+//      degrades to exactly the pre-#136 behaviour instead of stalling the run.
+// So over-granting costs something real and under-granting costs the tail of a
+// very long run; the window is sized to the ceiling, not to the backstop
+// (`hardIterations`, which exists so a prompt/respond ping-pong cannot spin
+// forever — sizing to it would buy 8h for a default run that needs 40 min).
+//
+// `--max-turns × --wait-timeout` is a FLOOR: ADR §14.2 measured the real elapsed
+// ABOVE the formula by the per-turn CLI overhead, and could not put a number on
+// that overhead for a real server. The comparison is therefore STRICT — a need
+// that reaches a window's exact length takes the next one up — which leaves the
+// remainder of the window as headroom for the overhead instead of inventing a
+// figure for it.
+const AUTO_YES_WINDOWS = [
+  { duration: '1h', seconds: 3600 },
+  { duration: '3h', seconds: 10800 },
+  { duration: '8h', seconds: 28800 },
+];
+
+// The supervision one armed worktree has to outlive, in seconds.
+function autoYesCeilingSeconds(inputs) {
+  return inputs.maxTurns * inputs.waitTimeout;
+}
+
+function autoYesWindow(inputs) {
+  const need = autoYesCeilingSeconds(inputs);
+  return AUTO_YES_WINDOWS.find((window) => need < window.seconds) ?? AUTO_YES_WINDOWS[AUTO_YES_WINDOWS.length - 1];
+}
+
+// The flags that ENABLE auto-yes on the worktree, for the one send that opens a
+// worker's supervision (Issue #136). Empty unless `--auto-yes` was explicitly
+// passed, so the safe default — and every run that predates this — sends exactly
+// what it sent before. The contract's `autoYes.mode` is written either way: it
+// declares the policy, this enables the state the poller checks before it reads
+// any policy at all.
+function autoYesSendFlags(inputs) {
+  if (!inputs.autoYes) return [];
+  return ['--auto-yes', '--duration', autoYesWindow(inputs).duration];
+}
+
 // `commandmate send <worktree-id> <message>`, then confirm the worker actually
 // started (Issue #1468). A send can leave the message unsubmitted (Enter not
 // confirmed), which would leave the worker idle so the next `wait` returns
@@ -2799,8 +2935,14 @@ async function worktreeHeadSha(inputs, worktreePath) {
 // sending; if it is neither generating nor holding a prompt, we treat the send as
 // unconfirmed and re-send once to force submission. The commit check below is the
 // real ground truth, so this is a best-effort confirmation, not a guarantee.
-async function sendAndConfirm(inputs, worktreeId, message) {
-  const first = await runCmAsync(inputs, ['send', worktreeId, message]);
+//
+// `armAutoYes` is set by the ONE send that opens a worker's supervision (Issue
+// #136), never by a nudge or a re-instruction: the state is already enabled by
+// then, and the flags carry a duration whose clock the first send started on
+// purpose. The re-send below stays plain for the same reason — it exists to submit
+// a message the first send may have left in the input box, not to re-arm anything.
+async function sendAndConfirm(inputs, worktreeId, message, { armAutoYes = false } = {}) {
+  const first = await runCmAsync(inputs, ['send', worktreeId, message, ...(armAutoYes ? autoYesSendFlags(inputs) : [])]);
   if (!first.ok) {
     return { sent: false, note: excerpt(first.stderr || first.stdout || 'send failed') };
   }
@@ -2841,8 +2983,19 @@ const COMMIT_REQUEST_MESSAGE = [
 // prints the TASK ID on stdout. A contract the server rejects exits 2 with every
 // violation on stderr and sends nothing, so a rejected contract is an honest
 // failed dispatch — never a quiet downgrade to a plain send.
+//
+// `--auto-yes` rides on THIS send (Issue #136), and that is the SECOND of the two
+// things the flag has to do. The contract's `autoYes` block is a policy the server
+// only ever consults from inside its Auto-Yes poller, and that poller does not
+// start unless the worktree's auto-yes state is enabled (`if
+// (!autoYesState?.enabled) return { started: false, reason: 'auto-yes not enabled'
+// }` — `dist/server/src/lib/auto-yes-poller.js`, ADR §14.6). So however permissive
+// the contract is, a worktree nobody enabled answers nothing; and however enabled
+// the worktree is, a policy that forbids the prompt's type answers nothing either
+// (see AUTO_YES_ALLOWED_PROMPT_TYPES). This send is where the state is enabled,
+// because it is the send that opens the supervision.
 async function sendContractAndConfirm(inputs, worktreeId, relativeContractPath) {
-  const first = await runCmAsync(inputs, ['send', worktreeId, '--contract', relativeContractPath]);
+  const first = await runCmAsync(inputs, ['send', worktreeId, '--contract', relativeContractPath, ...autoYesSendFlags(inputs)]);
   if (!first.ok) {
     return { sent: false, taskId: null, note: excerpt(first.stderr || first.stdout || 'contract send failed') };
   }
@@ -3235,7 +3388,11 @@ async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMes
   const baseSha = await worktreeHeadSha(inputs, worktreePath);
   let autoResponded = false;
 
-  const sent0 = await sendAndConfirm(inputs, worktreeId, initialMessage);
+  // The fallback path arms the worktree exactly as the contract path does (Issue
+  // #136): `--auto-yes` promises "prompts do not stop this run", and which
+  // dispatch path a CLI version put the run on is not something the operator who
+  // passed the flag chose.
+  const sent0 = await sendAndConfirm(inputs, worktreeId, initialMessage, { armAutoYes: true });
   if (!sent0.sent) {
     // As on the contract path: a send the budget killed is a stopped clock.
     const cutShort = wallClockExhausted();
@@ -3657,6 +3814,26 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   // pushed when the flag was not passed, which is what keeps a run without it
   // byte-identical to a run from before the flag existed.
   if (inputs.workerMethod !== null) report.limitations.push(workerMethodDeclaredLimitation(inputs.workerMethod));
+  // The one case the arming above cannot cover (Issue #136): 8h is the longest
+  // window the CLI accepts, and a run whose per-worker ceiling reaches it will
+  // outlive its own auto-yes. That is not a failure — the runner's own exit-10
+  // response path keeps working after the window closes — but it IS the run
+  // silently becoming a different run halfway through, so it is written down
+  // rather than left for the operator to infer from a stalled worker.
+  if (inputs.autoYes) {
+    const ceiling = autoYesCeilingSeconds(inputs);
+    const window = autoYesWindow(inputs);
+    if (ceiling >= window.seconds) {
+      report.limitations.push({
+        code: 'auto_yes_window_short',
+        detail: `--auto-yes armed the worktree auto-yes for ${window.duration}, the longest window commandmate send accepts, but `
+          + `--max-turns ${inputs.maxTurns} × --wait-timeout ${inputs.waitTimeout}s = ${ceiling}s of supervision can outlive it. `
+          + 'After it expires the server answers no prompt on its own; this runner still answers the prompts `wait --on-prompt agent` '
+          + 'returns to it, so the run continues, but a prompt raised inside a turn will sit until the wait of that turn times out. '
+          + 'Lower --max-turns or --wait-timeout to bring the ceiling under 8h',
+      });
+    }
+  }
   // Nothing is left to dispatch: every issue the plan names was already
   // completed AND verified. Reported as its own fact rather than as a silent
   // success, because "the run did nothing" and "the run did everything" produce
