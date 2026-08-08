@@ -750,7 +750,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.21.0",
+      "latest": "0.22.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -1382,6 +1382,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.21.0/cmate-orchestrate-0.21.0.tar.gz",
             "sha256": "5f5e0d25cf857f0dc48a23c8abeea0b2ddfafa657a74d978ce5c53c76e3d55f6",
             "size": 397912,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.22.0",
+          "changelog": "cmate-orchestrate 0.22.0 — 無人運転の段階C（merge --merge-prs と uat）",
+          "published_at": "2026-08-08T16:37:02Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.22.0",
+            "commit": "055bf2189bf1d07e4de0805fff5048e6703f6315"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.22.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.22.0/cmate-orchestrate-0.22.0.tar.gz",
+            "sha256": "1edd3a0c88747ded52423523df6c588c1fbdd43e1cafb28480f17d2082088eb0",
+            "size": 416852,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
