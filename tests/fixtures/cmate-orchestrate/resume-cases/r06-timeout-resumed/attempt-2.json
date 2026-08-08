@@ -1,0 +1,11 @@
+{
+  "_comment": "timeout のあと worker が実際には完走して commit を積んでいた世界（#89 の核心）。#102 の worktree には marker が置かれるので、再 dispatch 先で work-evidence も baseline も通る。#100 / #101 の指定は attempt 1 と同じで、resume がそれを読みに行かないこと（再 dispatch しないこと）を case.json 側で固定する。",
+  "cli_available": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "100": { "state": "completed", "verify": "pass" },
+    "101": { "state": "completed", "verify": "pass" },
+    "102": { "state": "completed", "verify": "pass" }
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "description": "Issue #121 受入条件1: timeout を起点にした resume（#89 の回復経路）。attempt 1 で #102 が worker_state timeout のまま止まり、timeout した worker は verify されないので裁定は not_run で凍る。--resume した attempt 2 は timeout を carryable と見なさないので #102 だけを再 dispatch し、pass 済みの #100 / #101 には send を1回も飛ばさない。#102 の worktree には worker が後から積んだ成果があるので、再 dispatch 先で completed + pass になり、3件とも merge の eligible に入る。空振り検証: isCarryable() に timeout も引き継ぐ変異（worker_state === 'timeout' で早期 return）を入れると attempt 2 が #102 を carry してしまい、このケースは赤 10 件になる。なお isCarryable の2つの節を片方ずつ外す変異は緑のままである（timeout + not_run はもう片方の節が拒むため）。このケースが固定するのは連言の結論「timeout した worker は carryable でない」であって、個別の節ではない。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": ["100", "101", "102", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "attempts": [
+    {
+      "scenario": "attempt-1.json",
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 7,
+        "status": "partial",
+        "stop_reason": "timeout",
+        "waves_count": 1,
+        "wave_dispatched": [[100, 101, 102]],
+        "sent": [100, 101, 102],
+        "worker_states": { "100": "completed", "101": "completed", "102": "timeout" },
+        "verification_outcomes": { "100": "pass", "101": "pass", "102": "not_run" },
+        "blocking_codes": ["worker_timeout"],
+        "blocking_details_include": ["#102 timed out; the next wave was not dispatched"],
+        "worker_notes_include": { "102": ["wait timed out after"] },
+        "absent_limitation_codes": ["resume_attempt", "resume_no_work"],
+        "report_file": "dispatch-report.json",
+        "merge_eligible": [100, 101],
+        "history_length": 1,
+        "history": {
+          "attempt": 1,
+          "kind": "initial",
+          "resumed_from": null,
+          "report": "dispatch-report.json",
+          "carried_over": [],
+          "dispatched": [100, 101, 102]
+        }
+      }
+    },
+    {
+      "scenario": "attempt-2.json",
+      "resume": true,
+      "dispatch_args": ["--expect-branch", "feature/integration"],
+      "expect": {
+        "exit": 0,
+        "status": "success",
+        "stop_reason": "completed",
+        "completion_check_passed": true,
+        "waves_count": 1,
+        "wave_dispatched": [[102]],
+        "sent": [102],
+        "never_sent": [100, 101],
+        "worker_states": { "100": "completed", "101": "completed", "102": "completed" },
+        "verification_outcomes": { "100": "pass", "101": "pass", "102": "pass" },
+        "verification_checks_include": { "100": ["cmate-verify-ok"], "102": ["cmate-verify-ok"] },
+        "worker_notes_include": {
+          "100": ["carried over from attempt 1", "did NOT re-dispatch #100"],
+          "101": ["carried over from attempt 1"],
+          "102": ["new commit detected"]
+        },
+        "limitation_codes": ["resume_attempt"],
+        "absent_limitation_codes": ["resume_no_work", "verification_unrecorded"],
+        "limitation_details_include": [
+          "Carried over without re-dispatching (worker completed and verification passed there): #100, #101",
+          "Re-dispatched here: #102"
+        ],
+        "summary_includes": [
+          "引き継ぎ（再 dispatch しない）: #100, #101",
+          "再実行対象: #102"
+        ],
+        "report_file": "resume-attempt-2/dispatch-report.json",
+        "merge_eligible": [100, 101, 102],
+        "history_length": 2,
+        "history": {
+          "attempt": 2,
+          "kind": "resume",
+          "resumed_from": { "attempt": 1, "report": "dispatch-report.json" },
+          "report": "resume-attempt-2/dispatch-report.json",
+          "carried_over": [100, 101],
+          "dispatched": [102]
+        }
+      }
+    }
+  ]
+}
