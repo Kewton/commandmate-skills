@@ -2250,6 +2250,77 @@
       ]
     },
     {
+      "id": "cmate-worker-development",
+      "name": "cmate-worker-development",
+      "summary": "Issue や実行契約を受け取ったワーカーが、読取・調査・計画・実装・検証・証拠の6段で作業を進めるための方法。権限は足さない。",
+      "provider": {
+        "name": "CommandMate",
+        "url": "https://github.com/Kewton/CommandMate"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/Kewton/commandmate-skills",
+      "keywords": [
+        "worker",
+        "development",
+        "method",
+        "work-discipline",
+        "evidence",
+        "verification",
+        "two-point-measurement",
+        "scope",
+        "delegation",
+        "issue",
+        "contract"
+      ],
+      "latest": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "changelog": "cmate-worker-development 0.1.0 — 初回リリース\n\nIssue または実行契約を受け取ったワーカーが、読取・調査・計画・実装・検証・証拠の6段で\n作業を進めるための手順である。1 Issue を単独で開発するときにも、並列オーケストレーション\n配下のワーカーとしても使う。\n\nこれまで、この suite にはワーカーの開発手法を定義したものが無かった。cmate-orchestrate の\ndispatch がワーカーへ渡すのは WHAT（目的・受入条件・変更してよいファイル）と制約だけで、\nHOW（調査・計画・実装の作法）は渡していない。CommandMate リポジトリ内ではスラッシュ\nコマンドがその穴を埋めていたが、スラッシュコマンドはリポジトリスコープであり、\n外部リポジトリのワーカーには届かない。本 skill はその穴を、リポジトリに依存しない形で埋める。\n\n中心の不変条件\n\n  このスキルが足すのは「方法」であって「権限」ではない。\n\n1. ゲートを緩めない。裁定は従来どおり commandmate wait --verify の exit code である\n2. 権限を増やさない。scope.allow を広げず、push / PR 作成 / merge の権限を持たない\n3. 契約の外へ出ない。契約と食い違ったら契約が勝つ\n4. 既定では何も起きない。呼び出し口は明示 opt-in である\n\n不変条件 3 が要である。方法論が契約を上書きできる設計にすると、「契約は PR を作るなと\n言っているが、方法論は PR を作れと言っている」というどちらが勝つか読めない状態が生まれる。\n\n委譲（再実装しない）\n\n- B 段（調査）は cmate-repository-analysis へ\n- E 段（検証）は cmate-verify へ\n\n未 install のときに黙って劣化させない扱いも定めてある。\n\n作業規律\n\nreferences/work-discipline.md に 8 項目を、すべて「破ると何が起きるか」の根拠つきで書いた。\n緑は「効いた」と「空振り」の両方と整合するので追加したゲートは赤になることを実測してから\n完了とする、既存テストの期待値を実装を通すために書き換えない、「既存から赤だった」を\n自己申告しない、Issue 本文の前提を実測で裏取りする、といったものである。\n\nreferences/evidence-vocabulary.md は証拠の語彙で、cmate-orchestrate の\nPR 証拠提出（#97）と受入条件の機械ゲート化（#100 / #114）のミラーである。\n\n設計の記録は cmate-orchestrate の references/adr-worker-development-skill.md にある。\nオーケストレーションとの結線（dispatch が本 skill を名指しする経路）は後続リリースで入る。",
+          "published_at": "2026-08-08T00:09:17Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-worker-development-v0.1.0",
+            "commit": "d2cc2030c173abd039b32723c510aad83cfcc5a3"
+          },
+          "artifact": {
+            "asset_name": "cmate-worker-development-0.1.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worker-development-v0.1.0/cmate-worker-development-0.1.0.tar.gz",
+            "sha256": "6f13caad9215023980f3ca72cd7b0e178aa6e9eb506144f6afcc40ab91f6efa4",
+            "size": 17592,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. The package ships instructions only, so the procedure is readable and usable by hand; discovery and reload are unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. The package ships instructions only, so the procedure is readable and usable by hand; discovery and reload are unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        }
+      ]
+    },
+    {
       "id": "cmate-worktree-cleanup",
       "name": "cmate-worktree-cleanup",
       "summary": "merge 済み・不要な git worktree を、削除可能性と証跡を dry-run で提示したうえで、clean かつ merge 証跡が十分な対象だけ guarded な方式で安全に削除する。dirty・unmerged・検証不能は削除しない。",
