@@ -372,6 +372,16 @@ report を読む人が補える欠落が、無人では**そのまま merge の�
 段階 A / B ではいずれも limitation のままである。昇格は**無人で不可逆な操作をするとき**にだけ
 正当化される。
 
+> **訂正（[#134](https://github.com/Kewton/commandmate-skills/issues/134) 実装時。第16節）。**
+> 直前の1文と本節の見出しは、`change_evidence_unavailable` について**第8節の段階表と矛盾していた**
+> —— 段階表は最初からこの昇格を**段階 B** に割り当てている（「+ `merge.mjs --create-prs`」の行の
+> 「追加で含意するもの」）。**第8節が正しく、段階 B で昇格済みである。**
+> 段階 C に残るのは `verification_gates_unrecorded`（dispatch）だけであり、`acceptance_not_run` は
+> 昇格ではなく「起こさない」なので、この表の3行目は段階 C のままである。
+> 昇格の正当化も「不可逆な操作」ではなく「**人間が読む前提の劣化を、読み手が居ない運転で止める**」
+> である（第8節）—— PR 作成は revert 可能だが、証拠の無い PR が黙って積まれることは、
+> それを読んで補う人が居ない運転では劣化のまま下流へ流れる。実装がこれをどう解いたかは第16節。
+
 **`branch_changed_outside_declared_scope`（merge）は昇格しない。** 契約ゲート
 `requireScopeClean` が上流で既に判定しており、unattended は契約経路を必須にしている（第3節）ので、
 この limitation は「機械ゲートが通ったうえでの人間可読版」であることが保証される。
@@ -1231,3 +1241,96 @@ SKILL.md 第3.2節）、
 （`scripts/validate.py` の `check_version_constant` が両者の一致を強制する）。
 **本 Issue の実行契約は `scripts/lib.mjs` を変更対象に含めておらず、`version:` 行の変更も禁じている**
 ため、bump は行っていない。**リリース時に両方を同一 commit で上げること。**
+
+---
+
+## 16. 実装で変えたこと（Issue [#134](https://github.com/Kewton/commandmate-skills/issues/134)。第12節 段 7 ＝ 段階 B）
+
+段階 B は **`merge.mjs --create-prs --unattended`** だけである。正本は
+[merge-contract.md](./merge-contract.md) 第2節・第5.3節・第6節・第9節と
+[../SKILL.md](../SKILL.md) 第3.3節・第5節。**裁定 0（第2節）と第6.1節の写像は1文字も変えていない。**
+
+第8節の段階表が段階 B に割り当てた締め付けは1つ（`change_evidence_unavailable` の昇格）で、
+実装もその1つだけである。**`merge_schema_version` は 1 のまま、`stop_reason` の enum にも
+target `outcome` の enum にも値を足していない。** 昇格した停止は既存の `pr_create_failed`
+（target は `pr_failed`）で受け、何が起きたかを名指しするのは `blocking_reasons[]` の code である
+—— 第15.2節が `wall_clock_budget_exhausted` に採ったのと同じ形である。
+
+以下は本 ADR から**形が変わった点**と、ADR が明示していなかった点をどう裁定したかである。
+
+### 16.0 第6.5節の見出しと第8節の段階表が矛盾していた（訂正済み）
+
+第8節の段階表は `change_evidence_unavailable` の昇格を**段階 B** に割り当てているのに、
+第6.5節は見出しを「段階 C でだけ blocking に昇格するもの」とし、本文にも
+「段階 A / B ではいずれも limitation のままである」と書いていた。**第8節が正しい**
+（#134 の Issue 本文も段階表を引いている）。第6.5節に訂正の但し書きを足した。
+段階 C に残るのは `verification_gates_unrecorded`（dispatch）だけである。
+
+### 16.1 昇格は `--approve` ではなく `--unattended` に紐づく（本 ADR に無い判断）
+
+第6.5節は昇格の理由を「無人で不可逆な操作をするとき」と書いており、字面どおりなら
+`--approve` が無い preview では昇格しないことになる。**実装では `--unattended` だけを条件にした。**
+
+理由は2つある。
+
+1. **preview は無人運転では「読まれる出力」ではなく「次の job の入力」である。** 人間が居る運転の
+   preview は人が読んで判断するための出力だが、無人運転で preview → `--approve` と2段に分ける
+   job 定義にとって、preview の `status` は「この先へ進んでよいか」の signal そのものである。
+   証拠を読めない Issue が在ることを preview が `success` と報告すれば、次の job はそのまま
+   mutation 段に進む。**昇格を preview に効かせないと、昇格は1段ずれて無意味になる。**
+2. **`--unattended` は invocation の性質の宣言であって、mutation の有無の宣言ではない**（裁定 0）。
+   昇格の条件に `--approve` を混ぜると、「この宣言が何を意味するか」が別のフラグに依存し始める。
+
+これは締め付けの側の拡張なので、裁定 0 の「含意するのは締め付けだけである」に反しない。
+
+### 16.2 昇格した Issue の PR 本文は書かない（ADR が触れていなかった点）
+
+`--unattended` で昇格した Issue については、`pr-bodies/issue-<n>.md` を**書かずに**停止する。
+本文を書いてから停止すると、artifact だけを見た読み手には「PR は作られたが本文が残っている」と
+「PR を作らずに本文だけ残した」の区別が付かない。**作らない PR の本文を残さない。**
+
+### 16.3 `branch_changed_outside_declared_scope` を昇格しないことを fixture で固定した
+
+第6.5節は「昇格しない」と裁定しているが、**裁定は「足さなかった」という形でしか実装に現れない**
+ので、後から「ついでに」昇格されても誰も気づかない。そこで twin fixture の世界を
+**scope 外変更を1件持つ**ものにした —— フラグの有無にかかわらず両 run が
+`branch_changed_outside_declared_scope` を limitation として持ち、unattended 側の差分が
+`unattended_mode` の1件だけであることを assert する。limitation が空の世界で比較すると、
+「保たれた limitation」と「消えた limitation」を区別できない。
+
+### 16.4 `gh` には停止を足していない（第14.5節どおり。第15.4節と同じ）
+
+**第6.3節に足した停止は無い。** 代わりに job 定義側の環境変数（`GH_TOKEN` /
+`GIT_TERMINAL_PROMPT=0`）を merge 契約 第5.3節と [../SKILL.md](../SKILL.md) 第3.3節に書いた
+（段階 A で dispatch について書いた記述と同じ内容である）。無人運転を実際に止めるのは `gh` では
+なく **`git push` の資格情報プロンプト**であり、それは「止まる」ではなく**無言で待つ**に化ける
+唯一の経路である。**runner はこれを検査しない。**
+
+### 16.5 未実装の段の拒否は、merge では runner が自分で行う（第15.7節からの変化）
+
+第15.7節は「`merge.mjs` / `uat.mjs` の `parseArgs` が未知 option を拒否するので、コードを1行も
+足さずに第8節の要求を満たしている」と記録した。段階 B で `merge.mjs` は `--unattended` を
+**知っている** option にしたので、その道は `--merge-prs` については塞がった。したがって
+**`--merge-prs --unattended` の拒否は runner が明示的に行う**（`invalid_input` / exit 3、
+理由を detail に書く）。`uat.mjs` は依然として `parseArgs` の拒否のままで、そちらも fixture で
+固定してある。
+
+dispatch の緩和フラグ（`--auto-yes` / `--allow-questions` / `--contract-mode`）は `merge.mjs` に
+存在しないので、引き続き `parseArgs` が同じ `invalid_input`（exit 3）で拒否する。**同じ exit で
+同じ意味なので、再実装はしていない。** これも fixture で固定してある（後の段階が黙って
+受理し始めないようにするため）。
+
+### 16.6 status runner の hint は追随できていない（既知の欠落）
+
+[../SKILL.md](../SKILL.md) 第5節の対処表には merge `change_evidence_unavailable` の行を足したが、
+`scripts/status.mjs` の `NEXT_ACTION_HINTS` には足していない —— **本 Issue の実行契約が
+`scripts/status.mjs` を変更対象に含めていない**ためである。追随するまでこの code は
+`UNKNOWN_CODE_HINT`（「detail と `summary_markdown` を読む」）に落ちる。#93 と第12節 段 6 が
+定めた扱いと同じで、**status が黙って別の対処を提案することはない。** 次に status を触る Issue で
+表の行をそのまま写すこと。
+
+### 16.7 version は上げていない（第15.8節と同じ理由）
+
+#134 の受入条件は minor bump（`commandmate.skill.yaml` と `scripts/lib.mjs` の**両方**）を求めて
+いるが、**本 Issue の実行契約は `scripts/lib.mjs` を変更対象に含めておらず、`version:` 行の変更も
+禁じている**ため、bump は行っていない。**リリース時に両方を同一 commit で上げること。**
