@@ -507,7 +507,7 @@
         "review",
         "github"
       ],
-      "latest": "0.2.1",
+      "latest": "0.3.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -655,6 +655,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-refinement-v0.2.1/cmate-issue-refinement-0.2.1.tar.gz",
             "sha256": "1cc347027caa619812696b9f174ddaaf927149479ab922b0c8a61bf196f09c2c",
             "size": 23743,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. No rubric evaluation recorded yet.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not evaluated",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not evaluated",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.3.0",
+          "changelog": "cmate-issue-refinement 0.3.0 — 受入条件の機械化を勧告する\n\ncmate-orchestrate 0.19.0（#114）で、Issue 本文の acceptance-gates ブロックが実行契約の\nverify.gates へ運ばれるようになった。既存 Issue を精錬するこの skill が、機械化できる\n受入条件を見つけたときに、そのブロックの追加を勧告する。\n\nこの skill は Issue を書き換えない設計なので、勧告に留める。read-only の findings として返す。\n\n推測で生成しない\n\n生産側の規律は cmate-issue-authoring と同一である。機械で測れると確信できるものだけを\n対象にし、測れるか判断できないものは散文のまま残す。require に書けるのは対象リポジトリの\nverify.yaml に実在する gate id だけで、読めない状況では書かない。gates（新規コマンドゲート）は\nconsumer 側が未実装なので出さない。",
+          "published_at": "2026-08-08T00:11:38Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-refinement-v0.3.0",
+            "commit": "924b188ea0505e7b648d5cc74e40842380355aa6"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-refinement-0.3.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-refinement-v0.3.0/cmate-issue-refinement-0.3.0.tar.gz",
+            "sha256": "039a5e7eb97d68f3f2b2bd40a20a2e4be029f036cc1e5ac95ca1c0d4c7133d90",
+            "size": 27204,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
