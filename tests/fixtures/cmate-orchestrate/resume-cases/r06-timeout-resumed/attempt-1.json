@@ -1,0 +1,11 @@
+{
+  "_comment": "#89 が報告した世界そのもの: #102 の worker は wait --timeout を使い切り、裁定が下りないまま run が止まる。#100 / #101 は completed + pass。timeout した worker は verify されないので（fake も実 CLI も、完了を検出した worktree しか verify しない）、#102 の verification は not_run のまま凍る。",
+  "cli_available": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "100": { "state": "completed", "verify": "pass" },
+    "101": { "state": "completed", "verify": "pass" },
+    "102": { "state": "timeout" }
+  }
+}
