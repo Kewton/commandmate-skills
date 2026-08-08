@@ -917,7 +917,8 @@ verification 記録はその report に転記されているので、merge / uat
 attempt 2 が直した後も Issue 行の次アクションに残る**。これは run の履歴を後から書き換えないため
 であって、未解決を意味しない。現在の状態は同じ行の `worker_state` / `verification` 側に出る。
 また `resume_*` の code は `status.mjs` の hint map にまだ無いので、「detail と `summary_markdown` を
-読む」に落ちる（SKILL.md 第5節に同じ注記がある。追随は別 Issue）。
+読む」に落ちる（[codes-and-recovery.md](./codes-and-recovery.md) 第4節に同じ注記がある。
+追随は別 Issue）。
 
 ### 8.4 整合性ガード
 
