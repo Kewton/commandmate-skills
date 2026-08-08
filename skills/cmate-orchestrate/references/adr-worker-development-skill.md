@@ -740,3 +740,187 @@ Issue #103 のビジョン上の穴は埋まり始める**。この順序は #10
    手順スキルであり、`cmate-worktree-setup` のような launcher 注入（#93 第2節）が使えない。
    ワーカーが skill として読む形でよいか、それとも呼び出し規約を新設する必要があるかを、
    実機で1件通してから決める。
+
+---
+
+## 14. 段3〜5 の実測と、実装で変わった形（[#128](https://github.com/Kewton/commandmate-skills/issues/128)）
+
+第12節の段3〜5（オーケストレーションとの結線）を実装した。本節はその記録であり、
+冒頭の運用規律（「ここに書いた形が実装で変わったなら、正本を直したうえでこの文書に
+『なぜ変えたか』を追記する」）に従う。**正本は
+[dispatch-contract.md](./dispatch-contract.md) 第1節・第3.0.2節と
+[../SKILL.md](../SKILL.md) 第2節・第3.2節・第4節・第5節にある。**
+
+### 14.1 第13節の未決事項1〜4 の実測結果
+
+**推測で実装しないという規律に従い、実装前に4点を測った。**
+測った結果、**第13節の裁定はどれも成り立った**（実装を強行して破ったものは無い）。
+
+#### 実測1 — install の判定条件は「**両 root**」である
+
+第13節1が対立させていた2つの事実を、両方ともコードで裏取りした。
+
+| 主張 | 測り方 | 結果 |
+|---|---|---|
+| dispatch は worker がどの Agent かを知らない | 4 runner すべてで `'--agent'` の出現数を数える | **0 件**（`dispatch` / `merge` / `uat` / `status` / `orchestrate` すべて 0） |
+| 同上 | `lookupWorktree()` が `ls --json` の row から読む key | `id` / `branch` / `name` / `path` のみ。**agent を表す field は読んでいない** |
+| CLI 表面には `--agent` が在る | `commandmate-cli-contract.json` の `send.flags` | `--agent` は**存在する**。使っていないのは能力の不足ではなく設計判断である |
+
+したがって「片方だけ在る worktree を『入っている』と読む」ことはできない。読むと、
+**Codex が読む root に無い契約に「この worktree の Skill を読め」と書く**ことになり、
+それは dispatch が測れない主張になる（第3.5節が禁じた形そのもの）。
+
+両方を要求する代償も測った。開発機の 21 の worktree root を走査した実測:
+
+| 母集団 | both | 片側のみ |
+|---|---|---|
+| 全 (worktree, skill-id) 対 144 件 | 54 | 90 |
+| うち **`cmate-*` の 45 件**（`--worker-method` が名指しする対象） | **45** | **0** |
+
+**`commandmate skill install` が入れた package は、実測 45/45 が両置きである。**
+片側のみだったのは手書きの `source-command-*` 等、catalog 外の package だけであり、
+[verify-install.md](../../../docs/runbooks/verify-install.md) 第3.1節も手で置く場合は
+両 root へ置けと書いている。**両方を要求しても、実在の install は1件も落ちない。**
+
+→ **裁定: 両 root の `SKILL.md` を要求する。** 片側だけ在る場合は「無い」ではなく
+「**半分ある**」と detail に書く（operator にとって別の情報である）。
+fixture は `d48-worker-method-half-installed` で固定した。
+
+#### 実測2 — probe の対象 path は「`ls --json` が返した worktree path 配下」である
+
+同一リポジトリの sibling worktree（`BorderFreeKidsMap-develop` / `-stg` / `-issue-34`。
+`git rev-parse --git-common-dir` が同じ `.git` を指す）が、**それぞれ自分の
+`.claude/skills` / `.agents/skills` を持っている**ことを実測した。install は
+リポジトリ単位ではなく **worktree 単位**である。
+
+これは dispatch が既に `<worktree>/.commandmate/verify.yaml` を読む経路（#114）と同じ base で
+あり、新しい能力を要さない（第1.6節の裁定どおり）。手で配置した receipt の付かない package も、
+runbook の手順が `cd <worktree path>` から始まるので同じ path に在る。
+
+#### 実測3 — version は**記録しない**
+
+`commandmate.skill.yaml` を、dispatch が持つ唯一の YAML reader
+（`readWorktreeGateIds()`。`.commandmate/verify.yaml` 用の閉じた subset parser）に
+実際に食わせた。
+
+```
+readWorktreeGateIds(commandmate.skill.yaml)
+  => {"ok":false,"reason":".commandmate/verify.yaml: unknown top-level key \"schema_version\""}
+```
+
+**先頭の key で拒否される。** 公開済み 12 package の manifest はすべて block scalar（`>-`）と
+入れ子リストを持っており、この subset には構造的に入らない。読むには**新しい parser が要る**。
+
+→ **裁定: 第13節3 が事前に許可したとおり、version は記録しない。**
+`worker_method_applied` の detail から version を落とすだけで、他は何も変わらない。
+推測で埋めない。
+
+#### 実測4 — `## Method` は切り詰めに**到達しない**
+
+節を入れた goal の実長を、実際の生成器（`buildContractGoal()`）に本リポジトリの
+Issue 本文を通して測った（第1.3節と同じ方法。`## Method` 節は **586 字**）。
+
+| Issue | 受入条件 | 対象 file | goal（現行） | goal（+Method） | 余裕 |
+|---|---|---|---|---|---|
+| #90 | 6 | 6 | 1899 | 2485 | 5515 |
+| #93 | 7 | 2 | 1584 | 2170 | 5830 |
+| #95 | 5 | 0 | 1410 | 1996 | 6004 |
+| #97 | 6 | 3 | 1659 | 2245 | 5755 |
+| #98 | 7 | 3 | 1739 | 2325 | 5675 |
+| #100 | 7 | 2 | 1614 | 2200 | 5800 |
+| #103 | 9 | 5 | 1773 | 2359 | 5641 |
+| #128 | 10 | 4 | 2017 | 2603 | 5397 |
+
+切り詰め（8000 字）の発火閾値は、第13節4 が懸念したとおり**手前へ動く**:
+
+| `suspected_files` の path 長 | 現行の発火閾値 | +Method の発火閾値 | 手前へ動いた分 |
+|---|---|---|---|
+| 40 字 | 151 件 | 137 件 | 14 件 |
+| 100 字 | 62 件 | 57 件 | 5 件 |
+| 200 字（上限） | 32 件 | 29 件 | 3 件 |
+
+**だが `## Method` 自身が切られることは無い。** 第13節4 が「切り詰めが `## Method` を
+消さないことをどう保証するか」と問うたことへの答えは、**節の位置**である。
+節の挿入点（`## Objective` の直前）の offset を測ると:
+
+| 条件 | `## Objective` の offset |
+|---|---|
+| 典型（#90 そのまま） | 365 |
+| `suspected_files` 200 件 × 200 字 | **365** |
+| `acceptance_criteria` 200 件 × 200 字 | **365** |
+| `objective` 5万字 | **365** |
+
+**節より後ろに何を積んでも offset は 365 のまま**であり、切り詰めは末尾から起きるので
+8000 字の境界がここに届くことはない。唯一の例外は planner が上限を持たない `title`
+（5万字にすると offset は 50238 になる）だが、それは **今日でも `## Objective` 以下すべてが
+消える**既存のハザードであって本変更が作ったものではなく、しかも `## Method` は
+その中で**最後まで残る側**である（先頭の節なので）。
+
+→ **裁定: 第1.3節・第3.3節の裁定はそのまま成り立つ。** 追加の保護機構は要らない。
+
+### 14.2 実装で ADR の形から変わった点
+
+**1点だけある。第3.3節の節の文面である。**
+
+第3.3節の例は、参照先を `.claude/skills/cmate-worker-development/SKILL.md` の**1本だけ**
+書いていた。実装は**両 path を列挙する**。理由は実測1 と同じで、`.claude` だけを書くと
+**Codex の worker に、自分が読む root ではない path を指す**ことになるからである
+（dispatch はどちらの Agent かを知らない）。実際に書いている節は次のとおり:
+
+```
+## Method
+Follow the `cmate-worker-development` Skill installed in this worktree. Read it before you
+start, and follow it for the whole task:
+- .claude/skills/cmate-worker-development/SKILL.md
+- .agents/skills/cmate-worker-development/SKILL.md
+The two copies are byte-identical; read whichever one your agent can see.
+The Skill supplies METHOD only. It does not widen the files you may change,
+does not relax any gate, and does not authorise a push or a pull request.
+Where the Skill and this task disagree, THIS TASK WINS.
+If the Skill is not there, STOP and report it — do not improvise a method.
+```
+
+併せて、第2節の不変条件3（**契約と食い違ったら契約が勝つ**）を節自身に1行として書いた。
+ADR の例には無かったが、これは新しい裁定ではなく既存の裁定を**worker に見える場所へ
+持ってきた**ものである——不変条件が ADR にしか書かれていなければ、それを読むのは
+実装者だけで、拘束される当人（worker）は読まない。
+
+**それ以外は ADR のとおりである。** 呼び出し口は `--worker-method <skill-id>`（第3.2節）、
+節の位置は `## Objective` の直前（第3.3節）、未 install は停止（第3.4節）、
+all-or-nothing（同）、`dispatch_schema_version` は 1 のまま・`stop_reason` の enum も不変で
+証跡は `limitations[].code` / `blocking_reasons[]`（第9節）、
+既定では 1 bit も変わらない（第11節）。
+
+### 14.3 何を fixture で固定したか（段4）
+
+dispatch case を 43 → 48 に増やした。**追加した5件が空振りでないことは、変異注入で実測した。**
+
+| case | 何を固定するか |
+|---|---|
+| `d44-worker-method-applied` | 適合側（緑）。契約 goal に `## Method` が入り、`worker_method_declared` が 1 件・`worker_method_applied` が 1 件・節の順序が Method → Objective → … であること |
+| `d45-worker-method-absent-non-regression` | **非回帰。** 同じ plan・同じ scenario（skill は install 済み）をフラグ**無し**で走らせ、golden contract が**実装前の bytes と byte 一致**すること。golden は #128 の実装前の `dispatch.mjs` が生成したものを凍結してある |
+| `d46-worker-method-fallback-prompt` | **両経路。** `--contract-mode off` のフォールバックで、節が**実際に send された message** に入っていること |
+| `d47-worker-method-unavailable` | 未 install の停止。`--out` を作らず・1人も dispatch せず・`dispatch_error` / failure で止まり、**install 後に同じコマンドを再実行すると success まで通る**こと |
+| `d48-worker-method-half-installed` | 実測1 の裁定。片側だけの install を「入っている」と読まないこと |
+
+**二点測定**は d44 と d45 が担う（同じ plan・同じ scenario をフラグ有り／無しで走らせる）。
+2つの golden contract の差分は `## Method` 節ちょうど 11 行であり、それ以外の byte は一致する。
+
+変異注入の実測（それぞれ実装を戻して赤を観測し、戻した）:
+
+| 変異 | 落ちた assertion | 落ちた case |
+|---|---|---|
+| `dispatch.mjs` を `origin/main` へ戻す | **52** | d44 / d45 / d46 / d47 / d48 |
+| `buildWorkerPrompt()` からだけ節を外す（**片経路実装**） | **2** | d46 のみ（d44 は緑のまま＝case が第2の生成器を本当に測っている） |
+| install 判定を「片方でよい」に緩める | **12** | d48 |
+| 既定を on にする（flag 無しでも節を書く） | **16** | d13 / d20 / d21 / d45 ほかの golden contract |
+
+**片経路変異が d46 だけを落とし d44 を落とさなかったこと**が、第1.2節の穴
+（`--contract-mode auto` のフォールバックで方法論が黙って消える）を本当に塞いだ証拠である。
+
+### 14.4 実装しなかったこと
+
+- **`--worker-method` の既定 on 化**（第12節 段7）。運用実績を見て別 Issue で判断する。
+- **version の記録**（実測3）。読める parser を持たないので記録しない。
+- **`cmate-worker-development` 側の変更**。段1〜2 は #123 で公開済みであり、本段は
+  `cmate-orchestrate` 側の結線だけを扱う。

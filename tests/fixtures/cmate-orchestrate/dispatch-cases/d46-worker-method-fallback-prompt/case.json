@@ -1,0 +1,41 @@
+{
+  "description": "ADR §3.2 (3) / §1.2: `## Method` 節は **契約 goal と worker prompt の両方** に入る。この case は `--contract-mode off` のフォールバック経路（契約を作らず `buildWorkerPrompt()` が worker へ送る本文になる経路）で、節が同じ位置に現れることを、report の artifact ではなく **実際に send された message** で測る。片方の生成器にしか入れていない実装だと、`--contract-mode auto` が契約非対応 CLI にぶつかった run で方法論だけが黙って消える —— その穴をここで塞ぐ。契約が無い経路でも `worker_method_applied` は記録される（記録されるのは「書いた」という事実であって、契約の有無ではない）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-worker-method.json",
+    "orchestrate_args": ["320", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration", "--contract-mode", "off", "--worker-method", "cmate-worker-development"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [true],
+    "no_respond": true,
+    "sent": [320],
+    "worker_states": { "320": "completed" },
+    "verification_outcomes": { "320": "pass" },
+    "no_contract_calls": true,
+    "sent_message_includes": {
+      "320": [
+        "## Method",
+        "Follow the `cmate-worker-development` Skill installed in this worktree.",
+        "- .claude/skills/cmate-worker-development/SKILL.md",
+        "- .agents/skills/cmate-worker-development/SKILL.md",
+        "Where the Skill and this task disagree, THIS TASK WINS.",
+        "\n## Method\n",
+        "\n## Objective\n"
+      ]
+    },
+    "prompt_artifact_contains": {
+      "320": ["## Method", "## Verification to run before reporting done"]
+    },
+    "limitation_codes": ["worker_method_declared", "worker_method_applied", "contract_disabled"],
+    "limitation_code_counts": { "worker_method_declared": 1, "worker_method_applied": 1 },
+    "limitation_details_include": ["the worker prompt"],
+    "absent_blocking_codes": ["worker_method_unavailable"],
+    "summary_includes": ["## 方法論"]
+  }
+}

@@ -55,7 +55,7 @@
 
 import { parseArgs, promisify } from 'node:util';
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdirSync, existsSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync, readFileSync, appendFileSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -173,6 +173,40 @@ const ATTEMPT_HISTORY_FILE = 'attempt-history.jsonl';
 const MAX_ATTEMPTS = 99;
 
 // =============================================================================
+// Worker method — the opt-in reference to a worker-side development Skill
+// (Issue #128 / references/adr-worker-development-skill.md sections 3 and 9)
+// =============================================================================
+//
+// What `--worker-method` adds is METHOD, never PERMISSION (ADR section 2). It
+// relaxes no gate, widens no `scope.allow`, and grants no push/PR right; the
+// contract still decides, and the task text says so in as many words.
+//
+// BOTH roots are required, and that is a measured decision rather than a
+// cautious one. CommandMate deploys a Skill byte-identically into
+// `.agents/skills/<id>/` (Codex) and `.claude/skills/<id>/` (Claude), and this
+// runner does not know which Agent will pick the task up: it never passes
+// `send --agent`, and the `ls --json` rows it resolves worktrees from carry
+// id/branch/path and no agent at all. Accepting one side would therefore mean
+// writing "read the skill in this worktree" into a contract whose worker may be
+// structurally unable to see it — asserting something this runner cannot
+// measure (ADR section 3.5). Requiring both is the only condition that holds
+// whichever Agent runs, and the measurement says it costs nothing real: of the
+// 45 `cmate-*` installs found across the worktrees on the development machine,
+// 45 were two-sided (the one-sided packages there were all hand-authored,
+// non-catalog ones). The runbook tells hand-placers to use both roots too, and
+// the cost of being wrong is one `commandmate skill install` plus a re-run of
+// the same command — `--out` is never consumed by this refusal.
+const WORKER_METHOD_ROOTS = ['.claude/skills', '.agents/skills'];
+// The file whose presence IS the install. A directory alone can be an empty
+// leftover of an uninstall; the Skill's entry point existing is what makes
+// "read it before you start" a true sentence.
+const WORKER_METHOD_ENTRY = 'SKILL.md';
+// A Skill id, mirroring the catalog's own id shape. It is interpolated into a
+// path, so the pattern is also the path-escape guard: no separator, no dot, no
+// leading dash can survive it.
+const WORKER_METHOD_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+// =============================================================================
 // Redaction (SkillError, the pattern list and redact/redactionsList are shared
 // with the merge and uat runners in lib.mjs)
 // =============================================================================
@@ -240,6 +274,17 @@ Options:
                          and must print a worktree-setup.result.v1 document on
                          stdout. Passing --profile/--base/--issues yourself is
                          refused: all three come from the approved plan.
+  --worker-method <id>   Name a worker-side development Skill (e.g.
+                         cmate-worker-development) whose method every dispatched
+                         worker must follow. OFF by default, and the default is
+                         not "on when it happens to be installed": without this
+                         flag the run is byte-for-byte what it was before the
+                         flag existed. With it, dispatch verifies the Skill is
+                         installed in EVERY worktree it is about to dispatch into
+                         (both ${WORKER_METHOD_ROOTS.join(' and ')}) and refuses the
+                         run if it is not, then writes a "## Method" section
+                         naming it into the task text. It adds METHOD only: no
+                         gate is relaxed and no permission is widened.
   --contract-mode <m>    auto (default) | require | off. auto dispatches under an
                          execution contract when the CLI supports one and falls
                          back to the profile baseline with an explicit limitation
@@ -277,6 +322,7 @@ function parseCli(argv) {
         'allow-questions': { type: 'boolean' },
         'prepare-worktrees': { type: 'boolean' },
         'worktree-setup': { type: 'string' },
+        'worker-method': { type: 'string' },
         'contract-mode': { type: 'string' },
         'verify-gates': { type: 'string' },
         'expect-branch': { type: 'string' },
@@ -334,6 +380,22 @@ function resolveVerifyGates(raw) {
     seen.add(id);
   }
   return ids;
+}
+
+// The worker-method Skill id, validated here rather than at the probe. The id is
+// interpolated into a path this runner reads inside somebody's worktree, so an id
+// that is not an id is an input error, not a missing install: reporting
+// `worker_method_unavailable` for `../../etc` would send the operator off to
+// install something that was never nameable in the first place.
+function resolveWorkerMethod(raw) {
+  if (raw === undefined) return null;
+  const id = String(raw).trim();
+  if (!WORKER_METHOD_ID_RE.test(id)) {
+    throw new SkillError('invalid_input',
+      `--worker-method must be a skill id matching ${WORKER_METHOD_ID_RE.source} (e.g. cmate-worker-development); ` +
+        'it names a directory this runner reads inside each worktree, so nothing else is accepted', 3);
+  }
+  return id;
 }
 
 // Flags the worktree-setup provider must not be handed a second time (Issue #93).
@@ -406,6 +468,7 @@ function resolveInputs(parsed) {
     allowQuestions: Boolean(values['allow-questions']),
     prepareWorktrees,
     worktreeSetupArgv: resolveSetupLauncher(values['worktree-setup'], prepareWorktrees),
+    workerMethod: resolveWorkerMethod(values['worker-method']),
     contractMode: resolveContractMode(values['contract-mode']),
     verifyGates: resolveVerifyGates(values['verify-gates']),
     expectBranch: values['expect-branch'] ?? null,
@@ -908,6 +971,74 @@ function driftChecks(inputs, plan, waveIndex, resolutions) {
   return { checks, unresolved };
 }
 
+// The two paths a worker-method Skill has to occupy in one worktree, in a fixed
+// order so every message, every contract and every limitation names them the same
+// way. Relative on purpose: they go into a contract a worker reads, and the
+// worktree they are relative to is the worker's own cwd.
+function workerMethodPaths(skillId) {
+  return WORKER_METHOD_ROOTS.map((root) => `${root}/${skillId}/${WORKER_METHOD_ENTRY}`);
+}
+
+// Is the Skill really in this worktree? The same shape as the acceptance-gate
+// probe (#114): read the worktree the `ls` resolution named, decide from what is
+// actually there, and never from what the plan or the operator asserted.
+//
+// A path that cannot be stat'ed counts as missing rather than as an error. The
+// question here is only "can a worker open this file", and every way the answer
+// is no — absent, a directory, unreadable — has the same fix and the same
+// consequence.
+function probeWorkerMethod(worktreePath, skillId) {
+  const found = [];
+  const missing = [];
+  for (const relative of workerMethodPaths(skillId)) {
+    let readable = false;
+    try {
+      readable = statSync(join(worktreePath, relative)).isFile();
+    } catch {
+      readable = false;
+    }
+    (readable ? found : missing).push(relative);
+  }
+  return { ok: missing.length === 0, found, missing };
+}
+
+// Probe every issue of a wave whose worktree actually resolved. An issue whose
+// worktree could not be resolved is already reported as `worktree_unresolved`;
+// re-reporting it here as a missing Skill would name the wrong fix.
+function workerMethodUnavailable(inputs, resolutions) {
+  if (inputs.workerMethod === null) return [];
+  return resolutions
+    .filter((entry) => entry.templatePath !== null && entry.resolved.id !== null && Boolean(entry.worktreePath))
+    .map((entry) => ({ number: entry.number, probe: probeWorkerMethod(entry.worktreePath, inputs.workerMethod) }))
+    .filter((entry) => !entry.probe.ok);
+}
+
+// One blocking reason per issue whose worktree does not carry the Skill (ADR
+// section 3.4). All-or-nothing: dispatching only the workers that happen to have
+// it would make "the whole wave passed" mean something different in every run,
+// which is the promise the wave barrier is built on (#93 論点2).
+function workerMethodUnavailableReasons(entries, skillId) {
+  return entries.map(({ number, probe }) => ({
+    code: 'worker_method_unavailable',
+    detail: redact(`#${number}: --worker-method ${skillId} was requested, but this worktree does not carry ${probe.missing.join(' or ')}`
+      + `${probe.found.length > 0 ? ` (it does carry ${probe.found.join(', ')}, which is only half an install: the other Agent cannot see it, and this runner never learns which Agent takes the task)` : ''}`
+      + `. Nothing was dispatched — a run started with --worker-method is a run whose premise is that the method is in place, and a contract naming a file the worker cannot open would state something this runner cannot measure. `
+      + `Run \`commandmate skill install ${skillId}\` for this worktree and re-run the same command, or drop --worker-method`),
+  }));
+}
+
+// The run-wide declaration (ADR section 9). One entry, recorded whether or not
+// the run goes on to dispatch anything, because "this run was started with a
+// method" is what every other line of the report is read against.
+function workerMethodDeclaredLimitation(skillId) {
+  return {
+    code: 'worker_method_declared',
+    detail: `--worker-method ${skillId}: this run declares a worker-side development method. Before dispatching, each worktree is checked for ${workerMethodPaths(skillId).join(' and ')}, and every dispatched issue's task text carries a \`## Method\` section naming them. `
+      + 'The method adds HOW only: it does not widen scope.allow, relax a gate or authorise a push or PR — where the two disagree the contract wins. '
+      + 'This records that the reference was DECLARED; whether a worker actually followed the method is not measured by dispatch',
+  };
+}
+
 // One blocking reason per unresolved worktree (Issue #90). A single aggregate
 // count ("2 planned worktrees do not resolve") tells an operator that something
 // is missing but not WHICH issue to create a worktree for, and the branch is the
@@ -939,12 +1070,26 @@ function preflightDispatch(inputs, plan, waveIndex, waveIssues) {
   const resolutions = resolveWave(inputs, plan, waveIssues);
   const { checks, unresolved } = driftChecks(inputs, plan, waveIndex, resolutions);
   const blocking = checks.find((check) => check.blocking && !check.ok);
-  const reasons = !blocking
-    ? []
-    : blocking.code === 'worktrees_present' && unresolved.length > 0
+  // The worker-method probe, and why it is HERE (Issue #128 / ADR section 3.4).
+  // A missing method Skill is refused on the same terms #90 refuses a missing
+  // worktree: before the run directory exists, so the fix (`skill install`) is
+  // followed by the SAME command rather than by inventing a new `--out`.
+  // Only reached when the world is otherwise sound — a worktree that did not
+  // resolve has no path to probe, and its own reason already names the fix.
+  const methodMissing = blocking ? [] : workerMethodUnavailable(inputs, resolutions);
+  const reasons = blocking
+    ? (blocking.code === 'worktrees_present' && unresolved.length > 0
       ? worktreeUnresolvedReasons(unresolved)
-      : [{ code: `drift_${blocking.code}`, detail: blocking.detail }];
-  return { waveIndex, resolutions, checks, unresolved, blocked: Boolean(blocking), reasons };
+      : [{ code: `drift_${blocking.code}`, detail: blocking.detail }])
+    : workerMethodUnavailableReasons(methodMissing, inputs.workerMethod);
+  return {
+    waveIndex,
+    resolutions,
+    checks,
+    unresolved,
+    blocked: Boolean(blocking) || methodMissing.length > 0,
+    reasons,
+  };
 }
 
 // The report a blocked pre-flight prints. `out_dir` is null because nothing was
@@ -959,12 +1104,20 @@ function preflightFailureReport(inputs, plan, preflight, preparation = null, res
   // one, and the re-run advice below ("re-run the same command") is only true
   // because this attempt's directory was never created either (Issue #98).
   if (resume !== null) report.limitations.push(resumeLimitation(plan, resume));
+  // The declaration survives the refusal: a report that stopped because the
+  // method was missing must still say which method the operator asked for
+  // (Issue #128 / ADR section 9).
+  if (inputs.workerMethod !== null) report.limitations.push(workerMethodDeclaredLimitation(inputs.workerMethod));
   // A preparation that could not run is not drift: nothing about branch, base or
   // permission moved — a conditional dependency was missing, misconfigured or
   // disagreed with the plan's profile. `dispatch_error` is the pre-dispatch stop
   // the schema already reserves for that shape (Issue #93).
+  // A missing worker-method Skill is the same shape and reuses the same
+  // stop_reason rather than adding one to the enum: the operator's move is
+  // "install the conditional dependency and re-run", exactly as it is for #93.
   const preparationFailed = preparation !== null && preparation.reasons.length > 0;
-  report.stop_reason = preparationFailed ? 'dispatch_error' : 'drift';
+  const methodBlocked = preflight.reasons.some((reason) => reason.code === 'worker_method_unavailable');
+  report.stop_reason = preparationFailed || methodBlocked ? 'dispatch_error' : 'drift';
   report.drift_checks = preflight.checks;
   // The preparation's reasons come first: when the stage was asked for, why it
   // could not deliver a worktree is the actionable half, and "this issue has no
@@ -1419,6 +1572,47 @@ function contractTitle(issue) {
   return raw.length > MAX_CONTRACT_TITLE ? `${raw.slice(0, MAX_CONTRACT_TITLE - 1)}…` : raw;
 }
 
+// The `## Method` section, or nothing at all (Issue #128 / ADR section 3.3).
+//
+// It goes into BOTH task-text generators — the contract goal and the fallback
+// worker prompt — at the same place, immediately before `## Objective`:
+//
+//   - Not first. `yamlBlockScalar` relies on the goal opening with a non-blank
+//     header line, and the header is also what identifies the task to a human.
+//   - Not inside `## Rules`. Rules are last, and last is what the 8000-char
+//     truncation eats first: a contract could then lose its method reference
+//     without saying so. Measured: the insertion point sits at a FIXED offset of
+//     365 chars for every issue whose title is of ordinary length, no matter how
+//     many acceptance criteria or files it declares, so the truncation cannot
+//     reach this section at all.
+//   - Before `## Objective`, because a worker reads top to bottom. A method
+//     stated after the objective arrives after the work has started.
+//
+// Only ONE generator carrying it would be worse than neither carrying it:
+// `--contract-mode auto` silently falls back to `buildWorkerPrompt()` on a CLI
+// with no `send --contract`, and the method would then disappear from exactly the
+// runs nobody is watching (ADR section 1.2).
+//
+// The text names the Skill, its two paths and the precedence rule, and nothing
+// else. Summarising the method here would put a second copy of it in this
+// runner, which is the case ADR section 3.2 rejects: the copy and the Skill drift
+// apart, and the worker reads the copy.
+function workerMethodSection(skillId) {
+  if (skillId === null) return [];
+  return [
+    '## Method',
+    `Follow the \`${skillId}\` Skill installed in this worktree. Read it before you`,
+    'start, and follow it for the whole task:',
+    ...workerMethodPaths(skillId).map((relative) => `- ${relative}`),
+    'The two copies are byte-identical; read whichever one your agent can see.',
+    'The Skill supplies METHOD only. It does not widen the files you may change,',
+    'does not relax any gate, and does not authorise a push or a pull request.',
+    'Where the Skill and this task disagree, THIS TASK WINS.',
+    'If the Skill is not there, STOP and report it — do not improvise a method.',
+    '',
+  ];
+}
+
 // The contract's `goal` — the body CommandMate sends after the preamble it
 // composes itself.
 //
@@ -1435,7 +1629,7 @@ function contractTitle(issue) {
 // mechanized part of the acceptance criteria: until now the goal told the worker
 // that "the same gates decide the verdict" while the verdict was actually the
 // repository's common gate set, which the issue had no way to speak to (ADR §1.1).
-function buildContractGoal(plan, issue, requiredGates = []) {
+function buildContractGoal(plan, issue, requiredGates = [], workerMethod = null) {
   const goal = [
     `# Issue #${issue.number} — ${issue.title ?? 'no title'}`,
     '',
@@ -1444,6 +1638,7 @@ function buildContractGoal(plan, issue, requiredGates = []) {
     `Work branch: ${issue.branch ?? '(from profile template)'}`,
     `Worktree: ${issue.worktree ?? '(from profile template)'}`,
     '',
+    ...workerMethodSection(workerMethod),
     '## Objective',
     issue.objective ?? issue.title ?? `Resolve issue #${issue.number}.`,
     '',
@@ -1484,7 +1679,7 @@ function buildContractGoal(plan, issue, requiredGates = []) {
 // declared none). It is passed in rather than re-read here because the CALLER is
 // what verified those ids exist in the worktree — a contract must never name a
 // gate this run has not seen in `.commandmate/verify.yaml`.
-function buildTaskContract(plan, issue, inputs, requiredGates = []) {
+function buildTaskContract(plan, issue, inputs, requiredGates = [], workerMethod = null) {
   const allow = contractScopeAllow(issue);
   const verifyGates = contractVerifyGates(inputs.verifyGates, requiredGates);
   const lines = [];
@@ -1492,7 +1687,7 @@ function buildTaskContract(plan, issue, inputs, requiredGates = []) {
   lines.push('# Do not edit by hand: the same plan regenerates this file byte for byte.');
   lines.push('version: 1');
   lines.push(`title: ${yamlString(contractTitle(issue))}`);
-  lines.push(yamlBlockScalar('goal', buildContractGoal(plan, issue, requiredGates)));
+  lines.push(yamlBlockScalar('goal', buildContractGoal(plan, issue, requiredGates, workerMethod)));
   lines.push('scope:');
   if (allow.length === 0) {
     lines.push('  allow: []');
@@ -1733,7 +1928,7 @@ function bullets(items, fallback) {
 // any worker CLI because it names the objective, the boundary (only the
 // issue's files), the branch/worktree, the baseline to run, and the rule that a
 // blocking question must stop and ask rather than be guessed.
-function buildWorkerPrompt(plan, issue) {
+function buildWorkerPrompt(plan, issue, workerMethod = null) {
   return [
     `# Worker task — issue #${issue.number}`,
     '',
@@ -1742,6 +1937,7 @@ function buildWorkerPrompt(plan, issue) {
     `Work branch: ${issue.branch ?? '(from profile template)'}`,
     `Worktree: ${issue.worktree ?? '(from profile template)'}`,
     '',
+    ...workerMethodSection(workerMethod),
     '## Objective',
     issue.objective ?? issue.title ?? `Resolve issue #${issue.number}.`,
     '',
@@ -2573,6 +2769,12 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   // carried, and what it re-dispatched. Every other line of the report is read
   // against that.
   if (resume !== null) report.limitations.push(resumeLimitation(plan, resume));
+  // The run-wide method declaration (Issue #128 / ADR section 9), stated before
+  // any wave: everything below — the `## Method` section in each contract, the
+  // per-issue `worker_method_applied` entries — is read against it. Nothing is
+  // pushed when the flag was not passed, which is what keeps a run without it
+  // byte-identical to a run from before the flag existed.
+  if (inputs.workerMethod !== null) report.limitations.push(workerMethodDeclaredLimitation(inputs.workerMethod));
   // Nothing is left to dispatch: every issue the plan names was already
   // completed AND verified. Reported as its own fact rather than as a silent
   // success, because "the run did nothing" and "the run did everything" produce
@@ -2746,6 +2948,27 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
       break;
     }
 
+    // 2b. The worker-method probe for a wave the pre-flight did not cover
+    //     (Issue #128 / ADR section 3.4). Wave 0 was probed before the run
+    //     directory existed; a later wave is probed HERE, at the moment its
+    //     worktrees resolve, for the same reason #93 re-checks worktrees per
+    //     wave: a worktree can be created, moved or emptied while an earlier
+    //     wave was running. All-or-nothing, like the drift block above — the
+    //     wave stops rather than dispatching the subset that happens to be
+    //     equipped.
+    const methodMissing = preflighted ? [] : workerMethodUnavailable(inputs, resolutions);
+    if (methodMissing.length > 0) {
+      report.waves.push({
+        index: waveIndex,
+        dispatched: [],
+        workers: carriedWorkers,
+        barrier: { all_workers_completed: false, all_verifications_passed: false, advanced: false },
+      });
+      haltWith(waveIndex === 0 ? 'failure' : 'partial', 'dispatch_error',
+        workerMethodUnavailableReasons(methodMissing, inputs.workerMethod));
+      break;
+    }
+
     // 3a. Prepare every issue in the wave (sequential, cheap): build its worker
     //     record, take its already-resolved worktree id/path, and write its prompt
     //     artifact. `worktreePaths` remembers the git path per issue so the
@@ -2879,7 +3102,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
           continue;
         }
         try {
-          contractPath = placeContract(res.worktreePath, number, buildTaskContract(plan, res.issue, inputs, requiredGates), contractsDir);
+          contractPath = placeContract(res.worktreePath, number, buildTaskContract(plan, res.issue, inputs, requiredGates, inputs.workerMethod), contractsDir);
         } catch (error) {
           worker.worker_state = 'failed';
           worker.note = redact(`could not place the execution contract in the worktree: ${error.message}`);
@@ -2891,8 +3114,24 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
       const promptFile = join(promptsDir, `issue-${number}.md`);
       // In contract mode the artifact is the goal — the body CommandMate sends
       // after its own preamble — so the file still shows what the worker read.
-      const prompt = contractMode ? buildContractGoal(plan, res.issue, requiredGates) : buildWorkerPrompt(plan, res.issue);
+      const prompt = contractMode
+        ? buildContractGoal(plan, res.issue, requiredGates, inputs.workerMethod)
+        : buildWorkerPrompt(plan, res.issue, inputs.workerMethod);
       writeFileSync(promptFile, `${prompt}\n`, 'utf8');
+
+      // The per-issue half of the evidence (ADR section 9): the Skill was found
+      // in THIS worktree and the reference really went into the text this worker
+      // is about to be sent. Recorded here rather than up front because up front
+      // it would only repeat the declaration — this entry exists to say the
+      // writing happened, for the issues where it happened.
+      if (inputs.workerMethod !== null) {
+        const probe = probeWorkerMethod(res.worktreePath, inputs.workerMethod);
+        report.limitations.push({
+          code: 'worker_method_applied',
+          detail: redact(`#${number}: ${inputs.workerMethod} was found in this worktree (${probe.found.join(', ')}), and a \`## Method\` section naming it was written into ${contractMode ? "the execution contract's goal" : 'the worker prompt'}. `
+            + '適用されたことは、守られたことではない — dispatch can see that the reference was written, not that the worker followed it; that evidence is the worker\'s own deliverable'),
+        });
+      }
 
       workers.push(worker);
       supervisable.push({ worker, worktreeId: res.resolved.id, worktreePath: res.worktreePath, prompt, contractPath, requiredGates });
@@ -3204,6 +3443,27 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
     lines.push('');
   }
 
+  // The method section (Issue #128 / ADR section 9). Printed only when the
+  // operator opted in, so a run without `--worker-method` reads exactly as it
+  // did before the flag existed — including this summary.
+  const methodDeclared = report.limitations.find((entry) => entry.code === 'worker_method_declared');
+  const methodApplied = report.limitations.filter((entry) => entry.code === 'worker_method_applied');
+  const methodBlocked = report.blocking_reasons.filter((entry) => entry.code === 'worker_method_unavailable');
+  if (methodDeclared || methodBlocked.length > 0) {
+    lines.push('## 方法論');
+    if (methodDeclared) lines.push(`- 宣言: ${methodDeclared.detail}`);
+    for (const entry of methodBlocked) lines.push(`- 停止: ${entry.code} — ${entry.detail}`);
+    lines.push(methodApplied.length === 0
+      ? '- 適用: なし（契約 / prompt を1件も書いていない）。'
+      : `- 適用: ${methodApplied.length} 件の Issue の task text に \`## Method\` 節を書いた。`);
+    // The one sentence this whole feature must not let a reader lose: dispatch
+    // measures that the reference was written, never that it was obeyed
+    // (ADR section 3.5 — the same discipline as cmate-verify's "PASS は宣言した
+    // ゲートが通った以上のことを意味しない").
+    lines.push('- **「適用された」と「守られた」は別の事実である。** dispatch が測れるのは、宣言・install の実在・契約への記載の3つだけで、worker が実際に方法論に従ったかは測っていない。');
+    lines.push('');
+  }
+
   lines.push('## Wave');
   if (report.waves.length === 0) {
     lines.push('- dispatch 前に停止（wave なし）。');
@@ -3275,6 +3535,12 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
     // The conditional dependency, named (Issue #93). A stage the operator asked
     // for and that could not run must say what to install and what to pass —
     // "worktree を作成して再実行" is the answer to a different question.
+    // The conditional dependency the operator named themselves (Issue #128).
+    // "install it and re-run the same command" is the whole fix, and it is worth
+    // saying that `--out` was not consumed — that is why the same command works.
+    if (methodBlocked.length > 0) {
+      lines.push('- next: `commandmate skill install <skill-id>` で方法論スキルを対象 worktree に入れ（`.claude/skills` と `.agents/skills` の両方に入る）、**同じコマンドをそのまま再実行**する。`--out` は消費していない。方法論なしで走らせてよいなら `--worker-method` を外す（owner: operator）。');
+    }
     if (report.blocking_reasons.some((reason) => reason.code === 'worktree_setup_unavailable')) {
       lines.push('- next: `cmate-worktree-setup` を install し、`--worktree-setup <launcher>` でその呼び出し口を渡して再実行する。`--prepare-worktrees` を外せば従来どおり「worktree を自分で作ってから dispatch」になる（owner: operator）。');
     }
@@ -3395,7 +3661,13 @@ async function run(argv) {
 
   if (preflight !== null && preflight.blocked) {
     const report = preflightFailureReport(inputs, plan, preflight, preparation, resume);
-    process.stderr.write(`nothing was dispatched; ${attemptDir} was not created, so the same command can be re-run once the drift is fixed\n`);
+    // The advice names what actually blocked. "once the drift is fixed" is the
+    // wrong instruction for a missing worker-method Skill, and the operator only
+    // gets one line on stderr (Issue #128).
+    const methodBlocked = preflight.reasons.some((reason) => reason.code === 'worker_method_unavailable');
+    process.stderr.write(methodBlocked
+      ? `nothing was dispatched; ${attemptDir} was not created, so the same command can be re-run once ${inputs.workerMethod} is installed in every worktree it dispatches into\n`
+      : `nothing was dispatched; ${attemptDir} was not created, so the same command can be re-run once the drift is fixed\n`);
     return { exitCode: 1, stdout: `${JSON.stringify(report, null, 2)}\n` };
   }
 

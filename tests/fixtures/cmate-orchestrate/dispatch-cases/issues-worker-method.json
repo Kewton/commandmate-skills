@@ -1,0 +1,11 @@
+{
+  "_comment": "One issue owning two files, used by the --worker-method cases (Issue #128 / ADR §12 段4). ONE issue on purpose: the two-point measurement runs this same plan twice — once with --worker-method and once without — and the whole claim is that the two reports differ only in what the flag adds. A second issue would put a second wave between the two runs without adding anything the measurement needs.",
+  "issues": [
+    {
+      "number": 320,
+      "title": "feat: add the retry budget",
+      "body": "Add the retry budget across `src/retry/budget.ts` and `src/retry/index.ts`.\n\n## Acceptance criteria\n- [ ] `src/retry/budget.ts` refuses a negative budget\n- [ ] `src/retry/index.ts` exports the budget\n",
+      "labels": ["feature"]
+    }
+  ]
+}

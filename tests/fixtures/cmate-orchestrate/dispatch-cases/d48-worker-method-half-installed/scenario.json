@@ -1,0 +1,12 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "320": { "state": "completed", "verify_exits": [0] }
+  },
+  "worktree_files": {
+    ".claude/skills/cmate-worker-development/SKILL.md": "# cmate-worker-development\n\nOnly the Claude root. A Codex worker cannot see this, and dispatch never learns which agent takes the task.\n"
+  }
+}
