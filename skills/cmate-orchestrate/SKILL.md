@@ -379,8 +379,9 @@ dispatch 側の規約は [dispatch-contract.md](./references/dispatch-contract.m
 
 規約の正本は [dispatch-contract.md](./references/dispatch-contract.md) 第3.0.3節・第3.0.4節、
 裁定の記録と実測は [adr-unattended-mode.md](./references/adr-unattended-mode.md)（特に第2節の裁定 0、
-実測の第14節、実装差分の第15節）。**段階 A は dispatch のみ**で、merge / uat に `--unattended` を
-渡すと `invalid_input` で落ちる（受理して無視すると、CI は自分が守られていると誤解する）。
+実測の第14節、実装差分の第15節・第16節）。**現在の段階は B**（dispatch と merge `--create-prs`。
+第3.3節）で、**その外に `--unattended` を渡すと `invalid_input` で落ちる** —— merge `--merge-prs` と
+uat が段階 C であり、まだ実装されていない（受理して無視すると、CI は自分が守られていると誤解する）。
 
 **監視の一次はこの `wait` ループである**（[cmate-orchestrate-monitor](../cmate-orchestrate-monitor/)
 との境界）。契約付き dispatch の裁定と nudge はこの runner が行う: ブロッキングな
@@ -417,6 +418,7 @@ merge.mjs --plan <plan.json> --dispatch <dispatch-report.json> (--create-prs | -
 | `--dispatch <path>` | **必須** | eligible の唯一の根拠 |
 | `--create-prs` / `--merge-prs` | どちらか1つ | PR 作成 / CI 確認付き guarded merge |
 | `--approve` | **off** | 明示承認。無ければ mutation しない preview |
+| `--unattended` | **off** | **人間が居ないことの宣言。締め付けだけを含意し、権限は1つも足さない**（後述）。`--approve` を含意しない。**`--create-prs` でのみ受理**し、`--merge-prs` との併用は `invalid_input`（段階 C 未実装） |
 | `--merge-method <m>` | `squash` | `merge` / `squash` / `rebase` |
 | `--out <dir>` | `<dispatch-dir>/<phase>` | 出力先。既存なら `out_exists` |
 | `--gh` / `--git <path>` | `gh`/`git` | 実行する CLI |
@@ -453,6 +455,41 @@ run ディレクトリの JSON の中にしか無い状態を残さない。
   人間可読版。phase は止めない）。
 
 merge-report.json / merge-summary.md の構造は変わらない。
+
+#### 無人運転（`--unattended`。既定 off。**`--create-prs` のみ**）
+
+dispatch の同名フラグ（第3.2節）と**同じ宣言**である。**mutation の権限を与えるフラグではない。**
+
+- **`--approve` を含意しない。** `--unattended` だけの invocation は従来どおり preview であり、
+  push も PR 作成もしない。**無人で PR を作る CI は両方書く。** これにより report の
+  `approved: true` は「この mutation は明示的に承認された」を意味し続ける。
+- **含意する締め付けは1つだけである: `change_evidence_unavailable` を limitation ではなく
+  blocking として扱う。** PR 本文に実変更を載せられなかった、という事実は、人間が読む運転なら
+  読み手が branch を開いて補える劣化だが、無人では**証拠の無い PR が黙って作られる**ことになる。
+  昇格した run は **その Issue の PR を作らずに停止**する（`partial` / exit 7 /
+  `stop_reason: pr_create_failed`。**新しい `stop_reason` 値は足していない**）。
+  フラグ無しでは従来どおり limitation を記録して続行する（fixture で二点測定してある）。
+- **`branch_changed_outside_declared_scope` は昇格しない。** 契約ゲート `requireScopeClean` が
+  上流で既に判定しており、unattended dispatch は契約経路を必須にしているので、この limitation は
+  「機械ゲートが通ったうえでの人間可読版」であることが保証される。
+- 全 gate が通る世界では、**フラグ無しの run と同じ `status` / `stop_reason` / 作られる PR** になり、
+  差分は limitation `unattended_mode` の1件だけである（fixture で機械的に固定してある）。
+- **`--merge-prs` との併用は `invalid_input`（exit 3）で拒否する**（段階 C 未実装）。dispatch の
+  緩和フラグ（`--auto-yes` / `--allow-questions` / `--contract-mode`）はこの runner に存在しないので、
+  同じ exit 3 で拒否される。**黙って無視しない。**
+- **job 定義側で置くべき環境変数は dispatch と同じ2つである。** `GH_TOKEN`（または
+  `GH_ENTERPRISE_TOKEN`）と **`GIT_TERMINAL_PROMPT=0`**。実測
+  （[#115](https://github.com/Kewton/commandmate-skills/issues/115)）によれば **`gh pr create` /
+  `gh pr merge` は TTY 非依存で完結する** —— 認証切れも確認プロンプトも gh は待たずに非ゼロで落ち、
+  既存の `pr_create_failed` / `merge_failed` / `preflight_failed` が受けるので、**この runner に
+  `gh` 由来の停止は足していない**。**`git push` の資格情報プロンプトだけは別**で、制御端末を持つ
+  起動元（tmux ペインから起動した cron 等）では「止まる」ではなく**無言で待つ**に化ける。
+  runner はこれを検査しない（別プロセスの環境を runner は保証できない）。
+- 証跡は `merge_schema_version` を上げずに `limitations[]` の `unattended_mode`（run 全体で1件。
+  停止した run にも残る）で運ぶ。
+
+正本は [merge-contract.md](./references/merge-contract.md) 第5.3節、裁定は
+[adr-unattended-mode.md](./references/adr-unattended-mode.md) 第6.5節・第8節・第16節。
 
 ### 3.4 uat（受入テストと回数上限つき修正ループ）
 
@@ -660,14 +697,14 @@ limitation は個々の report の語彙で、status runner はそれらを phas
 | `worktree_sync_rescanned` | dispatch | 準備段のため `commandmate sync` を2回実行した（解決時の1回＋作成後の強制1回） |
 | `worker_method_declared` | dispatch | `--worker-method <id>` 付きの run である。**run 全体で1件。** 停止した run にも残る（何を前提にした run だったかが読めるように） |
 | `worker_method_applied` | dispatch | その Issue の worktree に skill が在り、task text に `## Method` 節を書いた。**Issue ごとに1件。** 「適用された」であって「守られた」ではない |
-| `unattended_mode` | dispatch | `--unattended` 付きの run である。**run 全体で1件。** 停止した run にも残る。含意した締め付け（contract require / pre-flight の scope 検査 / wall-clock budget / worktree lock）と拒否する緩和フラグを detail に記録する |
+| `unattended_mode` | dispatch / merge | `--unattended` 付きの run である。**run 全体で1件。** 停止した run にも残る。含意した締め付けと拒否する入力を detail に記録する（dispatch: contract require / pre-flight の scope 検査 / wall-clock budget / worktree lock。merge: `change_evidence_unavailable` の blocking 昇格） |
 | `unattended_baseline` | dispatch | その Issue の worktree が dispatch 開始時どこに居たか（**branch 名と短縮 SHA**。絶対 path は書かない）。**Issue ごとに1件。** 取り消しの起点であり、**担保するのは worktree branch の1段だけ**である（第5節） |
 | `verification_unrecorded` | dispatch | completed した worker に裁定が1つも記録されなかった（runner 側の欠陥。`verification_recorded` completion check も落ちる） |
 | `verification_gates_unrecorded` | dispatch | verification は pass だが `GATE` 行を読めず、pass の根拠となった gate を report が名指しできない |
 | `drift_<check>` | dispatch | 非 blocking な drift（`integration_clean` / `worktrees_present`）を記録して続行した |
 | `issue_autoclose_not_default_branch` | merge | base がデフォルトブランチでないため `Resolves #n` が効かない。**merge 後に手動クローズが要る** |
 | `unsafe_branch` | merge | branch 名が safe-ref guard に弾かれた |
-| `change_evidence_unavailable` | merge | branch の実変更 file を読めなかった（worktree 不在など）。PR 本文もそう書く。**scope 内に収まっていた証拠ではない** |
+| `change_evidence_unavailable` | merge | branch の実変更 file を読めなかった（worktree 不在など）。PR 本文もそう書く。**scope 内に収まっていた証拠ではない**。**`--unattended` では limitation ではなく blocking**（証拠の無い PR を無人で作らない。第3.3節） |
 | `branch_changed_outside_declared_scope` | merge | 実変更に宣言 scope（`scope.allow`）外の file がある。PR 本文が違反 path を名指しする |
 | `acceptance_not_run` | uat | 意味ゲートが verdict を出せず、baseline のみで裁定した |
 | `no_eligible_issues` | merge / uat | dispatch report に completed かつ verification pass の Issue が無い |
@@ -723,6 +760,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | merge `ci_failed` / `ci_pending` | CI が green でない | CI を直す。**green 無しに merge しない** |
 | merge `pr_missing` / `merge_failed` | PR が無い / conflict | PR の状態を確認し、conflict は手で解消する |
 | merge `issue_autoclose_not_default_branch` | base がデフォルトブランチでない | merge 後に **Issue を手動でクローズする** |
+| merge `change_evidence_unavailable`（`stop_reason: pr_create_failed` / `partial`。**`--unattended` のとき**） | その Issue の worktree で `git diff <base>...<branch>` が答えず、PR 本文に実変更を載せられない。**その PR は作っていない**（push もしていない） | **worktree を復旧してから同じコマンドを再実行する**（片付け済みなら `cmate-worktree-setup` で作り直す）。人間が読む運転に戻すなら `--unattended` を外せば従来どおり limitation として続行する。**「読めなかった」を「scope 内だった」と読み替えない** |
 | uat `acceptance_conditional` | 受入判定が `conditional_go` | **条件を読んで人間が判断する。** 自動修正の対象ではない |
 | uat `blocked` / `max_attempts_reached` | 上限まで直しても不合格 | `unresolved_issues` と `next_actions` を読む。**success に丸めない** |
 | uat `acceptance_not_run` | 意味ゲートを掛けずに baseline だけで裁定した | cmate-acceptance-test を入れて result を用意し、必要なら `--require-acceptance` で必須にする |

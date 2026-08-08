@@ -202,8 +202,9 @@ per-issue の `baseline` / `acceptance` / `verdict` / `verdict_source` を記録
 を確かめ、外れていれば **1つも fix worktree を作らずに停止する**（dispatch が `branch_matches`
 drift check で既に持っている形をそのまま置けばよく、**新しい停止語彙は要らない**
 ——`preflight_failed` 相当で足りる）。**この節は段階 C の着手条件としてここに記録してある。**
-段階 A（[#122](https://github.com/Kewton/commandmate-skills/issues/122)）では uat runner は
-`--unattended` を受け付けない（渡すと `invalid_input`）ので、この検査はまだ存在しない。
+段階 A（[#122](https://github.com/Kewton/commandmate-skills/issues/122)）でも段階 B
+（[#134](https://github.com/Kewton/commandmate-skills/issues/134)。merge `--create-prs` まで）でも
+uat runner は `--unattended` を受け付けない（渡すと `invalid_input`）ので、この検査はまだ存在しない。
 
 ## 6. fix worktree（#1448 worktree-result との整合）
 

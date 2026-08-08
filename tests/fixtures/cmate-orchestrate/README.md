@@ -288,8 +288,9 @@ plan は入力の純粋関数なので、Agent の種類によらず同じ plan 
 | contract parity | runner が叩く `commandmate` の subcommand と flag が `commandmate-cli-contract.json` の範囲内か（実 CLI が在れば実物とも突き合わせる） |
 | launcher resolution | `--cli` の多トークン展開・`$CM` へのフォールバック・起動不能な launcher の拒否（#37） |
 | worktree-setup input | `--worktree-setup` の二重指定・shell 構文を、世界に触れる前に `invalid_input` で拒否するか（#93） |
-| **unattended input**（#122） | `--unattended` と緩和フラグ（`--auto-yes` / `--allow-questions` / `--contract-mode off｜auto`）の併用、および `--wall-clock-budget` 欠落を **exit 3・CLI 呼び出し 0 回**で拒否するか。**`--contract-mode require` を明示した併用は受理される**（この対照が無いと「`--unattended` を常に拒否する実装」でも緑になる）。段階 A は dispatch のみなので、`merge.mjs --unattended` が拒否されることも固定する |
+| **unattended input**（#122） | `--unattended` と緩和フラグ（`--auto-yes` / `--allow-questions` / `--contract-mode off｜auto`）の併用、および `--wall-clock-budget` 欠落を **exit 3・CLI 呼び出し 0 回**で拒否するか。**`--contract-mode require` を明示した併用は受理される**（この対照が無いと「`--unattended` を常に拒否する実装」でも緑になる）。段階 B の外（`uat.mjs --unattended`）が拒否されることも固定する |
 | **unattended exclusivity**（#122） | worktree lock の4規則 —— 生きた所有者は拒否（`--out` も作らず CLI も叩かない）／`kill -9` された所有者（死んだ pid）の lock は回収／別 host の lock は回収せず拒否／完走した run は自分の lock を返す。**`--unattended` を渡さない run は lock をまったく見ない**ことも同じ suite で固定する |
+| **unattended merge**（#134。段階 B） | `merge.mjs --create-prs --unattended` の5項目。①**twin の二点測定**: 同じ世界を `--unattended` 有り／無しで2回 `--create-prs --approve` し、`status` / `stop_reason` / `targets` / **実際に作られた PR**（fake の invocation log から読む）／ `blocking_reasons` / `completion_check` / `redactions` が**一致**し、差分は limitation `unattended_mode` の1件**だけ**であること。この世界は scope 外変更を1件持たせてあるので、**昇格しないと裁定した `branch_changed_outside_declared_scope` が両方で limitation のまま**であることも同時に固定する ②**`--unattended` だけでは PR を作らない**（`--approve` を含意しない）③`change_evidence_unavailable` の**二点測定**: フラグ無しは limitation で続行して PR を2つ作り、`--unattended` は blocking になり **PR も push も0回**で `partial` / `pr_create_failed` に落ち、作らない PR の本文も書かない ④`--merge-prs --unattended` は **exit 3**（段階 C 未実装）⑤緩和フラグとの併用も **exit 3・CLI 呼び出し 0 回**。merge-case ではなく suite なのは、①③が**2つの run の比較**であり、独立した case 同士では report を突き合わせられないためである |
 
 ## 実機評価の記録
 

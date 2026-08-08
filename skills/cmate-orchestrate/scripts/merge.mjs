@@ -63,6 +63,39 @@ const CI_PASS_STATES = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 const CI_PENDING_STATES = new Set(['PENDING', 'QUEUED', 'IN_PROGRESS', 'WAITING', 'REQUESTED', 'EXPECTED']);
 
 // =============================================================================
+// Unattended — the declaration that nobody is watching this invocation
+// (Issue #134 / references/adr-unattended-mode.md sections 2, 6.5, 8)
+// =============================================================================
+//
+// `--unattended` is an INPUT DECLARATION, not a permission (ADR "裁定 0"). It
+// disables no gate, downgrades no blocking reason to a limitation and raises no
+// status by one step; what it adds is tightening, and nothing else. In
+// particular it does NOT imply `--approve`: a CI that opens PRs with nobody
+// watching writes BOTH flags, and `approved: true` keeps meaning "this mutation
+// was explicitly approved" rather than "the runner decided it was fine".
+//
+// Stage B is this runner's `--create-prs` phase only. What it adds over a run
+// without the flag is exactly one thing (ADR section 6.5): the
+// `change_evidence_unavailable` limitation becomes BLOCKING, because with a
+// human reading the report a PR whose body could not show its diff is a
+// degradation somebody notices, and with nobody reading it it is a PR created on
+// no evidence at all.
+//
+// `--merge-prs --unattended` is stage C and is REFUSED (`invalid_input`, exit 3)
+// rather than accepted and ignored — a CI that passes the flag to a phase that
+// shrugs believes it is being guarded when it is not (ADR section 8).
+//
+// No stop was added for `gh`. Issue #115 measured it (ADR section 14.5): `gh pr
+// create` / `gh pr merge` decide for themselves that no TTY is present and exit
+// non-zero without waiting, which the existing `pr_create_failed` /
+// `merge_failed` / `preflight_failed` already receive. What unattended operation
+// actually needs there is input hygiene in the JOB definition (`GH_TOKEN` /
+// `GIT_TERMINAL_PROMPT=0`, SKILL.md section 3.3) — the runner does not check it,
+// for the same reason it does not check the monitor: it cannot guarantee another
+// process's environment.
+const UNATTENDED_STAGE = 'B（dispatch + merge --create-prs）';
+
+// =============================================================================
 // Redaction (SkillError, the pattern list and redact/redactionsList are shared
 // with the dispatch and uat runners in lib.mjs)
 // =============================================================================
@@ -95,6 +128,15 @@ Options:
                          its completed+verified workers are the only eligible issues.
   --approve              Explicit approval to actually mutate. WITHOUT it the phase
                          is a no-mutation preview: nothing is pushed, created or merged.
+  --unattended           Declare that NO HUMAN is watching this invocation (CI /
+                         cron). It grants nothing: it does NOT imply --approve, it
+                         disables no gate and it never turns a blocking reason into
+                         a limitation. What it adds is tightening — the
+                         change_evidence_unavailable limitation becomes blocking, so
+                         a PR whose body could not show what the branch changed is
+                         not opened at all. Accepted for --create-prs only;
+                         --merge-prs --unattended is refused with invalid_input
+                         (stage C) rather than accepted and ignored.
   --merge-method <m>     merge | squash | rebase for --merge-prs (default ${DEFAULT_MERGE_METHOD}).
   --out <dir>            Where merge artifacts are written
                          (default: <dispatch-dir>/<phase>).
@@ -118,6 +160,7 @@ function parseCli(argv) {
         'create-prs': { type: 'boolean' },
         'merge-prs': { type: 'boolean' },
         approve: { type: 'boolean' },
+        unattended: { type: 'boolean' },
         'merge-method': { type: 'string' },
         out: { type: 'string' },
         gh: { type: 'string' },
@@ -147,6 +190,28 @@ function resolveInputs(parsed) {
     );
   }
 
+  // Stage B accepts `--unattended` for PR creation only (ADR section 8). The
+  // refusal of the unimplemented stage is a refusal rather than a shrug for the
+  // same reason the two-phase flags refuse each other: an invocation that
+  // declared something this runner cannot honour must not have that declaration
+  // silently dropped, because the reader of the report — in unattended operation
+  // the next CI job, not a person — cannot tell that it was.
+  //
+  // A relaxing flag of the dispatch runner (`--auto-yes`, `--allow-questions`,
+  // `--contract-mode off`) is refused one step earlier, by parseArgs: this runner
+  // has no such option, and an unknown option is already `invalid_input`. That is
+  // the same exit 3 with the same meaning, so nothing is re-implemented here.
+  if (values.unattended && phases[0] === 'merge_prs') {
+    throw new SkillError(
+      'invalid_input',
+      '--merge-prs and --unattended cannot both hold yet: unattended merging is stage C of '
+        + 'references/adr-unattended-mode.md section 8 and is not implemented, so the flag is refused rather than accepted '
+        + 'and ignored (a CI that passes it to a phase that shrugs believes it is being guarded when it is not). '
+        + 'Today --unattended is accepted for --create-prs only',
+      3,
+    );
+  }
+
   if (!values.plan) throw new SkillError('invalid_input', '--plan <path> is required', 3);
   if (!values.dispatch) throw new SkillError('invalid_input', '--dispatch <path> is required', 3);
 
@@ -160,6 +225,7 @@ function resolveInputs(parsed) {
     planPath: values.plan,
     dispatchPath: values.dispatch,
     approve: Boolean(values.approve),
+    unattended: Boolean(values.unattended),
     mergeMethod: method,
     outDir: values.out ?? null,
     gh: values.gh ?? 'gh',
@@ -782,13 +848,32 @@ function newTarget(issue, branch, action) {
 const EVIDENCE_UNAVAILABLE_CODE = 'change_evidence_unavailable';
 const SCOPE_EXCEEDED_CODE = 'branch_changed_outside_declared_scope';
 
-function recordEvidenceLimitations(report, number, issue, evidence) {
+// Returns the blocking detail when the phase must stop here, null otherwise.
+//
+// Under `--unattended` the FIRST finding stops the phase (ADR section 6.5, stage
+// B of section 8): "the change set could not be read" is a degradation a human
+// reading the report can absorb — they open the branch and look — and with
+// nobody reading it, it is a PR opened on no evidence at all. Promoting it is
+// the whole of what stage B adds, and it is a promotion, never a relaxation.
+//
+// The SECOND finding is NOT promoted, deliberately. The contract gate
+// `requireScopeClean` has already judged the same question upstream, and
+// `--unattended` makes the contract path mandatory on the dispatch side, so a
+// branch that reaches this runner with changes outside its declared scope has
+// already been ruled on by a machine; this limitation is the human-readable copy
+// of that ruling (ADR section 6.5, last paragraph).
+function recordEvidenceFindings(inputs, report, number, issue, evidence) {
   if (!evidence.change.ok) {
+    if (inputs.unattended) {
+      return `#${number}: the branch's actual change set could not be read (${redact(evidence.change.reason)}); `
+        + 'under --unattended no PR is opened for it, because the body would have to say it cannot show what changed and '
+        + 'nobody is here to read that sentence';
+    }
     report.limitations.push({
       code: EVIDENCE_UNAVAILABLE_CODE,
       detail: `#${number}: the branch's actual change set could not be read (${redact(evidence.change.reason)}); the PR body reports it as unread rather than claiming the change stayed in scope`,
     });
-    return;
+    return null;
   }
   const scope = declaredScope(issue);
   const outOfScope = evidence.change.files.filter((path) => !inDeclaredScope(scope, path));
@@ -798,6 +883,7 @@ function recordEvidenceLimitations(report, number, issue, evidence) {
       detail: `#${number}: ${outOfScope.length} changed file(s) are outside the scope the plan declared for this issue (${outOfScope.slice(0, 10).map((path) => redact(path)).join(', ')}); the PR body names them`,
     });
   }
+  return null;
 }
 
 function runCreatePrs(inputs, plan, dispatch, eligible, outDir, report) {
@@ -831,7 +917,18 @@ function runCreatePrs(inputs, plan, dispatch, eligible, outDir, report) {
     // The measured half of the PR body (Issue #97). Both probes are read-only and
     // neither can stop the phase: what they cannot read is reported as unread.
     const evidence = { worker: workerRecordOf(dispatch, number), change: changeEvidence(inputs, plan, issue) };
-    recordEvidenceLimitations(report, number, issue, evidence);
+    const evidenceBlocked = recordEvidenceFindings(inputs, report, number, issue, evidence);
+    if (evidenceBlocked !== null) {
+      // Before the body is written and before anything is pushed: an unattended
+      // run that cannot show the diff does not open the PR, so it does not leave
+      // a body for a PR it refused to open either.
+      target.outcome = 'pr_failed';
+      target.note = 'unattended: the branch change set could not be read, so no PR was opened (its body would carry no evidence)';
+      report.targets.push(target);
+      halt(report, 'partial', 'pr_create_failed', EVIDENCE_UNAVAILABLE_CODE, evidenceBlocked);
+      stopped = true;
+      continue;
+    }
 
     const bodyFile = join(bodyDir, `issue-${number}.md`);
     writeFileSync(bodyFile, `${buildPrBody(plan, issue, autoCloseNote, evidence)}\n`, 'utf8');
@@ -971,6 +1068,31 @@ function runMergePrs(inputs, plan, eligible, report) {
 // Report assembly
 // =============================================================================
 
+// The run-wide declaration (mirrors the dispatch runner's entry of the same
+// code). One entry, in EVERY unattended report including the ones that stopped,
+// so what the run declared — and what that declaration implied — is readable
+// from the report alone.
+//
+// Deliberately free of absolute paths: `redact()` would replace them with
+// `[REDACTED-PATH]` and, worse, would tally a redaction a run without the flag
+// does not have, so the "an unattended run differs only by this limitation"
+// property would stop being true.
+const UNATTENDED_MODE_CODE = 'unattended_mode';
+
+function unattendedModeLimitation() {
+  return {
+    code: UNATTENDED_MODE_CODE,
+    detail: `--unattended（段階 ${UNATTENDED_STAGE}）: この invocation に人間は居ない、という入力の宣言である。`
+      + '締め付けだけを含意し、権限は1つも足していない — **`--approve` は含意しない**、'
+      + 'ゲートを無効化せず、blocking を limitation に格下げせず、status を1段も上げない。'
+      + `含意した締め付け: ${EVIDENCE_UNAVAILABLE_CODE} を limitation ではなく blocking として扱う`
+      + '（実変更を示せない PR は開かない）。'
+      + `拒否する入力: --merge-prs との併用（段階 C 未実装）と dispatch の緩和フラグ（invalid_input, exit 3）。`
+      + '`gh` 由来の停止は足していない（実測どおり gh は TTY 非依存で完結する）ので、'
+      + '`GH_TOKEN` と `GIT_TERMINAL_PROMPT=0` は job 定義側で置くこと（runner は検査しない）。',
+  };
+}
+
 function halt(report, status, stopReason, code, detail) {
   // The first blocking condition wins; later ones only add to blocking_reasons.
   if (report.status === 'success') {
@@ -1077,7 +1199,19 @@ function renderSummary(report) {
   lines.push('## preflight');
   for (const c of report.preflight) lines.push(`- ${c.code}: ${c.ok ? 'ok' : 'NG'}`);
   lines.push('');
+  // The unattended section (Issue #134). Printed only when the operator opted in,
+  // so a run without `--unattended` reads exactly as it did before the flag
+  // existed.
+  const unattendedDeclared = report.limitations.find((entry) => entry.code === UNATTENDED_MODE_CODE);
+  if (unattendedDeclared) {
+    lines.push('## 無人運転（unattended）');
+    lines.push(`- 宣言: ${unattendedDeclared.detail}`);
+    lines.push('- **`--unattended` は mutation の許可ではない。** 無人で PR を作る CI は `--approve` を別に書く。');
+    lines.push('- job 定義側で `GH_TOKEN`（または `GH_ENTERPRISE_TOKEN`）と `GIT_TERMINAL_PROMPT=0` を置くこと。**`git push` の資格情報プロンプトだけは「止まる」ではなく無言で待つに化ける**（SKILL.md 第3.3節）。');
+    lines.push('');
+  }
   lines.push('## 未解決と next action');
+  const evidenceBlocked = report.blocking_reasons.some((r) => r.code === EVIDENCE_UNAVAILABLE_CODE);
   if (report.blocking_reasons.length === 0 && report.limitations.length === 0) {
     lines.push(report.approved ? '- なし。全 eligible を処理した。' : '- なし。preview のみ（mutation なし）。');
   } else {
@@ -1085,7 +1219,10 @@ function renderSummary(report) {
     for (const l of report.limitations) lines.push(`- limitation: ${l.code} — ${l.detail}`);
     if (report.stop_reason === 'ci_failed' || report.stop_reason === 'ci_pending') lines.push('- next: CI を green にしてから再実行する（owner: operator）。無条件 merge はしない。');
     if (report.stop_reason === 'merge_failed') lines.push('- next: conflict/branch protection を解消し、再実行する（owner: operator）。');
-    if (report.stop_reason === 'pr_create_failed') lines.push('- next: push/PR 作成の失敗要因を解消し、再実行する（owner: operator）。');
+    // The evidence stop shares `pr_create_failed`, but nothing about push or gh
+    // failed there, so it gets its own next action instead of the generic one.
+    if (evidenceBlocked) lines.push('- next: 対象 Issue の worktree を復旧してから再実行する（`git diff <base>...<branch>` が答える状態にする）。人間が読む運転に戻すなら `--unattended` を外せば従来どおり limitation として続行する（owner: operator）。');
+    if (report.stop_reason === 'pr_create_failed' && !evidenceBlocked) lines.push('- next: push/PR 作成の失敗要因を解消し、再実行する（owner: operator）。');
     if (report.stop_reason === 'pr_missing') lines.push('- next: 先に --create-prs で PR を作成する（owner: operator）。');
     if (report.stop_reason === 'preflight_failed') lines.push('- next: gh 認証・repo 到達性・base 解決を復旧し、再実行する（owner: operator）。');
   }
@@ -1099,6 +1236,9 @@ function renderSummary(report) {
 function runMerge(inputs, plan, dispatch, outDir) {
   const eligible = eligibleIssues(plan, dispatch);
   const report = baseReport(inputs, plan, eligible, outDir);
+  // Recorded before anything else so it survives every early return below: a run
+  // that stopped in the preflight still says what it had declared.
+  if (inputs.unattended) report.limitations.push(unattendedModeLimitation());
 
   // Read-only preflight before any mutation.
   report.preflight = preflight(inputs, plan);

@@ -2841,13 +2841,17 @@ function unattendedInputTest() {
   check(accepted.exit === 0,
     `--unattended --contract-mode require should dispatch (it states the implied mode), exited ${accepted.exit}: ${accepted.stdout.slice(0, 300)}`);
 
-  // Stage A is dispatch only (ADR §8). merge and uat must REFUSE the flag rather
-  // than accept and ignore it: a CI that passes `--unattended` to a runner that
-  // shrugs believes it is being guarded when it is not. Their parseArgs has no
-  // such option, so the refusal is `invalid_input` — asserted here so a later
-  // stage cannot quietly start accepting it without a fixture saying so.
-  const merged = runMerge(planPath, '/dev/null', join(work, 'merge'), '--create-prs', ['--unattended'], baseEnv(), work);
-  check(merged.exit === 3, `merge.mjs --unattended should be refused with exit 3 (stage A is dispatch only), exited ${merged.exit}`);
+  // Stage B reaches merge `--create-prs` only (ADR §8; Issue #134). Every runner
+  // and phase BEYOND it must REFUSE the flag rather than accept and ignore it: a
+  // CI that passes `--unattended` to a runner that shrugs believes it is being
+  // guarded when it is not. Asserted here so a later stage cannot quietly start
+  // accepting one of them without a fixture saying so.
+  //
+  // uat.mjs has no such option at all, so its refusal comes from parseArgs;
+  // merge.mjs HAS the option and refuses the combination itself, which is why
+  // both rows are checked rather than assuming one covers the other.
+  const uatRefused = runUatRunner(planPath, '/dev/null', join(work, 'uat'), '--write-uat', ['--unattended'], baseEnv(), work);
+  check(uatRefused.exit === 3, `uat.mjs --unattended should be refused with exit 3 (stage C is not implemented), exited ${uatRefused.exit}`);
 }
 
 // The exclusivity lock (ADR §14.1 candidate A). Issue #115 reproduced two runs
@@ -3003,6 +3007,204 @@ function unattendedLockTest() {
     // than re-dispatches — a refusal must not read as a resume.
     check((report?.limitations ?? []).some((entry) => entry.code === 'reverify_attempt'),
       `a refused reverify should still record reverify_attempt, got ${JSON.stringify((report?.limitations ?? []).map((entry) => entry.code))}`);
+  }
+}
+
+// Stage B: `merge.mjs --create-prs --unattended` (Issue #134 / ADR §6.5, §8).
+//
+// Written as one suite rather than as merge-cases because the load-bearing
+// assertion is a COMPARISON of two runs over the same world: "the unattended run
+// differs from its flagless twin only by the unattended limitation" is the
+// machine-checkable form of "the flag relaxes nothing", and it is strictly
+// stronger than a self-reported boolean (a runner that DID relax something can
+// still write `relaxed: false`). Two independent cases could not compare their
+// reports, so the twin runs and the two-point evidence measurement live here.
+function unattendedMergeTest() {
+  log('  unattended merge --create-prs (#134)');
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-unattended-merge-plan-'));
+  const spec = { plan: { issues_fixture: 'cases/02-explicit-dependency/issues.json', orchestrate_args: ['200', '201', '--max-parallel', '3', '--run-id', 'plan'] } };
+  const planPath = generatePlan(spec, runsDir);
+  if (!check(existsSync(planPath), 'unattended merge: plan.json was not generated')) return;
+
+  const work = mkdtempSync(join(tmpdir(), 'cmate-unattended-merge-'));
+  const dispatchPath = generateDispatchReport(planPath, DEFAULT_DISPATCH_SCENARIO, work);
+  if (!check(existsSync(dispatchPath), 'unattended merge: dispatch-report.json was not generated')) return;
+  const plan = readPlan(planPath);
+  const integration = join(work, 'integration');
+
+  // One merge invocation against the fake gh/git, in the same world every time.
+  // `diff` overrides what an issue's worktree answers to `git diff`: `"fail"` is
+  // the #97 degradation path this stage promotes to blocking, and a `files` list
+  // is what the branch actually touched.
+  let runIndex = 0;
+  const mergePhase = (phaseFlag, args, diff = {}) => {
+    runIndex += 1;
+    const label = `run-${runIndex}`;
+    const outDir = join(work, `merge-${label}`);
+    const logPath = join(work, `${label}.log`);
+    const scenarioPath = writeScenario(work, `scenario-${label}.json`, withDiffDefaults({
+      cli_available: true,
+      gh: { repo_access: true },
+      git: { base_resolvable: true },
+      prs: { 200: { create: 'ok' }, 201: { create: 'ok' } },
+      diff,
+    }, plan));
+    const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath };
+    const { exit, stdout } = runMerge(planPath, dispatchPath, outDir, phaseFlag, args, env, integration);
+    let report = null;
+    try { report = JSON.parse(stdout); } catch { /* a refused invocation still prints a failure envelope */ }
+    return { exit, report, outDir, log: readCliLog(logPath) };
+  };
+
+  const codesOf = (entries) => (entries ?? []).map((entry) => entry.code);
+  // Everything about a target that the flag must not move. `note` is included on
+  // purpose: an identical outcome reached by a different path would show up here.
+  const targetShape = (report) => (report?.targets ?? []).map((target) => ({
+    issue: target.issue, branch: target.branch, outcome: target.outcome, pushed: target.pushed,
+    pr_created: target.pr_created, pr_number: target.pr_number, pr_url: target.pr_url, note: target.note,
+  }));
+  // The branches a run actually opened a PR for, read from the fake's invocation
+  // log rather than from the report the runner wrote about itself.
+  const createdHeads = (log) => log
+    .filter((entry) => entry.sub === 'pr' && entry.args[0] === 'create')
+    .map((entry) => entry.args[entry.args.indexOf('--head') + 1])
+    .sort();
+
+  // --- 1. the twin: --approve --unattended vs --approve ----------------------
+  // #200's branch reached one file outside its declared scope, so BOTH runs carry
+  // a real limitation. That is deliberate: ADR §6.5 rules that
+  // `branch_changed_outside_declared_scope` is NOT promoted (the contract gate
+  // `requireScopeClean` already judged it upstream, and unattended dispatch makes
+  // the contract path mandatory), and a twin whose only limitation list is empty
+  // could not tell a preserved limitation from an absent one.
+  const filesOf = (number) => [...(plan.issues.find((issue) => issue.number === number).suspected_files ?? [])];
+  const OUT_OF_SCOPE = { 200: { files: [...filesOf(200), 'docs/unplanned.md'] } };
+  {
+    const plain = mergePhase('--create-prs', ['--approve'], OUT_OF_SCOPE);
+    const unattended = mergePhase('--create-prs', ['--approve', '--unattended'], OUT_OF_SCOPE);
+
+    check(plain.exit === 0 && unattended.exit === 0,
+      `both twins should exit 0, got plain=${plain.exit} unattended=${unattended.exit}`);
+    check(validateAgainst(mergeSchema, unattended.report, 'merge').length === 0,
+      `the unattended report is not schema-valid: ${validateAgainst(mergeSchema, unattended.report, 'merge').slice(0, 3).join('; ')}`);
+    check(unattended.report?.merge_schema_version === 1,
+      `stage B must not bump merge_schema_version, got ${unattended.report?.merge_schema_version}`);
+    check(unattended.report?.status === plain.report?.status && unattended.report?.status === 'success',
+      `status differs between the twins: ${plain.report?.status} vs ${unattended.report?.status}`);
+    check(unattended.report?.stop_reason === plain.report?.stop_reason && unattended.report?.stop_reason === 'completed',
+      `stop_reason differs between the twins: ${plain.report?.stop_reason} vs ${unattended.report?.stop_reason}`);
+    check(deepEqual(unattended.report?.eligible_issues, plain.report?.eligible_issues),
+      'the eligible set differs between the twins');
+    check(deepEqual(targetShape(unattended.report), targetShape(plain.report)),
+      `the targets differ between the twins: ${JSON.stringify(targetShape(unattended.report))} vs ${JSON.stringify(targetShape(plain.report))}`);
+    // The PRs that were actually opened, not the report's account of them.
+    check(createdHeads(plain.log).length === 2, `the flagless twin should have opened 2 PRs, opened ${createdHeads(plain.log).length}`);
+    check(deepEqual(createdHeads(unattended.log), createdHeads(plain.log)),
+      `the PRs created differ between the twins: ${JSON.stringify(createdHeads(unattended.log))} vs ${JSON.stringify(createdHeads(plain.log))}`);
+    check(deepEqual(unattended.report?.blocking_reasons, plain.report?.blocking_reasons),
+      'the unattended twin recorded a different blocking reason');
+    check(deepEqual(unattended.report?.completion_check, plain.report?.completion_check),
+      'the unattended twin recorded a different completion_check');
+
+    // The ONLY permitted difference: one `unattended_mode` limitation.
+    const extra = (unattended.report?.limitations ?? []).filter((entry) => entry.code !== 'unattended_mode');
+    check(codesOf(plain.report?.limitations).includes('branch_changed_outside_declared_scope'),
+      `the twin world should produce a scope limitation to compare, got ${JSON.stringify(codesOf(plain.report?.limitations))}`);
+    check(codesOf(extra).includes('branch_changed_outside_declared_scope'),
+      'branch_changed_outside_declared_scope must stay a limitation under --unattended (ADR §6.5): it is the human-readable copy of a machine gate that already ruled');
+    check(codesOf(unattended.report?.limitations).filter((code) => code === 'unattended_mode').length === 1,
+      `the unattended run should record exactly one unattended_mode limitation, got ${JSON.stringify(codesOf(unattended.report?.limitations))}`);
+    check(deepEqual(extra, plain.report?.limitations ?? []),
+      `the twins differ by more than the unattended record: ${JSON.stringify(extra)} vs ${JSON.stringify(plain.report?.limitations)}`);
+    // The declaration must not itself redact anything: a tallied redaction the
+    // flagless run does not have would break the "only difference" property.
+    check(deepEqual(unattended.report?.redactions, plain.report?.redactions),
+      `the unattended record changed the redaction tally: ${JSON.stringify(unattended.report?.redactions)} vs ${JSON.stringify(plain.report?.redactions)}`);
+    // It does not imply approval either way round: approved still means approved.
+    check(unattended.report?.approved === true && unattended.report?.mutated === true,
+      'the approved unattended twin should report approved and mutated');
+  }
+
+  // --- 2. --unattended alone opens nothing (it does not imply --approve) -----
+  // ADR "裁定 0": the flag declares that nobody is watching, not that the runner
+  // may act. A CI that wants PRs writes BOTH flags.
+  {
+    const preview = mergePhase('--create-prs', ['--unattended']);
+    check(preview.exit === 0, `--create-prs --unattended should be a preview (exit 0), exited ${preview.exit}`);
+    check(preview.report?.status === 'success', `an unattended preview should succeed, got ${preview.report?.status}`);
+    check(preview.report?.approved === false, `--unattended must not imply --approve, got approved=${preview.report?.approved}`);
+    check(preview.report?.mutated === false, `an unattended preview must not mutate, got mutated=${preview.report?.mutated}`);
+    check(countCalls(preview.log, 'push') === 0 && countCalls(preview.log, 'pr', 'create') === 0,
+      `--unattended alone pushed or created something (push=${countCalls(preview.log, 'push')}, create=${countCalls(preview.log, 'pr', 'create')})`);
+    check((preview.report?.targets ?? []).every((target) => target.outcome === 'previewed'),
+      `every target of an unattended preview should be previewed, got ${JSON.stringify((preview.report?.targets ?? []).map((t) => t.outcome))}`);
+    check(codesOf(preview.report?.limitations).includes('unattended_mode'),
+      'an unattended preview should still record what it declared');
+  }
+
+  // --- 3. change_evidence_unavailable: the two-point measurement -------------
+  // The same world (#201's worktree cannot answer `git diff`) read twice. With a
+  // human present it is a limitation and the run continues; with nobody present
+  // it is blocking and no PR is opened at all. Measuring only the promoted side
+  // would not show that the promotion is what did it.
+  {
+    const attended = mergePhase('--create-prs', ['--approve'], { 201: 'fail' });
+    check(attended.exit === 0, `without --unattended an unreadable diff should not stop the phase, exited ${attended.exit}`);
+    check(attended.report?.status === 'success', `the attended run should still succeed, got ${attended.report?.status}`);
+    check(codesOf(attended.report?.limitations).includes('change_evidence_unavailable'),
+      `the attended run should record change_evidence_unavailable as a limitation, got ${JSON.stringify(codesOf(attended.report?.limitations))}`);
+    check(codesOf(attended.report?.blocking_reasons).length === 0,
+      `the attended run should record no blocking reason, got ${JSON.stringify(codesOf(attended.report?.blocking_reasons))}`);
+    check(createdHeads(attended.log).length === 2, `the attended run should still open both PRs, opened ${createdHeads(attended.log).length}`);
+
+    const unattended = mergePhase('--create-prs', ['--approve', '--unattended'], { 201: 'fail' });
+    check(unattended.exit === 7, `an unreadable diff should stop an unattended run as partial (exit 7), exited ${unattended.exit}`);
+    check(unattended.report?.status === 'partial', `the unattended run should be partial, got ${unattended.report?.status}`);
+    // The existing vocabulary receives it: no value was added to the enum.
+    check(unattended.report?.stop_reason === 'pr_create_failed',
+      `the stop should reuse pr_create_failed, got ${unattended.report?.stop_reason}`);
+    check(codesOf(unattended.report?.blocking_reasons).includes('change_evidence_unavailable'),
+      `the unattended run should name change_evidence_unavailable as blocking, got ${JSON.stringify(codesOf(unattended.report?.blocking_reasons))}`);
+    check(!codesOf(unattended.report?.limitations).includes('change_evidence_unavailable'),
+      'the promoted finding should be blocking, not blocking AND a limitation');
+    // No PR, and not even a push: the stop is before the first mutation.
+    check(countCalls(unattended.log, 'pr', 'create') === 0 && countCalls(unattended.log, 'push') === 0,
+      `a blocked unattended run pushed or created something (push=${countCalls(unattended.log, 'push')}, create=${countCalls(unattended.log, 'pr', 'create')})`);
+    check(unattended.report?.mutated === false, `a blocked unattended run must not report mutated, got ${unattended.report?.mutated}`);
+    const blocked = (unattended.report?.targets ?? []).find((target) => target.issue === 201);
+    check(blocked?.outcome === 'pr_failed', `#201 should be recorded as pr_failed, got ${blocked?.outcome}`);
+    const notReached = (unattended.report?.targets ?? []).find((target) => target.issue === 200);
+    check(notReached?.outcome === 'skipped', `#200 should be left skipped, got ${notReached?.outcome}`);
+    // And no body was written for a PR that was refused.
+    check(!existsSync(join(unattended.outDir, 'pr-bodies', 'issue-201.md')),
+      'a refused PR still had its body written');
+  }
+
+  // --- 4. --merge-prs --unattended is refused (stage C is not implemented) ---
+  {
+    const stageC = mergePhase('--merge-prs', ['--approve', '--unattended']);
+    check(stageC.exit === 3, `--merge-prs --unattended should be refused with exit 3, exited ${stageC.exit}`);
+    check(codesOf(stageC.report?.blocking_reasons).includes('invalid_input'),
+      `the refusal should be invalid_input, got ${JSON.stringify(codesOf(stageC.report?.blocking_reasons))}`);
+    check((stageC.report?.blocking_reasons ?? []).some((entry) => entry.detail.includes('stage C')),
+      `the refusal should say why (stage C), got ${JSON.stringify(stageC.report?.blocking_reasons)}`);
+    check(!existsSync(stageC.outDir), 'a refused invocation created its output directory');
+    check(stageC.log.length === 0, `a refused invocation called the CLI ${stageC.log.length} time(s)`);
+  }
+
+  // --- 5. the relaxing flags of the dispatch runner are refused here too -----
+  // merge.mjs has no such option, so the refusal comes from parseArgs — the same
+  // exit 3 with the same meaning. Pinned so a later stage cannot start accepting
+  // one of them (and quietly relaxing something) without a fixture saying so.
+  {
+    for (const relaxing of [['--auto-yes'], ['--allow-questions'], ['--contract-mode', 'off']]) {
+      const refused = mergePhase('--create-prs', ['--approve', '--unattended', ...relaxing]);
+      check(refused.exit === 3, `--unattended with ${relaxing[0]} should be refused with exit 3, exited ${refused.exit}`);
+      check(codesOf(refused.report?.blocking_reasons).includes('invalid_input'),
+        `${relaxing[0]}: the refusal should be invalid_input, got ${JSON.stringify(codesOf(refused.report?.blocking_reasons))}`);
+      check(!existsSync(refused.outDir), `${relaxing[0]}: a refused invocation created its output directory`);
+      check(refused.log.length === 0, `${relaxing[0]}: a refused invocation called the CLI ${refused.log.length} time(s)`);
+    }
   }
 }
 
@@ -3443,13 +3645,14 @@ function main() {
   log('  -- unattended --');
   unattendedInputTest();
   unattendedLockTest();
+  unattendedMergeTest();
 
   log('');
   if (failures > 0) {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution, worktree-setup input, reverify input, unattended input + exclusivity`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution, worktree-setup input, reverify input, unattended input + exclusivity + merge`);
 }
 
 main();
