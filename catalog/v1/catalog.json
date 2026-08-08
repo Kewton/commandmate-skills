@@ -750,7 +750,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.19.0",
+      "latest": "0.20.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -1294,6 +1294,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.19.0/cmate-orchestrate-0.19.0.tar.gz",
             "sha256": "bc85685086e6b3cf527f36b97cfc66c311c8c470986bc5804ca9ea6c2134b9b5",
             "size": 320292,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.20.0",
+          "changelog": "cmate-orchestrate 0.20.0 — 方法を渡す口・無人運転・送らない再裁定\n\nワーカーへ HOW（開発の方法）を渡す口が入った。無人運転は段階 A が入り、締め付けだけを\n含意する形で実装してある。timeout で凍結された裁定を、送らずに更新できるようになった。\n\ndispatch\n- #128 --worker-method <skill-id> を足した。pre-flight で install を実測し、## Method 節を\n  契約 goal と worker prompt の両方に置く（片方だけだと --contract-mode auto の\n  フォールバックで方法論が黙って消える）。既定は off で、指定しない run は 1 bit も変わらない。\n  install の判定は .claude/skills と .agents/skills の両方を要求する。理由は臆病さではなく\n  測定できないことである: dispatch は send --agent を渡さず、ls --json の row も\n  id/branch/path しか持たないので、どの Agent がこのタスクを取るかを知らない。\n  schema は触っていない（merge/uat は worker_state と verification.outcome の 2 field しか\n  読まないので、方法論の事実はそのどちらでもない）。方法論の正本は別 package\n  cmate-worker-development にある\n- #122 --unattended を足した。含意するのは締め付けだけである。どのゲートも無効化せず、\n  どの blocking も limitation に格下げせず、--approve を含意しない。緩和フラグとの併用は\n  invalid_input で拒否する。排他は runner の lock（worktree 単位。--out ではない ——\n  #90 が「pre-flight で止まった run は --out を消費しない」と決めている）。\n  stale lock は owner record が読めずかつ 60 秒より古いときだけ回収する。\n  wall-clock budget を入れたが stop_reason の新値は作らず timeout を再利用した。\n  #115 の実測が ADR を 4 点訂正しており、その訂正どおりに実装してある —— gh にコードの停止は\n  足していない（前提が逆だった。必要なのは GIT_TERMINAL_PROMPT=0 という job 定義側の\n  環境変数である）。monitor 併用時の --no-auto-approve は要件のままである\n- #121 --reverify を足した。send を 1 回も呼ばず、worktree の現在の状態をもう一度ゲートに\n  かけて report を更新する。裁定の取得には既存の commandmate verify <id> --json を使い、\n  新しい CLI 表面を要求していない。あわせて timeout 起点の resume を回帰ケースで固定した ——\n  「timeout は isCarryable を満たさないので再実行対象になる」はコードを読めば分かるだけで\n  fixture では固定されておらず、緩めても suite は赤にならなかった\n\nテストは 30 plan / 56 dispatch / 9 resume+reverify / 20 merge / 17 uat / 11 status /\n5 profile-init。前版から dispatch が 8、resume 系が 4、status が 2 増えている。",
+          "published_at": "2026-08-08T05:28:59Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.20.0",
+            "commit": "13ca8bb8273c8a6c6515cf37a327c3119781d4f8"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.20.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.20.0/cmate-orchestrate-0.20.0.tar.gz",
+            "sha256": "a3b14c96115744e992a2bf08757e4f18d8da0b4c59eb84cbd4b7ed8aaa7ec9d4",
+            "size": 376813,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
