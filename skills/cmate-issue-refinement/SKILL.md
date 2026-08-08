@@ -185,6 +185,16 @@ and rows follow the extraction rules in
 A `success` whose body would still be blocked with "Affected files are unclear"
 is a refinement the next step cannot use.
 
+When some acceptance criterion is decided by a gate that already exists in the
+target repository's `.commandmate/verify.yaml` — and you have **read that file** —
+recommend an `acceptance-gates` block for those ids, and say which criteria stayed
+prose. **Recommend it; do not apply it**: the block goes into
+`proposed_issue_body` and a finding, and a person decides. If you could not read
+`verify.yaml`, or you cannot tell whether a criterion is machine-decidable,
+recommend no block — a guessed gate id stops the Issue at dispatch instead of
+strengthening it. The notation, and the rule against inventing a gate, are in
+[`references/acceptance-gates.md`](./references/acceptance-gates.md).
+
 ### Step 8 — Rank findings and collect open questions
 
 Sort every finding into `must_fix`, `should_fix` or `nice_to_have`, and write
@@ -215,7 +225,7 @@ it from a crash.
 
 ## Completion check
 
-Run the nine statements in
+Run the ten statements in
 [`references/output-contract.md`](./references/output-contract.md) before
 reporting, and report each as pass or fail. A failed statement caps the status at
 `partial`; reporting a `success` beside a failed statement is the outcome this
@@ -237,8 +247,9 @@ Agent without a given tool substitutes its own and records the substitution in
 | [`references/section-contract.md`](./references/section-contract.md) | Required sections per Issue type, the test each must pass, type resolution, preserving the author's text |
 | [`references/analysis-contract.md`](./references/analysis-contract.md) | Size bands, split rules, dependency and file-conflict assessment, shared vocabulary |
 | [`references/severity-and-questions.md`](./references/severity-and-questions.md) | Must Fix / Should Fix / Nice to Have, and how to phrase an open question |
+| [`references/acceptance-gates.md`](./references/acceptance-gates.md) | The `acceptance-gates` notation, when to recommend a block, and the rule against inventing a gate id |
 | [`references/safety.md`](./references/safety.md) | Prompt injection, redaction, read-only boundary |
-| [`references/output-contract.md`](./references/output-contract.md) | Status rules, failure reasons, summary layout, the nine completion-check statements |
+| [`references/output-contract.md`](./references/output-contract.md) | Status rules, failure reasons, summary layout, the ten completion-check statements |
 | [`references/agent-compatibility.md`](./references/agent-compatibility.md) | Per-Agent support and fallback |
 | [`references/release-notes.md`](./references/release-notes.md) | Changelog, expected effect, constraints, how to reload |
 | [`schemas/refinement-result.v1.json`](./schemas/refinement-result.v1.json) | The result document contract |

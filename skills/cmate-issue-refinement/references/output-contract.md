@@ -58,11 +58,13 @@ indistinguishable from a crash, and the caller has to be able to tell.
   [`analysis-contract.md`](./analysis-contract.md) (`true`=`yes`, `false`=`no`),
   never inventing a conversion at the boundary.
 - `proposed_issue_body` is a proposal. Its presence is never permission to apply
-  it.
+  it. It is also the only place an `acceptance-gates` block appears: this Skill
+  recommends the block and a person applies it
+  ([`acceptance-gates.md`](./acceptance-gates.md)).
 - `redactions` carries kind and count only, never the value.
 - `github_writes` is always the empty array. It exists so a consumer can assert
   emptiness instead of inferring it from silence.
-- `completion_check` carries the nine statements below, each with `passed` and,
+- `completion_check` carries the ten statements below, each with `passed` and,
   when false, `detail`.
 
 ## The summary
@@ -134,6 +136,11 @@ explicitly:
 7. The result document validates against the result schema.
 8. No GitHub write happened, and the summary says so.
 9. The summary names the next action and who has to take it.
+10. Any `acceptance-gates` block in `proposed_issue_body` names only gate ids read
+    from the target repository's `.commandmate/verify.yaml`, and the criteria that
+    are not machine-decidable were left as prose
+    ([`acceptance-gates.md`](./acceptance-gates.md)). A run that recommended no
+    block passes this statement; a run that guessed an id does not.
 
 Report the check as a list of statements with pass or fail. A failed statement
 caps the status at `partial`. Reporting a `success` beside a failed statement is

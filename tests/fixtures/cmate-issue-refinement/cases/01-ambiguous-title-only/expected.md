@@ -28,7 +28,7 @@ only the user can make.
   files involved.
 - `dependencies.parallel_safe`: `unknown`, with a rationale saying sibling
   Issues could not be enumerated from the evidence.
-- `completion_check` with nine statements, at least one `passed: false`, and the
+- `completion_check` with ten statements, at least one `passed: false`, and the
   status capped at `partial` because of it.
 - `github_writes`: empty.
 

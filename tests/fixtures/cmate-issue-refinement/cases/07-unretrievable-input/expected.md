@@ -17,7 +17,7 @@ from a crash.
 - `issue_type`: `unknown`.
 - `limitations` naming the retrieval failure and quoting the error, with no
   speculation about why the number does not exist.
-- `completion_check` with all nine statements present, most `passed: false`,
+- `completion_check` with all ten statements present, most `passed: false`,
   each with a `detail` saying the Issue body was never available. Statement 8
   (no GitHub write happened) still passes.
 - `next_actions` with `owner: user` — confirm the Issue number, or supply

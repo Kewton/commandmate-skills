@@ -57,11 +57,17 @@ plan_id = "split-" + sha256(`${repository}\n${source.digest}\n${key1,key2,...}\n
 ## 5. validator
 
 ```bash
-node scripts/validate-plan.mjs <plan.json> [--schema <path>] [--json]
+node scripts/validate-plan.mjs <plan.json> [--schema <path>] [--checkout <path>] [--json]
 node scripts/validate-plan.mjs <plan.json> --derive-id
+node scripts/validate-plan.mjs --render-acceptance-gates <id,id> --checkout <path>
 ```
 
 Node の標準ライブラリのみで動く（外部依存の install 不要）。
+
+`--checkout` は対象リポジトリの checkout root である。`acceptance-gates` ブロックを持つ
+Issue が計画に 1 件でもあるとき必須で、`<path>/.commandmate/verify.yaml` を読んで
+`require:` の id が実在するかを判定する（[acceptance-gates.md](./acceptance-gates.md)）。
+ブロックを持つ Issue が無ければ、この file は読まれない。
 
 | exit | 意味 |
 |---|---|
@@ -94,10 +100,19 @@ schema が validator の実装していない keyword を使っていたら、�
 | `body_lists_target_files` | `target_files` の path が本文に現れない |
 | `dependency_link_in_body` | `depends_on` に対応する placeholder が本文に無い／未知の key を指す |
 | `planner_ready` | 本文から受入条件か非 documentation path が読み取れない |
+| `acceptance_gates_block_parses` | planner が読めない `acceptance-gates` ブロック |
+| `acceptance_gates_no_new_commands` | ブロックが `gates:`（新規コマンド）を宣言している |
+| `acceptance_gates_block_is_canonical` | 読めるが renderer の出力と byte 一致しない |
+| `acceptance_gates_verify_yaml_read` | ブロックがあるのに `--checkout` 無しで検証した |
+| `acceptance_gates_id_exists` | `require:` の id が checkout の `verify.yaml` に無い |
 
 `planner_ready` は cmate-orchestrate planner の抽出の写しである
 （[issue-body-contract.md](./issue-body-contract.md) 第 2 節）。planner が変わったら
-写しも変える。
+写しも変える。`acceptance_gates_*` の 5 rule も同じミラーであり、正本と規律は
+[acceptance-gates.md](./acceptance-gates.md) にある。
+
+`--checkout` を渡したのに `verify.yaml` が読めない・解釈できないときは exit 2 である。
+**「読めなかった」は「ブロックが無かった」ではない。**
 
 ## 6. version 運用
 
@@ -139,7 +154,7 @@ schema が validator の実装していない keyword を使っていたら、�
 
 ## 8. completion check（報告前の自己申告）
 
-計画または登録結果を人間に返す前に、次の 8 件を 1 件ずつ pass / fail で申告する。
+計画または登録結果を人間に返す前に、次の 9 件を 1 件ずつ pass / fail で申告する。
 **fail が 1 件でもあれば、その run は success ではない。** 各 check が何を要求して
 いるかを決めているのは「正本」列の文書であり、この表はその index である。
 
@@ -153,3 +168,4 @@ schema が validator の実装していない keyword を使っていたら、�
 | 6 | 依存が DAG であり、本文の placeholder と `depends_on` が一致している | rule `acyclic_dependencies` / `dependency_link_in_body`（本書 第 5.2 節） |
 | 7 | Phase 1 で GitHub への mutation を 1 件も実行していない | [safety.md](./safety.md) 第 1 節 |
 | 8 | 次の行動と、それを取るのが誰かを述べた | Phase 1 は要約の末尾、登録後は [register-contract.md](./register-contract.md) 第 6 節 |
+| 9 | 受入ゲートのブロックを出したなら、その id を `verify.yaml` に読んで確かめた。読めていない・測れるか判断できない条件はブロックにせず散文に残した | [acceptance-gates.md](./acceptance-gates.md) 第 3 節、rule `acceptance_gates_id_exists` / `acceptance_gates_verify_yaml_read` |

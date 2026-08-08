@@ -1,0 +1,64 @@
+{
+  "plan_schema_version": 1,
+  "skill_id": "cmate-issue-authoring",
+  "skill_version": "0.7.0",
+  "plan_id": "split-2c129bb6f00c",
+  "generated_mode": "dry-run",
+  "repository": "Kewton/commandmate-skills",
+  "source": {
+    "kind": "text",
+    "ref": "Feature description supplied inline by the caller",
+    "digest": "3c7a1f0e9d8b6a5c4e3d2b1a0f9e8d7c6b5a4938271605f4e3d2c1b0a9f8e7d6"
+  },
+  "issues": [
+    {
+      "key": "acceptance-gate-mirror",
+      "title": "feat(cmate-issue-authoring): 受入ゲート記法を起案側でミラーする",
+      "objective": "機械で測れる受入条件を持つ Issue に限り、起案する本文へ acceptance-gates ブロックを載せる。",
+      "acceptance_criteria": [
+        "`bash tests/fixtures/cmate-issue-authoring/run_tests.sh` が exit 0 で終わる",
+        "`python3 scripts/validate.py` が exit 0 で終わる"
+      ],
+      "target_files": ["skills/cmate-issue-authoring/scripts/validate-plan.mjs"],
+      "reference_files": ["skills/cmate-orchestrate/references/acceptance-gates-notation.md"],
+      "test_expectations": ["bash tests/fixtures/cmate-issue-authoring/run_tests.sh"],
+      "depends_on": [],
+      "labels": ["enhancement"],
+      "size": "m",
+      "parallel_safe": "unknown",
+      "evidence": [
+        {
+          "claim": "起案側の validator は記法を知らない",
+          "kind": "file",
+          "ref": "skills/cmate-issue-authoring/scripts/validate-plan.mjs:1"
+        },
+        {
+          "claim": "id の実在確認は dispatch が verify.yaml に対して行う",
+          "kind": "file",
+          "ref": "skills/cmate-orchestrate/references/acceptance-gates-notation.md:1"
+        }
+      ],
+      "body": "機械で測れる受入条件を持つ Issue に限り、起案する本文へ acceptance-gates ブロックを載せる。\n\n## 対象ファイル\n\n- `skills/cmate-issue-authoring/scripts/validate-plan.mjs`\n\n## 受入条件\n\n- [ ] `bash tests/fixtures/cmate-issue-authoring/run_tests.sh` が exit 0 で終わる\n- [ ] `python3 scripts/validate.py` が exit 0 で終わる\n\n上の 2 件は既存ゲートがそのまま測る。裁定に参加させるものだけをブロックにする。\n\n```acceptance-gates\nversion: 1\nrequire:\n  - issue-authoring-fixtures\n  - validate\n```\n\n**ゲート外**: 記法リファレンスの説明が読んで分かるかは機械では測れない。UAT で人間が読む。\n\n## 根拠\n\n- skills/cmate-issue-authoring/scripts/validate-plan.mjs:1 — 現状 validator は記法を知らない\n"
+    }
+  ],
+  "duplicate_suspicions": [],
+  "open_questions": [],
+  "commands": [
+    {
+      "purpose": "対象リポジトリが宣言しているゲート id を読む",
+      "command": "cat .commandmate/verify.yaml",
+      "mutating": false,
+      "executed": true
+    },
+    {
+      "purpose": "既存 Issue との重複を検査する",
+      "command": "gh issue list --repo Kewton/commandmate-skills --state all --search \"acceptance gates in:title,body\" --limit 30",
+      "mutating": false,
+      "executed": true
+    }
+  ],
+  "warnings": [],
+  "notes": [
+    "require: の 2 件は .commandmate/verify.yaml が宣言している id をそのまま写したものであり、翻訳していない"
+  ]
+}

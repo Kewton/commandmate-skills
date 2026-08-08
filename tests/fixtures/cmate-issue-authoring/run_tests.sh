@@ -3,7 +3,7 @@
 #
 #   bash tests/fixtures/cmate-issue-authoring/run_tests.sh
 #
-# Four things are proved here, in this order:
+# Five things are proved here, in this order:
 #
 #  1. **The validator is not a rubber stamp.** Every rule it claims to enforce is
 #     exercised by injecting one mutation into a conforming plan and requiring
@@ -20,6 +20,11 @@
 #     the mirrored extraction constants byte for byte and runs both copies over a
 #     corpus, so the validator cannot go on telling an author their body is ready
 #     while the planner reads it differently.
+#  5. **The acceptance-gates notation this package writes is the one the runners
+#     read**, and a gate id it never saw cannot reach a body. The block is
+#     rendered by the package, resolved against a real `.commandmate/verify.yaml`,
+#     read back by the actual planner, and held byte-identical to the 正本 by
+#     `acceptance-gates-conformance.mjs`.
 #
 # Requires bash, node and the standard POSIX tools. No network: the planner runs
 # from a fixture, and the `gh` on PATH is a shim that only writes a log.
@@ -33,6 +38,8 @@ ORCHESTRATOR="$REPO_ROOT/skills/cmate-orchestrate/scripts/orchestrate.mjs"
 CASES="$SUITE_DIR/cases"
 FULL="$CASES/valid-full.json"
 MINIMAL="$CASES/valid-minimal.json"
+GATES="$CASES/valid-acceptance-gates.json"
+UNMEASURABLE="$CASES/valid-unmeasurable.json"
 
 WORK=$(mktemp -d -t cmate-issue-authoring-tests.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT INT TERM
@@ -44,10 +51,18 @@ mutations=0
 pass() { passed=$((passed + 1)); printf 'ok   %s\n' "$1"; }
 fail() { failed=$((failed + 1)); printf 'FAIL %s\n     %s\n' "$1" "$2"; }
 
+# Extra arguments the helpers below pass to every validator run. Empty for most
+# of the suite — which is itself part of what is proved: a plan that declares no
+# acceptance gates needs nothing new. The acceptance-gates section sets it to
+# `--checkout <repo root>`, because an issue that declares gates can only be
+# judged against a real .commandmate/verify.yaml, and this repository ships one.
+VALIDATOR_ARGS=()
+validator() { node "$VALIDATOR" ${VALIDATOR_ARGS[@]+"${VALIDATOR_ARGS[@]}"} "$@"; }
+
 # expect_valid <name> <plan>
 expect_valid() {
   local name="$1" plan="$2" out status
-  out=$(node "$VALIDATOR" "$plan" 2>&1)
+  out=$(validator "$plan" 2>&1)
   status=$?
   if [ "$status" -eq 0 ]; then
     pass "$name"
@@ -92,7 +107,7 @@ mutant() {
   fi
 
   local out status
-  out=$(node "$VALIDATOR" "$plan" 2>&1)
+  out=$(validator "$plan" 2>&1)
   status=$?
   if [ "$status" -ne 1 ]; then
     fail "$name" "expected exit 1 (invalid), got $status: $out"
@@ -127,7 +142,7 @@ expect_no_rule() {
   fi
 
   local out
-  out=$(node "$VALIDATOR" "$plan" 2>&1)
+  out=$(validator "$plan" 2>&1)
   case "$out" in
     *"FAIL $rule "*) fail "$name" "rule $rule fired but should not have; findings were: $out" ;;
     *) pass "$name" ;;
@@ -199,6 +214,91 @@ mutant planner_ready "$MINIMAL" set /issues/0/body '"profile lookup の read 経
 expect_no_rule 'a document named under 成果物 is planner-ready' planner_ready "$MINIMAL" \
   set /issues/0/body '"profile cache の設計判断を ADR として残す。\n\n## 成果物\n\n- `docs/adr/0002-profile-cache.md`\n\n## 受入条件\n\n- [ ] ADR が採用案と却下案を述べている\n"'
 
+# The acceptance-gates notation (Issue #124). The producing side may only write a
+# gate id it has SEEN, so every case here runs against a real .commandmate/verify.yaml
+# — this repository's own, which is also what makes the ids in the fixture real.
+printf '\n== acceptance gates: only what was verified becomes a gate ==\n'
+
+GATE_BODY_HEAD='機械で測れる受入条件を持つ Issue に限り、起案する本文へ acceptance-gates ブロックを載せる。\n\n## 対象ファイル\n\n- `skills/cmate-issue-authoring/scripts/validate-plan.mjs`\n\n## 受入条件\n\n'
+GATE_CRITERIA='- [ ] `python3 scripts/validate.py` が exit 0 で終わる\n\n'
+
+VALIDATOR_ARGS=(--checkout "$REPO_ROOT")
+
+expect_valid 'a plan whose block names gates that exist is accepted' "$GATES"
+expect_valid 'a plan that leaves an unmeasurable criterion as prose is accepted' "$UNMEASURABLE"
+
+mutant acceptance_gates_no_new_commands "$GATES" set /issues/0/body \
+  "\"$GATE_BODY_HEAD$GATE_CRITERIA\`\`\`acceptance-gates\\nversion: 1\\ngates:\\n  - id: new-gate\\n\`\`\`\\n\""
+mutant acceptance_gates_block_parses "$GATES" set /issues/0/body \
+  "\"$GATE_BODY_HEAD$GATE_CRITERIA\`\`\`acceptance-gates\\nversion: 2\\nrequire:\\n  - validate\\n\`\`\`\\n\""
+mutant acceptance_gates_block_parses "$GATES" set /issues/0/body \
+  "\"$GATE_BODY_HEAD$GATE_CRITERIA\`\`\`acceptance-gates\\nversion: 1\\nrequire:\\n  - validate # 既存ゲート\\n\`\`\`\\n\""
+mutant acceptance_gates_block_is_canonical "$GATES" set /issues/0/body \
+  "\"$GATE_BODY_HEAD$GATE_CRITERIA\`\`\`acceptance-gates\\n# 機械で測る分\\nversion: 1\\nrequire:\\n  - validate\\n\`\`\`\\n\""
+mutant acceptance_gates_id_exists "$GATES" set /issues/0/body \
+  "\"$GATE_BODY_HEAD$GATE_CRITERIA\`\`\`acceptance-gates\\nversion: 1\\nrequire:\\n  - no-such-gate\\n\`\`\`\\n\""
+mutant acceptance_gates_id_exists "$GATES" set /issues/0/body \
+  "\"$GATE_BODY_HEAD$GATE_CRITERIA\`\`\`acceptance-gates\\nversion: 1\\nrequire:\\n  - env-clean\\n\`\`\`\\n\""
+
+# The block is not a substitute for the prose criteria, and this is what proves
+# the mirror strips it the way the planner does: the ids below look exactly like
+# an acceptance-criteria list, and a mirror that read the raw body would report
+# this Issue ready while the real planner raises its blocking question.
+mutant planner_ready "$GATES" set /issues/0/body \
+  "\"$GATE_BODY_HEAD\`\`\`acceptance-gates\\nversion: 1\\nrequire:\\n  - validate\\n\`\`\`\\n\""
+
+VALIDATOR_ARGS=()
+
+# The same plan, with nobody having looked at verify.yaml. Refusing here is the
+# whole point: an id that does not exist stops the issue at dispatch, before
+# `send`, so "I did not check" must not read as "checked and fine".
+out=$(node "$VALIDATOR" "$GATES" 2>&1)
+status=$?
+case "$status:$out" in
+  1:*"FAIL acceptance_gates_verify_yaml_read "*)
+    pass 'a block is refused when no checkout was read' ;;
+  *)
+    fail 'a block is refused when no checkout was read' "exit $status: $out" ;;
+esac
+
+# ... and a plan with no block needs no checkout at all, so nothing about this
+# feature reaches an Issue that did not ask for it.
+expect_valid 'a plan with no block validates without a checkout' "$UNMEASURABLE"
+
+mkdir -p "$WORK/no-config"
+expect_exit 'a checkout with no verify.yaml is "I could not look", not a verdict' 2 \
+  "$GATES" --checkout "$WORK/no-config"
+
+printf '\n== acceptance gates: the emitter cannot invent an id ==\n'
+expect_exit 'the emitter refuses an id the checkout does not declare' 2 \
+  --render-acceptance-gates no-such-gate --checkout "$REPO_ROOT"
+expect_exit 'the emitter refuses to run without a checkout' 2 --render-acceptance-gates validate
+expect_exit 'the emitter refuses a malformed id' 2 \
+  --render-acceptance-gates 'Validate' --checkout "$REPO_ROOT"
+expect_exit 'the emitter refuses a duplicate id' 2 \
+  --render-acceptance-gates validate,validate --checkout "$REPO_ROOT"
+expect_exit 'the emitter refuses to validate a plan at the same time' 2 \
+  "$GATES" --render-acceptance-gates validate --checkout "$REPO_ROOT"
+expect_exit 'the emitter accepts ids the checkout declares' 0 \
+  --render-acceptance-gates issue-authoring-fixtures,validate --checkout "$REPO_ROOT"
+
+# The fixture body was not typed by hand: it is what the emitter prints. A body
+# and an emitter that drift apart would make every case above test the fixture
+# rather than the package.
+node "$VALIDATOR" --render-acceptance-gates issue-authoring-fixtures,validate \
+  --checkout "$REPO_ROOT" > "$WORK/rendered-block.txt" 2>/dev/null
+if node -e '
+const { readFileSync } = require("node:fs");
+const plan = JSON.parse(readFileSync(process.argv[1], "utf8"));
+const block = readFileSync(process.argv[2], "utf8");
+process.exit(plan.issues[0].body.includes(block) ? 0 : 1);
+' "$GATES" "$WORK/rendered-block.txt"; then
+  pass 'the fixture body carries exactly what the emitter prints'
+else
+  fail 'the fixture body carries exactly what the emitter prints' \
+    "the emitter printed:\n$(cat "$WORK/rendered-block.txt")"
+fi
+
 printf '\n== the run itself failing is not the plan failing ==\n'
 expect_exit 'no argument is a usage error' 2
 expect_exit 'a missing plan file is an I/O error' 2 "$WORK/does-not-exist.json"
@@ -269,6 +369,32 @@ else
   pass 'the plan carries no open_questions risk factor'
 fi
 
+# The same dogfood for the notation: the block goes through the real planner and
+# has to come back as the same ids in the same order, and the plan that declares
+# no block has to come back with `acceptance_gates: null` and no question. Source
+# conformance (below) proves the two readers agree; this proves the bytes this
+# package writes are the bytes that reader accepts.
+printf '\n== dogfood: the block the real planner reads back ==\n'
+for case_file in "$GATES" "$UNMEASURABLE"; do
+  case_name=$(basename "$case_file" .json)
+  node "$SUITE_DIR/to-issue-json.mjs" "$case_file" > "$WORK/$case_name-issues.json"
+  if node "$ORCHESTRATOR" --issues 9000 \
+        --issue-json "$WORK/$case_name-issues.json" \
+        --runs-dir "$WORK/runs" --run-id "$case_name" > "$WORK/$case_name.out" 2>&1; then
+    if node "$SUITE_DIR/assert-planner-gates.mjs" "$case_file" \
+          "$WORK/runs/$case_name/plan.json" > "$WORK/$case_name.txt" 2>&1; then
+      sed 's/^/     /' "$WORK/$case_name.txt"
+      pass "the planner read $case_name exactly as the plan wrote it"
+    else
+      sed 's/^/     /' "$WORK/$case_name.txt"
+      fail "the planner read $case_name exactly as the plan wrote it" 'see the assertions above'
+    fi
+  else
+    fail "the planner read $case_name exactly as the plan wrote it" \
+      "the planner failed: $(cat "$WORK/$case_name.out")"
+  fi
+done
+
 # The validator's planner mirror is a verbatim copy of the extraction in
 # cmate-orchestrate, and nothing but review used to keep the two identical. The
 # conformance test compares the mirrored constants byte for byte AND runs both
@@ -292,6 +418,25 @@ else
       'the conformance test could not run; fix its region markers before trusting any of this'
   else
     fail 'the planner mirror matches cmate-orchestrate' 'the mirror has drifted; see above'
+  fi
+fi
+
+# The acceptance-gates notation has three implementations — the planner reads the
+# block, dispatch resolves the ids, this package writes both — and the producing
+# side went in last, which is exactly when a mirror starts to rot. Same three exit
+# codes as above: 0 in sync, 1 drifted, 2 the comparison could not be made.
+printf '\n== the acceptance-gates notation is in sync ==\n'
+if node "$SUITE_DIR/acceptance-gates-conformance.mjs" > "$WORK/gates-conformance.txt" 2>&1; then
+  sed 's/^/     /' "$WORK/gates-conformance.txt"
+  pass 'the notation matches cmate-orchestrate and the 正本'
+else
+  status=$?
+  sed 's/^/     /' "$WORK/gates-conformance.txt"
+  if [ "$status" -eq 2 ]; then
+    fail 'the notation matches cmate-orchestrate and the 正本' \
+      'the conformance test could not run; fix its region markers before trusting any of this'
+  else
+    fail 'the notation matches cmate-orchestrate and the 正本' 'the notation has drifted; see above'
   fi
 fi
 

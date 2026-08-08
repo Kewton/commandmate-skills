@@ -2,6 +2,40 @@
 
 ## Changelog
 
+### 0.3.0 — recommend the acceptance-gates block, never write it (Issue #124)
+
+- **This Skill now knows the `acceptance-gates` notation** and recommends a block
+  when some acceptance criterion is decided by a gate that already exists in the
+  target repository's `.commandmate/verify.yaml`. New reference:
+  [`acceptance-gates.md`](./acceptance-gates.md). The notation's source of truth
+  is `cmate-orchestrate`'s `references/acceptance-gates-notation.md`; this package
+  mirrors it and does not extend it.
+- **The read-only boundary is unchanged, and that is the point.** The block goes
+  into `proposed_issue_body` and a finding — a proposal a person applies. This
+  Skill still edits no Issue, `github_writes` is still always `[]`, and no new
+  permission is declared. Recommending is the whole of its part; registering an
+  Issue whose body carries a block is `cmate-issue-authoring`.
+- **It may not invent a gate.** The consuming runner refuses to infer gates from
+  prose (fail-closed, ADR §2.3), and that prohibition is void if the writing side
+  guesses instead: an id that is not declared in the worktree's `verify.yaml`
+  stops the Issue at dispatch, before anything is sent. So: read `verify.yaml` or
+  recommend nothing; leave anything you cannot tell is measurable as prose; never
+  recommend `gates:`, which no release enforces.
+- **A block is not a criteria list.** The planner strips the block out of the body
+  before reading any prose, so a section carrying only the block reads as having
+  no acceptance criteria at all and is blocked downstream.
+  [`section-contract.md`](./section-contract.md) now says so where the
+  planner-ready rules are stated.
+- Completion check goes from nine statements to **ten**; the tenth is the
+  discipline above, and a run that recommended no block passes it.
+- `result_schema_version` stays 1 and the schema is unchanged: the recommendation
+  uses `proposed_issue_body`, `findings`, `open_questions` and `limitations`,
+  which already exist. A document produced by 0.2.1 is still valid.
+- The shape of every block shipped in this package is held byte-identical to the
+  notation's own example by
+  `tests/fixtures/cmate-issue-authoring/acceptance-gates-conformance.mjs`, which
+  the repository's CI runs.
+
 ### 0.2.1 — the rules live in the references; `SKILL.md` points at them (Issue #68)
 
 - `SKILL.md` now settles only four things — when to use the Skill, how to call

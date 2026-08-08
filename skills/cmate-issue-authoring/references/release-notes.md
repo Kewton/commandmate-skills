@@ -19,6 +19,42 @@ install 先で走らせるよう案内している箇所は無い。
 
 ## Changelog
 
+### 0.7.0 — 受入ゲート記法の生産側（Issue #124）
+
+- **`acceptance-gates` ブロックを起案側が出せるようにした。** 記法の正本は
+  cmate-orchestrate の `references/acceptance-gates-notation.md` であり、この package は
+  ミラーする側である。何を出し、何を出さないかは
+  [acceptance-gates.md](./acceptance-gates.md) が正本。
+- **推測で書けない構造にした。** ブロックは手書きではなく renderer が出す
+  （`--render-acceptance-gates <id,id> --checkout <path>`）。renderer は `--checkout` を必須にし、
+  `<checkout>/.commandmate/verify.yaml` に実在しない id を渡されると **exit 2 で何も出力しない**。
+  推測した id は dispatch が `send` 前に `acceptance_gate_id_unknown` で止めるので、
+  親切のつもりの id は run の停止になる。**書ける経路を塞ぐのが唯一の確実な防ぎ方である。**
+- validator に rule を 5 件足した（`acceptance_gates_block_parses` /
+  `acceptance_gates_no_new_commands` / `acceptance_gates_block_is_canonical` /
+  `acceptance_gates_verify_yaml_read` / `acceptance_gates_id_exists`）。
+  ブロックを持つ Issue がある計画は `--checkout` 無しでは通らない。**「見ていない」を
+  「見て問題なかった」に化けさせない。** `--checkout` を渡したのに `verify.yaml` が
+  読めないときは exit 2 であり、計画が invalid（exit 1）とは区別する。
+- **planner が本文からブロックを剥がしてから散文を読む**という順序をミラーに反映した。
+  これは整形ではなく正しさの問題である: 剥がさないと、受入条件の見出しの下に置いた
+  ブロックの `  - validate` が受入条件の箇条書きに見え、散文の受入条件が 1 件も無い Issue を
+  「planner ready」と報告してしまう（実物の planner は blocking question を立てる）。
+  fixture がこの 1 点を名指しで測っている。
+- `verify.yaml` の読み取りは dispatch の `readWorktreeGateIds` の逐語の写しである。
+  組み込み解決可能 id は `work-evidence` / `scope` の 2 つだけで、`env-clean` は
+  built-in ゲートだが**この集合に入らない**（`require: [env-clean]` は拒否される）。
+- **ブロックを持たない計画の挙動は byte 単位で従来どおり**である。`verify.yaml` は
+  ブロックを持つ Issue があるときだけ読まれ、`--checkout` はそれ以外では影響しない。
+- completion check を 8 件から **9 件**にした（9 番目が上記の規律の自己申告）。
+  正本は [plan-contract.md](./plan-contract.md) 第 8 節。
+- 計画 artifact の schema に変更は無い。`plan_schema_version` は 1 のままである
+  （ブロックは `issues[].body` の中身であり、新しい field を作っていない）。
+  既に出力済みの計画は引き続き valid である。
+- 一致は `tests/fixtures/cmate-issue-authoring/acceptance-gates-conformance.mjs` が
+  機械で固定する（定数の byte 一致・関数本体の byte 一致・corpus・正本の例との byte 一致）。
+  リポジトリの CI が走らせる。install 先には含まれない。
+
 ### 0.6.0 — planner mirror の `FILE_EXT` に `jsonc` を同期（Issue #56）
 
 - planner 本体（cmate-orchestrate 0.16.0）が `FILE_EXT` に `jsonc` を足したのに合わせ、

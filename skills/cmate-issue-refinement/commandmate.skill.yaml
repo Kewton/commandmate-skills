@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-issue-refinement
 name: cmate-issue-refinement
-version: 0.2.1
+version: 0.3.0
 summary: Refines a vague GitHub Issue into an implementable specification, read-only, with evidence, ranked findings, open questions and a versioned result.
 description: >-
   Takes an Issue that is a title, a paragraph, or a set of unchecked assumptions,
@@ -29,6 +29,7 @@ capabilities:
   - Rank findings as must fix, should fix or nice to have with a locator on each
   - Return decisions only the user can make as open questions instead of silent assumptions
   - Emit a versioned result document, a human-readable summary and a completion check
+  - Recommend a machine-readable acceptance-gates block, naming only gate ids read from verify.yaml
 expected_outcomes:
   - An Issue leaves with checkable acceptance criteria, or an enumerated list of what is still missing
   - Implementation does not begin from an assumption the repository contradicts
@@ -84,9 +85,15 @@ risk_rationale: >-
   Issue or the working tree.
 files:
   - path: SKILL.md
-    sha256: a29eab7b4b10d31f7a479171ecbe38c16cfd9f552a6d2c66b631edcb5085dc87
-    size: 12611
+    sha256: 436e63a94accb8614a16f0726fa0ea18086ef47e498e279564276c2f8b9a7487
+    size: 13482
     kind: skill_md
+    executable: false
+    script: false
+  - path: references/acceptance-gates.md
+    sha256: b9a2ea5d329f7953966420be47c5f16573a11fae28248fcd7aba56a2a216bdea
+    size: 5637
+    kind: instruction
     executable: false
     script: false
   - path: references/agent-compatibility.md
@@ -102,14 +109,14 @@ files:
     executable: false
     script: false
   - path: references/output-contract.md
-    sha256: a3cf78549b9a205d52ec3f2d28141c41e46e628ef4ed33b5c212452c36b51733
-    size: 6073
+    sha256: c13c33f73f1d0ec943803099fd9795cac7f6608e253a6acc0ef6cb38e764668a
+    size: 6608
     kind: instruction
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 622ec7c8192cb482a2b0e1c7165877575b623c7d795e761470801b4319897a85
-    size: 8695
+    sha256: 09f747260fa61be9ef5ce1591bd33b908e180b829d8838454976073ead203ec0
+    size: 10960
     kind: instruction
     executable: false
     script: false
@@ -120,8 +127,8 @@ files:
     executable: false
     script: false
   - path: references/section-contract.md
-    sha256: 9d5a5ab6e862fd3388a8df9a27c7e5b709d7f033788728d3c4d7e2360ec37eed
-    size: 7603
+    sha256: a583bf6c678150a51687d10db9534c453c9634d2d6ca8f17498488ef46911763
+    size: 7946
     kind: instruction
     executable: false
     script: false

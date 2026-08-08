@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-issue-authoring
 name: cmate-issue-authoring
-version: 0.6.0
+version: 0.7.0
 summary: Feature 記述から実装可能な Issue 群を起案する。read-only の分割計画を schema 準拠 artifact で出し、明示承認の下でだけ依存順に GitHub へ一括登録する 2 phase 手順。
 description: >-
   Feature 記述・仕様断片・epic Issue を入力に、着手できる Issue 群を起案する手順である。
@@ -33,6 +33,7 @@ capabilities:
   - 明示承認の下でだけ gh issue create を依存順に実行し、相互リンクとラベルを付ける
   - 登録の途中失敗を skipped として報告し、部分成功を成功に丸めない
   - 同じ計画の二度目の登録を receipt で検出して既定で拒否する
+  - 受入ゲートのブロックを、対象 repo の verify.yaml に実在する id だけで描画し検証する
 expected_outcomes:
   - Feature はあるが Issue が無い状態から、着手できる Issue 群までを 1 手順で渡せる
   - 起案された Issue が cmate-orchestrate の planner に blocking question を立てさせない
@@ -89,16 +90,23 @@ declared_permissions:
 declared_risk: moderate
 risk_rationale: >-
   同梱する実行可能 file は無く、install 時に実行されるものも無い。script は
-  validate-plan.mjs 1 本（実行 bit 無し）で、file を 2 つ読んで findings を出すだけであり
+  validate-plan.mjs 1 本（実行 bit 無し）で、計画と schema、および --checkout を
+  渡されたときだけ対象 repo の .commandmate/verify.yaml を読み、findings を出すだけであり
   gh も git も呼ばない。書き込みは計画 artifact（.commandmate/issue-authoring/ 配下）に
   限り、実装 file には触れない。GitHub への mutation は --register と明示承認が揃った
   Phase 2 の gh issue create だけで、Issue の追加であって削除・履歴書き換えではない。
   既存 Issue の本文編集・クローズ・ラベル張り替えは手順として禁止している。
 files:
   - path: SKILL.md
-    sha256: 1cb3b5fe5b074e39e2e9261bfb1b9a0bdb6afee9da323b4a3078a984d38b63a4
-    size: 12032
+    sha256: 215afc2ba43fa0b9e1ef443deef999bc128d32d9701dfbfc5b3364f825039cd6
+    size: 13292
     kind: skill_md
+    executable: false
+    script: false
+  - path: references/acceptance-gates.md
+    sha256: 897004ad2aa05a46b639ac80e20f3878a47b4d4a7dfd2c785311268db0bd765a
+    size: 7831
+    kind: instruction
     executable: false
     script: false
   - path: references/agent-compatibility.md
@@ -114,14 +122,14 @@ files:
     executable: false
     script: false
   - path: references/issue-body-contract.md
-    sha256: bef2353d388436a02363f240b575bbe45edf96e8307aaa4707eb5e587b1162a8
-    size: 10426
+    sha256: f09c3357a5b1aa0c8267eecebcf37b790ca2dae3d4d2ec8e1dd51624a1f38412
+    size: 11496
     kind: instruction
     executable: false
     script: false
   - path: references/plan-contract.md
-    sha256: cd8b0f9d6ca35671e2c803c8608f936ac8f964060654c0d29e67db325721580a
-    size: 10196
+    sha256: 3e61db38ea4b8bf1c98f1baceb455bea2fffd2a227478371613320562ecc19f5
+    size: 11874
     kind: instruction
     executable: false
     script: false
@@ -132,8 +140,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 3f43a9351edb327424e30bbe3412fa7289056855e69e6bf1afb3d293026d5199
-    size: 12651
+    sha256: 6cea668cf1600a998bbf5ca81206ac8053f75af4917bc3b3c90a64f85a95788a
+    size: 15947
     kind: instruction
     executable: false
     script: false
@@ -150,8 +158,8 @@ files:
     executable: false
     script: false
   - path: scripts/validate-plan.mjs
-    sha256: 4333ce2b09dc31c90ef6326829491e64afeaf0d655c94be91c19e98c9c6a88f7
-    size: 26795
+    sha256: 460c5ee7cc6fc4eb8312cd656068018127474d6cdfa54004972f16e96e4771ec
+    size: 52530
     kind: script
     executable: false
     script: true
