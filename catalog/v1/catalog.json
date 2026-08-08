@@ -177,7 +177,7 @@
         "schema",
         "dry-run"
       ],
-      "latest": "0.6.0",
+      "latest": "0.7.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -413,6 +413,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.6.0/cmate-issue-authoring-0.6.0.tar.gz",
             "sha256": "2488f29b057b040f7b537b76907a0e5ff020515bf70a7007a8179355530f0a06",
             "size": 34250,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.7.0",
+          "changelog": "cmate-issue-authoring 0.7.0 — 受入条件の機械可読ブロックを起案する\n\ncmate-orchestrate 0.19.0（#114）で、Issue 本文の acceptance-gates ブロックを planner が\n読み、dispatch が実行契約の verify.gates へ運ぶ経路が入った。しかし Issue を起案するのは\nこの skill であり、記法を知らなければブロックは生まれない。読む側だけ在って書く側が無い\n状態だったのを埋める。\n\nIssue を起案するとき、機械で測れる受入条件がある場合に限り acceptance-gates ブロックを出す。\n\n推測で生成しない\n\nconsumer 側の裁定（散文からの推測生成は禁止・fail-closed）を、生産側も同じ規律で守る。\n\n- 機械で測れると確信できる受入条件だけをブロックにする。測れるか判断できないものは\n  散文のまま残す\n- require に書けるのは対象リポジトリの verify.yaml に実在する gate id だけである。\n  読めない状況では書かない。推測で id を書くと dispatch が send 前に拒否して run が止まる\n  （acceptance_gate_id_unknown）ので、親切のつもりが停止を作る\n- gates（新規コマンドゲート）は consumer 側が未実装で、planner が受理して dispatch が停止する\n  （acceptance_gate_block_unsupported）。生産側は出さない\n\nconformance テスト\n\ntests/fixtures/cmate-issue-authoring/acceptance-gates-conformance.mjs を足し、生産側が出す\n記法が正本（cmate-orchestrate の references/acceptance-gates-notation.md）と一致することを\n機械的に固定した。目視の一致ではない。",
+          "published_at": "2026-08-08T00:10:29Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-authoring-v0.7.0",
+            "commit": "655cf1cc1f80cfe9ff4c0296710619d817d1cb0a"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-authoring-0.7.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.7.0/cmate-issue-authoring-0.7.0.tar.gz",
+            "sha256": "b2492c0e69c559b086a389a3fe6eae61bfa7f6189532dfe99bd3fb93ae64186f",
+            "size": 46592,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
