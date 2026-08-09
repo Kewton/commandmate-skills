@@ -1,0 +1,60 @@
+{
+  "description": "Issue #161 / #162 二点測定のフラグ無し側（対になるのは d69）: **同じ plan・同じ世界**を `--unattended` 無しで dispatch すると、人間が読む運転なので停止はしない —— 両方の Issue が送られ、run は success で終わる。変わったのは **黙っていない**ことだけである: #240 は 200 件に狭まった権限で dispatch され、`contract_scope_dropped` が **limitation として 1 件**残る。無言の切り詰めは「全部入った」と読めるので、停止しない判断をする以上、最低でも ここに載っていなければならない。この case が緑であることが、d69 の停止は**検出時点を早めた**ものであって新しい 拒否ではないことの証拠である。落ちなかった #241 には 1 件も付かない（`limitation_code_counts` が run 全体で 1 件 であることを固定する）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-scope-dropped.json",
+    "orchestrate_args": [
+      "240",
+      "241",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      240,
+      241
+    ],
+    "out_dir_created": true,
+    "completion_check_passed": true,
+    "worker_states": {
+      "240": "completed",
+      "241": "completed"
+    },
+    "limitation_codes": [
+      "contract_scope_dropped"
+    ],
+    "limitation_code_counts": {
+      "contract_scope_dropped": 1,
+      "contract_scope_unknown": 0
+    },
+    "absent_limitation_codes": [
+      "unattended_mode",
+      "contract_scope_unknown"
+    ],
+    "limitation_details_include": [
+      "#240: 5 of the 205 path(s) this issue declares do NOT reach its execution contract",
+      "The issue IS dispatched, under the 200 pattern(s) that survived"
+    ],
+    "summary_includes": [
+      "worker の権限は Issue の宣言より狭い"
+    ]
+  }
+}

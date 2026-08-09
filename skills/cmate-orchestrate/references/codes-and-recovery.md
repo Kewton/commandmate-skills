@@ -50,6 +50,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | `unrecognized_file_extension` | 既知拡張子外の backtick path が抽出から落ちた |
 | `shadowed_file_candidate` | 他候補の path 境界つき suffix だったため候補から落とした |
 | `acceptance_requires_tests_but_scope_has_none` | 受入条件がテストの**作成**を能動的に要求しているのに、対象 file（**段1 の導出結果を含めて**）にテストらしき path が1件も無い |
+| `contract_scope_dropped` | 宣言された対象 file の一部が、dispatch の実行契約の `scope.allow` に**入らない**（件数上限 200 超過、または契約が扱えない形の path）。detail に**落ちた件数・落ちた path（先頭3件）・落ちた理由**が入る |
 
 `no_acceptance_criteria` / `no_suspected_files` / `acceptance_requires_tests_but_scope_has_none`
 は dispatch の open question ゲートと対になる。**これらを放置したまま `--allow-questions` で
@@ -61,6 +62,13 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 「テストは不要」「既存のテストが緑のまま」「手動テストで確認」「テストは変更しない」と
 書いた受入条件は**検出から除外される**ので、これらで止まったら実装側の欠陥である。
 
+`contract_scope_dropped` は**推論ではなく予告**である ——「dispatch の実行契約はこの path を
+運べない」という、その場で確定している事実を、dispatch より前に言っている。dispatch 側にも
+**同名の code** が在り（第3節・第4節）、`--unattended` では blocking reason、人間が居る run では
+limitation になる。同じ欠陥に同じ名前を付けてあるので、plan の warning と dispatch の停止は
+**同じ1件の findings を2つの時点で読んでいる**と分かる。詳細と規範は
+[plan-contract.md](./plan-contract.md) 第5.1節の不変条件4（「引いた分も必ず可視である」）にある。
+
 
 ## 3. limitation code（停止はしていないが、後から効いてくる制約）
 
@@ -69,6 +77,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | `contract_unsupported` | dispatch | CLI が実行契約に非対応で、より弱い baseline 裁定に落ちた |
 | `contract_disabled` | dispatch | `--contract-mode off` を明示したため probe していない |
 | `contract_scope_unknown` | dispatch | 対象 file が空の Issue を dispatch しなかった（その wave は advance しない） |
+| `contract_scope_dropped` | dispatch | 宣言された対象 file の一部が実行契約の `scope.allow` に入らないまま dispatch した。**Issue ごとに1件。** worker の権限は Issue の宣言より**狭い**。detail に落ちた件数・落ちた path・落ちた理由が入る。**`--unattended` では limitation ではなく blocking reason になり、`--out` を作る前に停止する** |
 | `open_questions_accepted` | dispatch | `--allow-questions` で未回答 question を引き受けた |
 | `auto_yes_used` | dispatch | `--auto-yes` で prompt を自動応答した |
 | `parallelism_truncated` | dispatch | wave が `max_parallel` より広かったので上限で切った |
@@ -140,6 +149,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | dispatch `resume_no_work`（`status: success`） | 再実行対象が1件も無い（全 Issue が completed かつ pass） | 停止ではない。その attempt の report をそのまま merge / uat に渡す |
 | dispatch `contract_unsupported` + `require` | CLI が実行契約に非対応 | CommandMate を 0.17.0 以上に上げるか、弱い裁定を承知のうえで `auto` に落とす。**`--unattended` の run では `auto` は選べない**（`require` を含意する。落とすなら `--unattended` を外して人間が読む運転に戻す） |
 | dispatch `contract_scope_unknown`（`stop_reason: dispatch_error`。**`--unattended` のとき**） | 対象 file を1件も宣言していない Issue が plan に在る。**1人も dispatch していない**（`--out` も未作成） | **Issue 本文に対象ファイルを書いて re-plan する。** フラグ無しの run では同じ Issue が wave の中で1人ずつ拒否される（そのときは他 Issue の worker が既に走っている）。無人ではその始末をする読み手が居ないので、pre-flight で全 Issue を検査している |
+| dispatch `contract_scope_dropped`（`stop_reason: dispatch_error`。**`--unattended` のとき**。フラグ無しでは limitation で続行） | 対象 file を**宣言しているのに、その一部が実行契約に入らない** Issue が plan に在る。`contract_scope_unknown`（scope が空）とは別で、**scope は在るが宣言より狭い**。無人では **1人も dispatch していない**（`--out` も未作成） | **detail が落ちた path と理由を名指ししている。理由で直し方が変わる。** `over_bound`（件数上限 200 超過）なら **Issue を分割する** —— 200 は CommandMate 側の契約上限なので runner の flag では上げられない。それ以外（`too_long` / `absolute` / `drive_letter` / `backslash` / `parent_escape` / `nul_byte`）は**その path 1件の形の問題**なので、200 字以内の repository-relative な path に書き直す。どちらも直して re-plan する。フラグ無しの run では Issue は**狭い権限のまま dispatch される**ので、**その run の pass は「宣言どおりの scope で通った」ことを意味しない** |
 | dispatch `unattended_locked`（同上） | 同じ worktree を**別の dispatch run が動かしている**（`--out` も未作成・`human_required: false`） | **先行 run の終了を待って、同じコマンドをそのまま再実行する。** lock が残り続けるなら所有 run の pid が生きているかを確認する（`kill -9` された run の lock は次の run が自動で回収する）。lock は `$CMATE_ORCHESTRATE_LOCK_DIR`（既定 `$TMPDIR/cmate-orchestrate-locks/`）に置かれる |
 | dispatch `wall_clock_budget_exhausted`（`stop_reason: timeout` / `partial`） | `--wall-clock-budget` に到達して打ち切った。**成功ではない** | 何に時間を使ったかを確認する（**profile baseline と acceptance コマンドは自前の timeout を持たない**ので、まずそこを疑う）。原因を潰すか budget を実測に合わせてから **`--resume` で再開する**。**打ち切りを success に丸めない** |
 | merge `ci_failed` / `ci_pending` | CI が green でない | CI を直す。**green 無しに merge しない** |
@@ -184,8 +194,9 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 
 `worktree_setup_unavailable` / `worktree_setup_failed` / `worktree_profile_mismatch` と
 `resume_attempt` / `resume_no_work` / `resume_invalid` / `resume_plan_mismatch`、
-そして `scope_unsatisfiable` は、
-この表には在るが **status runner の hint map にはまだ無い**（`status.mjs` は別 Issue で追随する）。
+そして `scope_unsatisfiable` / `contract_scope_dropped` は、
+この表には在るが **status runner の hint map にはまだ無い**（`status.mjs` は別 Issue で追随する。
+`contract_scope_dropped` については `status.mjs` が #161 / #162 の宣言 scope の外だった）。
 それまで `status.mjs --run` はこれらを「detail と `summary_markdown` を読む」に落として表示する。
 **推測で別の対処を出さない**のが status runner の約束なので、これは劣化ではなく既定の振る舞いである。
 dispatch report の `summary_markdown` には上表と同じ next action が出ている。

@@ -1042,6 +1042,88 @@ function extractionWarnings(analyses) {
   return out;
 }
 
+// The declared paths dispatch's execution contract will NOT carry (#161 / #162).
+//
+// A MIRROR of dispatch.mjs's `contractScopeReview`, and it has to stay one: the
+// two runners are separate entry points and neither imports the other, so the
+// predicate is duplicated exactly the way MAX_SCOPE_PATTERNS below already is.
+// What pays for the duplication is WHEN this fires — at plan review, where the
+// fix is an edit to the issue body, instead of at dispatch, where a worker has
+// already been sent against a permission narrower than the plan printed and the
+// contract's `scope.allow` is a send-time snapshot it cannot widen.
+//
+// Most shapes cannot reach here from prose: `isSafeRepoPath` already refuses an
+// absolute, drive-letter, backslash, `..`-bearing or control-character candidate
+// at extraction. Two can, and both are why this exists rather than being an
+// assertion:
+//
+//   * a body can name more files than the contract's count bound, and
+//   * a path can be longer than its per-pattern bound — including a path this
+//     planner DERIVED, since every companion shape is longer than the source
+//     path it came from (§5.1).
+//
+// The rest of the mirror is written out anyway. A mirror with holes is precisely
+// the drift these two issues are: the derivation side got a bound guard in #147
+// and #149, and the reporting side got nothing.
+function contractScopeDrops(paths) {
+  const seen = new Set();
+  const kept = [];
+  const dropped = [];
+  for (const raw of paths) {
+    if (typeof raw !== 'string') { dropped.push({ pattern: String(raw), reason: 'not_a_string' }); continue; }
+    const pattern = raw.trim();
+    if (pattern === '') { dropped.push({ pattern: raw, reason: 'empty' }); continue; }
+    if (pattern.length > MAX_SCOPE_PATTERN_LENGTH) { dropped.push({ pattern, reason: 'too_long' }); continue; }
+    if (pattern.startsWith('/')) { dropped.push({ pattern, reason: 'absolute' }); continue; }
+    if (/^[A-Za-z]:/.test(pattern)) { dropped.push({ pattern, reason: 'drive_letter' }); continue; }
+    if (pattern.includes('\\')) { dropped.push({ pattern, reason: 'backslash' }); continue; }
+    if (pattern.split('/').includes('..')) { dropped.push({ pattern, reason: 'parent_escape' }); continue; }
+    if (pattern.includes('\u0000')) { dropped.push({ pattern, reason: 'nul_byte' }); continue; }
+    if (seen.has(pattern)) continue;
+    seen.add(pattern);
+    kept.push(pattern);
+  }
+  // dispatch SORTS before it truncates, so the entries that fall off are the
+  // alphabetical tail — not the tail of the issue body. Reproducing the sort is
+  // what makes the warning name the paths that will actually go missing.
+  kept.sort();
+  for (const pattern of kept.slice(MAX_SCOPE_PATTERNS)) dropped.push({ pattern, reason: 'over_bound' });
+  return dropped;
+}
+
+// One warning per issue, never one per dropped path: 50 warnings saying the same
+// thing is a wall a reviewer skips, and the count is itself part of the finding.
+// The detail carries the tally, the first few paths and the two possible fixes —
+// they are opposite fixes (declare FEWER files vs. write a path differently), so
+// a reader who cannot tell the reasons apart cannot act.
+function contractScopeWarnings(analyses) {
+  const out = [];
+  for (const analysis of analyses) {
+    const dropped = contractScopeDrops(analysis.suspected_files);
+    if (dropped.length === 0) continue;
+    const counts = new Map();
+    for (const entry of dropped) counts.set(entry.reason, (counts.get(entry.reason) ?? 0) + 1);
+    const tally = [...counts.entries()].map(([reason, count]) => `${reason} x${count}`).join(', ');
+    const samples = dropped.slice(0, 3)
+      .map((entry) => `${entry.reason} \`${entry.pattern.length > 80 ? `${entry.pattern.slice(0, 80)}…` : entry.pattern}\``)
+      .join('; ');
+    const more = dropped.length > 3 ? `; …and ${dropped.length - 3} more` : '';
+    out.push({
+      code: 'contract_scope_dropped',
+      detail: redact(
+        `#${analysis.number}: the dispatch runner's execution contract cannot carry ${dropped.length} of the ` +
+          `${analysis.suspected_files.length} path(s) in this issue's suspected_files (${tally}): ${samples}${more}. ` +
+          `\`scope.allow\` is a send-time snapshot, so a worker told to edit one of them is failed by the scope gate ` +
+          'with no way to widen it. `over_bound` means the issue declares more paths than the contract accepts ' +
+          `(${MAX_SCOPE_PATTERNS} is CommandMate's bound, which no flag here raises) — split the issue; every other ` +
+          `reason is the shape of one path — write it as a plain repository-relative path of at most ` +
+          `${MAX_SCOPE_PATTERN_LENGTH} characters. Under --unattended the dispatch runner refuses the whole plan on this`,
+      ),
+    });
+  }
+  return out;
+}
+
 // An open question is a thing the planner could NOT read out of the issue, so it
 // belongs in `warnings` — the channel that drops `status` to `partial` — and not
 // only in `issues[].questions`, which nothing downstream was obliged to look at
@@ -1165,6 +1247,12 @@ function scopeDefaultsFor(suspected) {
 // (the widest shape is 4 paths per source file), but the guard is what makes
 // "derived paths never displace declared ones" a property rather than a hope.
 const MAX_SCOPE_PATTERNS = 200;
+
+// The other half of the same contract bound, mirrored for contractScopeWarnings
+// above. A derived companion is always LONGER than the path it was derived from
+// (`__tests__/` and `.test.` are both insertions), so this is the one dispatch
+// drop the derivation itself can cause.
+const MAX_SCOPE_PATTERN_LENGTH = 200;
 
 // Directory names that mean "everything below me is already test material".
 // Matched as whole path segments, never as substrings: `src/latest/render.ts`
@@ -2548,11 +2636,15 @@ function run(argv) {
   const { edges, errors: depErrors, warnings: dependencyWarnings } = buildDependencies(analyses, inputs);
   // Profile warnings first: a plan built against the wrong repository is the
   // premise a reviewer has to settle before reading anything downstream of it.
-  // Then per-issue extraction warnings, the unanswered questions those issues
-  // still carry, then cross-issue dependency warnings.
+  // Then per-issue extraction warnings — first the candidates that never reached
+  // `suspected_files`, then the declared paths that will not reach the CONTRACT
+  // (#161 / #162), which is the same finding one step further downstream — the
+  // unanswered questions those issues still carry, then cross-issue dependency
+  // warnings.
   const warnings = [
     ...profileWarnings,
     ...extractionWarnings(analyses),
+    ...contractScopeWarnings(analyses),
     ...openQuestionWarnings(analyses),
     ...dependencyWarnings,
   ];

@@ -1,0 +1,13 @@
+{
+  "_comment": "A 308-character declared path, past dispatch's MAX_SCOPE_PATTERN_LENGTH of 200. This is the one per-item shape of #162 a plan can actually carry: isSafeRepoPath already refuses an absolute, drive-letter, backslash, \"..\"-bearing or control-character candidate at extraction, and it does NOT bound the length. The extension is .md so the case measures exactly one drop — a .ts path this long would also derive four companions, every one of them longer still.",
+  "issues": [
+    {
+      "number": 492,
+      "title": "docs: 深い階層のノートを書き直す",
+      "body": "ノートを書き直す。\n\n## 対象ファイル\n- `docs/readme.md`\n- `segment00xxxxxxxxxxxxxxx/segment01xxxxxxxxxxxxxxx/segment02xxxxxxxxxxxxxxx/segment03xxxxxxxxxxxxxxx/segment04xxxxxxxxxxxxxxx/segment05xxxxxxxxxxxxxxx/segment06xxxxxxxxxxxxxxx/segment07xxxxxxxxxxxxxxx/segment08xxxxxxxxxxxxxxx/segment09xxxxxxxxxxxxxxx/segment10xxxxxxxxxxxxxxx/segment11xxxxxxxxxxxxxxx/notes.md`\n\n## Acceptance criteria\n- [ ] ノートの見出しが揃っている\n",
+      "labels": [
+        "docs"
+      ]
+    }
+  ]
+}
