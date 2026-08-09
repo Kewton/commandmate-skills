@@ -201,6 +201,40 @@ exit 20 は「ゲートが判定して落ちた」なので、**何が落ちた�
 **裁定は wait の exit code のままとし**、この呼び出しは gate を**名指しする**用途に限る。内訳が
 取れなかった場合はその事実を `checks` と再指示メッセージに書く（取れなかったことを隠さない）。
 
+### 2.3.1 収束しない scope 再指示は遮断する（`scope_unsatisfiable`）
+
+scope ゲートの再指示文は違反 path を転記し、「不可避なら worker 側では解決できない」とまで書いて
+いる。それでも **ターン数しか見ない監督ループは同じ再指示を送り続ける**ので、worker は
+「テストを消す＝受入条件を落とす」ジレンマに置かれ、同じ結論を上限まで繰り返す（実測:
+Kewton/BorderFreeKidsMap #35 は `--max-turns` 到達まで回って worker 1人分の run を失った）。
+
+「その変更が不可避か」は一般には判定できないが、**収束しているか**は判定できる。runner は
+scope ゲート失敗の**違反 path 集合**（再指示文の組み立てで既に取れているもの。重複除去＋ソートで
+順序非依存）を前ターンと比べ、**同一なら再送せずに停止する**。
+
+```
+turn N   : scope 違反 = {A, B}  → 再指示
+turn N+1 : scope 違反 = {A, B}  → 同一。停止（turn N+2 は送らない）
+```
+
+- **違反が1つでも減っていれば従来どおり再指示を続ける。** 遮断するのは「同じ答えの繰り返し」だけで
+  ある。scope 以外のゲート（lint 等）の反復では遮断しない —— それは worktree の中で直せるので、
+  もう1ターンが本当に効く
+- 比較は **連続する2ターン**でのみ行う。あいだに別の結果（exit 0 / 21）が挟まれば比較はリセットする
+- 違反 path を読み取れなかったターンは比較対象にしない（「2回とも読めなかった」は「同じ path だ」の
+  証拠ではない）
+- **`--max-turns` 到達の判定が先**である。上限に達した run は従来どおりの note で終わる
+- 停止の表現は**既存の裁定不合格の経路そのまま**である。`stop_reason` に値を足さず、
+  `blocking_reasons` に **`scope_unsatisfiable`** を1件積んで名指しする（`stop_reason` は
+  commit があれば `verification_failed`、無ければ `worker_failed`）
+- **`verification.outcome` は書き換えない。** それは CommandMate の exit code であり（第2.1.1節と
+  同じ扱い）、変わるのは run が先へ進むかだけである
+- `blocking_reasons[].detail` に**違反 path をそのまま**残す。これは Issue の対象ファイルに足すべき
+  規約そのものであり、**運用者が次に何を宣言すればよいかが report から読める**必要がある。
+  summary の next action は「worker では直せない。Issue の対象ファイルに足して re-plan する
+  （owner: human）」である（`verification 失敗の worktree を診断` の行は出さない —— 同じ plan の
+  再 dispatch は同じ所で止まる）
+
 ### 2.4 実行契約の生成（決定的）
 
 正準仕様は CommandMate の `docs/design/task-contract.md`（v1）。閉じたキー集合
@@ -711,7 +745,9 @@ acceptance コマンドは `execFileSync` に `timeout` を渡さずに実行さ
       - **exit 99** → 第2.6節。再指示せず `human_required` で停止する。
       - **exit 0** → 裁定 pass。第2.2節の commit 判定。新規 commit あり → `completed`。
         commit が無ければ commit を要求し、**以降 `--verify` を付けずに** wait する（第2.5節）。
-      - **exit 20** → 第2.3節で失敗ゲートを特定し、その内訳を引用して再指示する。
+      - **exit 20** → 第2.3節で失敗ゲートを特定し、その内訳を引用して再指示する。ただし
+        **scope ゲートの違反 path 集合が前ターンと同一**なら、そのループは収束しないので
+        再送せずに停止する（第2.3.1節。`blocking_reasons` に `scope_unsatisfiable`）。
       - **exit 21** → 作業証跡ゼロ。継続 nudge を送って 3 へ戻る。
       - フォールバックの **exit 0（idle）** → 第2.2節の commit 判定のみ（裁定は 5 で行う）。
    4. **ターン数が `--max-turns`（既定 8）に達しても未 commit** なら、当該 worker を
@@ -786,6 +822,7 @@ pre-flight（第3.0節）で停止した failure は artifact を書かないの
 | `worker_failed` | `worker_failed` | worker が起動したが `--max-turns` までに commit しなかった |
 | `timeout` | `worker_timeout` | `commandmate wait` が timeout した |
 | `verification_failed` | `verification_failed` | completed した worker の裁定が pass でない |
+| `verification_failed` / `worker_failed` | `scope_unsatisfiable` | scope ゲートの違反 path が2ターン連続で同一だったため、再指示ループを収束しないと判定して打ち切った（第2.3.1節）。**`stop_reason` の enum に値を足していない**（commit があれば `verification_failed`、無ければ `worker_failed`）。detail に違反 path が入る。対処は Issue の対象ファイルへの追加と re-plan（owner: human） |
 
 ## 6. completion_check（report）
 

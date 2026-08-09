@@ -1,0 +1,85 @@
+{
+  "description": "Issue #148 (ADR scope-derivation section 6, L4): a worker whose scope gate names the SAME violating paths twice in a row is not sent a third message. The re-instruction is already correct — it transcribes the paths and says the fix lives in the Issue — so re-sending it spends the rest of --max-turns 5 collecting the same answer (measured: Kewton/BorderFreeKidsMap #35 burned a whole run this way). The stop is measured in SENDS (2, not 5), not in status; it rides the existing verification-failure adjudication (no new stop_reason) and names itself with blocking_reasons[].code = scope_unsatisfiable, whose detail carries the violating paths an operator has to add to the Issue.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "5"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "verification_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      201
+    ],
+    "never_sent": [
+      200
+    ],
+    "send_counts": {
+      "201": 2
+    },
+    "sent_message_includes": {
+      "201": [
+        "scope ゲートについて",
+        "web/src/session.test.ts",
+        "web/package-lock.json"
+      ]
+    },
+    "worker_states": {
+      "201": "completed"
+    },
+    "worker_notes_include": {
+      "201": [
+        "two consecutive turns",
+        "stopped after 2 turn(s)"
+      ]
+    },
+    "verification_outcomes": {
+      "201": "fail"
+    },
+    "completed_but_unverified": [
+      201
+    ],
+    "blocking_codes": [
+      "scope_unsatisfiable"
+    ],
+    "blocking_details_include": [
+      "web/package-lock.json | web/src/session.test.ts",
+      "2 file(s) changed outside scope.allow:",
+      "the fix is in the Issue, not in the worktree"
+    ],
+    "summary_includes": [
+      "blocking: scope_unsatisfiable",
+      "worker では直せない",
+      "Issue の対象ファイルに足して re-plan する"
+    ],
+    "summary_excludes": [
+      "verification 失敗の worktree を診断し"
+    ],
+    "wave0_all_workers_completed": true,
+    "wave0_all_verifications_passed": false,
+    "verify_calls": 2,
+    "wait_verify_calls_min": 2
+  }
+}

@@ -118,6 +118,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | dispatch exit 10（prompt 検出） | worker が人間の判断を求めている | `capture` の内容が report に出ている。**自分で判断して答える。** runner は自動応答しない |
 | dispatch `verification_not_judged`（exit 99） | run が error / cancelled で**誰も判定していない** | **再 dispatch では解けない。** CommandMate 側のログを見る。判定していないものを worker に直させない |
 | dispatch `worker_failed`（`--max-turns` 到達で未 commit） | worker が起動したが commit まで到達しなかった（worktree 未解決はこの code に落ちない。上の行） | prompt / worker ログを読む。指示が過大なら Issue を分割して re-plan する |
+| dispatch `scope_unsatisfiable`（`stop_reason` は `verification_failed` か `worker_failed`。`partial`） | scope ゲートの**違反 path が2ターン連続で同一**だった。worker は同じ結論に到達しており、再送しても答えは変わらないので `--max-turns` を待たずに打ち切った（[dispatch-contract.md](./dispatch-contract.md) 第2.3.1節）。契約の `scope.allow` は **send 時 snapshot** なので、**worker 側には回復手段が無い** | **detail に違反 path がそのまま入っている。それを Issue の対象ファイルに足して re-plan する**（owner: human）。repo の規約（テスト配置・生成物・lockfile 等）なら profile 側に宣言する。**同じ plan のまま `--resume` しても同じ所で止まる。** 裁定（`verification.outcome`）は fail のままで、これは書き換えていない —— 変わったのは run が先へ進まないことだけである |
 | dispatch `verification_failed` / `worker_failed` / `timeout` で **一部の Issue だけ**落ちた | pass 済みの Issue と落ちた Issue が同じ run に混ざっている | 落ちた分を直したうえで **`dispatch.mjs --plan <plan.json> --resume <その run の dispatch ディレクトリ>`**。pass 済みは再 dispatch されず記録だけ引き継がれる（[SKILL.md](../SKILL.md) 第3.2節）。**re-plan は不要** |
 | dispatch `resume_plan_mismatch`（`stop_reason: dispatch_error`） | `--resume` 先の report が**別 plan**のものだった（`run_id` / repository / base 不一致） | その plan 自身の dispatch ディレクトリを `--resume` に渡す。新規に走らせるなら `--out` で始める。**何も dispatch していないので、直して同じコマンドを再実行してよい** |
 | dispatch `resume_invalid`（同上） | `--resume` 先の report が `dispatch-report.v1` として読めない（schema version 違い / JSON 破損） | detail が「何がどう合わないか」を名指ししている。報告どおりの report を指すか、`--out` で新規 run にする。**壊れた report を半分だけ信じて引き継がない** |
@@ -167,7 +168,8 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 起動し（実行時間・課金・通知）、PR 作成は reviewer に通知を出す。
 
 `worktree_setup_unavailable` / `worktree_setup_failed` / `worktree_profile_mismatch` と
-`resume_attempt` / `resume_no_work` / `resume_invalid` / `resume_plan_mismatch` は、
+`resume_attempt` / `resume_no_work` / `resume_invalid` / `resume_plan_mismatch`、
+そして `scope_unsatisfiable` は、
 この表には在るが **status runner の hint map にはまだ無い**（`status.mjs` は別 Issue で追随する）。
 それまで `status.mjs --run` はこれらを「detail と `summary_markdown` を読む」に落として表示する。
 **推測で別の対処を出さない**のが status runner の約束なので、これは劣化ではなく既定の振る舞いである。

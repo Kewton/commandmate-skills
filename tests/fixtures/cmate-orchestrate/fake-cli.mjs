@@ -617,6 +617,24 @@ function verifyExitFor(worker, issue) {
   return exits[Math.min(turn - 1, exits.length - 1)];
 }
 
+// The gates that FAIL on this turn. `failed_gates` is one list for the whole run
+// — every turn of a failing worker reports it unchanged, which is what a worker
+// stuck on the same complaint looks like. `failed_gates_by_turn` is the per-turn
+// form, consumed exactly like `verify_exits` (index by turn, last entry repeats),
+// so a scenario can model a worker whose scope violations SHRINK turn by turn
+// (Issue #148): without it, "the same answer twice" and "progress" would be
+// indistinguishable to the fake and the loop guard could only ever be measured
+// on one side.
+function failedGatesFor(worker, issue) {
+  const byTurn = Array.isArray(worker.failed_gates_by_turn) ? worker.failed_gates_by_turn : null;
+  if (byTurn && byTurn.length > 0) {
+    const turn = Math.max(1, readSends(issue));
+    const entry = byTurn[Math.min(turn - 1, byTurn.length - 1)];
+    return Array.isArray(entry) ? entry : [];
+  }
+  return Array.isArray(worker.failed_gates) ? worker.failed_gates : [];
+}
+
 // ---------------------------------------------------------------------------
 // Really running the worktree's declared gates (Issue #114)
 // ---------------------------------------------------------------------------
@@ -1152,7 +1170,7 @@ function main() {
         for (const id of worker.pass_gates ?? ['baseline']) gateLines.push(`GATE ${id} PASS`);
       } else if (exit === VERIFY_FAILED) {
         gateLines.push('GATE work-evidence PASS');
-        for (const entry of worker.failed_gates ?? []) {
+        for (const entry of failedGatesFor(worker, issue)) {
           gateLines.push(`GATE ${typeof entry === 'string' ? entry : entry.id} FAIL`);
         }
       } else if (exit === VERIFY_NOT_STARTED) {
@@ -1206,7 +1224,7 @@ function main() {
     // reads names the actual command and its actual exit status (Issue #114).
     const failedGates = spec.run_declared_gates
       ? runDeclaredGates(spec, issue, worktreeId).failing
-      : (Array.isArray(worker.failed_gates) ? worker.failed_gates : []);
+      : failedGatesFor(worker, issue);
     // The gates a PASSING run names. Empty by default, so every scenario written
     // before `--reverify` keeps the document it had; a case that re-judges a
     // worktree in place declares `pass_gates` so the report can say what the

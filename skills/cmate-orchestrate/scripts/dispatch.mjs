@@ -3149,6 +3149,24 @@ function scopeViolationLines(logTail) {
     .map((line) => redact(line));
 }
 
+// The scope-gate violations of ONE failing verification, as a comparable set —
+// the input to the loop guard below (ADR section 6 / Issue #148). The lines are
+// the very ones the re-instruction transcribes, so nothing new is read from the
+// CLI to decide whether the loop is converging.
+//
+// Deduplicated and sorted, because "the same answer" is about the SET of paths:
+// two turns that named the same two files in a different order are the worker
+// repeating itself, not making progress. `null` means this turn produced nothing
+// comparable — no scope gate failed, or its logTail could not be read — and a
+// null never compares equal to anything, including another null: "we could not
+// see the paths twice" is not evidence that they are the same paths.
+function scopeViolationSet(failing) {
+  const scopeGates = failing.filter((gate) => gate.isScope);
+  if (scopeGates.length === 0) return null;
+  const violations = [...new Set(scopeGates.flatMap((gate) => gate.violations))].sort();
+  return violations.length === 0 ? null : violations;
+}
+
 // The re-instruction sent to a worker whose contract verification failed. It
 // quotes the gates, because "verification failed" alone makes the worker guess.
 function buildVerifyReinstruction(failing) {
@@ -3243,6 +3261,11 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
   // Asking twice would manufacture the very "no verdict" state we escalate on.
   let verdict = null;
   let passed = false;
+  // The previous turn's scope violations (ADR section 6 / Issue #148), kept so
+  // this loop can tell a worker that is CONVERGING from one that is repeating
+  // itself. Reset by every turn that is not a scope-gate failure, so only two
+  // CONSECUTIVE identical answers count — the narrow reading, which blocks less.
+  let previousScopeViolations = null;
 
   const hardIterations = inputs.maxTurns * 4 + 8;
   for (let i = 0; i < hardIterations; i += 1) {
@@ -3334,6 +3357,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       if (turns >= inputs.maxTurns) {
         return done('failed', `no commit was produced after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap`);
       }
+      previousScopeViolations = null; // this turn was not a scope-gate failure
       const asked = await sendAndConfirm(inputs, worktreeId, COMMIT_REQUEST_MESSAGE);
       if (!asked.sent) return budgetCutoff() ?? done('failed', `commit request failed: ${asked.note}`);
       turns += 1;
@@ -3352,6 +3376,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       if (turns >= inputs.maxTurns) {
         return done('failed', `no work evidence after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap`);
       }
+      previousScopeViolations = null; // this turn was not a scope-gate failure
       const nudged = await sendAndConfirm(inputs, worktreeId, NUDGE_MESSAGE);
       if (!nudged.sent) return budgetCutoff() ?? done('failed', `nudge failed: ${nudged.note}`);
       turns += 1;
@@ -3379,6 +3404,36 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
           `the --max-turns ${inputs.maxTurns} cap was reached${committed ? '' : ' with no commit'}`,
         );
       }
+      // The loop guard (ADR section 6 / Issue #148). Ranked BELOW the --max-turns
+      // cap on purpose: the cap is the operator's own bound and the note it
+      // writes is the one existing runs are read by, so a run that reached it
+      // ends the way it always has.
+      //
+      // "Is this change unavoidable?" cannot be decided here. "Is this loop
+      // converging?" can: `scope.allow` is a snapshot taken when the contract
+      // was sent, so a worker cannot widen it from inside the worktree — the
+      // only move it has is to make the violating change go away. A turn that
+      // names the SAME paths as the turn before is a worker that has answered,
+      // and re-sending the same re-instruction spends turns to receive the same
+      // answer again (measured: Kewton/BorderFreeKidsMap #35 burned a whole run
+      // this way). One fewer violating path is progress and is re-instructed as
+      // before — this stops the repeat, not the retry.
+      const scopeViolations = scopeViolationSet(failing.failing);
+      if (scopeViolations !== null && previousScopeViolations !== null
+        && scopeViolations.join('\n') === previousScopeViolations.join('\n')) {
+        // Recorded on the EXISTING adjudication-failure path: no new state, no
+        // new stop_reason, and the verdict is untouched — verification really
+        // did fail, and that is CommandMate's exit code to give (#142's rule).
+        // What changes is only that the run stops here instead of at the cap.
+        return {
+          state: committed ? 'completed' : 'failed',
+          taskId, verdict, notJudged: false, promptExcerpt: null, nudges: turns - 1, autoResponded,
+          scopeUnsatisfiable: { violations: scopeViolations, turns },
+          note: `the scope gate named the same violating path(s) on two consecutive turns, so this re-instruction loop is not converging; `
+            + `stopped after ${turns} turn(s) without sending turn ${turns + 1} (the --max-turns cap is ${inputs.maxTurns})`,
+        };
+      }
+      previousScopeViolations = scopeViolations;
       const resent = await sendAndConfirm(inputs, worktreeId, buildVerifyReinstruction(failing.failing));
       if (!resent.sent) return budgetCutoff() ?? done('failed', `re-instruction failed: ${resent.note}`);
       turns += 1;
@@ -4311,6 +4366,12 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     //     --max-turns, prompt handling and auto-yes respond stay strictly
     //     independent; the wave barrier below is unchanged.
     const contractVerdicts = new Map();
+    // The workers whose scope re-instruction loop was cut short (Issue #148),
+    // collected here and written to `blocking_reasons` once supervision has
+    // joined, in `workers` order: this map is filled CONCURRENTLY, so pushing
+    // from inside it would order the report by whichever worker happened to
+    // finish first and two runs of the same plan could differ.
+    const scopeUnsatisfiable = new Map();
     await Promise.all(supervisable.map(async ({ worker, worktreeId, worktreePath, prompt, contractPath, requiredGates }) => {
       const supervised = contractMode
         ? await superviseWithContract(inputs, worktreeId, worktreePath, contractPath, requiredGates)
@@ -4321,10 +4382,30 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
       if (supervised.verdict) contractVerdicts.set(worker.issue, supervised.verdict);
       if (supervised.notJudged) notJudged.add(worker.issue);
       if (supervised.autoResponded) autoResponded = true;
+      if (supervised.scopeUnsatisfiable) scopeUnsatisfiable.set(worker.issue, supervised.scopeUnsatisfiable);
       if (supervised.state === 'prompt') {
         worker.prompt = { detected: true, excerpt: supervised.promptExcerpt };
       }
     }));
+
+    // The L4 finding, named in the report (ADR sections 6 and 9 / Issue #148).
+    // The VIOLATING PATHS are carried verbatim, because they are the whole
+    // actionable content: they are what has to be added to the Issue's 対象ファイル
+    // (or declared as a repo convention) before this plan can succeed, and an
+    // operator who only reads the report has nowhere else to get them.
+    for (const worker of workers) {
+      const cut = scopeUnsatisfiable.get(worker.issue);
+      if (!cut) continue;
+      report.blocking_reasons.push({
+        code: 'scope_unsatisfiable',
+        detail: redact(`#${worker.issue}: the scope gate named the SAME violating path(s) on two consecutive turns, so the re-instruction loop was not converging and supervision `
+          + `stopped after ${cut.turns} turn(s) rather than spending the rest of --max-turns ${inputs.maxTurns} on the same answer. `
+          + 'The contract\'s `scope.allow` is a snapshot of the Issue\'s 対象ファイル taken when the contract was sent, so a worker cannot widen it from inside the worktree — '
+          + 'when the violating change is unavoidable, the fix is in the Issue, not in the worktree. '
+          + `Violating path(s), transcribed from the scope gate: ${cut.violations.join(' | ')}. `
+          + 'The verdict is untouched: verification really did fail, and that is CommandMate\'s exit code to give — what this stops is the run going further'),
+      });
+    }
 
     // 3b'. The reverify pass (Issue #121), in the place of the supervision loop
     //      and never beside it: `reverifiable` is empty on every other run, and
@@ -4907,7 +4988,16 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
       || entry.code === 'reverify_evidence_unreadable' || entry.code === 'reverify_prompt_pending')) {
       lines.push('- next: 判定し直せなかった Issue（作業証跡が無い / 読めない / prompt 保留）は、裁定ではなく worker が要る。`dispatch.mjs --plan <plan.json> --resume <この run の dispatch ディレクトリ>` で dispatch し直す（owner: operator）。');
     }
-    if (report.stop_reason === 'verification_failed') lines.push('- next: verification 失敗の worktree を診断し、修正後に再 dispatch する（owner: operator）。');
+    // The L4 stop (Issue #148). It replaces the generic verification-failure line
+    // rather than sitting beside it: "worktree を診断して再 dispatch" is the one
+    // instruction that is WRONG here — re-dispatching the same plan re-runs the
+    // same unsatisfiable loop, because `scope.allow` is a snapshot of the Issue's
+    // 対象ファイル and nothing in the worktree can widen it.
+    const scopeUnsatisfiable = report.blocking_reasons.some((reason) => reason.code === 'scope_unsatisfiable');
+    if (scopeUnsatisfiable) {
+      lines.push('- next: **worker では直せない。** 契約の `scope.allow` は send 時 snapshot なので worktree の中からは広げられない。上記 blocking の違反 path を **Issue の対象ファイルに足して re-plan する**（repo の規約なら profile 側に宣言する）。同じ plan のまま再 dispatch すると同じ所で止まる（owner: human）。');
+    }
+    if (report.stop_reason === 'verification_failed' && !scopeUnsatisfiable) lines.push('- next: verification 失敗の worktree を診断し、修正後に再 dispatch する（owner: operator）。');
     if (report.status !== 'success' && report.out_dir !== null) {
       lines.push('- next: 原因を直したら `dispatch.mjs --plan <plan.json> --resume <この run の dispatch ディレクトリ>` で再開する。worker completed かつ verification pass の Issue は再 dispatch されず、その verification 記録だけが引き継がれる（owner: operator）。');
     }

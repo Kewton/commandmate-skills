@@ -1,0 +1,65 @@
+{
+  "description": "Issue #148: 'we could not read the violating paths twice' is not evidence that they are the same paths. #201's scope gate fails every turn with an EMPTY logTail — the degraded shape scopeViolationLines is written for — so no turn produces a comparable set and the guard never trips: the worker is driven to the --max-turns 3 cap (3 sends) exactly as before, and the run stops with the ordinary verification failure. A guard that compared empty-to-empty would cut runs short on a CommandMate whose log format merely changed, and its blocking_reasons would name no path for the operator to act on.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "verification_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      201
+    ],
+    "never_sent": [
+      200
+    ],
+    "send_counts": {
+      "201": 3
+    },
+    "sent_message_includes": {
+      "201": [
+        "scope ゲートについて",
+        "logTail から違反 path を読み取れませんでした"
+      ]
+    },
+    "worker_states": {
+      "201": "completed"
+    },
+    "worker_notes_include": {
+      "201": [
+        "the --max-turns 3 cap was reached"
+      ]
+    },
+    "verification_outcomes": {
+      "201": "fail"
+    },
+    "absent_blocking_codes": [
+      "scope_unsatisfiable"
+    ],
+    "verify_calls": 3,
+    "wait_verify_calls_min": 3
+  }
+}

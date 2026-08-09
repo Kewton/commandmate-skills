@@ -1,6 +1,6 @@
 # ADR: scope の導出 — 宣言から認可境界へ（[#145](https://github.com/Kewton/commandmate-skills/issues/145) を含むクラス）
 
-status: **accepted / 実装は段1〜4 が未着手**（2026-08-09 承認）。裁定 0 と4層の分割、
+status: **accepted / 段2（L4）実装済み・他の段は未着手**（2026-08-09 承認）。裁定 0 と4層の分割、
 契約 schema を分けない判断、L3 を question とする判断が承認された。
 実装は本 ADR の裁定に従い、実装で形が変わったら**正本を直したうえでこの文書に追記する**。
 
@@ -257,6 +257,31 @@ turn N+1 : scope 違反 = {A, B}  → 同一。worker は同じ結論に到達�
 
 report には**違反 path をそのまま**残す。これは L2 の profile へ書くべき規約そのものであり、
 運用者が次に何を宣言すればよいかが report から読める。
+
+### 追記（実装。[#148](https://github.com/Kewton/commandmate-skills/issues/148) / 段2）
+
+裁定どおりに実装した。**形は変えていない** —— `stop_reason` の enum に値は増えず、
+停止は既存の裁定不合格の経路（commit があれば `verification_failed`、無ければ `worker_failed`）に
+載り、`verification.outcome` は書き換えていない。正本は
+[dispatch-contract.md](./dispatch-contract.md) 第2.3.1節（判定と表現）と
+[codes-and-recovery.md](./codes-and-recovery.md) 第4節（対処）である。
+
+裁定が決めていなかった3点は、**いずれも遮断が狭くなる側**に倒した。過剰な遮断は
+「収束していた worker を殺す」であり、この段が防ごうとしている損失（run 1本）と同じものを
+自分で作ることになる。
+
+1. **`--max-turns` 到達の判定を先に見る。** 上限に達した run は従来どおりの note で終わる
+   （第10節「既存の期待値を1つも緩めない」）。
+2. **比較は連続する2ターンに限る。** あいだに別の結果（exit 0 / 21）が挟まれば比較をリセットする
+   —— 裁定文の「前ターン」の文字どおりの読みであり、より狭い。
+3. **違反 path を読み取れなかったターンは比較しない。** 「2回とも読めなかった」は
+   「同じ path だ」の証拠ではない（`scopeViolationLines` は format 変更に対して逐語引用へ
+   劣化する設計なので、空になりうる）。
+
+fixture は5件（`d61` 遮断・`d62` 収束は従来どおり継続・`d63` scope 以外では遮断しない・
+`d64` 別の結果が挟まれば比較はリセットする・`d65` 違反 path を読めないターンは比較しない）。
+**遮断は fake CLI の send 回数で測っている** —— status だけで見ると「再送してから止まった」を
+見逃すからである。
 
 ---
 
