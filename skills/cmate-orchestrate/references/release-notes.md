@@ -608,6 +608,41 @@ worker は直せず（契約の scope は send 時 snapshot）、planner も直�
 **推論は機械を止めてよいが、機械に指示してはならない。** この検出は `acceptance_gates` にも
 `scope.allow` にも1バイトも書かない。
 
+### #149 — planner が聞いたことのない規約は、誰にも宣言できなかった
+
+L1（#147）が導出できるのは**慣習的な**テスト path だけである。`spec/` が `app/` を鏡写しにする木、
+`.proto` の隣の `*_pb.ts`、ソースから再生成される locale 表 —— **planner が知らない規約**は
+導出しようがない。planner は repo を開かず、dispatch も worktree を観測してはならない
+（契約の byte-identical 性が壊れる。[adr-scope-derivation.md](./adr-scope-derivation.md) 第3節で却下済み）。
+L3（#145）が警告して人間に返すところまでは行くが、**宣言する先が無かった。**
+
+→ **repo 知識が入ってよい唯一の場所は profile であり、profile は plan の一部である。**
+`scope_companions.derive[]` に `when` / `add` の path テンプレート対を書けるようにした。
+
+```json
+{ "when": "app/{dir}{base}.rb", "add": ["spec/{dir}{base}_spec.rb"] }
+```
+
+placeholder は `{dir}`（0個以上の segment・末尾 `/` 込み）と `{base}`（ちょうど1 segment）の2つだけ。
+**ミラーが表現できるのは `{dir}` のおかげ**である。
+
+**ADR 第2節の不変条件3件が、後付けの検査ではなく形の構造的性質になっている。**
+**glob 構文が存在しない**（`*` `?` `[` は両テンプレートで拒否）ので、唯一のワイルドカードは
+placeholder であり、**捕捉されるのは宣言された path の literal な部分文字列**である。
+`add` は `when` が束縛した placeholder を最低1つ持たねばならないので、
+**宣言に含まれない path を許可する規則は書けない** —— `**/*.test.*` も裸の
+`docs/module-reference.md` も load 時に拒否される。profile 経由で #50 の穴が開くことはない。
+
+**実運用の観測がまだ無いので、形は「今の必要」ではなく「後から広げられること」を優先した。**
+`{ext}` を入れなかったのもそのためで、後から足しても互換な広がり方になる（ADR 第15.2節）。
+未宣言の profile は **段1 までの挙動へ degrade** する —— その後方互換は assert ではなく**実測**で、
+`cases/45-scope-companions-absent/expected-plan.json` は**実装コードを1行も書く前に 0.24.0 の
+runner で生成**して check-in してある（`44` との差は profile だけ）。
+
+**既知の限界**: `scope_companions` は `run_id` の入力集合に入っていない。宣言を編集して re-plan すると
+`run_exists`（exit 4）に当たる。ただしこれは `baseline` / `branch_template` / `worktree_template` /
+`verified` も同様で、**profile 全体をまとめて裁定すべき別件**である（ADR 第15.7節に revisit 条件つきで記録）。
+
 ### #148 — 直せない scope 違反に、上限まで再指示を送り続けていた
 
 Kewton/BorderFreeKidsMap #35 の note は `supervision exceeded its hard iteration bound` である。
@@ -852,6 +887,22 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 ---
 
 ## パッケージ
+
+### 0.25.0 — scope 導出の4層が揃った（#149）
+
+段4（L2・profile の `scope_companions`）が入り、
+[adr-scope-derivation.md](./adr-scope-derivation.md) の **L1 / L2 / L3 / L4 が揃った**。
+
+| 層 | 何をするか | 版 |
+|---|---|---|
+| L1 | 宣言されたソースから慣習的なテスト path を導出（設定不要） | 0.23.0（#147） |
+| L2 | **repo 固有の規約を profile に宣言**（本リリース） | 0.25.0（#149） |
+| L3 | 埋まらない残余を dispatch 前に question で止める | 0.24.0（#145） |
+| L4 | 収束しない scope 再指示の遮断 | 0.23.0（#148） |
+
+`suspected_files`（推測）を `scope.allow`（認可境界）へ無変換で昇格していた根本原因は、
+**`allow = declared ∪ companions(declared)`** という裁定 0 で閉じた。
+**4段すべてが CommandMate を1バイトも変えずに実装されている。**
 
 ### 0.24.0 — scope 導出の段3（#145）
 
