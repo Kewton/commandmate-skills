@@ -1,0 +1,14 @@
+{
+  "id": "companions-pytest-mirror",
+  "repository": "Kewton/CommandMate",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": ["pytest"],
+  "verified": true,
+  "scope_companions": {
+    "derive": [
+      { "when": "src/{dir}{base}.py", "add": ["tests/{dir}test_{base}.py"] }
+    ]
+  }
+}

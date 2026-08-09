@@ -1,6 +1,6 @@
 # ADR: scope の導出 — 宣言から認可境界へ（[#145](https://github.com/Kewton/commandmate-skills/issues/145) を含むクラス）
 
-status: **accepted / 段1（L1）・段2（L4）・段3（L3）実装済み・段4（#149）は未着手**（2026-08-09 承認）。裁定 0 と4層の分割、
+status: **accepted / 段1（L1）・段2（L4）・段3（L3）・段4（L2）すべて実装済み**（2026-08-09 承認）。裁定 0 と4層の分割、
 契約 schema を分けない判断、L3 を question とする判断が承認された。
 実装は本 ADR の裁定に従い、実装で形が変わったら**正本を直したうえでこの文書に追記する**。
 
@@ -523,3 +523,169 @@ Rust の unit test はソースファイルの中（`#[cfg(test)] mod tests`）�
 この warning について「detail と `summary_markdown` を読む」の既定に落ちる。運転で人間が出会う
 停止は dispatch 側の `open_questions` であり、そちらは hint を持ち、質問の本文（＝受入条件の
 原文）をそのまま出す。**hint を足すのは次の変更の仕事である。**
+
+---
+
+## 15. 実装時の追記（段4・[#149](https://github.com/Kewton/commandmate-skills/issues/149)）
+
+段4（L2・repo 規約の宣言）を profile の任意 field `scope_companions` として実装した。
+正本は [profile-contract.md](./profile-contract.md) 第9節（形と拒否規則）と
+[plan-contract.md](./plan-contract.md) 第5.1節（3つ目の導出元）である。
+第2節の不変条件3件・第3節の「なぜ L2 は profile なのか」・第9節（`scope_defaults` に出す、
+`plan_schema_version` は上げない）は**そのまま実装されている**。第4節のとおり CommandMate は
+1バイトも変えていない。
+
+**この段には実運用の観測データが無い。** 0.23.0 / 0.24.0 は出たばかりで、L1 の導出が実際に
+どれだけ当たるかはまだ測れていない。したがって形は「いま分かっている必要」ではなく
+**「後から広げられること」**を基準に選んだ。以下はその選択の記録である。
+
+### 15.1 採った形 —— 共通語彙の path テンプレート対
+
+```json
+"scope_companions": { "derive": [ { "when": "app/{dir}{base}.rb", "add": ["spec/{dir}{base}_spec.rb"] } ] }
+```
+
+`when` が**宣言済み path** に一致して placeholder を束縛し、`add` がその束縛を書き戻す。
+placeholder は `{dir}`（0個以上の segment、各々に末尾 `/`）と `{base}`（1 segment）の2つだけ。
+
+**第2節の不変条件3件が、検査ではなく形の性質になっている**ことがこの形を採った理由である。
+
+1. **導出元は必ず宣言済みファイル。** glob 構文が**存在しない** —— `*` `?` `[` `]` は
+   両テンプレートで拒否され、wildcard は placeholder だけである。placeholder が捕まえる文字列は
+   **宣言済み path の literal な部分文字列**であり、`add` は `when` が束縛した placeholder を
+   最低1つ含まなければならない。したがって「宣言と無関係な許可」は**書く場所が無い**。
+   `**/*_spec.rb` も裸の `docs/module-reference.md` も load 時に `load_error` で落ちる。
+   `|closure| ≤ (add 総数) × |declared|` が構成上成り立つ。
+2. **可視。** 導出結果は L1 と同じ1本の list に入り、`scope_defaults` と `suspected_files` へ
+   同じ文で append される。
+3. **plan の純関数。** 入力は profile（plan の一部）だけ。disk も clock も読まず、
+   sort も Set の走査もしない。
+
+`{dir}` を置いたのはミラーを書けるようにするためである。`app/models/user.rb` →
+`spec/models/user_spec.rb` の「先頭を差し替えて残りを保つ」は、この field が解こうとしている
+規約の中心にある形で、prefix を落とせない語彙では表現できない。
+
+**top-level を object にしたのは、後から key を足すためである。** いま key は `derive` 1つだけで、
+未知の key は拒否する（新しい profile が古い runner で黙って半分無視されるより、はっきり
+落ちるほうがよい —— profile の未知 field を拒否する既存の判断と同じ）。将来 `derive` 以外の
+概念（下記）を足すときは、list の意味を上書きするのではなく**兄弟 key として**足す。
+
+### 15.2 入れなかったもの（と、その理由）
+
+観測が無い段階では、**足せるものより足せないものを少なくしておく**ほうが安全である。
+次はいずれも「後から互換に足せる」ことを確認したうえで、今回は入れていない。
+
+| 入れなかったもの | 理由 |
+|---|---|
+| **定数の伴走 path**（「この repo は `docs/module-reference.md` の更新を要求する」） | placeholder を1つも含まない `add` を許すと、不変条件1の検査が「glob でないこと」だけに痩せる。`|closure| ≤ k × |declared|` は保てるが、**「宣言と無関係な許可が書けない」という強い言明が「書けるが狭い」に落ちる。** 実例が出たら `derive` とは別の key（例: `require`）として足す —— そのとき「宣言と無関係」であることを key の名前が明示する |
+| **`{ext}` placeholder** | 拡張子ごとに1規則書くほうが明示的で、当たる範囲も読んで分かる。`{ext}` は placeholder を1つ足すだけの互換な拡張である |
+| **規則の除外条件**（`unless`） | 除外が要る事例をまだ1件も持っていない。規則の未知 key は拒否されるので、足すときは runner の側で解禁する |
+| **profile が L1 を*上書き*すること** | 第5節の裁定どおり L2 は**足すだけ**である。上書きを許すと「設定ゼロで効く」L1 の保証が profile 次第になる |
+| **`scope_defaults` を `{path, origin}` へ広げる** | 第9節が実装時裁定に委ねた点。由来を区別したい需要はまだ出ていないし、広げると plan schema の変更になる。第12節の「読めない量になったとき」に再検討する |
+
+### 15.3 未指定は「段1 までの挙動」に literal に degrade する
+
+既存 profile はすべてこの key を持たない。したがって「未指定＝段1 までの挙動」は
+**plan の byte まで含めて**成り立たなければならない。実装は3か所でそれを保っている。
+
+- `normalizeProfile` は**未指定を未指定のまま**残す（`{"derive": []}` へ正規化しない）
+- `publicProfile` は**宣言があるときだけ**この key を plan に載せる（しかも最後に）
+- 導出は規則が0件なら即 `[]` を返す
+
+測り方は**二点測定**である。fixture `45-scope-companions-absent` の golden は
+**0.24.0（本変更前）の runner が出力した plan.json をそのまま**checked-in したもので、
+実装後も byte 単位で一致することを CI が検査する。`44-scope-companions-declared` は
+**同一の Issue** を宣言つき profile で計画したもので、2つの case の差は profile だけである。
+`{"derive": []}` が未指定と同じ導出になることも別に測っている（`plan.profile` の echo 以外に
+差が出ないことを比較する）。
+
+### 15.4 L3 との関係は「同じ list を後から読む」ことで自動的に保たれる
+
+L3（第14節）の第2条件は `suspected` を **`scopeDefaults` の push 後に**読む。L2 の導出は
+その push に合流するので、**L2 が埋めた Issue では L3 が自動的に黙る。**
+第14.1節が L1 について述べた理由がそのまま効く —— `isTestPath` という同じ述語を通す限り、
+L2 が「テストを足した」と言った path を L3 が「テストが無い」と読む余地は無い。
+
+fixture `49-scope-companions-silences-l3` は `36-acceptance-requires-tests-no-scope` と
+**同じ Issue**（`.sh` の deliverable ＋ テストを能動的に要求する受入条件）を bats 配置を宣言した
+profile で計画したもので、warning も question も出ない。第14.2節が「L3 が実際に話すのは
+L1 に規則が無い ecosystem である」と結論した、その残余をちょうど L2 が引き取っている。
+
+### 15.5 上限は L1 と共有する（合計に対して効く）
+
+L2 は L1 の**後**に走り、`have` には L1 の導出結果が既に入っている。したがって
+`MAX_SCOPE_PATTERNS`(=200) の判定は **3つの由来の合計**に対して行われ、打ち切りは
+L1 と同じく**宣言済みファイル単位**で起きる（1つのファイルの伴走は全部出るか1つも出ないか）。
+第13.3節が述べたとおり、これは可読性ではなく正しさの要求である —— dispatch は
+`scope.allow` を sort してから切り詰めるので、上限超過は宣言済みファイルが導出済みファイルに
+押し出されることを意味する。fixture は 30 宣言 × (L1 4 + L2 2) で 200 ちょうどに当てて測っている。
+
+### 15.6 profile-init は「対で裏が取れた配置」だけを起案する
+
+`profile-init.mjs` の検出は **directory の存在では起案しない。** `spec/` `test/` `tests/` の下の
+**実ファイル**と、それが写している `src/` `app/` `lib/` の**実ファイル**の対が揃ったときだけ
+規則を1件出し、`provenance[].evidence[]` にその2つを挙げる。裏の取れない起案は、この runner が
+避けるために存在している「黙った推測」そのものだからである。
+
+**起案は最大1規則**とし、裏の取れた配置が複数あるときは走査順の先頭を出して残りを warning
+`multiple_test_layouts` に載せた（`multiple_ecosystems` / `multiple_lockfiles` と同じ規律：
+黙って1つを選ばない）。1件も取れなければ `{"derive": []}` を `default` として置き、対の TODO
+`scope_companions_undetermined` を添える —— 第7.2節の `gaps_explicit` 検査がこれを自己検査する。
+`verified` は当然 `false` のままである。
+
+fixture `01-node-npm` に `src/` と `test/` のミラーを足したのは、**「全 field に根拠がある draft は
+`success` である」という suite の性質を保つため**である。この field を常に `default` にしてしまうと、
+何も欠けていない repo の draft まで恒久的に `partial` になり、`partial` が「読むべき欠落がある」の
+合図でなくなる。
+
+### 15.7 run_id には入れていない（既知の摩擦）
+
+`scope_companions` は plan を変えるが、**run_id の入力には入れていない**（plan-contract.md 第1節の
+入力集合は変えていない）。したがって「宣言を直して plan を取り直す」と `run_exists`(exit 4) になり、
+`--run-id` か `--runs-dir` が要る。`baseline` を直したときと同じ摩擦であり、エラー文が2つの
+回避策を名指しする。
+
+#46 が Issue 本文について同じ摩擦を消した以上、profile の宣言についても消す価値はある。
+**入れなかったのは、それが run_id の入力集合の変更であり、本 ADR のどの節も裁定していないから**である
+（同じ理由で `baseline` も入っていない）。宣言の修正 → re-plan が実運用で頻出するなら、
+`baseline` を含む profile 全体を run_id に入れるかを、そのとき一度に裁定する。
+
+### 15.8 変異注入の実測
+
+追加した検査が空振りでないことを、`orchestrate.mjs` / `profile-init.mjs` を1箇所ずつ書き換えて
+fixture 全体（`node tests/fixtures/cmate-orchestrate/run_tests.mjs`）を回すことで実測した。
+
+**14件すべてが赤になった。空振りの検査は無い。**
+
+| 変異 | 結果（赤になった検査） |
+|---|---|
+| L2 の適用そのものを外す | 赤 14 —— `44` / `48` / `49` と L2 の determinism / bound test |
+| L2 の分を `scope_defaults` に出さず `suspected` にだけ足す（不変条件2） | 赤 4 —— `44` / `48` / `49` / determinism（`scope_defaults` 側だけが落ちる） |
+| `add` に placeholder を要求しない（不変条件1） | 赤 6 —— `47` と拒否表の "a constant add" |
+| glob metacharacter の拒否を外す（不変条件1） | 赤 7 —— `46` と拒否表の "a glob beside a placeholder in add" / "a glob in when" |
+| `when` が束縛していない placeholder を許す | 赤 1 —— 拒否表の該当行のみ |
+| `MAX_SCOPE_PATTERNS` の打ち切りを L2 側だけ外す | 赤 3 —— bound test（200 → 210） |
+| 未指定を `{"derive": []}` に正規化して plan に載せる（後方互換） | 赤 3 —— **plan 全文 golden 3件**（`02` / `31` / `45`） |
+| L2 を L1 より**先**に走らせる | 赤 8 —— `44` / `48` / determinism / bound（列挙順が変わる） |
+| 派生済み path からの再導出を許す（不変条件1） | 赤 5 —— `44`（`spec/models/user_spec_spec.rb` が生える）/ `48` / determinism |
+| L1 との重複除去を外す | 赤 2 —— `48`（`tests/test_loader.py` が2回出る） |
+| profile-init: 対の source file の実在を要求しない | 赤 5 —— `06`（裏の取れない `spec/routing_spec.rb` から起案してしまう） |
+| profile-init: `default` に対の TODO を付けない | 赤 12 —— `02`〜`05`（`gaps_explicit` completion check が落ちる） |
+| profile-init: 起案した profile から field を落とす | 赤 24 —— `01`〜`06`（`contract_shaped` と全 golden） |
+| profile-init: 複数配置を黙って1つ選ぶ（warning を出さない） | 赤 1 —— `06` |
+
+**「変異が緑のまま」を1件、実測で潰した。** 当初 fixture `46` は裸の glob
+（`add: ["spec/**/*_spec.rb"]`）を宣言していたが、これは**2つの検査に独立に引っかかる** ——
+glob 文字の検査と「placeholder が1つも無い」の検査である。glob 検査だけを外した変異では
+この行は**緑のまま**で（M4 の出力で "a bare glob in add" は落ちていない）、
+`46` はどちらの線が効いているかを測れていなかった。そこで宣言を
+`add: ["spec/{dir}**/{base}_spec.rb"]`（placeholder を持つ glob）に変え、
+拒否表にも placeholder つきの行を足した。**裸の glob の行は残してある** ——
+それが塞ぎたい脅威そのものだからで、測定用の行とは役割が違う。
+
+### 15.9 触っていない正本
+
+`SKILL.md` 第3.5節・`runner-operations.md` 第13節・`codes-and-recovery.md` は
+**本変更の宣言 scope の外**だったので、新しい code（`scope_companions_undetermined` /
+`multiple_test_layouts`）と `--emit profile` の増えた field を反映していない。
+第14.5節が `status.mjs` の hint について書いたのと同じで、**それは次の変更の仕事である。**

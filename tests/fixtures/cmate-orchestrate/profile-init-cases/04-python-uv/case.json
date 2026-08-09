@@ -10,18 +10,21 @@
       "branch_template": "default",
       "worktree_template": "default",
       "baseline": "detected",
-      "verified": "fixed"
+      "verified": "fixed",
+      "scope_companions": "default"
     },
     "todos": [
       "base_undetermined",
       "branch_template_undetermined",
       "worktree_template_undetermined",
-      "baseline_env_prefix"
+      "baseline_env_prefix",
+      "scope_companions_undetermined"
     ],
     "warnings": [],
     "evidence_files": {
       "repository": ["pyproject.toml"],
-      "baseline": ["uv.lock", "pyproject.toml", "pyproject.toml", "pyproject.toml"]
+      "baseline": ["uv.lock", "pyproject.toml", "pyproject.toml", "pyproject.toml"],
+      "scope_companions": []
     }
   }
 }

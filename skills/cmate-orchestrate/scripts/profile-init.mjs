@@ -56,6 +56,12 @@ const PROFILE_FIELDS = [
   'worktree_template',
   'baseline',
   'verified',
+  // Optional in the contract, always emitted here: a drafted profile that stayed
+  // silent about companions would be indistinguishable from one whose author
+  // decided there were none, and telling those two apart is this runner's job.
+  // An undetectable layout yields an EMPTY declaration plus a TODO, which
+  // derives exactly what no declaration derives (Issue #149).
+  'scope_companions',
 ];
 
 // Safe templates. Used when the repository says nothing about a field, always
@@ -245,6 +251,16 @@ function openRepo(repoRoot, warnings) {
     }
   }
 
+  // `list` returns [] both for "not a directory" and for "empty directory", so a
+  // recursive walk needs the two told apart.
+  function isDir(relative) {
+    try {
+      return statSync(join(repoRoot, relative)).isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
   // Sorted names only. The order a filesystem hands back directory entries is
   // not a contract, and every default derived downstream depends on this order.
   function list(relativeDir) {
@@ -270,7 +286,7 @@ function openRepo(repoRoot, warnings) {
     return null;
   }
 
-  return { readText, exists, list, find };
+  return { readText, exists, isDir, list, find };
 }
 
 function lines(text) {
@@ -1047,6 +1063,181 @@ function detectWorktreeTemplate(ctx) {
 }
 
 // =============================================================================
+// scope_companions (Issue #149)
+// =============================================================================
+//
+// The planner's L1 derivation covers the test layouts a path alone predicts: a
+// sibling `*.test.ts`, a `_test.go`, a `tests/test_*.py`. What it cannot know is
+// a MIRROR — `app/models/user.rb` tested by `spec/models/user_spec.rb` — because
+// the mirror is a fact about this repository's directory tree, and the planner
+// never opens the target repository. This runner does open it, which is exactly
+// why references/adr-scope-derivation.md §3 puts the declaration in the profile
+// and its detection here.
+//
+// Detection is EVIDENCE-BASED, not name-based: a rule is proposed only when an
+// actual test file and the actual source file it mirrors both exist, and both
+// are cited in `provenance`. Nothing is inferred from the mere presence of a
+// `spec/` directory — a drafted rule nobody can check against two real files is
+// the quiet guess this runner exists to avoid.
+//
+// At most ONE rule is drafted. A repository with several layouts gets the first
+// in the fixed scan order plus a `multiple_test_layouts` warning naming the
+// others, the same discipline `multiple_ecosystems` follows: never silently pick
+// one of several. The draft is a starting point a human extends, and
+// `verified: false` says so.
+
+// Fixed scan order. The first (test root, source root, affix) triple that pairs
+// two real files wins, so this order is part of the runner's determinism, not an
+// implementation detail.
+const COMPANION_TEST_ROOTS = ['spec', 'test', 'tests'];
+const COMPANION_SOURCE_ROOTS = ['src', 'app', 'lib'];
+
+// How a test file's name relates to its source file's name. Ordered most
+// specific first: the bare pair (a test tree that repeats the source name
+// unchanged) is last because it is the one that can also match by accident.
+const COMPANION_AFFIXES = [
+  { prefix: '', suffix: '_test' },
+  { prefix: '', suffix: '_spec' },
+  { prefix: '', suffix: '.test' },
+  { prefix: '', suffix: '.spec' },
+  { prefix: 'test_', suffix: '' },
+  { prefix: '', suffix: 'Test' },
+  { prefix: '', suffix: 'Spec' },
+  { prefix: '', suffix: '' },
+];
+
+// A tree walk in a drafting tool is a convenience, not a search: it stops well
+// before it could become the reason this runner is slow on a large checkout.
+const COMPANION_SCAN_MAX_FILES = 400;
+const COMPANION_SCAN_MAX_DIRS = 200;
+
+// Only plain path characters are considered. Everything read here ends up inside
+// a profile template that orchestrate.mjs refuses if it carries a glob
+// metacharacter, so a file named `weird*name.ts` must be skipped rather than
+// drafted into a rule the planner would then reject.
+const COMPANION_PATH_RE = /^[A-Za-z0-9._/-]+$/;
+
+// Breadth-first, each directory's entries already sorted by repo.list, so the
+// file order is a function of the tree and not of the filesystem.
+function listFilesUnder(repo, root) {
+  const files = [];
+  const queue = [root];
+  let visited = 0;
+  while (queue.length > 0 && visited < COMPANION_SCAN_MAX_DIRS) {
+    const dir = queue.shift();
+    visited += 1;
+    for (const entry of repo.list(dir)) {
+      const path = `${dir}/${entry}`;
+      if (repo.isDir(path)) queue.push(path);
+      else files.push(path);
+      if (files.length >= COMPANION_SCAN_MAX_FILES) return files;
+    }
+  }
+  return files;
+}
+
+// Given a file under a test root, the rule that would have produced it — but
+// only if the source file it mirrors is really there.
+function companionRuleFrom(repo, testPath) {
+  const cut = testPath.indexOf('/');
+  if (cut === -1) return null;
+  const testRoot = testPath.slice(0, cut);
+  const rest = testPath.slice(cut + 1);
+  const slash = rest.lastIndexOf('/');
+  const dir = slash === -1 ? '' : rest.slice(0, slash + 1);
+  const file = rest.slice(slash + 1);
+  const dot = file.lastIndexOf('.');
+  // `dot <= 0` covers the extensionless name and the dotfile whose leading dot
+  // is not an extension separator.
+  if (dot <= 0) return null;
+  const stem = file.slice(0, dot);
+  const ext = file.slice(dot + 1);
+  if (!/^[A-Za-z0-9]+$/.test(ext)) return null;
+  for (const { prefix, suffix } of COMPANION_AFFIXES) {
+    if (!stem.startsWith(prefix) || !stem.endsWith(suffix)) continue;
+    const base = stem.slice(prefix.length, stem.length - suffix.length);
+    if (base.length === 0) continue;
+    for (const sourceRoot of COMPANION_SOURCE_ROOTS) {
+      const sourcePath = `${sourceRoot}/${dir}${base}.${ext}`;
+      if (!repo.exists(sourcePath)) continue;
+      return {
+        rule: {
+          when: `${sourceRoot}/{dir}{base}.${ext}`,
+          add: [`${testRoot}/{dir}${prefix}{base}${suffix}.${ext}`],
+        },
+        sourcePath,
+        testPath,
+      };
+    }
+  }
+  return null;
+}
+
+function detectScopeCompanions(ctx) {
+  const { repo, warnings } = ctx;
+  const found = [];
+  const seen = new Set();
+  for (const testRoot of COMPANION_TEST_ROOTS) {
+    if (!repo.isDir(testRoot)) continue;
+    for (const testPath of listFilesUnder(repo, testRoot)) {
+      if (!COMPANION_PATH_RE.test(testPath)) continue;
+      const candidate = companionRuleFrom(repo, testPath);
+      if (candidate === null) continue;
+      const key = JSON.stringify(candidate.rule);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      found.push(candidate);
+    }
+  }
+
+  if (found.length === 0) {
+    // An EMPTY declaration, which derives exactly what no declaration derives.
+    // The value is a template like every other `default` here, so it carries the
+    // TODO that keeps "we found nothing" from reading like "there is nothing".
+    return {
+      value: { derive: [] },
+      source: 'default',
+      evidence: [],
+      detail:
+        `no file under ${COMPANION_TEST_ROOTS.join(' / ')} pairs with a source file under ` +
+        `${COMPANION_SOURCE_ROOTS.join(' / ')}, so no repository-specific companion could be PROVED. ` +
+        'An empty declaration derives what no declaration derives: the planner\'s built-in rules only.',
+      todo: {
+        field: 'scope_companions',
+        code: 'scope_companions_undetermined',
+        detail:
+          'if this repository keeps its tests, its generated files or a required document somewhere the ' +
+          'planner cannot reach from a source path, declare the rule here — a companion missing from a ' +
+          'worker\'s scope fails the scope gate in a way the worker cannot resolve ' +
+          '(references/profile-contract.md §9). If there is no such convention, leave "derive" empty.',
+      },
+    };
+  }
+
+  if (found.length > 1) {
+    warnings.push({
+      code: 'multiple_test_layouts',
+      detail:
+        `several test layouts pair with real source files (${found.map((c) => c.rule.add[0]).join(', ')}); ` +
+        `the draft declares ${found[0].rule.add[0]} only. Add the others by hand if this repository uses them.`,
+    });
+  }
+
+  const chosen = found[0];
+  return {
+    value: { derive: [chosen.rule] },
+    source: 'detected',
+    evidence: [
+      evidence(chosen.sourcePath, null, `${chosen.sourcePath} is a source file this layout mirrors`),
+      evidence(chosen.testPath, null, `${chosen.testPath} is its test, which "${chosen.rule.add[0]}" reproduces`),
+    ],
+    detail:
+      `${chosen.testPath} mirrors ${chosen.sourcePath}, a pairing the planner cannot derive from a path ` +
+      'alone; the rule re-derives it for every source file the issue declares',
+  };
+}
+
+// =============================================================================
 // id
 // =============================================================================
 
@@ -1177,6 +1368,7 @@ function draftProfile(inputs) {
     branch_template: detectBranchTemplate(ctx),
     worktree_template: detectWorktreeTemplate(ctx),
     baseline: detectBaseline(ctx),
+    scope_companions: detectScopeCompanions(ctx),
   };
 
   const profile = {
@@ -1189,6 +1381,9 @@ function draftProfile(inputs) {
     // Not a decision this runner is allowed to make. See the header, and
     // references/profile-contract.md §8 for what promotes it.
     verified: false,
+    // Last, because it is the one optional field: a reviewer diffing a draft
+    // against the contract's table reads the seven required fields first.
+    scope_companions: fields.scope_companions.value,
   };
 
   const provenance = [];

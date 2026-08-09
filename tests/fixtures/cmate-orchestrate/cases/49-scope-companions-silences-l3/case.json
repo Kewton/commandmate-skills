@@ -1,0 +1,19 @@
+{
+  "description": "Issue #149: L2 fills the residue L3 was left to report, and L3 goes quiet on its own. This is case 36's issue byte for byte — a `.sh` deliverable whose acceptance criteria actively demand a unit test — where L1 has no rule and the plan therefore carried `acceptance_requires_tests_but_scope_has_none`, one warning, one blocking question, and a run that dispatch refuses. The only change is a profile declaring this repository's bats layout: `tests/verify-run.bats` lands in scope, L3's second condition (no test-shaped path among the affected files) is no longer met, and the plan is a clean success. L3 reads `suspected` AFTER the defaults are pushed, which is what makes this automatic rather than a coincidence — compare 36 and 38.",
+  "args": ["450", "--profile-json", "PROFILE:companions-bats.json", "--run-id", "fixture-l2-silences-l3"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[450]],
+    "merge_order": [450],
+    "dependencies": [],
+    "classifications": { "450": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "450": ["scripts/verify-run.sh", "tests/verify-run.bats"] },
+    "scope_defaults": { "450": ["tests/verify-run.bats"] },
+    "reference_files": { "450": [] },
+    "acceptance_gates": { "450": null },
+    "questions_count": { "450": 0 }
+  }
+}

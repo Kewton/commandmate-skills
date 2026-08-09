@@ -10,5 +10,8 @@
     "mypy .",
     "pytest"
   ],
-  "verified": false
+  "verified": false,
+  "scope_companions": {
+    "derive": []
+  }
 }

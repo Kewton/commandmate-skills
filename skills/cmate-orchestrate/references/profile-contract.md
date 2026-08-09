@@ -32,6 +32,7 @@ worktree path、baseline 検証 — を **profile** から解決する。planner
 | `worktree_template` | 必須 | worktree path の雛形。同じ placeholder を展開 |
 | `baseline` | 必須 | 各 worker が実行する検証 command の配列 |
 | `verified` | 任意 | 実機確認済みなら `true`。既定は `false` |
+| `scope_companions` | 任意 | このリポジトリ固有の**伴走ファイル規約**。第9節。**未指定なら宣言が無いのと同じ**で、planner は組み込みの導出だけを行う |
 
 placeholder は次のとおり展開する。
 
@@ -152,10 +153,13 @@ node scripts/orchestrate.mjs 123 --profile-json /tmp/my-profile.json --allow-unv
 | `baseline` | toolchain manifest（`package.json` / `Cargo.toml` / `pyproject.toml` / `go.mod` / `Makefile`）と lockfile。cargo clippy はリポジトリが clippy を使っている証跡があるときだけ入れる | 後述の失敗する placeholder |
 | `id` | `<toolchain>-<repository 名>`（内蔵 profile と同じ命名） | `custom-repo` |
 | `verified` | — | **常に `false`。この runner が変えることはない** |
+| `scope_companions` | `spec/` `test/` `tests/` の実ファイルと、それが写している `src/` `app/` `lib/` の実ファイルの**対**。両方が実在するときだけ1件起案する（第9.4節） | `{"derive": []}`（空。＝宣言が無いのと同じ挙動） |
 
 toolchain が複数ある場合は `node` > `rust` > `python` > `go` > `make` の固定順で
 1つを選び、選ばなかったものを warning `multiple_ecosystems` に載せる。npm 系 lockfile が
-複数ある場合も同様に warning `multiple_lockfiles` を載せる。**黙って1つを選ばない。**
+複数ある場合も同様に warning `multiple_lockfiles` を載せる。テスト配置が複数見つかった
+場合も同じで、固定順の先頭を起案して残りを warning `multiple_test_layouts` に載せる。
+**黙って1つを選ばない。**
 
 ### 7.2 provenance と TODO
 
@@ -227,6 +231,101 @@ plan の risk には `unverified_profile`（high）が載る。これは劣化�
 確認した Issue 番号を profile と一緒に記録しておくこと**（profile JSON 自体には
 契約外の field を足せないので、profile を置いた場所の README なり commit message なりに書く）。
 
+8. **`scope_companions` が実在の規約を写している。** 宣言した規則が、このリポジトリで
+   実際に使われている配置と一致する（第9節）。宣言は worker の `scope.allow` に入るので、
+   でたらめな規則は「使われない許可」として無害ではあるが、**verified の主張には含まれる**。
+
 `--repo` で対象リポジトリを差し替えると `verified` は自動的に降格する（第4節）。
 上の主張が「そのリポジトリで」確認したことである以上、リポジトリを替えれば主張の
 対象が消えるからである。**確認していない環境へ verified を持ち回さない。**
+
+## 9. `scope_companions` — repo 固有の伴走ファイル規約（任意）
+
+裁定の記録は [adr-scope-derivation.md](./adr-scope-derivation.md)（第2節・第3節・第15節）、
+plan 側の正本は [plan-contract.md](./plan-contract.md) 第5.1節である。
+
+### 9.1 何を解く field か
+
+`suspected_files` は dispatch がそのまま契約の `scope.allow` へ写す。したがって
+**Issue が書き忘れた伴走ファイルに触れた worker は不合格になり、契約 scope は send 時
+snapshot なので worker 側からは直せない。** planner は「宣言されたファイルを編集すれば
+機械的に付いてくるファイル」を既定で許可してこれを消しているが（plan-contract.md 第5.1節）、
+その規則は **path だけから決まる普遍のもの**に限られる。
+
+repo には planner が知りようのない規約がある。
+
+- `app/` を `spec/` が写す独自のテスト配置
+- 生成物（`.proto` → `*_pb.ts`、locale 辞書、snapshot）
+- 宣言済みファイルから決まる、repo が要求する更新
+
+**planner は対象リポジトリを開かない**（開けば plan が入力の純関数でなくなる）し、
+**dispatch が worktree を観測する案は却下されている**（契約が worktree ごとに変わり、
+`dispatch-contract.md` の byte-identical 性が壊れる）。repo 知識の正しい入口は profile
+だけであり、profile は plan の一部なので、そこに置けば両方の性質が保たれる。
+
+### 9.2 形
+
+```json
+"scope_companions": {
+  "derive": [
+    { "when": "app/{dir}{base}.rb", "add": ["spec/{dir}{base}_spec.rb"] },
+    { "when": "src/{dir}{base}.proto", "add": ["src/{dir}{base}_pb.ts"] }
+  ]
+}
+```
+
+1つの規則は、**共通の語彙で書かれた2つの path テンプレートの対**である。
+`when` が**宣言済み path** に一致して placeholder を束縛し、`add` がその束縛を
+具体的な path として書き戻す。placeholder は2つだけである。
+
+| placeholder | 一致するもの |
+|---|---|
+| `{dir}` | 0個以上の path segment（各々に末尾 `/` が付く）。repo 直下なら空文字 |
+| `{base}` | ちょうど1つの segment。通常はファイルの stem（拡張子はテンプレートに直接書く） |
+
+`{dir}` があることで**ミラーが書ける**。`app/{dir}{base}.rb` → `spec/{dir}{base}_spec.rb` は
+`app/models/user.rb` を `spec/models/user_spec.rb` に写す（先頭の `app/` は落ちる）。
+
+**glob は書けない。** `*` `?` `[` `]` は両テンプレートで拒否され、wildcard は placeholder
+だけである。したがって `add` が生む path は必ず**宣言済み path の一部を literal に含む**。
+
+### 9.3 拒否される宣言（すべて `load_error` / exit 6）
+
+Issue を読む前、profile を読んだ時点で止まる。
+
+| 宣言 | なぜ拒否するか |
+|---|---|
+| `add: ["spec/**/*_spec.rb"]` | 単独 glob。宣言と無関係な許可であり、[#50](https://github.com/Kewton/commandmate-skills/issues/50) が塞いだ穴を profile 経由で開ける |
+| `add: ["docs/module-reference.md"]` | placeholder を1つも含まない。宣言済み path の関数になっていない |
+| `add` が `when` の束縛していない placeholder を使う | 同上 |
+| `when` が placeholder を1つも持たない / 同じ placeholder を2回持つ | 前者は固定 path 1件にしか一致せず、後者は意味が定義できない |
+| `{ext}` など未知の placeholder、`{base` のような括弧の不整合 | typo が literal に化けると「一致しない規則」が黙って残る |
+| `..` を含む / 絶対 path | 対象リポジトリの外を指す |
+| `derive` 以外の key、規則の `when` / `add` 以外の key | 未知 field を持つ profile を拒否するのと同じ（第1節）。**新しい runner 向けの profile は古い runner で黙って半分無視されるのではなく、はっきり落ちなければならない** |
+| `add: []`、`derive` が配列でない、`scope_companions` が object でない | 形が違う |
+
+`{"derive": []}` は**正当で、かつ何もしない**。未指定と同じ導出になる。
+
+### 9.4 起案（`profile-init.mjs`）と provenance
+
+`profile-init.mjs` は `spec/` → `test/` → `tests/` の順に走査し、その下の実ファイルが
+`src/` → `app/` → `lib/` の実ファイルを写しているとき、その対を根拠に規則を1件起案する。
+**directory があるだけでは起案しない** —— 2つの実ファイルで裏が取れた対だけを、
+`provenance[].evidence[]` にその2つを挙げて `detected` として出す。
+
+裏の取れた配置が複数あるときは走査順の先頭を起案し、残りを warning
+`multiple_test_layouts` に載せる。1件も取れなければ `{"derive": []}` を `default` として置き、
+対の TODO `scope_companions_undetermined` を必ず添える。**起案は常に1規則である** ——
+draft は人間が広げる出発点であり、`verified: false` がそう言っている。
+
+### 9.5 運用上の注意
+
+- **宣言を直して plan を取り直すと `run_exists`（exit 4）になる。** run_id の入力は
+  Issue 内容・base・profile の `id` / `repository` などであって、profile の中身全部ではない
+  （[plan-contract.md](./plan-contract.md) 第1節）。`baseline` を直したときと同じで、
+  `--run-id` か `--runs-dir` を使う。エラー文がその2つを名指しする。
+- **当たらない規則は無害である。** `scope.allow` は指示ではなく権限なので、使われなかった
+  許可は何も起こさない。一方、宣言しなければ worker 1人分の run が失われる。
+- **書きすぎは無害ではない。** dispatch は `scope.allow` を sort してから 200 件に切り詰めるので、
+  導出が増えすぎると宣言済みファイルが押し出される。planner は合計が 200 に達する手前で
+  宣言済みファイル単位に打ち切るが、規則を増やすほど1 Issue あたりの導出は増える。

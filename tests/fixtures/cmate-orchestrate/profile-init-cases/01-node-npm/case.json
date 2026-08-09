@@ -1,5 +1,5 @@
 {
-  "description": "A node repository that declares everything: slug, CI base branch, branch and worktree conventions, npm scripts.",
+  "description": "A node repository that declares everything: slug, CI base branch, branch and worktree conventions, npm scripts, and — since Issue #149 — a test tree that mirrors src/, which is what keeps this case a clean success: every field, including the optional scope_companions, has evidence behind it.",
   "args": [],
   "expect": {
     "status": "success",
@@ -10,7 +10,8 @@
       "branch_template": "detected",
       "worktree_template": "detected",
       "baseline": "detected",
-      "verified": "fixed"
+      "verified": "fixed",
+      "scope_companions": "detected"
     },
     "todos": [],
     "warnings": [],
@@ -19,7 +20,8 @@
       "base": [".github/workflows/ci.yml"],
       "branch_template": ["CONTRIBUTING.md"],
       "worktree_template": ["CONTRIBUTING.md"],
-      "baseline": ["package-lock.json", "package.json", "package.json", "package.json"]
+      "baseline": ["package-lock.json", "package.json", "package.json", "package.json"],
+      "scope_companions": ["src/session/retry.ts", "test/session/retry.test.ts"]
     }
   }
 }
