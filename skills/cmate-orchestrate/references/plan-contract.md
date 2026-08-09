@@ -150,6 +150,46 @@ Wave 生成の規則は次の3つ。
 | `conflicting` | 依存は無いが、他 Issue と suspected file が重なる |
 | `independent` | 依存も conflict も無い |
 
+## 5.1 scope の既定許可（`issues[].scope_defaults`）
+
+`suspected_files` は dispatch がそのまま契約の `scope.allow` へ写す
+（[dispatch-contract.md](./dispatch-contract.md)）。したがってこの list は
+**「Issue が書いた意図」と「worker に与える権限」の2役**を兼ねており、狭すぎると
+**正しく実装した worker が不合格になる**。しかも契約 scope は send 時 snapshot なので
+**worker 側からは直せない**。
+
+そこで planner は、**宣言されたファイルを編集すれば機械的に付いてくるファイル**を
+既定で許可し、足した分を `scope_defaults` に列挙する。裁定の記録は
+[adr-scope-derivation.md](./adr-scope-derivation.md)（第2節「認可境界は宣言の閉包である」）にある。
+
+導出元は2つある。
+
+| 由来 | 規則 | 例 |
+|---|---|---|
+| lockfile（Issue #44） | 宣言された dependency manifest と**同一 directory** の lockfile | `web/package.json` → `web/package-lock.json` / `web/pnpm-lock.yaml` / `web/yarn.lock` |
+| テスト伴走（Issue #147） | 宣言された**ソースファイル**の慣習的なテスト path。形は拡張子で決まる | `src/session.ts` → `src/session.test.ts` / `src/session.spec.ts` / `src/__tests__/session.ts` / `src/__tests__/session.test.ts`<br>`store.go` → `store_test.go`<br>`app/loader.py` → `app/test_loader.py` / `tests/test_loader.py`<br>`lib/parser.rb` → `lib/parser_spec.rb`<br>`src/main/java/…/Loader.java` → `…/LoaderTest.java` / `src/test/java/…/LoaderTest.java` |
+
+守る不変条件は3つで、いずれも実装が破ったら実装が誤りである。
+
+1. **導出元は必ず宣言済みファイルである。** 単独の glob（`**/*.test.*` 等）は足さない。
+   したがって `suspected_files` が空なら `scope_defaults` も空であり、影響範囲は宣言に比例する。
+2. **足した分は必ず可視である。** `scope_defaults` に出さずに `suspected_files` だけ増やさない。
+   両者は実装上ひとつの list から出る。
+3. **plan は入力の純粋関数のままである。** 導出は決定的で順序も安定しており、planner は
+   対象リポジトリを開かない（規約の観測ではなく規則の適用である）。
+
+テスト path の導出は**当たらないことがある** —— テスト配置は repo の規約だからである。
+それでも成立するのは、`scope.allow` が指示ではなく**権限**だからで、使われなかった許可は
+何も起こさない一方、導出しなければ worker 1人分の run が失われる。ソースでない拡張子
+（`.md` / `.json` / `.yaml` / lockfile / `Makefile` 等）は**規則を持たない**ので1件も導出しない。
+
+導出は `MAX_SCOPE_PATTERNS`（200、dispatch 側の契約上限）に収まる位置で source file 単位に
+打ち切る。dispatch は `scope.allow` を sort してから切り詰めるので、上限を超えた list は
+**宣言済みファイルを導出済みファイルに奪われる**からである。
+
+`scope_defaults` は既存 field であり、この拡張で `plan_schema_version` は上げない
+（意味は「planner が既定で許可した path」のままで、由来が1つ増えただけである）。
+
 ## 6. risk
 
 `risk.level` は factor の最大 severity である。factor は決定的に導く。

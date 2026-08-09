@@ -21,6 +21,18 @@ goal: |
   - src/config/schema.ts
   - src/config/base.ts
   - src/config/env.ts
+  - src/config/schema.test.ts
+  - src/config/schema.spec.ts
+  - src/config/__tests__/schema.ts
+  - src/config/__tests__/schema.test.ts
+  - src/config/base.test.ts
+  - src/config/base.spec.ts
+  - src/config/__tests__/base.ts
+  - src/config/__tests__/base.test.ts
+  - src/config/env.test.ts
+  - src/config/env.spec.ts
+  - src/config/__tests__/env.ts
+  - src/config/__tests__/env.test.ts
 
   ## Rules
   - Stay within this issue. Do not modify files another issue in the plan owns.
@@ -35,8 +47,20 @@ goal: |
   - Do not print tokens, secrets, or absolute host paths.
 scope:
   allow:
+    - "src/config/__tests__/base.test.ts"
+    - "src/config/__tests__/base.ts"
+    - "src/config/__tests__/env.test.ts"
+    - "src/config/__tests__/env.ts"
+    - "src/config/__tests__/schema.test.ts"
+    - "src/config/__tests__/schema.ts"
+    - "src/config/base.spec.ts"
+    - "src/config/base.test.ts"
     - "src/config/base.ts"
+    - "src/config/env.spec.ts"
+    - "src/config/env.test.ts"
     - "src/config/env.ts"
+    - "src/config/schema.spec.ts"
+    - "src/config/schema.test.ts"
     - "src/config/schema.ts"
   deny: []
 autoYes:

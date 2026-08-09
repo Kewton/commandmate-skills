@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 443,
+      "title": "feat: セッション保存とローダーを実装する",
+      "body": "`internal/store/session.go` にセッション保存を実装し、`app/loader.py` から読み出す。\n\n## Acceptance criteria\n- [ ] 保存したセッションが再起動後も読める\n- [ ] 追加したテストが緑である\n",
+      "labels": ["feature"]
+    }
+  ]
+}

@@ -384,7 +384,7 @@
           "items": {
             "$ref": "#/$defs/repo_path"
           },
-          "description": "Lockfiles the planner allowed by default because the issue names their dependency manifest (e.g. package.json -> package-lock.json). Already included in suspected_files; listed here so a reviewer sees which scope entries the planner added rather than read in the issue."
+          "description": "Paths the planner allowed by default because a file the issue DID name mechanically drags them along: the same-directory lockfiles of a dependency manifest (package.json -> package-lock.json), and the conventional test paths of a declared source file (src/session.ts -> src/session.test.ts, src/session.spec.ts, src/__tests__/session.ts, ...; session.go -> session_test.go). Every entry is derived from a declared path — no bare glob is ever added — and all of them are already included in suspected_files. Listed here so a reviewer sees which scope entries the planner added rather than read in the issue. See references/adr-scope-derivation.md."
         },
         "reference_files": {
           "type": "array",

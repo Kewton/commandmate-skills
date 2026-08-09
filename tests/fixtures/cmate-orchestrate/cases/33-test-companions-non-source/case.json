@@ -1,0 +1,17 @@
+{
+  "description": "Issue #147, the negative: an issue whose declared files are a Markdown document and a JSON config derives NOTHING. Both paths ARE in suspected_files (the 成果物 heading makes the .md a deliverable, #50), so this is not \"nothing was extracted\" — it is the derivation declining to invent `docs/design/scope-derivation.test.md` or `config/app.test.json`, neither of which any repository has. The exclusion is the ABSENCE of a rule for those extensions rather than a deny-list, so a new non-source extension is silent by default; `app.json` is also not a dependency manifest, so the lockfile companions stay empty too and scope_defaults is empty as a whole.",
+  "args": ["442", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[442]],
+    "merge_order": [442],
+    "dependencies": [],
+    "classifications": { "442": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "442": ["docs/design/scope-derivation.md", "config/app.json"] },
+    "scope_defaults": { "442": [] },
+    "reference_files": { "442": [] }
+  }
+}

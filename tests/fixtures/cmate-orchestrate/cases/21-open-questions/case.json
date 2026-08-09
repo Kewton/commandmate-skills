@@ -13,7 +13,8 @@
     "waves": [[320, 321]],
     "merge_order": [320, 321],
     "dependencies": [],
-    "suspected_files": { "320": ["src/upload.ts"], "321": [] },
+    "suspected_files": { "320": ["src/upload.ts", "src/upload.test.ts", "src/upload.spec.ts", "src/__tests__/upload.ts", "src/__tests__/upload.test.ts"], "321": [] },
+    "scope_defaults": { "321": [] },
     "classifications": { "320": "independent", "321": "independent" },
     "risk_level": "moderate"
   }

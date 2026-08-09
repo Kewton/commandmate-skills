@@ -21,6 +21,18 @@ goal: |
   - src/store/write.ts
   - src/store/index.ts
   - src/store/read.ts
+  - src/store/write.test.ts
+  - src/store/write.spec.ts
+  - src/store/__tests__/write.ts
+  - src/store/__tests__/write.test.ts
+  - src/store/index.test.ts
+  - src/store/index.spec.ts
+  - src/store/__tests__/index.ts
+  - src/store/__tests__/index.test.ts
+  - src/store/read.test.ts
+  - src/store/read.spec.ts
+  - src/store/__tests__/read.ts
+  - src/store/__tests__/read.test.ts
 
   ## Rules
   - Stay within this issue. Do not modify files another issue in the plan owns.
@@ -35,8 +47,20 @@ goal: |
   - Do not print tokens, secrets, or absolute host paths.
 scope:
   allow:
+    - "src/store/__tests__/index.test.ts"
+    - "src/store/__tests__/index.ts"
+    - "src/store/__tests__/read.test.ts"
+    - "src/store/__tests__/read.ts"
+    - "src/store/__tests__/write.test.ts"
+    - "src/store/__tests__/write.ts"
+    - "src/store/index.spec.ts"
+    - "src/store/index.test.ts"
     - "src/store/index.ts"
+    - "src/store/read.spec.ts"
+    - "src/store/read.test.ts"
     - "src/store/read.ts"
+    - "src/store/write.spec.ts"
+    - "src/store/write.test.ts"
     - "src/store/write.ts"
   deny: []
 autoYes:

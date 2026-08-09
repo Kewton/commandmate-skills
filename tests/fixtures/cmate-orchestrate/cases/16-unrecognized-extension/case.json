@@ -10,6 +10,6 @@
     "dependencies": [],
     "classifications": { "412": "independent" },
     "risk_level": "low",
-    "suspected_files": { "412": ["src/tiles/build.ts"] }
+    "suspected_files": { "412": ["src/tiles/build.ts", "src/tiles/build.test.ts", "src/tiles/build.spec.ts", "src/tiles/__tests__/build.ts", "src/tiles/__tests__/build.test.ts"] }
   }
 }

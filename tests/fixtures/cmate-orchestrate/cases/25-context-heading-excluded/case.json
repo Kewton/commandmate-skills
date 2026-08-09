@@ -10,7 +10,7 @@
     "dependencies": [],
     "classifications": { "430": "independent" },
     "risk_level": "low",
-    "suspected_files": { "430": ["web/src/lib/filter.ts"] },
+    "suspected_files": { "430": ["web/src/lib/filter.ts", "web/src/lib/filter.test.ts", "web/src/lib/filter.spec.ts", "web/src/lib/__tests__/filter.ts", "web/src/lib/__tests__/filter.test.ts"] },
     "reference_files": { "430": ["web/src/lib/store.ts", "web/src/legacy/old-filter.ts"] }
   }
 }

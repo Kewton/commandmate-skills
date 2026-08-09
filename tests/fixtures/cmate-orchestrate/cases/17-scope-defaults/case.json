@@ -1,5 +1,5 @@
 {
-  "description": "Issue #44 (CommandMate #1678 B-2): an issue naming web/package.json gets that directory's lockfiles allowed by default — they join suspected_files (the worker's future scope.allow) and the plan says so in scope_defaults, so `npm install` rewriting the lockfile is no longer a scope violation the worker cannot resolve.",
+  "description": "Issue #44 (CommandMate #1678 B-2): an issue naming web/package.json gets that directory's lockfiles allowed by default — they join suspected_files (the worker's future scope.allow) and the plan says so in scope_defaults, so `npm install` rewriting the lockfile is no longer a scope violation the worker cannot resolve. Since Issue #147 the same list also carries `web/main.ts`'s conventional test paths: both default sources share one exit, so nothing can reach scope.allow without also being reported in scope_defaults.",
   "args": ["413", "--profile", "node-commandmate"],
   "expect": {
     "exit": 0,
@@ -10,7 +10,7 @@
     "dependencies": [],
     "classifications": { "413": "independent" },
     "risk_level": "low",
-    "suspected_files": { "413": ["web/package.json", "web/main.ts", "web/package-lock.json", "web/pnpm-lock.yaml", "web/yarn.lock"] },
-    "scope_defaults": { "413": ["web/package-lock.json", "web/pnpm-lock.yaml", "web/yarn.lock"] }
+    "suspected_files": { "413": ["web/package.json", "web/main.ts", "web/package-lock.json", "web/pnpm-lock.yaml", "web/yarn.lock", "web/main.test.ts", "web/main.spec.ts", "web/__tests__/main.ts", "web/__tests__/main.test.ts"] },
+    "scope_defaults": { "413": ["web/package-lock.json", "web/pnpm-lock.yaml", "web/yarn.lock", "web/main.test.ts", "web/main.spec.ts", "web/__tests__/main.ts", "web/__tests__/main.test.ts"] }
   }
 }

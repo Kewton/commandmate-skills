@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 442,
+      "title": "docs: scope 導出の設計ノートと既定値を書く",
+      "body": "scope 導出の裁定を文書に残し、既定値を設定ファイルへ移す。Makefile の target 名は変えない。\n\n## 成果物\n\n- `docs/design/scope-derivation.md`\n- `config/app.json`\n\n## Acceptance criteria\n- [ ] 設計ノートが4層の分割を述べている\n- [ ] 既定値が設定ファイルから読まれる\n",
+      "labels": ["docs"]
+    }
+  ]
+}
