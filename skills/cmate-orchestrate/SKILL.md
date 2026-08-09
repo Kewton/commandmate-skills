@@ -62,7 +62,10 @@ runner が自分で再試行ループを回すことはない。
 `filesystem_read` / `filesystem_write` / `process_execution` / `network_access` で、これは
 orchestration 全体が要求する集合である（plan にも同じ集合を提示する）。base branch・branch 名・
 worktree path・baseline は **profile から解決**し、`develop`/`npm`/`cargo` を hardcode しない
-（[profile-contract.md](./references/profile-contract.md)）。内蔵 profile
+（[profile-contract.md](./references/profile-contract.md)）。**リポジトリ固有の伴走ファイル規約
+（`spec/` ミラー等）も profile の任意 field `scope_companions` で宣言する** —— planner は
+リポジトリを開かないので、規約の出どころは profile だけである
+（[adr-scope-derivation.md](./references/adr-scope-derivation.md) 第3節）。内蔵 profile
 （`node-commandmate` / `rust-commandagent`）以外のリポジトリで使うなら、まず
 `scripts/profile-init.mjs` で profile draft を起案する（第3.5節）。
 
