@@ -750,7 +750,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.25.0",
+      "latest": "0.26.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -1558,6 +1558,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.25.0/cmate-orchestrate-0.25.0.tar.gz",
             "sha256": "8af27eacf189fc38b5cc3989691925cfca3b82a0404aec2778db630b3c92f1c2",
             "size": 463425,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.26.0",
+          "changelog": "cmate-orchestrate 0.26.0 — run_id が plan を一意に指すようになった（#157）",
+          "published_at": "2026-08-09T13:41:19Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.26.0",
+            "commit": "062439bba77fb06ce3cc4a0f69faa6a26914fb38"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.26.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.26.0/cmate-orchestrate-0.26.0.tar.gz",
+            "sha256": "0ef376143d6a6cc322738a5e73e3923bef66e3ff8c19eafc72f89e2af4b8e73f",
+            "size": 467057,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
