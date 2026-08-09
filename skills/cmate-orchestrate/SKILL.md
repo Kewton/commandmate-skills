@@ -539,6 +539,8 @@ report/artifact に残さない（redaction）。
 - [references/adr-issue-acceptance-gates.md](./references/adr-issue-acceptance-gates.md) — Issue 受入条件の機械ゲート化
 - [references/adr-worktree-preparation.md](./references/adr-worktree-preparation.md) — worktree 準備段の合成（`--prepare-worktrees`）
 - [references/adr-worker-development-skill.md](./references/adr-worker-development-skill.md) — ワーカー側方法論の呼び出し口（`--worker-method`）
+- [references/adr-unattended-mode.md](./references/adr-unattended-mode.md) — 無人運転（`--unattended`）の段階 A〜C
+- [references/adr-scope-derivation.md](./references/adr-scope-derivation.md) — scope の導出（宣言 → 認可境界の閉包）**proposed**
 
 **機械検証用 schema** — `schemas/` に
 [execution-plan.v2](./schemas/execution-plan.v2.json)（plan）・

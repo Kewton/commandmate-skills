@@ -1,6 +1,7 @@
 # ADR: 全自動モード（unattended）の契約改版（[#95](https://github.com/Kewton/commandmate-skills/issues/95)）
 
-status: **proposed**（人間のレビュー待ち。この文書が承認されるまで実装に入らない）
+status: **accepted / 段階 A〜C 実装済み**（Issue [#122](https://github.com/Kewton/commandmate-skills/issues/122) / [#134](https://github.com/Kewton/commandmate-skills/issues/134) / [#142](https://github.com/Kewton/commandmate-skills/issues/142)、0.22.0）。
+第14節は #115 の実測による訂正、第15〜17節は実装で変えた点である。
 
 ロードマップ Phase 4（エピック [#96](https://github.com/Kewton/commandmate-skills/issues/96)）である。
 ビジョンは「承認つき運転（plan → **人間の承認** → dispatch）を**既定として維持したまま**、

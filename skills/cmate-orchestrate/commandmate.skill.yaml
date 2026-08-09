@@ -107,8 +107,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: d0f1100e6a8d2636bb0558d5098821745cfab949cf51d3fbd391f102a7b9066d
-    size: 45478
+    sha256: 82af65645a0a5b2ee0b80a8417477093be6d801fa2e0f3ff677c5e834a1e8010
+    size: 45752
     kind: skill_md
     executable: false
     script: false
@@ -124,15 +124,21 @@ files:
     kind: instruction
     executable: false
     script: false
+  - path: references/adr-scope-derivation.md
+    sha256: 550df19383e00bbac2286424e0982c65bec31dccb14b9ea13c135705320f4895
+    size: 21095
+    kind: instruction
+    executable: false
+    script: false
   - path: references/adr-unattended-mode.md
-    sha256: 131fcb944031d206a90efd5223cf94581804a3a488a553c8379b9cf762cca5de
-    size: 116814
+    sha256: 5dd91ab4dfa508fc7cd343c80a810a21de8854a0d1df2c604a7a6e5bb5cca6a5
+    size: 117062
     kind: instruction
     executable: false
     script: false
   - path: references/adr-worker-development-skill.md
-    sha256: 93d7acd6884d1269243afbaa3e71df0e03c209b1f5b25670383c53d59efd9695
-    size: 68594
+    sha256: ecc643a470de3e3291ca09977e51e97cc69b5db92384d9d62a2cfb63b2b8ef27
+    size: 68703
     kind: instruction
     executable: false
     script: false
