@@ -1,6 +1,6 @@
 # ADR: ワーカー側の開発スキル（[#103](https://github.com/Kewton/commandmate-skills/issues/103)）
 
-status: **proposed**（人間のレビュー待ち。この文書が承認されるまで実装に入らない）
+status: **accepted / 段1〜5 実装済み**（Issue [#123](https://github.com/Kewton/commandmate-skills/issues/123) / [#128](https://github.com/Kewton/commandmate-skills/issues/128)）。段6〜7 は別 Issue である。
 
 エピック [#96](https://github.com/Kewton/commandmate-skills/issues/96) の
 「ビジョンの7段のうち、**ワーカーが Issue を受け取ってから何をするか**」を埋めるための
