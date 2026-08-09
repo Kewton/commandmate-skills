@@ -750,7 +750,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.24.0",
+      "latest": "0.25.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -1514,6 +1514,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.24.0/cmate-orchestrate-0.24.0.tar.gz",
             "sha256": "3f3950907af6cf305cd78085a3371101a0d155056168e0ca92e1cf5ccd6fecef",
             "size": 447055,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.25.0",
+          "changelog": "cmate-orchestrate 0.25.0 — scope 導出の4層が揃った（#149）",
+          "published_at": "2026-08-09T12:49:03Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.25.0",
+            "commit": "9a792f47682b1977dd961eb7f3e03c6b410d4b0e"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.25.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.25.0/cmate-orchestrate-0.25.0.tar.gz",
+            "sha256": "8af27eacf189fc38b5cc3989691925cfca3b82a0404aec2778db630b3c92f1c2",
+            "size": 463425,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
