@@ -1,0 +1,300 @@
+{
+  "description": "Issue #165 の第1点の裏面: 窓を溢れさせた run で **FAIL が窓から落ちない**こと。`work-evidence PASS` + FAIL 50本 = 51本を出す fail run を回す。50本の窓に対して素直に先頭から切ると、先頭に居る `work-evidence PASS` が残り FAIL が1本落ちる —— 何が落ちたかを report が言えないまま、失敗を名指す側の gate が消える。FAIL を先に拾うので `verification.gates` は FAIL 50本、落ちた1本は `checks` が数えて名指す。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "100",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "1",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "1"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "verification_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "sent": [
+      100
+    ],
+    "worker_states": {
+      "100": "completed"
+    },
+    "verification_outcomes": {
+      "100": "fail"
+    },
+    "verification_gates": {
+      "100": [
+        {
+          "id": "failing-01",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-02",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-03",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-04",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-05",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-06",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-07",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-08",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-09",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-10",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-11",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-12",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-13",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-14",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-15",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-16",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-17",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-18",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-19",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-20",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-21",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-22",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-23",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-24",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-25",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-26",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-27",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-28",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-29",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-30",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-31",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-32",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-33",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-34",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-35",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-36",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-37",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-38",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-39",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-40",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-41",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-42",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-43",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-44",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-45",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-46",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-47",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-48",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-49",
+          "verdict": "fail",
+          "origin": "repo"
+        },
+        {
+          "id": "failing-50",
+          "verdict": "fail",
+          "origin": "repo"
+        }
+      ]
+    },
+    "verification_checks_include": {
+      "100": [
+        "1 further gate(s) are not listed"
+      ]
+    }
+  }
+}

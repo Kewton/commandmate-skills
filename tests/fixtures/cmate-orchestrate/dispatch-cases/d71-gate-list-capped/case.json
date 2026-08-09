@@ -1,0 +1,303 @@
+{
+  "description": "Issue #165 の第1点: `MAX_REPORTED_GATES` = 50 を超える gate を出した run で、51本目以降が無言で消えないこと。61本 (`work-evidence` + 60) 出す pass run を回し、`verification.gates` が先頭50本になり、`checks` に「50本に切った / 残り11本は載せていない」と書かれることを固定する。切り捨てを黙って行うと、report は「この run には50本の gate が在った」と読めてしまう —— merge.mjs の `capped()` / `droppedNote()` が PR 本文で塞いだのと同じ穴。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "100",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "1",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      100
+    ],
+    "worker_states": {
+      "100": "completed"
+    },
+    "verification_outcomes": {
+      "100": "pass"
+    },
+    "verification_gates": {
+      "100": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-01",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-02",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-03",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-04",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-05",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-06",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-07",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-08",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-09",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-10",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-11",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-12",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-13",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-14",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-15",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-16",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-17",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-18",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-19",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-20",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-21",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-22",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-23",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-24",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-25",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-26",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-27",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-28",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-29",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-30",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-31",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-32",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-33",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-34",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-35",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-36",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-37",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-38",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-39",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-40",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-41",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-42",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-43",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-44",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-45",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-46",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-47",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-48",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "gate-49",
+          "verdict": "pass",
+          "origin": "repo"
+        }
+      ]
+    },
+    "verification_checks_include": {
+      "100": [
+        "the gate list was cut to 50 entries",
+        "11 further gate(s) are not listed"
+      ]
+    },
+    "absent_limitation_codes": [
+      "verification_gates_unrecorded"
+    ]
+  }
+}
