@@ -1,0 +1,75 @@
+{
+  "description": "Issue #164: the L4 loop guard compares the VIOLATIONS, not the first 20 lines of the scope gate's logTail. #201's scope gate names 22 out-of-scope paths on turn 1 and 22 again on turn 2, identical except for the last three — the worker really did move, and the change falls OUTSIDE the 20-line display window. Before the fix the window was applied before the dedup/sort that builds the comparison set, so the two turns compared equal and a converging worker was cut off with scope_unsatisfiable on turn 2. Here it is re-instructed as before (3 sends under --max-turns 5), the wave advances and #200 is dispatched. The bounded message still says what it left out ('ほか 3 行'), and the worker record keeps the fact that it did.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "5"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [
+      true,
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      201,
+      200
+    ],
+    "send_counts": {
+      "201": 3,
+      "200": 1
+    },
+    "sent_message_includes": {
+      "201": [
+        "scope ゲートについて",
+        "web/src/a01.ts",
+        "web/src/a19.ts",
+        "ほか 3 行",
+        "全部で 23 行"
+      ]
+    },
+    "worker_states": {
+      "201": "completed",
+      "200": "completed"
+    },
+    "worker_notes_include": {
+      "201": [
+        "20 of 23 violating line(s) were transcribed",
+        "3 were left out",
+        "the loop guard compared all 23"
+      ]
+    },
+    "verification_outcomes": {
+      "201": "pass",
+      "200": "pass"
+    },
+    "absent_blocking_codes": [
+      "scope_unsatisfiable"
+    ],
+    "summary_excludes": [
+      "scope_unsatisfiable"
+    ],
+    "verify_calls": 2,
+    "wait_verify_calls_min": 3
+  }
+}

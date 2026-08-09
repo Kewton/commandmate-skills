@@ -3137,22 +3137,56 @@ async function describeFailingGates(inputs, worktreeId) {
 // there (CommandMate #1678 B-2; CLI display is #1683). Lines are copied rather
 // than parsed for path shapes, so a format change on the CommandMate side
 // degrades to a verbatim quote instead of an empty list.
-const MAX_SCOPE_VIOLATION_LINES = 20;
-
+//
+// EVERY line is kept (Issue #164). The bound below is a DISPLAY bound and
+// nothing else. It used to be applied HERE, before the dedup/sort that builds
+// the loop guard's comparison set, which made the guard compare "the first 20
+// lines of the logTail" rather than "the violations": two turns whose only
+// difference fell outside that window read as the SAME answer, so a worker that
+// was really converging was cut off with `scope_unsatisfiable` (measured on the
+// fixture d67: 22 violations each turn, differing only from line 21 on — the old
+// code stopped the run on turn 2). The reverse misreading was possible too, a fix
+// inside the window pulling an untouched line into it and reading as progress.
+// Keeping them all is cheap: CommandMate bounds a logTail at 8192 bytes
+// (`DEFAULT_MAX_LOG_TAIL_BYTES` in src/lib/verification/verify-config.ts), a few
+// hundred lines at worst — and the runs that overflow 20 are the repo-wide
+// formatter / `lint --fix` accidents the scope gate exists to catch.
 function scopeViolationLines(logTail) {
   return String(logTail ?? '')
     .replace(/\r/g, '')
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-    .slice(0, MAX_SCOPE_VIOLATION_LINES)
     .map((line) => redact(line));
 }
 
+// How many transcribed violation lines one MESSAGE may carry. Bounding the
+// re-instruction and the report detail is still right — an unbounded quote of a
+// repo-wide accident helps nobody — so the number is unchanged. What changed is
+// that a cut is now COUNTED and NAMED wherever it happens, the rule merge.mjs
+// already applies to PR bodies with `capped()` / `droppedNote()`: shortening a
+// list is fine, shortening it silently is not.
+const MAX_SCOPE_VIOLATION_LINES = 20;
+
+// The bounded view of one failing verification's scope violations: what a message
+// may print, how many lines it had to leave out, and the full count so the
+// message can say what it is a view OF.
+function scopeViolationDisplay(failing) {
+  const lines = failing.filter((gate) => gate.isScope).flatMap((gate) => gate.violations);
+  return {
+    shown: lines.slice(0, MAX_SCOPE_VIOLATION_LINES),
+    dropped: Math.max(0, lines.length - MAX_SCOPE_VIOLATION_LINES),
+    total: lines.length,
+  };
+}
+
 // The scope-gate violations of ONE failing verification, as a comparable set —
-// the input to the loop guard below (ADR section 6 / Issue #148). The lines are
-// the very ones the re-instruction transcribes, so nothing new is read from the
-// CLI to decide whether the loop is converging.
+// the input to the loop guard below (ADR section 6 / Issue #148). The lines come
+// from the same transcription the re-instruction prints, so nothing new is read
+// from the CLI to decide whether the loop is converging — but this set is built
+// from ALL of them, never from the bounded view a message shows (Issue #164):
+// what the worker was told is a display decision, and a display decision must not
+// decide whether a run continues.
 //
 // Deduplicated and sorted, because "the same answer" is about the SET of paths:
 // two turns that named the same two files in a different order are the worker
@@ -3185,13 +3219,19 @@ function buildVerifyReinstruction(failing) {
   // Name the paths and say so, instead of asking for a retry that cannot succeed.
   const scopeGates = failing.filter((gate) => gate.isScope);
   if (scopeGates.length > 0) {
-    const violations = scopeGates.flatMap((gate) => gate.violations);
+    const violations = scopeViolationDisplay(failing);
     lines.push('');
     lines.push('scope ゲートについて: 実行契約 scope.allow の外のファイルが変更されています。違反 path（scope ゲートの記録から転記）:');
-    if (violations.length === 0) {
+    if (violations.total === 0) {
       lines.push('- （logTail から違反 path を読み取れませんでした。`commandmate verify <worktree-id>` で確認してください）');
     }
-    for (const line of violations) lines.push(`- ${line}`);
+    for (const line of violations.shown) lines.push(`- ${line}`);
+    // A worker that is told about 20 of 23 violations cannot fix the other 3, and
+    // silence about the cut would read as "these are all of them" (Issue #164).
+    if (violations.dropped > 0) {
+      lines.push(`- （ほか ${violations.dropped} 行は、このメッセージの表示上限 ${MAX_SCOPE_VIOLATION_LINES} 行を超えたため省略しました。`
+        + `scope ゲートの記録は全部で ${violations.total} 行あります —— 残りは \`commandmate verify <worktree-id>\` で確認してください）`);
+    }
     lines.push('scope.allow は Issue の対象ファイルから生成されます。違反 path を許可するには Issue の対象ファイルに追加して plan を作り直す必要があります。');
     lines.push('この変更が受入条件の達成に不可避なら worker 側では解決できません — 停止してその旨を報告してください。回避できるなら、違反 path への変更を取り消して scope 内で完了してください。');
   }
@@ -3266,6 +3306,16 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
   // itself. Reset by every turn that is not a scope-gate failure, so only two
   // CONSECUTIVE identical answers count — the narrow reading, which blocks less.
   let previousScopeViolations = null;
+  // The worst cut any turn's scope re-instruction had to make (Issue #164). The
+  // loop guard compares every violating line, but a MESSAGE is bounded, so a
+  // worker can be told about 20 of 23. That is a fact about what the worker was
+  // given to act on, and it belongs in the record rather than only in the message
+  // that was sent — a report listing 20 paths must not read as a run that had 20.
+  let scopeViolationCut = null;
+  const scopeCutClause = () => (scopeViolationCut === null
+    ? ''
+    : `; a scope re-instruction was bounded: ${scopeViolationCut.shown.length} of ${scopeViolationCut.total} violating line(s) were transcribed `
+      + `and ${scopeViolationCut.dropped} were left out of the message (the loop guard compared all ${scopeViolationCut.total})`);
 
   const hardIterations = inputs.maxTurns * 4 + 8;
   for (let i = 0; i < hardIterations; i += 1) {
@@ -3296,7 +3346,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       };
     }
     const code = waited.ok ? VERIFY_EXIT_PASS : (waited.status ?? null);
-    const done = (state, note) => ({ state, taskId, verdict, notJudged: false, promptExcerpt: null, nudges: turns - 1, autoResponded, note });
+    const done = (state, note) => ({ state, taskId, verdict, notJudged: false, promptExcerpt: null, nudges: turns - 1, autoResponded, note: `${note}${scopeCutClause()}` });
 
     if (code === WAIT_EXIT_PROMPT) {
       const promptExcerpt = await capturePrompt(inputs, worktreeId);
@@ -3418,7 +3468,13 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       // answer again (measured: Kewton/BorderFreeKidsMap #35 burned a whole run
       // this way). One fewer violating path is progress and is re-instructed as
       // before — this stops the repeat, not the retry.
+      //
+      // The comparison runs on the WHOLE violation set; the bounded view below is
+      // only what the next message may print (Issue #164). Which lines fit in a
+      // message is a display decision, and it decided this stop until #164.
       const scopeViolations = scopeViolationSet(failing.failing);
+      const shownViolations = scopeViolationDisplay(failing.failing);
+      if (shownViolations.dropped > (scopeViolationCut?.dropped ?? 0)) scopeViolationCut = shownViolations;
       if (scopeViolations !== null && previousScopeViolations !== null
         && scopeViolations.join('\n') === previousScopeViolations.join('\n')) {
         // Recorded on the EXISTING adjudication-failure path: no new state, no
@@ -3430,7 +3486,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
           taskId, verdict, notJudged: false, promptExcerpt: null, nudges: turns - 1, autoResponded,
           scopeUnsatisfiable: { violations: scopeViolations, turns },
           note: `the scope gate named the same violating path(s) on two consecutive turns, so this re-instruction loop is not converging; `
-            + `stopped after ${turns} turn(s) without sending turn ${turns + 1} (the --max-turns cap is ${inputs.maxTurns})`,
+            + `stopped after ${turns} turn(s) without sending turn ${turns + 1} (the --max-turns cap is ${inputs.maxTurns})${scopeCutClause()}`,
         };
       }
       previousScopeViolations = scopeViolations;
@@ -4393,16 +4449,29 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     // actionable content: they are what has to be added to the Issue's 対象ファイル
     // (or declared as a repo convention) before this plan can succeed, and an
     // operator who only reads the report has nowhere else to get them.
+    //
+    // Verbatim, but bounded: a repo-wide accident can name hundreds of paths, and
+    // a detail that long stops being read. The list is cut to the same display
+    // bound the re-instruction uses and the cut is stated with its count and with
+    // how many the guard actually compared (Issue #164) — merge.mjs's
+    // `capped()` / `droppedNote()` rule, so a shortened list never passes for a
+    // complete one.
     for (const worker of workers) {
       const cut = scopeUnsatisfiable.get(worker.issue);
       if (!cut) continue;
+      const shownPaths = cut.violations.slice(0, MAX_SCOPE_VIOLATION_LINES);
+      const droppedPaths = cut.violations.length - shownPaths.length;
       report.blocking_reasons.push({
         code: 'scope_unsatisfiable',
         detail: redact(`#${worker.issue}: the scope gate named the SAME violating path(s) on two consecutive turns, so the re-instruction loop was not converging and supervision `
           + `stopped after ${cut.turns} turn(s) rather than spending the rest of --max-turns ${inputs.maxTurns} on the same answer. `
           + 'The contract\'s `scope.allow` is a snapshot of the Issue\'s 対象ファイル taken when the contract was sent, so a worker cannot widen it from inside the worktree — '
           + 'when the violating change is unavoidable, the fix is in the Issue, not in the worktree. '
-          + `Violating path(s), transcribed from the scope gate: ${cut.violations.join(' | ')}. `
+          + `Violating path(s), transcribed from the scope gate: ${shownPaths.join(' | ')}`
+          + (droppedPaths > 0
+            ? ` (+${droppedPaths} more line(s) not listed here; this detail is cut to ${MAX_SCOPE_VIOLATION_LINES} line(s) — the loop guard compared all ${cut.violations.length}, and \`commandmate verify <worktree-id>\` prints the rest)`
+            : '')
+          + '. '
           + 'The verdict is untouched: verification really did fail, and that is CommandMate\'s exit code to give — what this stops is the run going further'),
       });
     }

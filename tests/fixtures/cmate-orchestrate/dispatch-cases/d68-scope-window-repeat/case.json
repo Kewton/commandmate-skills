@@ -1,0 +1,84 @@
+{
+  "description": "Issue #164, the other half: keeping every line for the comparison must not weaken the guard. #201's scope gate names the SAME 22 out-of-scope paths on both turns — more than the 20-line display window holds — and the loop is still cut short on turn 2 (2 sends, not 5), exactly as d61 pins for the small case. What the window costs is now COUNTED and NAMED wherever a list is shortened (the capped()/droppedNote() rule merge.mjs applies to PR bodies): the re-instruction says how many lines it left out, the scope_unsatisfiable detail says the same and states how many the guard compared, and the worker record keeps the fact so a report that lists 20 paths cannot be read as a run that had 20 violations.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "5"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "verification_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      201
+    ],
+    "never_sent": [
+      200
+    ],
+    "send_counts": {
+      "201": 2
+    },
+    "sent_message_includes": {
+      "201": [
+        "scope ゲートについて",
+        "web/src/a01.ts",
+        "web/src/a19.ts",
+        "ほか 3 行",
+        "全部で 23 行"
+      ]
+    },
+    "worker_states": {
+      "201": "completed"
+    },
+    "worker_notes_include": {
+      "201": [
+        "two consecutive turns",
+        "stopped after 2 turn(s)",
+        "20 of 23 violating line(s) were transcribed",
+        "the loop guard compared all 23"
+      ]
+    },
+    "verification_outcomes": {
+      "201": "fail"
+    },
+    "completed_but_unverified": [
+      201
+    ],
+    "blocking_codes": [
+      "scope_unsatisfiable"
+    ],
+    "blocking_details_include": [
+      "22 file(s) changed outside scope.allow: | web/src/a01.ts",
+      "web/src/a19.ts (+3 more line(s) not listed here",
+      "the loop guard compared all 23"
+    ],
+    "summary_includes": [
+      "blocking: scope_unsatisfiable",
+      "worker では直せない",
+      "Issue の対象ファイルに足して re-plan する"
+    ],
+    "verify_calls": 2,
+    "wait_verify_calls_min": 2
+  }
+}

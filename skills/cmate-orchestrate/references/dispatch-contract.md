@@ -235,6 +235,35 @@ turn N+1 : scope 違反 = {A, B}  → 同一。停止（turn N+2 は送らない
   （owner: human）」である（`verification 失敗の worktree を診断` の行は出さない —— 同じ plan の
   再 dispatch は同じ所で止まる）
 
+#### 判定は全行で、表示は上限つきで（[#164](https://github.com/Kewton/commandmate-skills/issues/164)）
+
+比較集合は logTail の**全違反行**から作る。再指示文と `blocking_reasons[].detail` は
+**20 行**（`MAX_SCOPE_VIOLATION_LINES`）で打ち切ってよいが、**打ち切りは判定の前に掛けてはならない。**
+
+0.26.0 まではこの上限が転記の時点（`scopeViolationLines`）で掛かっており、重複除去＋ソートより
+**前**だった。その結果 L4 が比べていたのは「違反集合」ではなく「logTail 先頭 20 行の集合」であり、
+
+- 違反が 21 件以上あって**窓の外だけが変わった**2ターン（＝ worker は前進している）が「同一の答え」と
+  判定され、`scope_unsatisfiable` が誤発火した（実測: fixture `d67`。1ターン目・2ターン目とも違反 22 件、
+  異なるのは 21 行目以降だけ。修正前は turn 2 で停止した）
+- 逆に、窓の中の1件が直ると後ろの行が窓へ繰り上がり、停滞している2ターンが「異なる」と読まれうる
+- worker には 20 件しか知らされないので、21 件目以降を直す機会が無い
+
+logTail は CommandMate 既定で 8192 bytes（`DEFAULT_MAX_LOG_TAIL_BYTES`）なので全行を保持しても
+数百行であり、21 行以上の違反は repo 横断の formatter / `lint --fix` 事故 —— まさに scope ゲートが
+捕まえたい場面 —— で普通に起きる。
+
+上限そのものは report サイズ抑制として維持する。**ただし打ち切ったら必ず数えて名指す**
+（`merge.mjs` の `capped()` / `droppedNote()` と同じ思想）:
+
+- 再指示文は省略した行数と全体の行数を書く（「ほか N 行は…表示上限 20 行を超えたため省略しました。
+  … 全部で M 行あります」）
+- `blocking_reasons[].detail` は `(+N more line(s) not listed here; … the loop guard compared all M)` を
+  添える —— **表示 20 件と比較 M 件が別物であることを detail 自身が述べる**
+- 打ち切りが起きた事実は worker record の `note` に1行残す（`… violating line(s) were transcribed and
+  N were left out of the message (the loop guard compared all M)`）。20 件だけ載った report が
+  「違反は 20 件だった run」と読まれないため
+
 ### 2.4 実行契約の生成（決定的）
 
 正準仕様は CommandMate の `docs/design/task-contract.md`（v1）。閉じたキー集合
