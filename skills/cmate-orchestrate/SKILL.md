@@ -131,7 +131,7 @@ orchestrate.mjs <issue>... [options]
 | `--base <ref>` / `--repo <owner/name>` | profile 由来 | 上書き。**`--repo` は profile の `verified` を降格させる** |
 | `--max-parallel <1-3>` | `3` | 1 Wave の最大幅 |
 | `--depends <a:b>` / `--no-infer` / `--order <a,b>` | — | 依存の override / 推論無効化 / 順序の主張 |
-| `--run-id <id>` | 入力 hash（**Issue 内容を含む**） | run_id の明示 |
+| `--run-id <id>` | 入力 hash（**Issue 内容と profile 全体を含む**） | run_id の明示 |
 | `--runs-dir <path>` | `.commandmate/orchestrate/runs` | artifact の出力先 |
 | `--allow-unverified` | off | unverified profile での planning を許可 |
 
@@ -142,7 +142,11 @@ plan を作ること（本文の精錬には cmate-issue-refinement が使える
 
 `<runs-dir>/<run_id>/` に `plan.json`・`result.json`・`manifest.md`・`issue-analysis.md`・
 `dependency-plan.md` を書き、run directory が既にあれば上書きせず `run_exists` で終了する。
-既定 run_id は Issue 内容を含む hash なので、**本文を直して再 plan すれば自動的に別 run** になる。
+既定 run_id は Issue 内容と **解決後の profile 全体**を含む hash なので、**本文を直しても
+profile を直しても自動的に別 run** になる（Issue #157。`baseline` / `branch_template` /
+`worktree_template` / `verified` / `scope_companions` はいずれも plan の中身を決めるため、
+field を選ばず丸ごと hash する）。`run_exists` は「同じ id に hash された run が既にある」
+までしか述べず、**「何も変えていない」とは断定しない**（cwd の `origin` は hash の外）。
 plan は「入力 + cwd の origin」の純粋関数で、**同一入力からは同一 plan が出る**（Claude/Codex
 parity）。`--run-id` を固定して2つの `--runs-dir` に出し `plan.json` を `diff` すれば確認できる。
 
@@ -487,7 +491,7 @@ report/artifact に残さない（redaction）。
 |---|---|
 | plan `no_acceptance_criteria` / `no_suspected_files` | **Issue 本文に受入条件と対象 file を書いて re-plan する** |
 | plan `cycle_detected` / `override_incomplete` / `dependency_order_violation` | `dependency-plan.md` の edge `reason` を見て、Issue 本文か `--depends` を直す |
-| plan `run_exists` | 本文を直すか、`--run-id <new-id>` / `--runs-dir <dir>` を渡す |
+| plan `run_exists` | 既存の `plan.json` と突き合わせ、違うなら本文か profile を直す。同じでよいなら `--run-id <new-id>` / `--runs-dir <dir>` を渡す |
 | plan `profile_repository_mismatch` | `--profile` / `--profile-json` / `--repo` のどれかを渡して意図を明示する |
 | dispatch `open_questions` + `human_required` | blocking reason に出ている質問の答えを Issue 本文に書いて re-plan する |
 | dispatch `drift` | drift の内容を確認し、必要なら re-plan する。**drift の上に dispatch しない** |

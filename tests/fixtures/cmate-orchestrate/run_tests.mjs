@@ -4273,6 +4273,204 @@ function rerunSemanticsTest() {
 }
 
 // =============================================================================
+// run_id covers the WHOLE resolved profile (Issue #157)
+// =============================================================================
+//
+// The default run id used to hash three profile fields (`base` / `id` /
+// `repository`) while five more decide plan content, so two plans with different
+// content could claim the same id. This suite is the measurement that the
+// enumeration is gone: for each field it plans TWICE from profiles that differ in
+// that ONE field and asserts both that the ids diverge AND that the plans really
+// do differ where that field lands. The second half matters — an id that churned
+// on a field with no effect on the plan would pass the first assertion alone and
+// prove nothing about the property the id is supposed to carry.
+//
+// The two-point measurement (the acceptance condition of #157) is the pair at
+// the end: identical profile + identical issues + identical options still derive
+// the SAME id and are still refused by `run_exists`, so widening the hash did not
+// quietly turn no-overwrite into overwrite.
+
+// The base profile every variant below is a one-field edit of. Kept separate from
+// writeProfile() above (which varies only `scope_companions`) because these cases
+// need to reach every field, including ones that profile has to hold fixed.
+const RUN_ID_BASE_PROFILE = {
+  id: 'run-id-base',
+  repository: 'Kewton/CommandMate',
+  base: 'origin/develop',
+  branch_template: 'feature/issue-{number}-{slug}',
+  worktree_template: '../{repo}-issue-{number}-{slug}',
+  baseline: ['npm test'],
+  verified: true,
+};
+
+function writeProfileVariant(dir, name, overrides) {
+  const path = join(dir, name);
+  const profile = { ...RUN_ID_BASE_PROFILE, ...overrides };
+  if (overrides.scope_companions === undefined) delete profile.scope_companions;
+  writeFileSync(path, `${JSON.stringify(profile, null, 2)}\n`);
+  return path;
+}
+
+// One issue that touches every field under measurement at once: a declared ruby
+// source (so `scope_companions` has something to mirror), a title that slugifies
+// (so branch/worktree templates expand visibly), and two commands in code spans
+// whose heads — `npm` and `bundle` — are recognised only when the profile's
+// `baseline` names them, which is how `baseline` reaches test_expectations.
+const RUN_ID_ISSUE = {
+  issues: [{
+    number: 471,
+    title: 'fix: user profile を直す',
+    body: '## 対象ファイル\n- `app/models/user.rb`\n\n'
+      + '## Acceptance criteria\n- [ ] 直っている\n\n'
+      + '## 検証\n- `npm test`\n- `bundle exec rspec`\n',
+    labels: ['bug'],
+  }],
+};
+
+function planWithProfile(profilePath, issuesPath, extraArgs = []) {
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-orch-runid-'));
+  const args = ['471', '--profile-json', profilePath, ...extraArgs, '--issue-json', issuesPath, '--runs-dir', runsDir];
+  const { exit, stdout } = runRunner(args);
+  return { exit, runsDir, result: exit === 0 || stdout ? JSON.parse(stdout) : null };
+}
+
+function runIdCoversProfileTest() {
+  const dir = mkdtempSync(join(tmpdir(), 'cmate-orch-runid-in-'));
+  const issuesPath = join(dir, 'issues.json');
+  writeFileSync(issuesPath, JSON.stringify(RUN_ID_ISSUE));
+
+  const basePath = writeProfileVariant(dir, 'base.json', {});
+
+  // Each entry: the field, the profile that differs only in it, the extra CLI
+  // options both sides need, and the plan projection that must ALSO differ.
+  const variants = [
+    {
+      field: 'baseline',
+      overrides: { baseline: ['bundle exec rspec'] },
+      args: [],
+      project: (plan) => plan.issues[0].test_expectations,
+    },
+    {
+      field: 'branch_template',
+      overrides: { branch_template: 'work/{number}-{slug}' },
+      args: [],
+      project: (plan) => plan.issues[0].branch,
+    },
+    {
+      field: 'worktree_template',
+      overrides: { worktree_template: '../wt-{number}' },
+      args: [],
+      project: (plan) => plan.issues[0].worktree,
+    },
+    {
+      // Both sides pass --allow-unverified, so the flag is not what differs —
+      // without it the unverified side would exit 3 and never reach a run id.
+      field: 'verified',
+      overrides: { verified: false },
+      args: ['--allow-unverified'],
+      project: (plan) => [plan.risk.level, plan.risk.factors.map((f) => f.code)],
+    },
+    {
+      // `app/{dir}{base}.rb` -> `spec/{dir}{base}_spec.rb` is the L2 mirror of
+      // #149: a convention no L1 path rule derives, declared in the profile.
+      field: 'scope_companions',
+      overrides: {
+        scope_companions: {
+          derive: [{ when: 'app/{dir}{base}.rb', add: ['spec/{dir}{base}_spec.rb'] }],
+        },
+      },
+      args: [],
+      project: (plan) => plan.issues[0].suspected_files,
+    },
+  ];
+
+  for (const variant of variants) {
+    log(`  a profile differing only in \`${variant.field}\` derives a different run id (#157)`);
+    const variantPath = writeProfileVariant(dir, `${variant.field}.json`, variant.overrides);
+    const left = planWithProfile(basePath, issuesPath, variant.args);
+    const right = planWithProfile(variantPath, issuesPath, variant.args);
+    if (!check(left.exit === 0 && right.exit === 0, `both plans should succeed, exited ${left.exit}/${right.exit}`)) continue;
+    check(
+      left.result.run_id !== right.result.run_id,
+      `editing \`${variant.field}\` alone left the run id at ${left.result.run_id}`,
+    );
+    // The half that makes the assertion above mean something: the field really
+    // does move the plan, so the two ids are naming two different plans.
+    check(
+      !deepEqual(variant.project(left.result.plan), variant.project(right.result.plan)),
+      `\`${variant.field}\` did not change the plan it is supposed to decide `
+        + `(${JSON.stringify(variant.project(left.result.plan))}); the run-id assertion above is measuring nothing`,
+    );
+  }
+
+  // Key ORDER is not a difference. A profile is a JSON object, and a hand-edited
+  // one whose keys moved is the same profile, so re-ordering its keys must not
+  // fork a run id. Nothing in the signature sorts keys — the guarantee comes from
+  // normalizeProfile REBUILDING the profile field by field before it is ever
+  // hashed. That is a load-time property nothing else measures, and hashing the
+  // whole profile is what made it load-bearing: a future field that passed a
+  // caller-supplied object through unrebuilt would fork the id on a cosmetic
+  // edit, and this is the assertion that would say so.
+  log('  re-ordering a profile\'s keys does not change the run id (#157)');
+  const reorderedPath = join(dir, 'reordered.json');
+  const reordered = {};
+  for (const key of Object.keys(RUN_ID_BASE_PROFILE).reverse()) reordered[key] = RUN_ID_BASE_PROFILE[key];
+  writeFileSync(reorderedPath, `${JSON.stringify(reordered, null, 2)}\n`);
+  const straight = planWithProfile(basePath, issuesPath);
+  const shuffled = planWithProfile(reorderedPath, issuesPath);
+  if (check(straight.exit === 0 && shuffled.exit === 0, 'both key orders should plan successfully')) {
+    check(
+      straight.result.run_id === shuffled.result.run_id,
+      `re-ordering profile keys forked the run id (${straight.result.run_id} / ${shuffled.result.run_id})`,
+    );
+  }
+
+  // Point two of the two-point measurement: nothing about widening the hash
+  // loosened no-overwrite. The same profile, issues and options derive the same
+  // id, the plan artifact is byte-identical across two runs directories (the runs
+  // directory is not an input and must not reach a byte of the plan), and a
+  // second run into the SAME directory is still refused.
+  log('  an identical re-run still derives the same run id and is still refused (#157)');
+  const again = planWithProfile(basePath, issuesPath);
+  if (check(again.exit === 0, `the repeat plan should succeed, exited ${again.exit}`)) {
+    check(
+      straight.result.run_id === again.result.run_id,
+      `an identical re-run forked the run id (${straight.result.run_id} / ${again.result.run_id})`,
+    );
+    const bytes = [
+      readFileSync(join(straight.runsDir, straight.result.run_id, 'plan.json'), 'utf8'),
+      readFileSync(join(again.runsDir, again.result.run_id, 'plan.json'), 'utf8'),
+    ];
+    check(bytes[0] === bytes[1], 'two runs of the same input produced different plan bytes');
+  }
+
+  const overwrite = runRunner([
+    '471', '--profile-json', basePath, '--issue-json', issuesPath, '--runs-dir', straight.runsDir,
+  ]);
+  check(overwrite.exit === 4, `re-planning into an existing run directory should exit 4, exited ${overwrite.exit}`);
+  const overwriteResult = JSON.parse(overwrite.stdout);
+  check(overwriteResult.errors.some((e) => e.code === 'run_exists'), 'the repeat run should fail with run_exists');
+  const detail = overwriteResult.errors.map((e) => e.detail).join(' ');
+  check(detail.includes('--run-id'), `run_exists detail should name the --run-id workaround: ${detail}`);
+  check(detail.includes('--runs-dir'), `run_exists detail should name the --runs-dir workaround: ${detail}`);
+  // The claim the message is no longer allowed to make (#157). The hash cannot
+  // see the cwd origin the default-profile cross-check reads, so "nothing
+  // changed" is a conclusion for the operator to reach, not one for the runner
+  // to assert. The message must point at the existing plan instead.
+  check(
+    !/nothing changed/i.test(detail),
+    `run_exists detail still asserts that nothing changed: ${detail}`,
+  );
+  check(detail.includes('plan.json'), `run_exists detail should point at the existing plan.json: ${detail}`);
+  // The five fields the old three-field hash missed are named, because the
+  // operator reading this is deciding whether their profile edit is the reason
+  // this id already exists.
+  for (const field of ['baseline', 'branch_template', 'worktree_template', 'verified', 'scope_companions']) {
+    check(detail.includes(field), `run_exists detail should name the profile field ${field}: ${detail}`);
+  }
+}
+
+// =============================================================================
 // Test companions: byte-identical derivation (Issue #147)
 // =============================================================================
 //
@@ -4637,6 +4835,9 @@ function main() {
   for (const caseId of caseIds) runCase(caseId);
   rerunSemanticsTest();
 
+  log('  -- run id --');
+  runIdCoversProfileTest();
+
   log('  -- dispatch cases --');
   const dispatchIds = existsSync(DISPATCH_CASES_DIR)
     ? readdirSync(DISPATCH_CASES_DIR).filter((name) => existsSync(join(DISPATCH_CASES_DIR, name, 'case.json'))).sort()
@@ -4711,7 +4912,7 @@ function main() {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, contract parity, launcher resolution, worktree-setup input, reverify input, auto-yes arming, unattended input + exclusivity + merge, unattended stage C (gates + merge-prs + uat)`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, run id vs profile, contract parity, launcher resolution, worktree-setup input, reverify input, auto-yes arming, unattended input + exclusivity + merge, unattended stage C (gates + merge-prs + uat)`);
 }
 
 main();

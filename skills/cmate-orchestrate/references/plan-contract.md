@@ -40,8 +40,9 @@ plan は入力の純粋関数である。同じ入力からは byte 単位で同
 plan を決める入力は次だけである。
 
 - Issue 集合（`issues`）と **Issue 内容（title / body / labels。labels は順序を無視）**
-- base branch（profile 由来、`--base` で上書き可）
-- profile（`id` と `repository`）
+- **解決後の profile 全体**（`--repo` / `--base` 上書きと、それが誘発する verified 降格を
+  適用した後の姿。`id` / `repository` / `base` だけでなく `baseline` /
+  `branch_template` / `worktree_template` / `verified` / `scope_companions` を含む）
 - `max_parallel`
 - dependency override（`--depends`）と `--no-infer`
 - `--order`
@@ -55,6 +56,24 @@ Issue 内容が hash に入っているため（Issue #46 / CommandMate #1678 B-
 **自動的に新しい run_id** になり、`run_exists` に阻まれない。逆に本文まで完全に同一の
 再実行は従来どおり同じ run_id に導かれ、上書きは拒否される。
 
+profile は **field を選ばず丸ごと** hash する（Issue #157）。以前は `id` / `repository` /
+`base` の3つだけを hash しており、`baseline`（`test_expectations` を決める）、
+`branch_template` / `worktree_template`（`branch` / `worktree` を決める）、
+`verified`（`unverified_profile` の risk factor を決める）、
+`scope_companions`（`suspected_files` / `scope_defaults` を決める）は hash の外にあった。
+その結果 **中身の違う plan が同じ既定 run_id を主張しえた**。列挙を直すのではなく列挙をやめた
+のは、profile に field が増えるたびに人間が「これは plan に効くか」を判定し直す必要をなくす
+ためである —— その判定を誤ったことが #157 の原因そのものだった。
+したがって **profile のどの field を編集しても既定 run_id は変わる**。plan に効かない field
+を編集した場合も変わるが、それは安全な側の誤差である（新しい id は新しい directory を作る
+だけで、古い run を上書きしない）。`--resume` は dispatch directory を指すので影響を受けない。
+profile の **key の並び順は差分ではない**。手書き profile の key を並べ替えても run_id は
+変わらない。これは hash 側で sort しているからではなく、profile の loader が field を1つずつ
+**組み直して**から返すからである（`scope_companions` の各 rule も同様に組み直される）。
+hash 側に sort を置くと、どの入力でも挙動の変わらない検査不能な防御になる —— それは本 Issue が
+直そうとしている「コードが述べていない主張」と同じ形なので、置いていない。順序の性質は
+それを実際に保証している loader の層に対して fixture で固定してある。
+
 ひとつだけ cwd に依存する項目がある。**profile が既定値に解決された場合のみ**、
 `warnings` に `profile_repository_mismatch` が載るかどうかが cwd の `origin` に依存する
 （[profile-contract.md](./profile-contract.md) 第6節）。plan は「入力 + cwd の origin」の
@@ -63,9 +82,15 @@ Issue 内容が hash に入っているため（Issue #46 / CommandMate #1678 B-
 ## 2. run の隔離
 
 - run artifact は `<runs-dir>/<run_id>/` 配下に書く。
-- run_id の既定は入力 hash（`plan-<12hex>`、Issue 内容を含む）。`--run-id` で明示上書きできる。
+- run_id の既定は入力 hash（`plan-<12hex>`、Issue 内容と profile 全体を含む）。
+  `--run-id` で明示上書きできる。
 - run directory が既に存在する場合は **上書きせず** `run_exists` で失敗する。
   エラーメッセージは回避例（`--run-id <new-id>` / `--runs-dir <dir>`）を明示する。
+- `run_exists` は「**同じ id に hash された run が既にある**」までしか述べない。
+  「何も変えていない」とは**断定しない**（Issue #157）。既定 profile の
+  `profile_repository_mismatch` 判定に使う cwd の `origin` は hash の外にあり、
+  同じ id でも plan が違いうるからである。メッセージは既存の `plan.json` を指すので、
+  実際に同じ plan かどうかはそれと突き合わせて判断する。
 
 ## 3. dependency
 
