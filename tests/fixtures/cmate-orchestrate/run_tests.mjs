@@ -583,6 +583,36 @@ function runCase(caseId) {
       );
     }
   }
+  // `issues[].questions` is the field DISPATCH reads to refuse an issue, and the
+  // only place the planner's reason survives into the plan artifact. Two shapes are
+  // asserted (Issue #145): the exact COUNT, because "one warning and one question"
+  // is the contract an inferred question joins — a second copy would double-report a
+  // single finding — and substrings, because the L3 question quotes the acceptance
+  // criterion VERBATIM, which is what lets a reviewer confirm a false positive
+  // without opening the issue. A warning detail containing the text is not the same
+  // assertion: dispatch reads this field, not `warnings`.
+  if (expect.questions_count) {
+    for (const [number, count] of Object.entries(expect.questions_count)) {
+      const issue = plan.issues.find((i) => i.number === Number(number));
+      check(
+        issue !== undefined && issue.questions.length === count,
+        `questions of #${number} number ${issue?.questions.length} !== ${count}: ${JSON.stringify(issue?.questions)}`,
+      );
+    }
+  }
+  if (expect.questions_include) {
+    for (const [number, needles] of Object.entries(expect.questions_include)) {
+      const issue = plan.issues.find((i) => i.number === Number(number));
+      if (check(issue !== undefined, `no issue #${number} in the plan`)) {
+        for (const needle of needles) {
+          check(
+            issue.questions.some((question) => question.includes(needle)),
+            `no question of #${number} contains "${needle}"; questions: ${JSON.stringify(issue.questions)}`,
+          );
+        }
+      }
+    }
+  }
   // The machine-readable acceptance block (Issue #114), asserted exactly —
   // including `null`, which is what a body with no block and a body with a
   // BROKEN block both produce. The two are told apart by warning_codes, and a
@@ -4323,6 +4353,88 @@ function testCompanionBoundTest() {
   check(issue.suspected_files.includes('src/m36.ts'), 'the 36th source file is declared and must stay in scope');
 }
 
+// =============================================================================
+// 裁定 A: an inference may stop the machine, never instruct it (Issue #145)
+// =============================================================================
+//
+// adr-scope-derivation.md section 8 draws the line L3 must not cross: it writes
+// ZERO bytes into the fields a machine consumes — `suspected_files` (which
+// dispatch copies into scope.allow verbatim), `scope_defaults`, and
+// `acceptance_gates` (which becomes the contract's `require`). Its only outputs
+// are `warnings` and `questions`, which a human reads and which stop the run.
+//
+// A per-case expectation cannot see this: it pins what the fields ARE, not that
+// they are UNAFFECTED. So the same issue is planned twice, differing only in the
+// one criterion that trips the detector, and the two plans are compared field by
+// field. Everything but the two human-facing channels — down to `run_id`, which
+// hashes the issue bodies and therefore MUST differ — has to be identical. An
+// implementation that "helpfully" added a `*.test.*` pattern to the scope, or a
+// gate to the contract, on the strength of a sentence it read in prose would pass
+// every case fixture in this suite and fail here.
+function inferenceDoesNotInstructTest() {
+  log('  an L3 inference stops the run without touching the contract fields (#145)');
+  const dir = mkdtempSync(join(tmpdir(), 'cmate-orch-l3-'));
+  const bodyFor = (criterion) =>
+    '`scripts/verify-run.sh` の gate 判定が新しい GATE 行を読めていない。\n\n'
+    + '## 対象ファイル\n- `scripts/verify-run.sh`\n\n'
+    + `## Acceptance criteria\n- [ ] ${criterion}\n`;
+  const plans = [
+    // Fires: an active demand for a test, and `.sh` derives no test path.
+    '新しい GATE 行を読む unit test を追加し、それが判定する',
+    // Silent: the same issue asking for the same behaviour without a test.
+    '新しい GATE 行が判定に反映される',
+  ].map((criterion, index) => {
+    const issuesPath = join(dir, `issues-${index}.json`);
+    writeFileSync(issuesPath, JSON.stringify({
+      issues: [{ number: 470, title: 'fix: verify-run の gate 判定を直す', body: bodyFor(criterion), labels: ['bug'] }],
+    }));
+    const result = runRunner(buildArgs(['470', '--profile', 'node-commandmate'], issuesPath, join(dir, `runs-${index}`)));
+    return JSON.parse(result.stdout);
+  });
+
+  const [fired, silent] = plans;
+  check(fired.status === 'partial', `the demanding body should plan as partial, got "${fired.status}"`);
+  check(silent.status === 'success', `the neutral body should plan as a clean success, got "${silent.status}"`);
+  check(
+    warningCodesOf(fired).join() === 'acceptance_requires_tests_but_scope_has_none' && warningCodesOf(silent).length === 0,
+    `warning codes ${JSON.stringify(warningCodesOf(fired))} / ${JSON.stringify(warningCodesOf(silent))} are not the expected fired/silent pair`,
+  );
+
+  const firedIssue = fired.plan.issues[0];
+  const silentIssue = silent.plan.issues[0];
+  check(firedIssue.questions.length === 1, `the firing plan should carry exactly one question, got ${firedIssue.questions.length}`);
+  check(silentIssue.questions.length === 0, `the silent plan should carry no question, got ${silentIssue.questions.length}`);
+  for (const field of ['suspected_files', 'scope_defaults', 'reference_files', 'acceptance_gates', 'test_expectations']) {
+    check(
+      deepEqual(firedIssue[field], silentIssue[field]),
+      `L3 changed ${field}: ${JSON.stringify(firedIssue[field])} !== ${JSON.stringify(silentIssue[field])}`,
+    );
+  }
+  // The rest of the plan, minus the channels the detector is allowed to write and
+  // the identifiers that hash the issue body it read. `risk` is nulled for a
+  // different reason: assessRisk has counted `questions.length` since Issue #52,
+  // so a run whose only finding is a question has read "moderate" off the question
+  // channel rather than out of anything L3 wrote — the same value
+  // `no_acceptance_criteria` produces, and advisory either way.
+  const machineFacing = (result) => {
+    const plan = JSON.parse(JSON.stringify(result.plan));
+    plan.run_id = null;
+    plan.warnings = null;
+    plan.risk = null;
+    for (const issue of plan.issues) {
+      issue.questions = null;
+      // acceptance_criteria differs by construction: it holds the criterion that
+      // was edited to make one body fire and the other not.
+      issue.acceptance_criteria = null;
+    }
+    return plan;
+  };
+  check(
+    deepEqual(machineFacing(fired), machineFacing(silent)),
+    'L3 changed a machine-facing part of the plan outside warnings/questions',
+  );
+}
+
 function main() {
   log('cmate-orchestrate fixture tests');
   selfTestValidator();
@@ -4396,6 +4508,7 @@ function main() {
   log('  -- scope derivation --');
   testCompanionDeterminismTest();
   testCompanionBoundTest();
+  inferenceDoesNotInstructTest();
 
   log('');
   if (failures > 0) {

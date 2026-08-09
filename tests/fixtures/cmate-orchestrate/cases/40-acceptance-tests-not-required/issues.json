@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 456,
+      "title": "fix: backup の保持世代に上限を入れる",
+      "body": "`scripts/backup.sh` が世代を無制限に残す。\n\n## 対象ファイル\n- `scripts/backup.sh`\n\n## Acceptance criteria\n- [ ] 保持世代の上限を追加する。unit test は不要（同じ観点を e2e が持つ）\n",
+      "labels": ["bug"]
+    },
+    {
+      "number": 457,
+      "title": "fix: prune the backup retention list",
+      "body": "`scripts/prune.sh` keeps every generation.\n\n## Target files\n- `scripts/prune.sh`\n\n## Acceptance criteria\n- [ ] The retention cap is added; no new unit test is needed\n",
+      "labels": ["bug"]
+    }
+  ]
+}

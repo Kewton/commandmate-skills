@@ -50,6 +50,10 @@ node tests/fixtures/cmate-orchestrate/run_tests.mjs
 - golden がある case では、plan が checked-in の期待値と byte 一致すること
 - `warning_codes` を宣言した case では、warnings の code 列がその集合と完全一致すること
   （`plan.warnings` と `result.warnings` の一致も確認する）
+- `questions_count` / `questions_include` を宣言した case では、`issues[].questions` の**件数**と
+  **含む文字列**が期待どおりであること。dispatch が読むのは `warnings` ではなくこの field であり、
+  推論由来の question（`acceptance_requires_tests_but_scope_has_none`, #145）は判定の元になった
+  受入条件を**原文で**載せるので、件数と原文の両方を固定する
 
 case.json に `cwd` があると、harness は使い捨ての working directory を作ってそこで planner を
 起動する（`{"git": true, "origin": "<url>"}` なら `git init` + `remote add origin`、

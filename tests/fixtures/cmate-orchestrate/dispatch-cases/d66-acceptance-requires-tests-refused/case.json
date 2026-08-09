@@ -1,0 +1,50 @@
+{
+  "description": "Issue #145 段3 (ADR adr-scope-derivation.md section 7), the half that makes the detection worth having: the L3 question rides the EXISTING open-question gate, so the plan that carries it dispatches NOBODY. #240 demands a unit test while declaring only a shell script — an ecosystem L1 has no rule for, so no test path reaches its scope.allow — and the run stops before the first send. #241 would have succeeded (the scenario has both workers completing with verify 0); the refusal comes from the plan, not from the world, which is exactly why a false positive here is cheap: `commandmate send` is called ZERO times, so no worker's run is spent, and the operator re-plans after editing the body — the same move a true positive asks for. `warning` alone could not do this: dispatch never reads plan.status.",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-tests-not-in-scope.json",
+    "orchestrate_args": [
+      "240",
+      "241",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": true,
+    "waves_count": 0,
+    "never_sent": [
+      240,
+      241
+    ],
+    "no_respond": true,
+    "no_contract_calls": true,
+    "cli_subcommand_counts": {
+      "send": 0
+    },
+    "blocking_codes": [
+      "open_questions"
+    ],
+    "blocking_details_include": [
+      "#240: Acceptance asks for a test but no test path is among the affected files; name it in the issue body, or say no new test is needed. Criterion: \"新しい GATE 行を読む unit test を追加し、それが判定する\"",
+      "Nothing was dispatched",
+      "--allow-questions"
+    ],
+    "summary_includes": [
+      "## open question",
+      "Criterion: \"新しい GATE 行を読む unit test を追加し、それが判定する\"",
+      "worker を 1 人も dispatch せずに停止した"
+    ]
+  }
+}

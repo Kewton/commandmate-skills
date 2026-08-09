@@ -1,0 +1,17 @@
+{
+  "description": "Issue #145, exclusion 4 of 4: 「テストは変更しない」/ \"leave the tests unchanged\". The strongest statement of the four — the author is saying the very file this detector would ask for must NOT be touched, so raising a question that asks for it inverts the issue's intent. Both criteria carry an active verb about the implementation (書き換える / \"Add\") next to a test noun, so the positive rule fires the moment this exclusion is removed.",
+  "args": ["462", "463", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "fixture", "--no-infer"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[462, 463]],
+    "merge_order": [462, 463],
+    "dependencies": [],
+    "classifications": { "462": "independent", "463": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "462": ["scripts/migrate.sh"], "463": ["scripts/load.sh"] },
+    "scope_defaults": { "462": [], "463": [] },
+    "questions_count": { "462": 0, "463": 0 }
+  }
+}

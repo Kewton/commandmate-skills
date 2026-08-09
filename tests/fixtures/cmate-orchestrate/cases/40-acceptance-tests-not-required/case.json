@@ -1,0 +1,17 @@
+{
+  "description": "Issue #145, exclusion 1 of 4 (ADR section 7): 「unit test は不要」/ \"no new unit test is needed\". Both criteria carry a test noun AND an active verb — 追加 / \"added\" — so the positive rule alone WOULD fire, which is what makes this exclusion load-bearing rather than decorative: delete it and this case goes red. The author already decided; a planner that stops the run to ask anyway is overruling a stated decision, and that is the fastest way for this warning to lose its reader — after which `--allow-questions` becomes habit and silences the real `no_acceptance_criteria` alongside it. The declared file is a shell script both times, so nothing is derived and the silence is the exclusion's alone.",
+  "args": ["456", "457", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "fixture", "--no-infer"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[456, 457]],
+    "merge_order": [456, 457],
+    "dependencies": [],
+    "classifications": { "456": "independent", "457": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "456": ["scripts/backup.sh"], "457": ["scripts/prune.sh"] },
+    "scope_defaults": { "456": [], "457": [] },
+    "questions_count": { "456": 0, "457": 0 }
+  }
+}

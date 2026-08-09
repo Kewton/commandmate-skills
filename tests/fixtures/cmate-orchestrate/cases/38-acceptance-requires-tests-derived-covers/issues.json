@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 453,
+      "title": "feat: session の保存を実装する",
+      "body": "`web/src/lib/session.ts` にセッション保存を実装する。\n\n## 対象ファイル\n- `web/src/lib/session.ts`\n\n## Acceptance criteria\n- [ ] session の保存を判定する unit test を追加する\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 454,
+      "title": "feat: rebuild the store index",
+      "body": "Rebuild the store index in `internal/store/index.go`.\n\n## Target files\n- `internal/store/index.go`\n\n## Acceptance criteria\n- [ ] Add a unit test that pins the index rebuild\n",
+      "labels": ["feature"]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 455,
+      "title": "fix: release script tags without an annotation",
+      "body": "`scripts/release.sh` creates a lightweight tag.\n\n## Target files\n- `scripts/release.sh`\n\n## Acceptance criteria\n- [ ] The release tag is annotated and signed\n- [ ] リリース前の dry-run は差分だけを出力する\n",
+      "labels": ["bug"]
+    }
+  ]
+}

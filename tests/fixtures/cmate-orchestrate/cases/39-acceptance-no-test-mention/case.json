@@ -1,0 +1,17 @@
+{
+  "description": "Issue #145, the plainest negative: the acceptance criteria never mention a test, so nothing is raised even though the declared file is a shell script the derivation has no rule for. Without this case the detector could be a `scope has no test path` check wearing the name of a test-demand check, and every shell / Rust / SQL issue in the repository would stop dispatch. Both criteria are ordinary conditions, one per language, because the noun rule reads both.",
+  "args": ["455", "--profile", "node-commandmate", "--run-id", "fixture"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[455]],
+    "merge_order": [455],
+    "dependencies": [],
+    "classifications": { "455": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "455": ["scripts/release.sh"] },
+    "scope_defaults": { "455": [] },
+    "questions_count": { "455": 0 }
+  }
+}

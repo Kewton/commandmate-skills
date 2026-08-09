@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 458,
+      "title": "fix: lint の除外規則を足す",
+      "body": "`scripts/lint.sh` が生成物まで見ている。\n\n## 対象ファイル\n- `scripts/lint.sh`\n\n## Acceptance criteria\n- [ ] lint の除外規則を追加しても、既存の unit test が緑のままである\n",
+      "labels": ["bug"]
+    },
+    {
+      "number": 459,
+      "title": "fix: widen the formatter ignore list",
+      "body": "`scripts/format.sh` reformats vendored files.\n\n## Target files\n- `scripts/format.sh`\n\n## Acceptance criteria\n- [ ] Existing unit tests still pass after the new ignore rule is added\n",
+      "labels": ["bug"]
+    }
+  ]
+}

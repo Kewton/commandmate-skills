@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 462,
+      "title": "fix: migrate の実装を書き換える",
+      "body": "`scripts/migrate.sh` の適用順が安定しない。\n\n## 対象ファイル\n- `scripts/migrate.sh`\n\n## Acceptance criteria\n- [ ] migrate の実装を書き換えるが、テストは変更しない\n",
+      "labels": ["bug"]
+    },
+    {
+      "number": 463,
+      "title": "feat: map the new column in the loader",
+      "body": "Map the new column in `scripts/load.sh`.\n\n## Target files\n- `scripts/load.sh`\n\n## Acceptance criteria\n- [ ] Add the new column mapping and leave the tests unchanged\n",
+      "labels": ["feature"]
+    }
+  ]
+}

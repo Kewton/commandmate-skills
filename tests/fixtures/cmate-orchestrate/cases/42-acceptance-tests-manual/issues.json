@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 460,
+      "title": "feat: deploy に rollback 手順を足す",
+      "body": "`scripts/deploy.sh` に rollback 手順を足す。\n\n## 対象ファイル\n- `scripts/deploy.sh`\n\n## Acceptance criteria\n- [ ] 追加した rollback 手順の反映は手動テストで確認する\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 461,
+      "title": "feat: add a health check to the smoke script",
+      "body": "Add a health check to `scripts/smoke.sh`.\n\n## Target files\n- `scripts/smoke.sh`\n\n## Acceptance criteria\n- [ ] The new health check is verified by manual testing\n",
+      "labels": ["feature"]
+    }
+  ]
+}

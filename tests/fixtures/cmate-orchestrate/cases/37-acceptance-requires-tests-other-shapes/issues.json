@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 451,
+      "title": "fix: install script rejects a relative prefix",
+      "body": "`scripts/install.sh` accepts a relative `--prefix` and installs outside the tree.\n\n## Target files\n- `scripts/install.sh`\n\n## Acceptance criteria\n- [ ] Add a unit test that asserts a relative prefix is rejected\n- [ ] An absolute prefix still installs into that directory\n",
+      "labels": ["bug"]
+    },
+    {
+      "number": 452,
+      "title": "fix: 描画のクリップ矩形がずれる",
+      "body": "`src/render.c` のクリップ矩形が 1px ずれる。\n\n## 対象ファイル\n- `src/render.c`\n\n## Acceptance criteria\n- [ ] クリップ矩形の回帰は test_render.c で固定する\n",
+      "labels": ["bug"]
+    }
+  ]
+}
