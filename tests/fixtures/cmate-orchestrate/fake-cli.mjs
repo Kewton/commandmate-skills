@@ -732,6 +732,18 @@ function runDeclaredGates(spec, issue, worktreeId) {
   return { lines, exit: failing.length > 0 ? VERIFY_FAILED : 0, failing };
 }
 
+// Where a `GATE <id> PASS|FAIL` line goes. MEASURED against CommandMate 0.22.2:
+// verify-runner's reportGates writes them to **stderr**, keeping stdout free for
+// the machine-readable output a caller pipes. This fake used to print them to
+// stdout, which copied WHAT the real CLI prints but not WHERE — so every fixture
+// asserting `verification_gates` was exercising a stream the real CLI never uses,
+// and the runner's "read stdout only" bug (#160) stayed green here while it
+// emptied `verification.gates` on every real contract pass. Keep this on stderr:
+// it is the only thing making those assertions mean anything.
+function writeGateLine(line) {
+  process.stderr.write(`${line}\n`);
+}
+
 function emit(object) {
   process.stdout.write(`${JSON.stringify(object)}\n`);
   process.exit(0);
@@ -1155,14 +1167,14 @@ function main() {
       // red) instead of asserting that the fake was told to say 20.
       if (spec.run_declared_gates) {
         const run = runDeclaredGates(spec, issue, worktreeId);
-        for (const line of run.lines) process.stdout.write(`${line}\n`);
+        for (const line of run.lines) writeGateLine(line);
         process.exit(run.exit);
       }
       // Like the real CLI (verify-runner's reportGates), a judged run prints one
       // `GATE <id> PASS|FAIL` line per executed gate (#1678 B-5): pass runs list
       // work-evidence plus the scenario's pass_gates (default ['baseline']),
       // fail runs list work-evidence plus the failed_gates. Exit 99 judged
-      // nothing, so nothing is printed.
+      // nothing, so nothing is printed. They go to STDERR — see writeGateLine.
       const exit = verifyExitFor(worker, issue);
       const gateLines = [];
       if (exit === 0) {
@@ -1182,7 +1194,7 @@ function main() {
       // the pass was based on, which the runner must record rather than leave as
       // an empty list (Issue #83).
       if (worker.gate_lines === false) gateLines.length = 0;
-      for (const line of gateLines) process.stdout.write(`${line}\n`);
+      for (const line of gateLines) writeGateLine(line);
       process.exit(exit);
     }
     if (state === 'prompt') {

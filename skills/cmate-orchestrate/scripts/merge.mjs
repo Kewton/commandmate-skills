@@ -324,6 +324,11 @@ function runCli(bin, args, extra = {}) {
       maxBuffer: 8 * 1024 * 1024,
       ...extra,
     });
+    // `stderr: ''` on success is execFileSync's API, not a decision: it returns
+    // stdout ALONE. Nothing here reads a CLI's stderr on a zero exit — this
+    // runner parses stdout JSON and `git` output — so there is nothing to lose.
+    // Where it DID matter (dispatch's async twin dropping the `GATE` lines that
+    // `wait --verify` prints to stderr) the fix was to keep stderr there, #160.
     return { ok: true, stdout, stderr: '', status: 0 };
   } catch (error) {
     return {

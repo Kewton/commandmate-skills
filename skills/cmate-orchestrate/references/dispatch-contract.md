@@ -128,7 +128,16 @@ commit を要求する（下流の PR 作成は commit を必要とする）。
 （CommandMate の検証 run document は schema version を持たない）。
 
 `gates` には、その run の `GATE <id> PASS|FAIL` 行をそのまま転記する（#47 / CommandMate #1678 B-5:
-**report 単体で「何が pass の根拠か」が読める**ようにするため）。`outcome: pass` なのに `gates` が
+**report 単体で「何が pass の根拠か」が読める**ようにするため）。この行は **stderr に出る**
+（実測: CommandMate 0.22.2 の verify-runner `reportGates`。stdout は機械可読な出力のために空けてある）。
+runner は **stdout と stderr の両方**を読む —— `GATE` 行は行頭一致で拾うので、2つの stream が
+混ざっても、どちらも印字していない gate が生まれることはない（#160）。
+
+`gates` は最大 **50 件**で、それを超えた run では **FAIL を先に**拾ったうえで切り、
+**切った件数を `checks` の1行に書く**（#165）。黙って切ると「この run には gate が 50 本
+在った」と読めてしまい、fail を名指す gate が窓から落ちても report がそれを言えない。
+
+`outcome: pass` なのに `gates` が
 空になった場合は、**拾えなかったこと自体**を limitation `verification_gates_unrecorded` と `checks`
 の1行に記録する。planner の `unrecognized_file_extension` と同型で、空のリストを「何も走らなかった」
 と読ませない。**`--unattended` ではこれが blocking になる**（段階 C。第3.0.3節）——
@@ -633,7 +642,7 @@ runner 間で伝播しない**（同 ADR 第8節）: この runner が unattende
 | 締め付け | 内容 |
 |---|---|
 | 契約経路の必須化 | `--contract-mode require` を含意する（第2.7節） |
-| 裁定の根拠の要求 | **`verification_gates_unrecorded` を limitation ではなく blocking として扱う**（段階 C。第2.1.1節 / ADR 第6.5節）。契約 pass なのに `GATE <id> PASS|FAIL` 行を1本も読めなかった Issue が1つでもあれば、その wave を最後に **次の wave を dispatch せずに停止**する（`partial` / exit 7 / `stop_reason: dispatch_error`）。**裁定そのものは書き換えない** —— exit code の pass はそのまま `verification.outcome: pass` で残り、barrier の `advanced` も true のままである。変わるのは「その run が先へ進むか」だけである。**`human_required` は false**（GATE 行を出す CommandMate で再実行すれば解ける） |
+| 裁定の根拠の要求 | **`verification_gates_unrecorded` を limitation ではなく blocking として扱う**（段階 C。第2.1.1節 / ADR 第6.5節）。契約 pass なのに `GATE <id> PASS|FAIL` 行を1本も読めなかった Issue が1つでもあれば、その wave を最後に **次の wave を dispatch せずに停止**する（`partial` / exit 7 / `stop_reason: dispatch_error`）。**裁定そのものは書き換えない** —— exit code の pass はそのまま `verification.outcome: pass` で残り、barrier の `advanced` も true のままである。変わるのは「その run が先へ進むか」だけである。**`human_required` は false**（読めなかった原因を潰せば解ける。0.26.0 までは runner が stdout しか読んでいなかったので、**その版では再実行しても解けなかった** —— #160 で両方の stream を読むようにした） |
 | pre-flight の scope 検査 | **plan の全 Wave の全 Issue**について、その Issue の実行契約が `scope.allow` を宣言できることを、**`--out` を作る前**に確かめる。1件でも空なら **1人も dispatch せず** `blocking_reasons` に `contract_scope_unknown` を Issue ごとに1件、`stop_reason: dispatch_error` / `status: failure`（exit 1）で停止する。判定は plan の `suspected_files` そのものではなく **契約が受理できるパターンが1つ以上残るか**（絶対 path・`..` 脱出・長すぎる pattern 等は契約の parser が拒否するので落とす）。同じ pre-flight で **未回答の planner question も同時に**報告する（`open_questions`。`--allow-questions` は拒否されるので、この停止を押し通す道は無い）。**この停止も `--out` を消費しない** |
 | 排他 lock | 下記 |
 | wall-clock budget | `--wall-clock-budget` の明示が必須（第3.0.4節） |

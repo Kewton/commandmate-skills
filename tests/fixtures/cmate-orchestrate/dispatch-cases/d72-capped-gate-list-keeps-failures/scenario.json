@@ -1,0 +1,272 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "100": {
+      "state": "completed",
+      "commit_on": 1,
+      "verify_exits": [
+        20
+      ],
+      "failed_gates": [
+        {
+          "id": "failing-01",
+          "exit": 20,
+          "logTail": "failing-01: exited 20"
+        },
+        {
+          "id": "failing-02",
+          "exit": 20,
+          "logTail": "failing-02: exited 20"
+        },
+        {
+          "id": "failing-03",
+          "exit": 20,
+          "logTail": "failing-03: exited 20"
+        },
+        {
+          "id": "failing-04",
+          "exit": 20,
+          "logTail": "failing-04: exited 20"
+        },
+        {
+          "id": "failing-05",
+          "exit": 20,
+          "logTail": "failing-05: exited 20"
+        },
+        {
+          "id": "failing-06",
+          "exit": 20,
+          "logTail": "failing-06: exited 20"
+        },
+        {
+          "id": "failing-07",
+          "exit": 20,
+          "logTail": "failing-07: exited 20"
+        },
+        {
+          "id": "failing-08",
+          "exit": 20,
+          "logTail": "failing-08: exited 20"
+        },
+        {
+          "id": "failing-09",
+          "exit": 20,
+          "logTail": "failing-09: exited 20"
+        },
+        {
+          "id": "failing-10",
+          "exit": 20,
+          "logTail": "failing-10: exited 20"
+        },
+        {
+          "id": "failing-11",
+          "exit": 20,
+          "logTail": "failing-11: exited 20"
+        },
+        {
+          "id": "failing-12",
+          "exit": 20,
+          "logTail": "failing-12: exited 20"
+        },
+        {
+          "id": "failing-13",
+          "exit": 20,
+          "logTail": "failing-13: exited 20"
+        },
+        {
+          "id": "failing-14",
+          "exit": 20,
+          "logTail": "failing-14: exited 20"
+        },
+        {
+          "id": "failing-15",
+          "exit": 20,
+          "logTail": "failing-15: exited 20"
+        },
+        {
+          "id": "failing-16",
+          "exit": 20,
+          "logTail": "failing-16: exited 20"
+        },
+        {
+          "id": "failing-17",
+          "exit": 20,
+          "logTail": "failing-17: exited 20"
+        },
+        {
+          "id": "failing-18",
+          "exit": 20,
+          "logTail": "failing-18: exited 20"
+        },
+        {
+          "id": "failing-19",
+          "exit": 20,
+          "logTail": "failing-19: exited 20"
+        },
+        {
+          "id": "failing-20",
+          "exit": 20,
+          "logTail": "failing-20: exited 20"
+        },
+        {
+          "id": "failing-21",
+          "exit": 20,
+          "logTail": "failing-21: exited 20"
+        },
+        {
+          "id": "failing-22",
+          "exit": 20,
+          "logTail": "failing-22: exited 20"
+        },
+        {
+          "id": "failing-23",
+          "exit": 20,
+          "logTail": "failing-23: exited 20"
+        },
+        {
+          "id": "failing-24",
+          "exit": 20,
+          "logTail": "failing-24: exited 20"
+        },
+        {
+          "id": "failing-25",
+          "exit": 20,
+          "logTail": "failing-25: exited 20"
+        },
+        {
+          "id": "failing-26",
+          "exit": 20,
+          "logTail": "failing-26: exited 20"
+        },
+        {
+          "id": "failing-27",
+          "exit": 20,
+          "logTail": "failing-27: exited 20"
+        },
+        {
+          "id": "failing-28",
+          "exit": 20,
+          "logTail": "failing-28: exited 20"
+        },
+        {
+          "id": "failing-29",
+          "exit": 20,
+          "logTail": "failing-29: exited 20"
+        },
+        {
+          "id": "failing-30",
+          "exit": 20,
+          "logTail": "failing-30: exited 20"
+        },
+        {
+          "id": "failing-31",
+          "exit": 20,
+          "logTail": "failing-31: exited 20"
+        },
+        {
+          "id": "failing-32",
+          "exit": 20,
+          "logTail": "failing-32: exited 20"
+        },
+        {
+          "id": "failing-33",
+          "exit": 20,
+          "logTail": "failing-33: exited 20"
+        },
+        {
+          "id": "failing-34",
+          "exit": 20,
+          "logTail": "failing-34: exited 20"
+        },
+        {
+          "id": "failing-35",
+          "exit": 20,
+          "logTail": "failing-35: exited 20"
+        },
+        {
+          "id": "failing-36",
+          "exit": 20,
+          "logTail": "failing-36: exited 20"
+        },
+        {
+          "id": "failing-37",
+          "exit": 20,
+          "logTail": "failing-37: exited 20"
+        },
+        {
+          "id": "failing-38",
+          "exit": 20,
+          "logTail": "failing-38: exited 20"
+        },
+        {
+          "id": "failing-39",
+          "exit": 20,
+          "logTail": "failing-39: exited 20"
+        },
+        {
+          "id": "failing-40",
+          "exit": 20,
+          "logTail": "failing-40: exited 20"
+        },
+        {
+          "id": "failing-41",
+          "exit": 20,
+          "logTail": "failing-41: exited 20"
+        },
+        {
+          "id": "failing-42",
+          "exit": 20,
+          "logTail": "failing-42: exited 20"
+        },
+        {
+          "id": "failing-43",
+          "exit": 20,
+          "logTail": "failing-43: exited 20"
+        },
+        {
+          "id": "failing-44",
+          "exit": 20,
+          "logTail": "failing-44: exited 20"
+        },
+        {
+          "id": "failing-45",
+          "exit": 20,
+          "logTail": "failing-45: exited 20"
+        },
+        {
+          "id": "failing-46",
+          "exit": 20,
+          "logTail": "failing-46: exited 20"
+        },
+        {
+          "id": "failing-47",
+          "exit": 20,
+          "logTail": "failing-47: exited 20"
+        },
+        {
+          "id": "failing-48",
+          "exit": 20,
+          "logTail": "failing-48: exited 20"
+        },
+        {
+          "id": "failing-49",
+          "exit": 20,
+          "logTail": "failing-49: exited 20"
+        },
+        {
+          "id": "failing-50",
+          "exit": 20,
+          "logTail": "failing-50: exited 20"
+        }
+      ]
+    }
+  }
+}

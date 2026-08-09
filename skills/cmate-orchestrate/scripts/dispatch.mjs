@@ -1237,14 +1237,21 @@ const execFileAsync = promisify(execFile);
 // error.code (a number) where execFileSync used error.status; a spawn failure keeps
 // a string code (e.g. "ENOENT"). Normalizing to a numeric `status` lets the wait
 // exit-code checks (prompt 10 / timeout 124) read exactly as the sync path does.
+//
+// The SUCCESS branch keeps stderr (#160). A CLI that exits 0 still says things on
+// stderr — `commandmate wait --verify` prints its whole `GATE <id> PASS|FAIL`
+// report there — and dropping it as `''` made every contract-path pass record an
+// empty `verification.gates`. The sync runCli above cannot do the same: execFileSync
+// returns stdout ALONE on success, so its `stderr: ''` is an API limit, not a
+// choice. Nothing reads GATE lines off the sync path, which is why it stays as is.
 async function runCliAsync(bin, args, extra = {}) {
   try {
-    const { stdout } = await execFileAsync(bin, args, {
+    const { stdout, stderr } = await execFileAsync(bin, args, {
       encoding: 'utf8',
       maxBuffer: 8 * 1024 * 1024,
       ...budgetedExtra(extra),
     });
-    return { ok: true, stdout, stderr: '', status: 0 };
+    return { ok: true, stdout, stderr, status: 0 };
   } catch (error) {
     return {
       ok: false,
@@ -1853,7 +1860,10 @@ const SETUP_REQUIRED_FIELDS = [
 const SETUP_STATUSES = new Set(['success', 'partial', 'failure']);
 
 // How many of the provider's own blocking reasons are lifted into this report.
-// Enough to act on, bounded so a provider cannot flood a dispatch report.
+// Enough to act on, bounded so a provider cannot flood a dispatch report. The
+// bound is NAMED where it bites (#165): five reasons shown out of nine reads as
+// "there were five" unless the detail says otherwise, and an operator who cannot
+// tell a complete list from a cut one goes looking in the wrong place.
 const MAX_SETUP_REASONS = 5;
 
 // Where the cmate-worktree-setup package sits when it is installed: next to this
@@ -2055,13 +2065,18 @@ function prepareWorktrees(inputs, plan, unresolved) {
   }
 
   if (evidence.prepared.length === 0) {
-    const own = doc.blocking_reasons
-      .slice(0, MAX_SETUP_REASONS)
-      .map((reason) => (typeof reason === 'string' ? reason : JSON.stringify(reason)))
-      .join('; ');
+    const all = doc.blocking_reasons.map((reason) => (typeof reason === 'string' ? reason : JSON.stringify(reason)));
+    const own = all.slice(0, MAX_SETUP_REASONS).join('; ');
+    // Counted OUTSIDE the excerpt on purpose: excerpt() may cut the joined text
+    // again, and the one thing that must survive both cuts is the fact that
+    // something was cut.
+    const more = Math.max(0, all.length - MAX_SETUP_REASONS);
+    const blocked = own
+      ? `; it blocked on: ${excerpt(own, 400)}${more > 0 ? ` (+${more} more reason(s) not listed here; read the provider's own report for the rest)` : ''}`
+      : ' and named no blocking reason';
     evidence.reasons.push({
       code: 'worktree_setup_failed',
-      detail: redact(`the ${SETUP_SKILL_ID} provider reported status ${doc.status} and created no worktree for ${requested.map((n) => `#${n}`).join(', ')}${own ? `; it blocked on: ${excerpt(own, 400)}` : ' and named no blocking reason'}`),
+      detail: redact(`the ${SETUP_SKILL_ID} provider reported status ${doc.status} and created no worktree for ${requested.map((n) => `#${n}`).join(', ')}${blocked}`),
     });
     return evidence;
   }
@@ -3060,17 +3075,51 @@ function gateOrigin(id, requiredGateIds) {
   return requiredGateIds.has(id) ? 'issue' : 'repo';
 }
 
-function gatesFromWaitOutput(stdout, requiredGateIds = new Set()) {
+// Both streams of a finished `wait`, as one text to scan. MEASURED against
+// CommandMate 0.22.2: reportGates writes the `GATE` lines to **stderr** and keeps
+// stdout for the machine-readable output, so a reader that looked at stdout alone
+// found none of them and recorded `gates: []` for every contract pass (#160).
+// Concatenating is safe rather than merely convenient: GATE_LINE_RE anchors at the
+// start of a line, so no interleaving of the two streams can produce a gate that
+// neither of them printed — the worst case is the order the lines are listed in.
+function waitStreams(result) {
+  return `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`;
+}
+
+// Cap the reported list, and say how much the cap ate (#165). A silent slice at
+// MAX_REPORTED_GATES reads exactly like a run that had that many gates, which is
+// the same "quietly shortened" failure `capped()`/`droppedNote()` fixed for the PR
+// body in merge.mjs. FAIL entries are taken first when the list must be cut: on a
+// failing run the gates that NAME the failure are the ones the report exists for,
+// and they must not fall out of the window behind 50 passes. A list that fits is
+// returned untouched, in the CLI's own order.
+function capGates(gates) {
+  if (gates.length <= MAX_REPORTED_GATES) return { gates, dropped: 0 };
+  const ordered = [
+    ...gates.filter((gate) => gate.verdict === 'fail'),
+    ...gates.filter((gate) => gate.verdict !== 'fail'),
+  ];
+  return { gates: ordered.slice(0, MAX_REPORTED_GATES), dropped: gates.length - MAX_REPORTED_GATES };
+}
+
+// The `checks` line a cut list owes the reader: what was shown, what was not, and
+// that the ordering was not the CLI's. Empty when nothing was dropped.
+function droppedGateChecks({ dropped }) {
+  if (dropped <= 0) return [];
+  return [`the gate list was cut to ${MAX_REPORTED_GATES} entries to bound this report; ${dropped} further gate(s) are not listed (failing gates were kept first, so the cut fell on passing ones)`];
+}
+
+// Returns { gates, dropped } — the cut is part of the answer, never silent.
+function gatesFromWaitOutput(output, requiredGateIds = new Set()) {
   const gates = [];
-  for (const line of String(stdout ?? '').split('\n')) {
+  for (const line of String(output ?? '').split('\n')) {
     const match = GATE_LINE_RE.exec(line.trim());
     if (match) {
       const id = redact(match[1]);
       gates.push({ id, verdict: match[2] === 'PASS' ? 'pass' : 'fail', origin: gateOrigin(id, requiredGateIds) });
     }
-    if (gates.length >= MAX_REPORTED_GATES) break;
   }
-  return gates;
+  return capGates(gates);
 }
 
 // `commandmate verify <worktree-id> --json` prints the verification run document
@@ -3381,14 +3430,18 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
     if (code === VERIFY_EXIT_PASS) {
       if (!passed) {
         passed = true;
+        // The GATE lines of THIS passing run are the only safe source of the
+        // gate list: a `commandmate verify` after a pass cannot bind to the
+        // succeeded task and manufactures exit 99 (#1620).
+        const passGates = gatesFromWaitOutput(waitStreams(waited), requiredGateIds);
         verdict = {
           ran: true,
           outcome: 'pass',
-          // The GATE lines of THIS passing run are the only safe source of the
-          // gate list: a `commandmate verify` after a pass cannot bind to the
-          // succeeded task and manufactures exit 99 (#1620).
-          gates: gatesFromWaitOutput(waited.stdout, requiredGateIds),
-          checks: [`commandmate wait --verify → exit ${VERIFY_EXIT_PASS} (every declared gate passed)`],
+          gates: passGates.gates,
+          checks: [
+            `commandmate wait --verify → exit ${VERIFY_EXIT_PASS} (every declared gate passed)`,
+            ...droppedGateChecks(passGates),
+          ],
         };
       }
       if (await hasNewCommit(inputs, worktreePath, baseSha)) {
@@ -3417,11 +3470,15 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
     if (code === VERIFY_EXIT_NOT_STARTED) {
       // work-evidence found no commit and no change: the worker has not started,
       // or has nothing to show yet. Never a pass.
+      const startGates = gatesFromWaitOutput(waitStreams(waited), requiredGateIds);
       verdict = {
         ran: true,
         outcome: 'fail',
-        gates: gatesFromWaitOutput(waited.stdout, requiredGateIds),
-        checks: [`commandmate wait --verify → exit ${VERIFY_EXIT_NOT_STARTED} (work-evidence found no commit and no uncommitted change)`],
+        gates: startGates.gates,
+        checks: [
+          `commandmate wait --verify → exit ${VERIFY_EXIT_NOT_STARTED} (work-evidence found no commit and no uncommitted change)`,
+          ...droppedGateChecks(startGates),
+        ],
       };
       if (turns >= inputs.maxTurns) {
         return done('failed', `no work evidence after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap`);
@@ -3434,15 +3491,15 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
     }
 
     if (code === VERIFY_EXIT_FAILED) {
-      const waitGates = gatesFromWaitOutput(waited.stdout, requiredGateIds);
+      const waitGates = gatesFromWaitOutput(waitStreams(waited), requiredGateIds);
       const failing = await describeFailingGates(inputs, worktreeId);
       verdict = {
         ran: true,
         outcome: 'fail',
         // The wait's own GATE lines are primary; when a CLI prints none, the
         // confirming verify run's failing gates still name what was judged.
-        gates: waitGates.length > 0 ? waitGates : failing.failing.map((gate) => ({ id: gate.id, verdict: 'fail', origin: gateOrigin(gate.id, requiredGateIds) })),
-        checks: failing.checks,
+        gates: waitGates.gates.length > 0 ? waitGates.gates : failing.failing.map((gate) => ({ id: gate.id, verdict: 'fail', origin: gateOrigin(gate.id, requiredGateIds) })),
+        checks: [...failing.checks, ...droppedGateChecks(waitGates)],
       };
       const committed = await hasNewCommit(inputs, worktreePath, baseSha);
       if (turns >= inputs.maxTurns) {
@@ -3747,6 +3804,9 @@ function workEvidenceDetail(evidence) {
 // so the same facts are read out of the document's own `gates[]` (the shape
 // describeFailingGates already reads). `skipped` is not a verdict and is left
 // out rather than rounded, exactly as the ordinary path leaves it out.
+//
+// Returns { gates, dropped }, like gatesFromWaitOutput: the same cap applies here
+// and it owes the reader the same accounting (#165).
 function gatesFromVerifyDocument(run, requiredGateIds = new Set()) {
   const gates = [];
   for (const gate of (run !== null && typeof run === 'object' && Array.isArray(run.gates)) ? run.gates : []) {
@@ -3757,9 +3817,8 @@ function gatesFromVerifyDocument(run, requiredGateIds = new Set()) {
     const verdict = FAILED_GATE_STATUSES.has(status) ? 'fail' : (status === 'passed' ? 'pass' : null);
     if (verdict === null) continue;
     gates.push({ id: redact(id), verdict, origin: gateOrigin(id, requiredGateIds) });
-    if (gates.length >= MAX_REPORTED_GATES) break;
   }
-  return gates;
+  return capGates(gates);
 }
 
 // Re-judge ONE worktree as it stands. Nothing is sent, no contract is written
@@ -3801,11 +3860,11 @@ async function reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePa
     run = null;
   }
   const code = result.ok ? VERIFY_EXIT_PASS : (result.status ?? null);
-  const gates = gatesFromVerifyDocument(run, new Set(requiredGates));
+  const reverifyGates = gatesFromVerifyDocument(run, new Set(requiredGates));
   const done = (outcome, checks, extra = {}) => ({
     source: 'contract',
     notJudged: false,
-    verdict: { ran: true, report_schema_version: null, outcome, gates, checks },
+    verdict: { ran: true, report_schema_version: null, outcome, gates: reverifyGates.gates, checks: [...checks, ...droppedGateChecks(reverifyGates)] },
     note: '',
     ...extra,
   });
