@@ -17,6 +17,33 @@ Issue 番号は、`#<数字>` がこのリポジトリ（Kewton/commandmate-skil
 
 ## planner（`scripts/orchestrate.mjs`）
 
+### #147 — Issue が書き忘れたテストファイルで、正しく実装した worker が落ちていた
+
+同じ形の障害が**3回目**である。#56 は `wrangler.jsonc` が抽出されず、
+CommandMate #1678 B-2（#44）は lockfile が `scope.allow` の外にあり、そして本件は
+テストファイルが外にあった。いずれも「**worker がやるべきことをやると落ちる**」であり、
+契約の scope は send 時 snapshot なので **worker 側からは直せない**。
+
+実測（Kewton/BorderFreeKidsMap #35）では **scope 外は `session.test.ts` の 1 件だけ**で、
+worker 1人分の run（dispatch 約25分＋検証1周）を失った。Issue 本文の `## 対象ファイル` に
+2行足して re-plan しただけで、**コードには一切触れずに1ターンで pass した**。
+
+→ 宣言されたソースファイルの**慣習的なテスト path を既定許可に入れ**、
+`scope_defaults` に明示する。lockfile（#44）とまったく同じ経路・同じ安全弁である。
+JS/TS の3形に加え、`FILE_EXT` が受理する Go（`_test.go`）・Python（`test_*.py`）・
+Ruby（`_spec.rb`）・JVM（`FooTest` と `src/main/`→`src/test/` ミラー）も出す ——
+JS だけの規則は planner の他の部分と非対称になる。
+
+**#50 の穴は開かない。** 導出は必ず宣言済み path の関数であり、単独 glob を足さないので
+**宣言が空なら導出も空**である。「使われなかった許可はコストがゼロ、導出しなければ run 1本が失われる」
+という非対称が、規約依存の推測を許容できる理由である。
+
+実装で分かったこと: `dispatch.mjs` は `scope.allow` を**ソートしてから `.slice(0, 200)`** する。
+導出が多すぎると**アルファベット順で早い派生 path が宣言ファイルを押し出す**——
+この機能が消そうとしている失敗そのものなので、ソースファイル境界で導出を打ち切る。
+裁定は [adr-scope-derivation.md](./adr-scope-derivation.md)、正本は
+[plan-contract.md](./plan-contract.md)。
+
 ### #36 — 別リポジトリで profile を指定し忘れると、中身の違う Issue から plan が出た
 
 別リポジトリの worktree 内で `--profile` を渡し忘れると、planner は既定 profile
@@ -552,6 +579,29 @@ true のままである（barrier が測っているのは completion と verifi
 
 ---
 
+### #148 — 直せない scope 違反に、上限まで再指示を送り続けていた
+
+Kewton/BorderFreeKidsMap #35 の note は `supervision exceeded its hard iteration bound` である。
+**1回落ちたのではなく turn 上限まで回っていた。** 再指示文そのものは正しく、違反 path を転記して
+「worker 側では解決できません — 停止して報告してください」とまで言っている。
+**しかし dispatch は turn 数しか見ずに再送し続ける。** worker は
+「テストを消す＝受入条件を落とす」というジレンマに置かれ、同じ結論を繰り返す。
+
+→ 「その変更が不可避か」は判定できないが、「**このループが収束しているか**」は判定できる。
+違反 path 集合が前ターンと同一なら再送しても結果は変わらないので、そこで停止する。
+`blocking_reasons[].code = scope_unsatisfiable` が**違反 path を逐語で**運ぶ ——
+それが「次に何を Issue の対象ファイルへ足せばよいか」の唯一の情報源である。
+
+**止めるのは repeat であって retry ではない。** worker が違反を1つでも減らせば従来どおり
+再指示が続く。決めていなかった3点はすべて**遮断が狭くなる側**に倒した:
+`--max-turns` 到達を先に見る / 比較は連続2ターンに限る / 違反 path を読めなかったターンは
+比較しない（「2回とも読めなかった」は「同じ path だ」の証拠ではない）。
+
+`stop_reason` の enum に値は増えず、`verification.outcome` も書き換えない ——
+検証は本当に失敗しており、それは CommandMate の exit code である。変わるのは run が先へ進むかだけ。
+`summary_markdown` では「worktree を診断して再 dispatch」の行を**併記ではなく置換**する。
+ここではその助言が積極的に誤りだからである（同じ plan を再投入すれば同じ所で止まる）。
+
 ## merge（`scripts/merge.mjs`）
 
 ### #142 — 無人運転の段階 C（`merge --merge-prs`）
@@ -773,6 +823,26 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 ---
 
 ## パッケージ
+
+### 0.23.0 — scope は「推測」から「宣言の閉包」へ（#147 / #148）
+
+**同型の障害が3回出たので、クラスとして裁定した**（[adr-scope-derivation.md](./adr-scope-derivation.md)）。
+根本原因は `suspected_files`（推測）を `scope.allow`（認可境界）へ**無変換で昇格**していたことである。
+
+裁定 0 は `allow = declared ∪ companions(declared)` ——
+**宣言は Issue のものに保ったまま、認可境界だけを閉包へ広げる。**
+段1（#147・planner がテスト伴走を導出）と段2（#148・収束しない再指示の遮断）が入った。
+段3（#145・残余の検出）と段4（#149・profile の repo 規約宣言）は後続である。
+
+**CommandMate は1バイトも変わっていない** —— 契約 schema を分けない裁定（ADR 第4節）により、
+全段が skill 側で完結する。
+
+### 0.22.0 — 無人運転の段階 C（#142）
+
+`--unattended` が dispatch / merge 両 phase / uat の**すべてに到達**した。
+段階 A（#122）→ B（#134）→ C（#142）の3段が揃い、宣言の意味が invocation のどこでも同一になった。
+中心は uat の cwd pre-flight である —— 再merge の `git merge --no-ff` は cwd 引数を持たないので、
+fix は invocation cwd の branch に入る。**fix worktree を1つも作る前に**それを拒否する。
 
 ### 0.21.0 — パレット復帰・無人運転の段階 B・`--auto-yes` の実効化（#134 / #135 / #136）
 
