@@ -75,6 +75,10 @@ const BUILTIN_PROFILES = {
   },
 };
 
+// `scope_companions` is the only OPTIONAL entry. Neither built-in profile
+// declares it: both target repositories whose test layout L1 already derives, so
+// declaring nothing is both accurate and what keeps their plans byte-identical
+// to the ones 0.24.0 produced (references/adr-scope-derivation.md §15).
 const PROFILE_FIELDS = [
   'id',
   'repository',
@@ -83,6 +87,7 @@ const PROFILE_FIELDS = [
   'worktree_template',
   'baseline',
   'verified',
+  'scope_companions',
 ];
 
 // =============================================================================
@@ -408,7 +413,7 @@ function normalizeProfile(raw) {
   if (!Array.isArray(raw.baseline) || raw.baseline.some((c) => typeof c !== 'string')) {
     throw new SkillError('load_error', 'profile.baseline must be an array of strings', 6);
   }
-  return {
+  const profile = {
     id: String(raw.id),
     repository: String(raw.repository),
     base: String(raw.base),
@@ -418,6 +423,270 @@ function normalizeProfile(raw) {
     // A profile is unverified unless it explicitly claims verification.
     verified: raw.verified === true,
   };
+  // ABSENT stays absent. Every profile written before Issue #149 lacks this key,
+  // and normalizing it to an empty declaration would put a field into
+  // `plan.profile` that was never in the profile — a byte those plans did not
+  // have. "未指定＝段1 までの挙動" has to be literal, down to the plan bytes.
+  const companions = normalizeScopeCompanions(raw.scope_companions);
+  if (companions !== null) profile.scope_companions = companions;
+  return profile;
+}
+
+// =============================================================================
+// scope_companions — layer L2 of references/adr-scope-derivation.md (Issue #149)
+// =============================================================================
+//
+// L1 (testScopeDefaultsFor, below) derives the CONVENTIONAL test path of every
+// declared source file. What it cannot derive is a convention it has never heard
+// of: an `spec/` tree mirroring `app/`, a generated `*_pb.ts` beside every
+// `.proto`, a locale table regenerated from its source. The planner never opens
+// the target repository (see the comment above the acceptance-gates parser), and
+// dispatch must not observe the worktree either — a contract that depended on
+// worktree state would stop being byte-identical across worktrees, which is the
+// property dispatch-contract.md:212 rests on. The one place repository
+// knowledge is already allowed to enter is the PROFILE, and the profile is part
+// of the plan, so a declaration there keeps both properties (ADR §3).
+//
+// ---- The shape, and why this one -------------------------------------------
+//
+//   "scope_companions": {
+//     "derive": [
+//       { "when": "app/{dir}{base}.rb", "add": ["spec/{dir}{base}_spec.rb"] }
+//     ]
+//   }
+//
+// A rule is a pair of PATH TEMPLATES over one shared vocabulary. `when` matches a
+// DECLARED path and binds its placeholders; `add` re-emits those bindings into
+// concrete paths. Two placeholders exist, and they are the two pieces a companion
+// convention is ever a function of:
+//
+//   {dir}   zero or more path segments, each with its trailing "/" (so it is ""
+//           at the repository root). This is what makes a MIRROR expressible:
+//           `app/{dir}{base}.rb` -> `spec/{dir}{base}_spec.rb` moves
+//           app/models/user.rb to spec/models/user_spec.rb, prefix stripped.
+//   {base}  exactly one path segment. Normally the file's stem, because the
+//           extension is written literally in the template — which is also why
+//           there is no `{ext}` yet: one rule per extension is more explicit, and
+//           adding `{ext}` later is a compatible widening (§15.2 of the ADR).
+//
+// The three invariants of ADR §2 are structural properties of this shape rather
+// than checks bolted onto it:
+//
+//   1. DERIVED FROM THE DECLARATION. There is no glob syntax at all: `*`, `?` and
+//      `[` are refused in both templates, and the only wildcards are placeholders,
+//      whose captured text is LITERALLY A SUBSTRING OF A DECLARED PATH. An `add`
+//      must carry at least one placeholder bound by its `when`, so no rule can
+//      grant a path that does not contain a piece of a path the issue declared.
+//      `**/*.test.*` and a bare `docs/module-reference.md` are both rejected at
+//      load time. A profile therefore cannot re-open the hole #50 closed, and
+//      |closure| <= (total `add` entries) x |declared| holds by construction.
+//   2. VISIBLE. The derivation returns a list the caller appends to
+//      `scope_defaults` and `suspected_files` in one statement, exactly as L1's
+//      does — the two cannot drift apart.
+//   3. A PURE FUNCTION OF THE PLAN. The input is the profile, which is part of
+//      the plan; nothing is read from disk, nothing is sorted, no Set is walked.
+//
+// Rejected for this first cut, with the reasons in ADR §15.2: a constant
+// companion path (the "this repo requires docs/module-reference.md" case), an
+// `{ext}` placeholder, per-rule exclusions, and any form that lets `when` match
+// something other than a declared path.
+
+// The wildcard vocabulary. Order matters only for the error message; the regex
+// fragments are what a `when` template compiles to. `{dir}` is greedy so
+// `src/{dir}{base}.ts` reads `src/a/b/c.ts` as dir="a/b/", base="c" — the same
+// split a human makes.
+const COMPANION_PLACEHOLDERS = {
+  dir: '((?:[^/]+/)*)',
+  base: '([^/]+)',
+};
+
+// Anything brace-shaped is a placeholder attempt. Captured loosely on purpose:
+// `{Base}` and `{ext}` must be REFUSED, not silently treated as literal text —
+// a typo that becomes a literal is a rule that never matches and never says so.
+const COMPANION_TOKEN_RE = /\{([^{}]*)\}/g;
+
+// Glob metacharacters, refused in both templates. This is the check that makes
+// "a profile cannot write a bare glob" true rather than merely discouraged.
+const COMPANION_GLOB_RE = /[*?[\]]/;
+
+function companionError(detail) {
+  return new SkillError('load_error', `profile.scope_companions: ${detail}`, 6);
+}
+
+// Splits a template into literal spans and placeholder names. Throws load_error
+// on anything that is not a well-formed template, so a malformed declaration is
+// refused where the profile is read rather than producing a rule that quietly
+// matches nothing.
+function parseCompanionTemplate(text, label) {
+  if (typeof text !== 'string' || text.length === 0) {
+    throw companionError(`${label} must be a non-empty string`);
+  }
+  if (COMPANION_GLOB_RE.test(text)) {
+    throw companionError(
+      `${label} "${text}" contains a glob metacharacter; companions are derived from declared paths, ` +
+        'never matched by a pattern of their own (adr-scope-derivation.md §2, invariant 1)',
+    );
+  }
+  if (text.startsWith('/') || text.includes('..') || text.includes('\\')) {
+    throw companionError(`${label} "${text}" must be a relative repository path with no ".." segment`);
+  }
+  const parts = [];
+  const names = [];
+  let cursor = 0;
+  for (const match of text.matchAll(COMPANION_TOKEN_RE)) {
+    const name = match[1];
+    if (!Object.prototype.hasOwnProperty.call(COMPANION_PLACEHOLDERS, name)) {
+      throw companionError(
+        `${label} "${text}" uses unknown placeholder "{${name}}"; the placeholders are ` +
+          Object.keys(COMPANION_PLACEHOLDERS).map((key) => `{${key}}`).join(' / '),
+      );
+    }
+    if (match.index > cursor) parts.push({ literal: text.slice(cursor, match.index) });
+    parts.push({ name });
+    names.push(name);
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < text.length) parts.push({ literal: text.slice(cursor) });
+  // A stray brace left in a literal span means the template was not fully
+  // tokenized (`{dir` , `dir}`), which is a typo, not a path.
+  for (const part of parts) {
+    if (part.literal !== undefined && /[{}]/.test(part.literal)) {
+      throw companionError(`${label} "${text}" has an unbalanced brace`);
+    }
+  }
+  return { parts, names };
+}
+
+// Validates the declaration and returns it in canonical form, or null when the
+// profile does not carry the key. Everything here throws `load_error` (exit 6),
+// the same code an unknown profile field gets: a declaration this runner had to
+// repair is a declaration whose author should be told.
+function normalizeScopeCompanions(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw companionError('must be a JSON object');
+  }
+  // An OBJECT rather than a bare list, so a later layer of this feature (a
+  // constant companion, an exclusion, a per-rule option) arrives as a sibling KEY
+  // instead of overloading the meaning of the list. Unknown keys are refused for
+  // the reason profile fields are: a newer profile must fail loudly on an older
+  // runner, never have half of itself ignored.
+  for (const key of Object.keys(raw)) {
+    if (key !== 'derive') throw companionError(`unknown key "${key}"; the only key is "derive"`);
+  }
+  if (!Array.isArray(raw.derive)) throw companionError('"derive" must be an array of rules');
+  const derive = [];
+  for (const [index, rule] of raw.derive.entries()) {
+    const at = `derive[${index}]`;
+    if (rule === null || typeof rule !== 'object' || Array.isArray(rule)) {
+      throw companionError(`${at} must be a JSON object`);
+    }
+    for (const key of Object.keys(rule)) {
+      if (key !== 'when' && key !== 'add') throw companionError(`${at} has an unknown key "${key}"`);
+    }
+    const when = parseCompanionTemplate(rule.when, `${at}.when`);
+    if (when.names.length === 0) {
+      throw companionError(
+        `${at}.when "${rule.when}" binds no placeholder, so it can only match one fixed path; ` +
+          'a rule that adds nothing derived from the declaration is not a companion rule',
+      );
+    }
+    if (new Set(when.names).size !== when.names.length) {
+      throw companionError(`${at}.when "${rule.when}" repeats a placeholder; each may appear once`);
+    }
+    if (!Array.isArray(rule.add) || rule.add.length === 0) {
+      throw companionError(`${at}.add must be a non-empty array of path templates`);
+    }
+    const bound = new Set(when.names);
+    for (const template of rule.add) {
+      const parsed = parseCompanionTemplate(template, `${at}.add`);
+      if (parsed.names.length === 0) {
+        throw companionError(
+          `${at}.add "${template}" contains no placeholder, so it would grant a path unrelated to ` +
+            'anything the issue declared (adr-scope-derivation.md §2, invariant 1)',
+        );
+      }
+      for (const name of parsed.names) {
+        if (!bound.has(name)) {
+          throw companionError(`${at}.add "${template}" uses {${name}}, which its "when" does not bind`);
+        }
+      }
+    }
+    derive.push({ when: String(rule.when), add: rule.add.map(String) });
+  }
+  return { derive };
+}
+
+// Turns a validated declaration into matchers. Cannot throw: every template here
+// already passed normalizeScopeCompanions.
+function compileScopeCompanions(declaration) {
+  if (!declaration) return [];
+  return declaration.derive.map((rule) => {
+    const when = parseCompanionTemplate(rule.when, 'when');
+    const source = when.parts
+      .map((part) => (part.name === undefined
+        ? part.literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        : COMPANION_PLACEHOLDERS[part.name]))
+      .join('');
+    return {
+      match: new RegExp(`^${source}$`),
+      names: when.names,
+      add: rule.add.map((template) => parseCompanionTemplate(template, 'add').parts),
+    };
+  });
+}
+
+// The same contract as testScopeDefaultsFor: `suspected` is the DECLARED file
+// list, `added` the defaults already chosen for this issue, neither is mutated,
+// and the caller appends the return value to `scope_defaults` and
+// `suspected_files` in one place (ADR §2, invariant 2).
+//
+// Derivation reads the DECLARED paths only — never `added` — because deriving
+// from a derived path is what invariant 1 forbids; `added` is read solely so a
+// path L1 already produced is not emitted twice. Declared paths are walked in
+// order, rules in declaration order, `add` templates in written order, and
+// nothing is sorted, so the output is a pure function of (plan, profile) and the
+// plan stays byte-identical across runs (invariant 3).
+//
+// Unlike L1 this does NOT skip a declared path that already looks like a test:
+// the profile author is stating a rule about their own repository, and a
+// snapshot derived from a test file is a legitimate thing to state.
+function profileScopeDefaultsFor(rules, suspected, added) {
+  if (rules.length === 0) return [];
+  const have = new Set([...suspected, ...added]);
+  const out = [];
+  for (const path of suspected) {
+    const fresh = [];
+    for (const rule of rules) {
+      const matched = rule.match.exec(path);
+      if (matched === null) continue;
+      const binding = {};
+      rule.names.forEach((name, index) => { binding[name] = matched[index + 1]; });
+      for (const parts of rule.add) {
+        const companion = parts
+          .map((part) => (part.name === undefined ? part.literal : binding[part.name]))
+          .join('');
+        // Defence in depth. A declared path is already safe and the templates are
+        // validated, so this cannot currently fire; if a future placeholder ever
+        // lets one through, it must be dropped rather than granted.
+        if (!isSafeRepoPath(companion)) continue;
+        if (have.has(companion) || fresh.includes(companion)) continue;
+        fresh.push(companion);
+      }
+    }
+    if (fresh.length === 0) continue;
+    // The same boundary L1 stops at, for the same reason: dispatch.mjs SORTS
+    // scope.allow before truncating it to MAX_SCOPE_PATTERNS, so a list over the
+    // bound loses DECLARED paths to alphabetically earlier derived ones. `have`
+    // already carries L1's entries, so the bound is checked against the COMBINED
+    // total rather than L2's own.
+    if (have.size + fresh.length > MAX_SCOPE_PATTERNS) break;
+    for (const companion of fresh) {
+      have.add(companion);
+      out.push(companion);
+    }
+  }
+  return out;
 }
 
 // =============================================================================
@@ -1387,7 +1656,7 @@ function topicTokens(text) {
 const PRODUCER_RE = /(schema|contract|interface|protocol|type\s*def|定義|スキーマ|契約|インターフェース|プロトコル|型定義)/i;
 const CONSUMER_RE = /(implement|integrat|consume|connect|wire|apply|利用|連携|接続|適用|参照|使用)/i;
 
-function analyzeIssue(issue, profile, binaries) {
+function analyzeIssue(issue, profile, binaries, companionRules) {
   // The machine-readable block is read from the RAW body, and every prose
   // extractor below reads the body with the block removed. Both halves matter:
   // reading the block from the stripped text would find nothing, and running the
@@ -1407,14 +1676,23 @@ function analyzeIssue(issue, profile, binaries) {
     extraction.deliverable,
     extraction.contextOnly,
   );
-  // Both default sources feed ONE list, which is then appended to
+  // All THREE default sources feed ONE list, which is then appended to
   // suspected_files and reported as `scope_defaults` — the plan can never grant
-  // a path it does not also declare it granted. Test companions are derived from
-  // the DECLARED files only (`suspected` before the push below): the lockfiles
-  // just chosen are themselves derived, and deriving from derived paths is what
-  // invariant 1 forbids.
+  // a path it does not also declare it granted. Every source derives from the
+  // DECLARED files only (`suspected` before the push below): the lockfiles just
+  // chosen are themselves derived, and deriving from derived paths is what
+  // invariant 1 forbids. The growing `scopeDefaults` is passed along so a path
+  // two sources agree on is emitted once.
+  //
+  // L2 runs LAST, after L1's universal rules — the profile EXTENDS the built-in
+  // derivation rather than replacing it, the same relation `verifyBinaries` has
+  // to GENERIC_VERIFY_BINARIES (ADR §5, "却下: profile 必須にする"). With no
+  // `scope_companions` in the profile, `companionRules` is empty and this line
+  // appends nothing, which is what makes an existing profile's plan identical to
+  // the one 段1 produced.
   const scopeDefaults = scopeDefaultsFor(suspected);
   scopeDefaults.push(...testScopeDefaultsFor(suspected, scopeDefaults));
+  scopeDefaults.push(...profileScopeDefaultsFor(companionRules, suspected, scopeDefaults));
   suspected.push(...scopeDefaults);
   const tests = extractTestExpectations(text, binaries).map(redact);
 
@@ -1938,7 +2216,7 @@ function makeRunId(inputs, profile, issues) {
 }
 
 function publicProfile(profile) {
-  return {
+  const out = {
     id: profile.id,
     repository: profile.repository,
     base: profile.base,
@@ -1947,6 +2225,12 @@ function publicProfile(profile) {
     baseline: profile.baseline,
     verified: profile.verified,
   };
+  // Echoed only when the profile declared it, and LAST, so a plan built on a
+  // profile without the key is byte-for-byte the plan 0.24.0 produced. When it is
+  // there, it is what lets a reviewer trace a `scope_defaults` entry that no L1
+  // rule explains back to the declaration that produced it.
+  if (profile.scope_companions !== undefined) out.scope_companions = profile.scope_companions;
+  return out;
 }
 
 function issueForPlan(analysis, analyses, edges) {
@@ -2220,7 +2504,10 @@ function run(argv) {
   const rawIssues = loadIssues(inputs, profile);
   const runId = makeRunId(inputs, profile, rawIssues);
   const binaries = verifyBinaries(profile);
-  const analyses = rawIssues.map((issue) => analyzeIssue(issue, profile, binaries));
+  // Compiled once for the whole plan, not per issue: the rules are a property of
+  // the profile, and every issue must be judged by the identical matchers.
+  const companionRules = compileScopeCompanions(profile.scope_companions ?? null);
+  const analyses = rawIssues.map((issue) => analyzeIssue(issue, profile, binaries, companionRules));
 
   const { edges, errors: depErrors, warnings: dependencyWarnings } = buildDependencies(analyses, inputs);
   // Profile warnings first: a plan built against the wrong repository is the

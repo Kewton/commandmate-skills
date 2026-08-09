@@ -1,0 +1,28 @@
+{
+  "description": "Issue #149 (layer L2): a repository whose tests live in a spec/ tree mirroring src/ — a layout the planner cannot derive from a path alone. The draft proposes it as a scope_companions rule with BOTH halves of the proof cited (the source file and the test file that mirrors it), never from the mere presence of a spec/ directory: `spec/routing_spec.rb` is scanned FIRST and skipped, because no src/ app/ lib/ file pairs with it, and a rule drafted from it would be a guess. A second layout under test/ does pair, so the draft declares the first in scan order and warns about the other rather than silently picking one.",
+  "args": [],
+  "expect": {
+    "status": "partial",
+    "sources": {
+      "id": "derived",
+      "repository": "detected",
+      "base": "default",
+      "branch_template": "default",
+      "worktree_template": "default",
+      "baseline": "detected",
+      "verified": "fixed",
+      "scope_companions": "detected"
+    },
+    "todos": [
+      "base_undetermined",
+      "branch_template_undetermined",
+      "worktree_template_undetermined"
+    ],
+    "warnings": ["multiple_test_layouts"],
+    "evidence_files": {
+      "repository": ["package.json"],
+      "baseline": ["package-lock.json", "package.json"],
+      "scope_companions": ["src/session/retry.ts", "spec/session/retry_spec.ts"]
+    }
+  }
+}

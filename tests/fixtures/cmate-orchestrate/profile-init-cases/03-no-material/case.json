@@ -10,7 +10,8 @@
       "branch_template": "default",
       "worktree_template": "default",
       "baseline": "default",
-      "verified": "fixed"
+      "verified": "fixed",
+      "scope_companions": "default"
     },
     "todos": [
       "id_derived_from_placeholder",
@@ -18,7 +19,8 @@
       "base_undetermined",
       "branch_template_undetermined",
       "worktree_template_undetermined",
-      "baseline_undetermined"
+      "baseline_undetermined",
+      "scope_companions_undetermined"
     ],
     "warnings": [],
     "evidence_files": {
@@ -27,7 +29,8 @@
       "base": [],
       "branch_template": [],
       "worktree_template": [],
-      "baseline": []
+      "baseline": [],
+      "scope_companions": []
     },
     "baseline_fails_closed": true
   }

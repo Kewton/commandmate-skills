@@ -1,0 +1,22 @@
+{
+  "description": "Issue #149 (ADR adr-scope-derivation.md, layer L2), the OTHER half of the two-point measurement in case 45: byte-for-byte the same issue, planned with a profile that declares an rspec mirror. `app/{dir}{base}.rb` -> `spec/{dir}{base}_spec.rb` is a convention no path rule can predict — L1 derives the sibling `app/models/user_spec.rb` and stops — so without the declaration the worker that writes spec/models/user_spec.rb is failed by a scope gate it cannot resolve. The declared companion reaches suspected_files (which dispatch copies into scope.allow verbatim) and is reported in scope_defaults, so nothing is granted silently. Diff this case against 45: only the profile differs.",
+  "args": ["461", "--profile-json", "PROFILE:companions-rspec-mirror.json", "--run-id", "fixture-l2-declared"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[461]],
+    "merge_order": [461],
+    "dependencies": [],
+    "classifications": { "461": "independent" },
+    "risk_level": "low",
+    "suspected_files": {
+      "461": ["app/models/user.rb", "app/models/user_spec.rb", "spec/models/user_spec.rb"]
+    },
+    "scope_defaults": {
+      "461": ["app/models/user_spec.rb", "spec/models/user_spec.rb"]
+    },
+    "reference_files": { "461": [] },
+    "questions_count": { "461": 0 }
+  }
+}

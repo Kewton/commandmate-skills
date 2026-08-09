@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 450,
+      "title": "fix: verify-run の gate 判定を新しい GATE 行に合わせる",
+      "body": "`scripts/verify-run.sh` の gate 判定が新しい GATE 行を読めていない。\n\n## 対象ファイル\n- `scripts/verify-run.sh`\n\n## Acceptance criteria\n- [ ] 新しい GATE 行を読む unit test を追加し、それが判定する\n- [ ] 既知の GATE 行の判定は変わらない\n",
+      "labels": ["bug"]
+    }
+  ]
+}

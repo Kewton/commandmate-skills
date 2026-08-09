@@ -1,0 +1,36 @@
+{
+  "description": "Issue #149: L1 and L2 meet on one path and it appears once. The profile declares the pytest MIRROR `src/{dir}{base}.py` -> `tests/{dir}test_{base}.py`, while L1's built-in python rule emits the flat `tests/test_{base}.py`. For the root-level `src/loader.py` the two agree exactly — L2 must add nothing — and for `src/pkg/parse.py` they differ, so L2 contributes `tests/pkg/test_parse.py`, the path L1's flat rule cannot reach. Both halves matter: the first proves the de-duplication, the second proves L2 actually ran. A duplicated entry would be two identical patterns eating dispatch's MAX_SCOPE_PATTERNS budget for one file.",
+  "args": ["462", "--profile-json", "PROFILE:companions-pytest-mirror.json", "--run-id", "fixture-l2-overlap"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[462]],
+    "merge_order": [462],
+    "dependencies": [],
+    "classifications": { "462": "independent" },
+    "risk_level": "low",
+    "suspected_files": {
+      "462": [
+        "src/loader.py",
+        "src/pkg/parse.py",
+        "src/test_loader.py",
+        "tests/test_loader.py",
+        "src/pkg/test_parse.py",
+        "tests/test_parse.py",
+        "tests/pkg/test_parse.py"
+      ]
+    },
+    "scope_defaults": {
+      "462": [
+        "src/test_loader.py",
+        "tests/test_loader.py",
+        "src/pkg/test_parse.py",
+        "tests/test_parse.py",
+        "tests/pkg/test_parse.py"
+      ]
+    },
+    "reference_files": { "462": [] },
+    "questions_count": { "462": 0 }
+  }
+}

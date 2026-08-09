@@ -1,22 +1,19 @@
 {
-  "id": "node-widget",
-  "repository": "Acme/widget",
+  "id": "companions-invalid-glob",
+  "repository": "Kewton/CommandMate",
   "base": "origin/develop",
   "branch_template": "feature/issue-{number}-{slug}",
   "worktree_template": "../{repo}-issue-{number}-{slug}",
   "baseline": [
-    "npm ci",
-    "npm run build",
-    "npm run lint",
-    "npm test"
+    "bundle exec rspec"
   ],
-  "verified": false,
+  "verified": true,
   "scope_companions": {
     "derive": [
       {
-        "when": "src/{dir}{base}.ts",
+        "when": "app/{dir}{base}.rb",
         "add": [
-          "test/{dir}{base}.test.ts"
+          "spec/{dir}**/{base}_spec.rb"
         ]
       }
     ]

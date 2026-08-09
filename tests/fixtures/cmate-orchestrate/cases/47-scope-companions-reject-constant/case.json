@@ -1,0 +1,10 @@
+{
+  "description": "Issue #149, the subtler half of the same refusal: `add: [\"docs/module-reference.md\"]` carries no glob, yet it grants a FIXED path that contains nothing derived from the declaration — the shape ADR §15.2 records as deliberately left out of this first cut. Invariant 1 is enforced structurally: every `add` template must bind at least one placeholder from its `when`, so a rule that is not a function of a declared path cannot be written. Also refused at load (load_error, exit 6).",
+  "args": ["461", "--profile-json", "PROFILE:companions-invalid-constant.json"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "plan_null": true
+  }
+}

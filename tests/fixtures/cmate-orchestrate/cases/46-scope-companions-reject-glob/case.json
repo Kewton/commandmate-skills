@@ -1,0 +1,10 @@
+{
+  "description": "Issue #149: a profile cannot re-open the hole #50 closed. `add: [\"spec/{dir}**/{base}_spec.rb\"]` mixes glob syntax into the template vocabulary — the `**` would match paths the issue never declared, which is exactly the bare-glob permission invariant 1 forbids. Refused at profile load (load_error, exit 6), before an issue is even read, so no plan carrying it can exist to be dispatched. The declaration carries a real placeholder ON PURPOSE: a bare `**/*_spec.rb` is caught twice over (no placeholder either), so it would not tell us which check is doing the work.",
+  "args": ["461", "--profile-json", "PROFILE:companions-invalid-glob.json"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "plan_null": true
+  }
+}

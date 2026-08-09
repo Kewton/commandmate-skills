@@ -10,18 +10,21 @@
       "branch_template": "detected",
       "worktree_template": "default",
       "baseline": "detected",
-      "verified": "fixed"
+      "verified": "fixed",
+      "scope_companions": "default"
     },
     "todos": [
       "id_derived_from_placeholder",
       "repository_undetermined",
       "base_undetermined",
-      "worktree_template_undetermined"
+      "worktree_template_undetermined",
+      "scope_companions_undetermined"
     ],
     "warnings": ["multiple_ecosystems", "multiple_lockfiles"],
     "evidence_files": {
       "branch_template": ["README.md"],
-      "baseline": ["pnpm-lock.yaml", "package.json"]
+      "baseline": ["pnpm-lock.yaml", "package.json"],
+      "scope_companions": []
     }
   }
 }

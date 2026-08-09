@@ -1,0 +1,14 @@
+{
+  "id": "companions-bats",
+  "repository": "Kewton/CommandMate",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": ["bats tests"],
+  "verified": true,
+  "scope_companions": {
+    "derive": [
+      { "when": "scripts/{base}.sh", "add": ["tests/{base}.bats"] }
+    ]
+  }
+}

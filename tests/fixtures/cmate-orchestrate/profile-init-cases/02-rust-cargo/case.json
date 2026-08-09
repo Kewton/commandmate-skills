@@ -10,16 +10,18 @@
       "branch_template": "default",
       "worktree_template": "default",
       "baseline": "detected",
-      "verified": "fixed"
+      "verified": "fixed",
+      "scope_companions": "default"
     },
-    "todos": ["base_ambiguous", "branch_template_undetermined", "worktree_template_undetermined"],
+    "todos": ["base_ambiguous", "branch_template_undetermined", "worktree_template_undetermined", "scope_companions_undetermined"],
     "warnings": [],
     "evidence_files": {
       "repository": ["Cargo.toml"],
       "base": [".github/workflows/rust.yml"],
       "branch_template": [],
       "worktree_template": [],
-      "baseline": ["Cargo.toml", ".github/workflows/rust.yml"]
+      "baseline": ["Cargo.toml", ".github/workflows/rust.yml"],
+      "scope_companions": []
     }
   }
 }

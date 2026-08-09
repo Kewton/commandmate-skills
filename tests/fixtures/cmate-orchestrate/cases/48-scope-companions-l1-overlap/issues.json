@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 462,
+      "title": "feat: loader の解決順を設定できるようにする",
+      "body": "loader が探索する順序を設定から読めるようにする。\n\n## 対象ファイル\n- `src/loader.py`\n- `src/pkg/parse.py`\n\n## Acceptance criteria\n- [ ] 設定が無いときの順序は現在と同じである\n- [ ] 設定した順序で解決される\n",
+      "labels": ["feature"]
+    }
+  ]
+}
