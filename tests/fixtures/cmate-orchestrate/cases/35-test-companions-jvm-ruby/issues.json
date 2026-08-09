@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 444,
+      "title": "feat: 設定ローダーと構文解析を実装する",
+      "body": "`src/main/java/com/example/Loader.java` に設定ローダーを実装し、`lib/parser.rb` の構文解析から呼ぶ。\n\n## Acceptance criteria\n- [ ] 設定ファイルが起動時に読まれる\n- [ ] 追加したテストが緑である\n",
+      "labels": ["feature"]
+    }
+  ]
+}

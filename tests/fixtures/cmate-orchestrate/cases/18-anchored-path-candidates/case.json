@@ -10,7 +10,7 @@
     "dependencies": [],
     "classifications": { "414": "independent" },
     "risk_level": "low",
-    "suspected_files": { "414": [".claude/skills/cmate-verify/scripts/verify-run.sh", "web/src/lib/store.ts"] },
+    "suspected_files": { "414": [".claude/skills/cmate-verify/scripts/verify-run.sh", "web/src/lib/store.ts", "web/src/lib/store.test.ts", "web/src/lib/store.spec.ts", "web/src/lib/__tests__/store.ts", "web/src/lib/__tests__/store.test.ts"] },
     "reference_files": { "414": [] }
   }
 }

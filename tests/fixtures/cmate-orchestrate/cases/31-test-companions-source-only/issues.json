@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 440,
+      "title": "feat: send セッションの再送を実装する",
+      "body": "`src/session/retry.ts` に再送処理を実装する。\n\n## Acceptance criteria\n- [ ] 再送は指数バックオフで最大3回である\n- [ ] 追加した unit test が緑である\n",
+      "labels": ["feature"]
+    }
+  ]
+}

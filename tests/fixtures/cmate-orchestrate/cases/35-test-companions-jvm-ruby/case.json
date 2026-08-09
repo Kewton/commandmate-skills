@@ -1,0 +1,31 @@
+{
+  "description": "Issue #147: the two ecosystems the ADR's table does not name but FILE_EXT accepts. Ruby gets RSpec's `_spec.rb`. The JVM gets `<Base>Test.<ext>` twice: Maven and Gradle mirror `src/main/<lang>/…` into `src/test/<lang>/…`, which is as mechanical as Go's rule, so the mirrored path is emitted whenever the declared path actually carries a `src/main/` segment — and the sibling is emitted too for the single-module and Android-style trees that do not use that layout. Deriving only the sibling would leave every standard Maven repository with the failure this exists to remove.",
+  "args": ["444", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[444]],
+    "merge_order": [444],
+    "dependencies": [],
+    "classifications": { "444": "independent" },
+    "risk_level": "low",
+    "suspected_files": {
+      "444": [
+        "src/main/java/com/example/Loader.java",
+        "lib/parser.rb",
+        "src/main/java/com/example/LoaderTest.java",
+        "src/test/java/com/example/LoaderTest.java",
+        "lib/parser_spec.rb"
+      ]
+    },
+    "scope_defaults": {
+      "444": [
+        "src/main/java/com/example/LoaderTest.java",
+        "src/test/java/com/example/LoaderTest.java",
+        "lib/parser_spec.rb"
+      ]
+    },
+    "reference_files": { "444": [] }
+  }
+}

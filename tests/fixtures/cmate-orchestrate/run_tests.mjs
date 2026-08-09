@@ -1836,7 +1836,15 @@ function runMerge(planPath, dispatchPath, outDir, phaseFlag, extraArgs, env, cwd
 // diff for #201 does not silently blank #200's.
 function withDiffDefaults(scenario, plan) {
   const diff = {};
-  for (const issue of plan.issues) diff[issue.number] = { files: [...(issue.suspected_files ?? [])] };
+  for (const issue of plan.issues) {
+    // The files the ISSUE declared, not every file the contract allows. Since
+    // Issue #147 the planner also permits each declared source file's
+    // conventional test paths (reported in `scope_defaults`), and a branch does
+    // not create a file merely because it was allowed to — a default that
+    // "changed" all of them would model a worker nobody has.
+    const derived = new Set(issue.scope_defaults ?? []);
+    diff[issue.number] = { files: (issue.suspected_files ?? []).filter((path) => !derived.has(path)) };
+  }
   return { ...scenario, diff: { ...diff, ...(scenario.diff ?? {}) } };
 }
 
@@ -4234,6 +4242,87 @@ function rerunSemanticsTest() {
   }
 }
 
+// =============================================================================
+// Test companions: byte-identical derivation (Issue #147)
+// =============================================================================
+//
+// Every plan case already re-runs the planner and compares the two plans as
+// PARSED objects, which cannot see field order. The derivation feeds the
+// contract, and dispatch-contract.md's guarantee is that the same plan yields a
+// byte-identical contract, so this compares the two runs' plan.json artifacts as
+// BYTES — a derivation that walked a Set, sorted by a locale rule, or appended in
+// discovery order would pass deepEqual and fail here. The two runs use different
+// --runs-dir values on purpose: the run directory is not an input, so it must not
+// reach a single byte of the plan (the result envelope quotes it in `run_dir`,
+// which is why the artifact rather than stdout is the thing compared).
+function testCompanionDeterminismTest() {
+  const issuesPath = join(CASES_DIR, '34-test-companions-go-python', 'issues.json');
+  const args = ['443', '--profile', 'node-commandmate'];
+  const runs = [mkdtempSync(join(tmpdir(), 'cmate-orch-det-')), mkdtempSync(join(tmpdir(), 'cmate-orch-det-'))];
+  const results = runs.map((runsDir) => runRunner(buildArgs(args, issuesPath, runsDir)));
+  log('  test companion derivation is byte-identical across runs (#147)');
+  if (!check(results.every((r) => r.exit === 0), `both runs should succeed, exited ${results.map((r) => r.exit).join('/')}`)) return;
+  const [firstId, secondId] = results.map((r) => JSON.parse(r.stdout).run_id);
+  check(firstId === secondId, `the same input derived two run ids (${firstId} / ${secondId})`);
+  const bytes = runs.map((runsDir, i) => readFileSync(join(runsDir, JSON.parse(results[i].stdout).run_id, 'plan.json'), 'utf8'));
+  check(bytes[0] === bytes[1], 'two runs of the same plan input produced different plan bytes');
+
+  // The bound the derivation must stay inside. dispatch.mjs sorts scope.allow and
+  // truncates it to MAX_SCOPE_PATTERNS, so an issue whose derived entries pushed
+  // the total past 200 would lose DECLARED files to alphabetically earlier
+  // derived ones — the very failure this feature removes.
+  const plan = JSON.parse(results[0].stdout).plan;
+  for (const issue of plan.issues) {
+    check(
+      issue.suspected_files.length <= 200,
+      `#${issue.number} has ${issue.suspected_files.length} scope patterns, over dispatch's MAX_SCOPE_PATTERNS`,
+    );
+    // Invariant 2: nothing reaches scope.allow without being reported.
+    const declared = new Set(issue.suspected_files);
+    for (const path of issue.scope_defaults) {
+      check(declared.has(path), `#${issue.number}: scope_defaults entry ${path} is not in suspected_files`);
+    }
+  }
+}
+
+// The bound, exercised rather than asserted. dispatch.mjs SORTS scope.allow and
+// then truncates it to MAX_SCOPE_PATTERNS (200), so a derivation that ignored the
+// bound would not merely lose its own tail — an alphabetically earlier derived
+// path would displace a DECLARED file, which is the failure Issue #147 exists to
+// remove. 60 declared `.ts` files is past the point where the JS shapes (4 each)
+// fit: exactly 35 of them derive (60 + 35*4 = 200) and the derivation stops at
+// that source-file boundary, whole rather than half-emitted.
+function testCompanionBoundTest() {
+  const dir = mkdtempSync(join(tmpdir(), 'cmate-orch-bound-'));
+  const declared = Array.from({ length: 60 }, (_, i) => `src/m${String(i + 1).padStart(2, '0')}.ts`);
+  const issuesPath = join(dir, 'issues.json');
+  writeFileSync(issuesPath, JSON.stringify({
+    issues: [{
+      number: 450,
+      title: 'refactor: module 名を一括で揃える',
+      body: `次のファイルの module 名を揃える。\n\n${declared.map((p) => `- \`${p}\``).join('\n')}\n\n## Acceptance criteria\n- [ ] すべての module が新しい命名である\n`,
+      labels: ['chore'],
+    }],
+  }));
+
+  log('  test companion derivation stays inside dispatch\'s scope bound (#147)');
+  const result = runRunner(buildArgs(['450', '--profile', 'node-commandmate'], issuesPath, join(dir, 'runs')));
+  if (!check(result.exit === 0, `the planner should succeed, exited ${result.exit}`)) return;
+  const issue = JSON.parse(result.stdout).plan.issues[0];
+  check(issue.suspected_files.length === 200, `expected exactly 200 scope patterns, got ${issue.suspected_files.length}`);
+  check(issue.scope_defaults.length === 140, `expected 140 derived entries, got ${issue.scope_defaults.length}`);
+  // Every declared file survives — the bound must never cost the issue its own
+  // paths — and the cut falls between two source files rather than inside one.
+  for (const path of declared) check(issue.suspected_files.includes(path), `declared ${path} was pushed out of scope`);
+  for (const shape of ['src/m35.test.ts', 'src/m35.spec.ts', 'src/__tests__/m35.ts', 'src/__tests__/m35.test.ts']) {
+    check(issue.suspected_files.includes(shape), `${shape} should have been derived before the bound`);
+  }
+  for (const shape of ['src/m36.test.ts', 'src/m36.spec.ts', 'src/__tests__/m36.ts', 'src/__tests__/m36.test.ts']) {
+    check(!issue.suspected_files.includes(shape), `${shape} was derived past the bound`);
+  }
+  check(issue.suspected_files.includes('src/m36.ts'), 'the 36th source file is declared and must stay in scope');
+}
+
 function main() {
   log('cmate-orchestrate fixture tests');
   selfTestValidator();
@@ -4303,6 +4392,10 @@ function main() {
   unattendedGatesTest();
   unattendedMergePrsTest();
   unattendedUatTest();
+
+  log('  -- scope derivation --');
+  testCompanionDeterminismTest();
+  testCompanionBoundTest();
 
   log('');
   if (failures > 0) {

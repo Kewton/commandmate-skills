@@ -20,6 +20,14 @@ goal: |
   ## Files you may change
   - src/retry/budget.ts
   - src/retry/index.ts
+  - src/retry/budget.test.ts
+  - src/retry/budget.spec.ts
+  - src/retry/__tests__/budget.ts
+  - src/retry/__tests__/budget.test.ts
+  - src/retry/index.test.ts
+  - src/retry/index.spec.ts
+  - src/retry/__tests__/index.ts
+  - src/retry/__tests__/index.test.ts
 
   ## Rules
   - Stay within this issue. Do not modify files another issue in the plan owns.
@@ -34,7 +42,15 @@ goal: |
   - Do not print tokens, secrets, or absolute host paths.
 scope:
   allow:
+    - "src/retry/__tests__/budget.test.ts"
+    - "src/retry/__tests__/budget.ts"
+    - "src/retry/__tests__/index.test.ts"
+    - "src/retry/__tests__/index.ts"
+    - "src/retry/budget.spec.ts"
+    - "src/retry/budget.test.ts"
     - "src/retry/budget.ts"
+    - "src/retry/index.spec.ts"
+    - "src/retry/index.test.ts"
     - "src/retry/index.ts"
   deny: []
 autoYes:

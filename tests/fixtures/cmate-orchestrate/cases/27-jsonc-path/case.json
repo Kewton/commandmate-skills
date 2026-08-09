@@ -9,6 +9,6 @@
     "merge_order": [421],
     "dependencies": [],
     "classifications": { "421": "independent" },
-    "suspected_files": { "421": ["wrangler.jsonc", "src/worker/batch.ts"] }
+    "suspected_files": { "421": ["wrangler.jsonc", "src/worker/batch.ts", "src/worker/batch.test.ts", "src/worker/batch.spec.ts", "src/worker/__tests__/batch.ts", "src/worker/__tests__/batch.test.ts"] }
   }
 }

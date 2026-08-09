@@ -1,0 +1,31 @@
+{
+  "description": "Issue #147: the derivation is per ECOSYSTEM, not per JS. FILE_EXT accepts go|py|java|kt|rb, so a JS-only rule would leave exactly those issues with the failure this feature removes. A Go file gets `_test.go` and nothing else — `go test` only recognises that name, in the same package directory, so there is no second shape to guess. A Python file gets pytest's `test_*.py` both beside the module and under a top-level `tests/`, because both layouts are ubiquitous and neither is derivable from the other. Crucially, neither path gets the JS shapes: `internal/store/session.test.go` and `app/loader.spec.py` must NOT appear.",
+  "args": ["443", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[443]],
+    "merge_order": [443],
+    "dependencies": [],
+    "classifications": { "443": "independent" },
+    "risk_level": "low",
+    "suspected_files": {
+      "443": [
+        "internal/store/session.go",
+        "app/loader.py",
+        "internal/store/session_test.go",
+        "app/test_loader.py",
+        "tests/test_loader.py"
+      ]
+    },
+    "scope_defaults": {
+      "443": [
+        "internal/store/session_test.go",
+        "app/test_loader.py",
+        "tests/test_loader.py"
+      ]
+    },
+    "reference_files": { "443": [] }
+  }
+}
