@@ -1,0 +1,32 @@
+{
+  "description": "Issue #147: the issue already names a test file, so the derivation must not double up. `src/session/retry.test.ts` is derivable from `src/session/retry.ts` AND declared by the issue — it appears exactly once in suspected_files and is NOT reported as a planner default, because the planner did not add it. Neither declared test path derives anything of its own: `retry.test.ts` would otherwise produce `retry.test.test.ts`, and `tests/e2e/flow.spec.ts` is excluded by both its directory and its name. Every path the issue wrote is still in scope.",
+  "args": ["441", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[441]],
+    "merge_order": [441],
+    "dependencies": [],
+    "classifications": { "441": "independent" },
+    "risk_level": "low",
+    "suspected_files": {
+      "441": [
+        "src/session/retry.ts",
+        "src/session/retry.test.ts",
+        "tests/e2e/flow.spec.ts",
+        "src/session/retry.spec.ts",
+        "src/session/__tests__/retry.ts",
+        "src/session/__tests__/retry.test.ts"
+      ]
+    },
+    "scope_defaults": {
+      "441": [
+        "src/session/retry.spec.ts",
+        "src/session/__tests__/retry.ts",
+        "src/session/__tests__/retry.test.ts"
+      ]
+    },
+    "reference_files": { "441": [] }
+  }
+}

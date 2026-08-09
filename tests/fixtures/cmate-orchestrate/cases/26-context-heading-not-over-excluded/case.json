@@ -10,7 +10,7 @@
     "dependencies": [],
     "classifications": { "431": "independent" },
     "risk_level": "low",
-    "suspected_files": { "431": ["src/session/restore.ts", "src/session/manager.ts"] },
+    "suspected_files": { "431": ["src/session/restore.ts", "src/session/manager.ts", "src/session/restore.test.ts", "src/session/restore.spec.ts", "src/session/__tests__/restore.ts", "src/session/__tests__/restore.test.ts", "src/session/manager.test.ts", "src/session/manager.spec.ts", "src/session/__tests__/manager.ts", "src/session/__tests__/manager.test.ts"] },
     "reference_files": { "431": [] }
   }
 }

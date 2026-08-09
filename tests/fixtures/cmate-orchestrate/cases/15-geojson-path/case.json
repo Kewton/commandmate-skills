@@ -10,6 +10,7 @@
     "dependencies": [],
     "classifications": { "411": "independent" },
     "risk_level": "low",
-    "suspected_files": { "411": ["data/demo/service-area.geojson", "src/map/layers.ts"] }
+    "suspected_files": { "411": ["data/demo/service-area.geojson", "src/map/layers.ts", "src/map/layers.test.ts", "src/map/layers.spec.ts", "src/map/__tests__/layers.ts", "src/map/__tests__/layers.test.ts"] },
+    "scope_defaults": { "411": ["src/map/layers.test.ts", "src/map/layers.spec.ts", "src/map/__tests__/layers.ts", "src/map/__tests__/layers.test.ts"] }
   }
 }

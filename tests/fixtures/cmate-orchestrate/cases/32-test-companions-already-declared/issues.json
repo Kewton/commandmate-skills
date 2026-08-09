@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 441,
+      "title": "fix: 再送のバックオフ計算を直す",
+      "body": "`src/session/retry.ts` のバックオフ計算を直し、`src/session/retry.test.ts` を更新する。E2E の `tests/e2e/flow.spec.ts` も同じ観点を持つ。\n\n## Acceptance criteria\n- [ ] バックオフは指数である\n- [ ] 既存のテストが緑である\n",
+      "labels": ["bug"]
+    }
+  ]
+}

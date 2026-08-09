@@ -855,6 +855,158 @@ function scopeDefaultsFor(suspected) {
   return out;
 }
 
+// =============================================================================
+// Test companions — layer L1 of references/adr-scope-derivation.md (Issue #147)
+// =============================================================================
+//
+// The same failure as the lockfile case above, and the same fix. An issue that
+// names only the implementation file produces a scope.allow with no test path in
+// it, so a worker that writes the test its OWN acceptance criteria demand is
+// failed by the scope gate — and the contract's scope is a send-time snapshot,
+// so the worker cannot resolve it. Measured three times now (#56 = extraction,
+// #44 = lockfiles, #145 = tests), each time as a whole worker run lost to a file
+// the issue forgot to write down. The planner therefore allows the CONVENTIONAL
+// test paths of every source file the issue declared and reports them in
+// `scope_defaults`, exactly as it already does for lockfiles.
+//
+// Two properties keep this from re-opening the hole #50 closed:
+//
+//   * Every derived path is a function of a DECLARED path. No bare glob
+//     (`**/*.test.*`) is ever added, so an issue that declares nothing derives
+//     nothing and the blast radius stays proportional to the declaration
+//     (ADR section 2, invariant 1).
+//   * An allowance nobody uses costs nothing. Test layout is a repository
+//     CONVENTION, so this derivation is a guess by construction — but
+//     `scope.allow` is a PERMISSION, not an instruction. Allowing
+//     `session.test.ts`, `session.spec.ts` and `__tests__/session.ts` when the
+//     repo uses one of the three wastes two patterns that never match anything;
+//     allowing none of them wastes a worker's run.
+//
+// Which shapes an extension gets is decided per ecosystem rather than once for
+// all, because FILE_EXT already spans `go|py|java|kt|rb` and a JS-only rule would
+// leave exactly those issues with the failure this exists to remove. The
+// reasoning per family is on each branch of testCompanionShapes below.
+
+// Mirrors dispatch.mjs MAX_SCOPE_PATTERNS. That runner SORTS scope.allow and
+// then `.slice(0, 200)`s it, so an over-long list does not merely lose its
+// derived tail — it can drop a DECLARED file in favour of an alphabetically
+// earlier derived one, which is the very failure this feature removes. The
+// derivation therefore stops at a source-file boundary before the issue's
+// de-duplicated total can reach the bound. In practice no fixture comes close
+// (the widest shape is 4 paths per source file), but the guard is what makes
+// "derived paths never displace declared ones" a property rather than a hope.
+const MAX_SCOPE_PATTERNS = 200;
+
+// Directory names that mean "everything below me is already test material".
+// Matched as whole path segments, never as substrings: `src/latest/render.ts`
+// is not a test file.
+const TEST_DIR_SEGMENTS = new Set(['test', 'tests', '__tests__', 'spec', 'specs', 'testdata']);
+
+// File names that are already a test, in the shapes the rules below emit plus
+// the ones adjacent to them:
+//   `session.test.ts` `session.spec.tsx` `session-test.js`   (JS/TS)
+//   `session_test.go` `session_test.py`  `session_spec.rb`   (Go / Python / Ruby)
+//   `test_session.py`                                        (Python, pytest)
+//   `SessionTest.java` `SessionSpec.kt`  `SessionIT.java`    (JVM)
+// Without this, `session.test.ts` in a body would derive `session.test.test.ts`
+// — a path that cannot exist, and one more pattern eating the scope budget.
+const TEST_FILE_RE = /^test_|[._-](test|spec)\.[A-Za-z0-9]+$|(Test|Tests|Spec|IT)\.(java|kt)$/;
+
+function isTestPath(path) {
+  const segments = path.split('/');
+  const file = segments.pop();
+  if (segments.some((segment) => TEST_DIR_SEGMENTS.has(segment))) return true;
+  return TEST_FILE_RE.test(file);
+}
+
+// Jest, Vitest and Mocha all resolve a sibling `*.test.*`/`*.spec.*`, and
+// `__tests__/` is the layout Jest's default testMatch documents. All three are
+// in live use side by side, and the planner cannot open the repository to learn
+// which one this repo picked (orchestrate.mjs never does — see the comment above
+// the acceptance-gates parser), so all three are allowed.
+const JS_TEST_EXTENSIONS = new Set(['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs']);
+
+// The conventional test paths of one source file, in a fixed order. An extension
+// with no entry here yields NOTHING, which is what keeps a `.md` / `.json` /
+// `.yaml` / lockfile / `Makefile` issue from deriving anything at all: the
+// non-source exclusion is not a deny-list to maintain, it is the absence of a
+// rule. `.rs`, `.sh`, `.c`, `.sql`, `.css`, `.html` are deliberately absent too:
+// Rust's unit tests live INSIDE the source file (`#[cfg(test)] mod tests`),
+// which is already in scope, and its integration tests are named after an
+// intent rather than a module, while shell and the C family have no convention
+// a path alone can predict (`*.bats`, `test_*.sh`, `*_test.c`, `check_*.c` are
+// all common). Guessing there would spend scope budget on paths no repository
+// has. Add an ecosystem when an issue shows the shape it actually needs — the
+// same rule SCOPE_DEFAULT_COMPANIONS and FILE_EXT are maintained by.
+function testCompanionShapes(dir, base, ext) {
+  if (JS_TEST_EXTENSIONS.has(ext)) {
+    return [
+      `${dir}${base}.test.${ext}`,
+      `${dir}${base}.spec.${ext}`,
+      `${dir}__tests__/${base}.${ext}`,
+      `${dir}__tests__/${base}.test.${ext}`,
+    ];
+  }
+  // Go: `go test` only recognises `_test.go` in the SAME package directory, so
+  // there is exactly one shape and no guesswork.
+  if (ext === 'go') return [`${dir}${base}_test.go`];
+  // Python: pytest's default discovery is `test_*.py`, found either beside the
+  // module or under a top-level `tests/`. Both are ubiquitous and neither is
+  // derivable from the other, so both are allowed (ADR section 5).
+  if (ext === 'py') return [`${dir}test_${base}.py`, `tests/test_${base}.py`];
+  // Ruby: RSpec's `_spec.rb`.
+  if (ext === 'rb') return [`${dir}${base}_spec.rb`];
+  // JVM: NOT in the ADR's table, added here because FILE_EXT accepts `java|kt`
+  // and leaving them out would reproduce the JS-only asymmetry the ADR rejects.
+  // Maven and Gradle both mirror `src/main/<lang>/…/Foo.java` into
+  // `src/test/<lang>/…/FooTest.java`, which is as mechanical as Go's rule, so
+  // the mirror is emitted whenever the declared path actually carries a
+  // `src/main/` segment. The sibling `FooTest.java` is emitted as well for the
+  // single-module and Android-style trees that do not use that layout.
+  if (ext === 'java' || ext === 'kt') {
+    const shapes = [`${dir}${base}Test.${ext}`];
+    const mirrored = dir.replace(/(^|\/)src\/main\//, '$1src/test/');
+    if (mirrored !== dir) shapes.push(`${mirrored}${base}Test.${ext}`);
+    return shapes;
+  }
+  return [];
+}
+
+// `suspected` is the DECLARED file list and `added` the defaults already chosen
+// for this issue (the lockfiles). Both are read, neither is mutated: the caller
+// appends the return value to `scope_defaults` and to `suspected_files` in one
+// place, so "added to the scope" and "reported in the plan" cannot drift apart
+// (ADR section 2, invariant 2).
+//
+// Deterministic by construction — the declared list is walked in order, each
+// file's shapes are emitted in the fixed order above, and nothing is sorted or
+// read out of a Set — so the same plan input still produces a byte-identical
+// plan and hence a byte-identical contract (dispatch-contract.md section on
+// determinism, invariant 3).
+function testScopeDefaultsFor(suspected, added) {
+  const have = new Set([...suspected, ...added]);
+  const out = [];
+  for (const path of suspected) {
+    if (isTestPath(path)) continue;
+    const cut = path.lastIndexOf('/');
+    const dir = cut === -1 ? '' : path.slice(0, cut + 1);
+    const file = path.slice(cut + 1);
+    const dot = file.lastIndexOf('.');
+    // `dot <= 0` covers both the extensionless name (`Makefile`) and the dotfile
+    // whose leading dot is not an extension separator (`.gitignore`).
+    if (dot <= 0) continue;
+    const fresh = testCompanionShapes(dir, file.slice(0, dot), file.slice(dot + 1))
+      .filter((companion) => !have.has(companion));
+    if (fresh.length === 0) continue;
+    if (have.size + fresh.length > MAX_SCOPE_PATTERNS) break;
+    for (const companion of fresh) {
+      have.add(companion);
+      out.push(companion);
+    }
+  }
+  return out;
+}
+
 // Verification commands the issue text names, recognised by the binaries the
 // profile's baseline uses plus a small generic set. Nothing is hardcoded to one
 // ecosystem: the recognised binaries are derived from the active profile.
@@ -1095,7 +1247,14 @@ function analyzeIssue(issue, profile, binaries) {
     extraction.deliverable,
     extraction.contextOnly,
   );
+  // Both default sources feed ONE list, which is then appended to
+  // suspected_files and reported as `scope_defaults` — the plan can never grant
+  // a path it does not also declare it granted. Test companions are derived from
+  // the DECLARED files only (`suspected` before the push below): the lockfiles
+  // just chosen are themselves derived, and deriving from derived paths is what
+  // invariant 1 forbids.
   const scopeDefaults = scopeDefaultsFor(suspected);
+  scopeDefaults.push(...testScopeDefaultsFor(suspected, scopeDefaults));
   suspected.push(...scopeDefaults);
   const tests = extractTestExpectations(text, binaries).map(redact);
 

@@ -32,7 +32,7 @@
       "201": [
         "The branch's actual change set could NOT be read",
         "**This is not evidence that the branch stayed in scope.**",
-        "- Declared scope (`scope.allow`, 1 entry):\n  - `src/base.ts`"
+        "- Declared scope (`scope.allow`, 5 entries):\n  - `src/__tests__/base.test.ts`\n  - `src/__tests__/base.ts`\n  - `src/base.spec.ts`\n  - `src/base.test.ts`\n  - `src/base.ts`"
       ],
       "200": [
         "- Out-of-scope changes: **0** — every one of the 1 changed file(s) is inside the declared scope."

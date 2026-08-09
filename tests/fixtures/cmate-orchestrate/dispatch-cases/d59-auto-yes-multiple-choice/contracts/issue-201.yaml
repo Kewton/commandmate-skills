@@ -18,6 +18,10 @@ goal: |
 
   ## Files you may change
   - src/base.ts
+  - src/base.test.ts
+  - src/base.spec.ts
+  - src/__tests__/base.ts
+  - src/__tests__/base.test.ts
 
   ## Rules
   - Stay within this issue. Do not modify files another issue in the plan owns.
@@ -32,6 +36,10 @@ goal: |
   - Do not print tokens, secrets, or absolute host paths.
 scope:
   allow:
+    - "src/__tests__/base.test.ts"
+    - "src/__tests__/base.ts"
+    - "src/base.spec.ts"
+    - "src/base.test.ts"
     - "src/base.ts"
   deny: []
 autoYes:

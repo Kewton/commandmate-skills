@@ -19,8 +19,7 @@
   },
   "inputs": {
     "issues": [
-      200,
-      201
+      440
     ],
     "base": "origin/develop",
     "profile_id": "node-commandmate",
@@ -32,100 +31,52 @@
   },
   "issues": [
     {
-      "number": 200,
-      "title": "feat: add a session store",
-      "objective": "Add the session store in `src/store.ts`.",
+      "number": 440,
+      "title": "feat: send セッションの再送を実装する",
+      "objective": "`src/session/retry.ts` に再送処理を実装する。",
       "acceptance_criteria": [
-        "`src/store.ts` persists a session"
+        "再送は指数バックオフで最大3回である",
+        "追加した unit test が緑である"
       ],
       "acceptance_gates": null,
       "suspected_files": [
-        "src/store.ts",
-        "src/store.test.ts",
-        "src/store.spec.ts",
-        "src/__tests__/store.ts",
-        "src/__tests__/store.test.ts"
+        "src/session/retry.ts",
+        "src/session/retry.test.ts",
+        "src/session/retry.spec.ts",
+        "src/session/__tests__/retry.ts",
+        "src/session/__tests__/retry.test.ts"
       ],
       "scope_defaults": [
-        "src/store.test.ts",
-        "src/store.spec.ts",
-        "src/__tests__/store.ts",
-        "src/__tests__/store.test.ts"
+        "src/session/retry.test.ts",
+        "src/session/retry.spec.ts",
+        "src/session/__tests__/retry.ts",
+        "src/session/__tests__/retry.test.ts"
       ],
       "reference_files": [],
       "test_expectations": [],
       "labels": [
         "feature"
       ],
-      "branch": "feature/issue-200-feat-add-a-session-store",
-      "worktree": "../CommandMate-issue-200-feat-add-a-session-store",
-      "worktree_id": null,
-      "questions": [],
-      "classification": "dependent"
-    },
-    {
-      "number": 201,
-      "title": "feat: add base configuration loader",
-      "objective": "Add the base configuration loader in `src/base.ts`.",
-      "acceptance_criteria": [
-        "`src/base.ts` reads config from disk"
-      ],
-      "acceptance_gates": null,
-      "suspected_files": [
-        "src/base.ts",
-        "src/base.test.ts",
-        "src/base.spec.ts",
-        "src/__tests__/base.ts",
-        "src/__tests__/base.test.ts"
-      ],
-      "scope_defaults": [
-        "src/base.test.ts",
-        "src/base.spec.ts",
-        "src/__tests__/base.ts",
-        "src/__tests__/base.test.ts"
-      ],
-      "reference_files": [],
-      "test_expectations": [],
-      "labels": [
-        "feature"
-      ],
-      "branch": "feature/issue-201-feat-add-base-configuration-loader",
-      "worktree": "../CommandMate-issue-201-feat-add-base-configuration-loader",
+      "branch": "feature/issue-440-feat-send",
+      "worktree": "../CommandMate-issue-440-feat-send",
       "worktree_id": null,
       "questions": [],
       "classification": "independent"
     }
   ],
-  "dependencies": [
-    {
-      "issue": 200,
-      "depends_on": 201,
-      "kind": "explicit",
-      "reason": "#200 states a dependency on #201 (direction word \"Depends on\" in \"- Depends on #201\")"
-    }
-  ],
+  "dependencies": [],
   "waves": [
     [
-      201
-    ],
-    [
-      200
+      440
     ]
   ],
   "merge_order": [
-    201,
-    200
+    440
   ],
   "max_parallel": 3,
   "risk": {
-    "level": "moderate",
-    "factors": [
-      {
-        "code": "cross_issue_dependency",
-        "severity": "moderate",
-        "detail": "1 dependency edge(s) constrain ordering"
-      }
-    ]
+    "level": "low",
+    "factors": []
   },
   "permissions": [
     "filesystem_read",
@@ -136,13 +87,7 @@
   "commands": [
     {
       "phase": "analyze",
-      "command": "gh issue view 200 --repo Kewton/CommandMate --json number,title,body,labels",
-      "mutating": false,
-      "executed": false
-    },
-    {
-      "phase": "analyze",
-      "command": "gh issue view 201 --repo Kewton/CommandMate --json number,title,body,labels",
+      "command": "gh issue view 440 --repo Kewton/CommandMate --json number,title,body,labels",
       "mutating": false,
       "executed": false
     },

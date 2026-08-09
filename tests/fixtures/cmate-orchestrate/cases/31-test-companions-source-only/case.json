@@ -1,0 +1,33 @@
+{
+  "description": "Issue #147 (ADR adr-scope-derivation.md, layer L1): the issue names ONE implementation file and no test file, which is the shape that cost a whole worker run three times — the contract's scope.allow is a send-time snapshot, so a worker that writes the unit test its own acceptance criteria demand is failed by the scope gate and cannot resolve it. The planner therefore allows that source file's conventional test paths and SAYS SO in scope_defaults; the same entries appear in suspected_files, which is the field dispatch copies into scope.allow verbatim. The golden pins every byte, so the derivation is proved to be a pure function of the plan input.",
+  "args": ["440", "--profile", "node-commandmate", "--run-id", "fixture"],
+  "golden": "expected-plan.json",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[440]],
+    "merge_order": [440],
+    "dependencies": [],
+    "classifications": { "440": "independent" },
+    "risk_level": "low",
+    "suspected_files": {
+      "440": [
+        "src/session/retry.ts",
+        "src/session/retry.test.ts",
+        "src/session/retry.spec.ts",
+        "src/session/__tests__/retry.ts",
+        "src/session/__tests__/retry.test.ts"
+      ]
+    },
+    "scope_defaults": {
+      "440": [
+        "src/session/retry.test.ts",
+        "src/session/retry.spec.ts",
+        "src/session/__tests__/retry.ts",
+        "src/session/__tests__/retry.test.ts"
+      ]
+    },
+    "reference_files": { "440": [] }
+  }
+}

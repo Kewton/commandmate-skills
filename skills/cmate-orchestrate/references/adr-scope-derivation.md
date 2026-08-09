@@ -1,6 +1,6 @@
 # ADR: scope の導出 — 宣言から認可境界へ（[#145](https://github.com/Kewton/commandmate-skills/issues/145) を含むクラス）
 
-status: **accepted / 段2（L4）実装済み・他の段は未着手**（2026-08-09 承認）。裁定 0 と4層の分割、
+status: **accepted / 段1（L1）・段2（L4）実装済み・段3（#145）と段4（#149）は未着手**（2026-08-09 承認）。裁定 0 と4層の分割、
 契約 schema を分けない判断、L3 を question とする判断が承認された。
 実装は本 ADR の裁定に従い、実装で形が変わったら**正本を直したうえでこの文書に追記する**。
 
@@ -388,3 +388,48 @@ L1 / L2 は推論ではなく**規則の適用**（宣言済みファイルの�
 - **上流 #1756 が案B で決着したとき** —— 第4節（契約 schema で宣言/派生を分ける）を再検討する。
 - **`scope_defaults` が読めない量になったとき** —— 1 Issue あたりの導出数に上限を設けるか、
   `{path, origin}` へ広げて出所で畳むかを裁定する。
+
+---
+
+## 13. 実装時の追記（段1・[#147](https://github.com/Kewton/commandmate-skills/issues/147)）
+
+段1（L1 テスト伴走）を `orchestrate.mjs` の `testScopeDefaultsFor` として実装した。
+正本は [plan-contract.md](./plan-contract.md) 第 5.1 節である。第2節の不変条件3件、
+第3節の「L1 は設定ゼロ」、第5節の導出規則は**そのまま実装されている**。
+第9節のとおり `scope_defaults` は list のまま（`{path, origin}` へは広げていない）で、
+`plan_schema_version` も上げていない。
+
+第5節の表から**変えた点が2つ**あるので、第0節の約束に従って記録する。
+
+### 13.1 java / kt を足した
+
+第5節の表は `go|py|rb` までしか挙げていないが、`FILE_EXT` は `java|kt` も受理する。
+表のとおりに実装すると、まさに第5節が「JS だけの規則は非対称である」として却下した形が
+JVM に対して残る。そこで
+
+```
+<dir>/<Base>Test.<ext>                         （単一 module / Android 形式）
+src/test/<lang>/…/<Base>Test.<ext>             （src/main/ を持つ path のみ。Maven / Gradle）
+```
+
+を足した。`src/main/` → `src/test/` の対応は Maven と Gradle が両方要求する規約であり、
+**Go の `_test.go` と同じく path だけから決まる**ので、L1（規則の適用）の範囲に収まる。
+`src/main/` segment を持たない path には mirror を出さない。
+
+### 13.2 導出しない拡張子を明示した
+
+`rs` / `sh` / `c` / `h` / `cpp` / `sql` / `css` / `html` は `FILE_EXT` にあるが**規則を持たない**。
+Rust の unit test はソースファイルの中（`#[cfg(test)] mod tests`）にあり、それは既に scope 内
+である。integration test（`tests/<name>.rs`）と shell / C 系（`*.bats` / `test_*.sh` /
+`*_test.c` / `check_*.c`）は**意図に応じて名前が付く**ので path からは決まらない。
+第5節の「使われなかった許可はコストがゼロ」は、当たる見込みのある形にだけ効く議論であり、
+どの repo にも無い path を作ることまでは正当化しない。**4件目の見直し条件（第12節）に従い、
+実際の Issue が形を示したときに足す。**
+
+### 13.3 上限
+
+第12節が予告した上限は、可読性ではなく**正しさ**の理由で先に必要だった。
+`dispatch.mjs` は `scope.allow` を **sort してから** `MAX_SCOPE_PATTERNS`(=200) で切り詰めるので、
+上限を超えた list は導出済み path が宣言済み path を押し出す —— 本 ADR が消そうとしている
+障害そのものである。したがって導出は、issue の重複除去後の合計が 200 に達する前に
+**source file 単位で打ち切る**。fixture の実測はどれも1桁である。

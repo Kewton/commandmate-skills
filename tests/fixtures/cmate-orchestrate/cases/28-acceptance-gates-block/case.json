@@ -41,12 +41,24 @@
       "330": [
         "src/gates.ts",
         "scripts/validate.py",
-        "tests/fixtures/cmate-orchestrate/run_tests.mjs"
+        "tests/fixtures/cmate-orchestrate/run_tests.mjs",
+        "src/gates.test.ts",
+        "src/gates.spec.ts",
+        "src/__tests__/gates.ts",
+        "src/__tests__/gates.test.ts",
+        "scripts/test_validate.py",
+        "tests/test_validate.py"
       ],
       "331": [
         "src/gates.ts",
         "scripts/validate.py",
-        "tests/fixtures/cmate-orchestrate/run_tests.mjs"
+        "tests/fixtures/cmate-orchestrate/run_tests.mjs",
+        "src/gates.test.ts",
+        "src/gates.spec.ts",
+        "src/__tests__/gates.ts",
+        "src/__tests__/gates.test.ts",
+        "scripts/test_validate.py",
+        "tests/test_validate.py"
       ]
     },
     "classifications": {
