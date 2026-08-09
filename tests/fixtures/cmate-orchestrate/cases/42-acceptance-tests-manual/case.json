@@ -1,0 +1,17 @@
+{
+  "description": "Issue #145, exclusion 3 of 4: 「手動テストで確認する」/ \"verified by manual testing\". A manual test is not a file, so no scope entry could answer the question this would otherwise raise — the run would stop on a question with no answer, which is the one stop shape a human cannot clear by editing the body. Both criteria carry 追加 / \"new\" plus a test noun, so removing the exclusion turns this case red.",
+  "args": ["460", "461", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "fixture", "--no-infer"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[460, 461]],
+    "merge_order": [460, 461],
+    "dependencies": [],
+    "classifications": { "460": "independent", "461": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "460": ["scripts/deploy.sh"], "461": ["scripts/smoke.sh"] },
+    "scope_defaults": { "460": [], "461": [] },
+    "questions_count": { "460": 0, "461": 0 }
+  }
+}

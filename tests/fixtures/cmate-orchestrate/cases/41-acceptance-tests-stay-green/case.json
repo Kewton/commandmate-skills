@@ -1,0 +1,17 @@
+{
+  "description": "Issue #145, exclusion 2 of 4: 「既存の unit test が緑のまま」/ \"Existing unit tests still pass\". That is a REGRESSION condition — satisfied by touching no test file at all — so a scope with no test path in it is right rather than short. Both criteria also say 追加 / \"added\" about the CHANGE, which is precisely why the positive rule fires without this exclusion and why the case goes red when it is removed. 既存 / existing on its own must not veto (「既存のテストに1件追加する」 is a real demand), so the exclusion needs the stays-as-it-is half inside the same clause; the bounded gap that never crosses a 。 / \".\" is what enforces that.",
+  "args": ["458", "459", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "fixture", "--no-infer"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[458, 459]],
+    "merge_order": [458, 459],
+    "dependencies": [],
+    "classifications": { "458": "independent", "459": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "458": ["scripts/lint.sh"], "459": ["scripts/format.sh"] },
+    "scope_defaults": { "458": [], "459": [] },
+    "questions_count": { "458": 0, "459": 0 }
+  }
+}

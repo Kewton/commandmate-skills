@@ -1,0 +1,29 @@
+{
+  "description": "Issue #145 (ADR adr-scope-derivation.md, layer L3): the residue L1 cannot reach. The acceptance criteria actively demand a unit test, the issue declares only a shell script — an ecosystem the derivation has no rule for (ADR 13.2: `*.bats` / `test_*.sh` are named after an intent, not a path) — so nothing is derived and the future scope.allow holds no test path at all. Dispatching that plan spends a whole worker run on a scope gate the worker cannot resolve, so the planner raises ONE warning and ONE open question instead, dropping the run to `partial`. The question quotes the criterion VERBATIM, which is what makes confirming a false positive a matter of seconds rather than a trip to the issue. Note what does NOT change: suspected_files and scope_defaults are exactly what they were before this detector existed — 裁定 A (ADR section 8), an inference may stop the machine but may not instruct it.",
+  "args": ["450", "--profile", "node-commandmate", "--run-id", "fixture"],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": ["acceptance_requires_tests_but_scope_has_none"],
+    "warning_details_include": [
+      "#450: Acceptance asks for a test but no test path is among the affected files; name it in the issue body, or say no new test is needed. Criterion: \"新しい GATE 行を読む unit test を追加し、それが判定する\"",
+      "The dispatch runner refuses an issue with an unanswered question"
+    ],
+    "waves": [[450]],
+    "merge_order": [450],
+    "dependencies": [],
+    "classifications": { "450": "independent" },
+    "risk_level": "moderate",
+    "suspected_files": { "450": ["scripts/verify-run.sh"] },
+    "scope_defaults": { "450": [] },
+    "reference_files": { "450": [] },
+    "acceptance_gates": { "450": null },
+    "questions_include": {
+      "450": [
+        "新しい GATE 行を読む unit test を追加し、それが判定する",
+        "name it in the issue body, or say no new test is needed"
+      ]
+    },
+    "questions_count": { "450": 1 }
+  }
+}

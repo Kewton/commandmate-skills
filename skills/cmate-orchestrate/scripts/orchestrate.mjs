@@ -1007,6 +1007,166 @@ function testScopeDefaultsFor(suspected, added) {
   return out;
 }
 
+// =============================================================================
+// Test demand vs. scope — layer L3 of references/adr-scope-derivation.md (#145)
+// =============================================================================
+//
+// The residue L1 above cannot reach. L1 derives the CONVENTIONAL test paths of
+// every declared source file, so the measured failure — an issue whose acceptance
+// criteria demand a unit test, whose 対象ファイル lists only the implementation,
+// and whose worker is then failed by the scope gate for writing exactly that test
+// — now disappears with nobody doing anything, FOR A REPOSITORY WHOSE LAYOUT IS
+// ONE OF L1's SHAPES. What is left is the repository whose convention the planner
+// does not know: a layout L1 does not emit, with no L2 `scope_companions`
+// declared yet (#149). There the whole run is still lost, and the loss is total —
+// the worker cannot resolve it (the contract's scope is a send-time snapshot) and
+// neither can the planner (it never opens the target repository).
+//
+// So the planner says so, to a human, BEFORE dispatch: one warning and one open
+// question. The question is what makes it stop anything. `plan.status` is read by
+// nobody downstream, while dispatch refuses an issue carrying an unanswered
+// question — and does it in pre-flight, before `--out` exists, so a false
+// positive costs nothing but the re-plan the true positive would have cost
+// anyway (ADR section 7).
+//
+// ---- 裁定 A (ADR section 8) -------------------------------------------------
+//
+//   推論は機械を止めてよいが、機械に指示してはならない。
+//   An inference may stop the machine; it must not instruct the machine.
+//
+// This detector writes ZERO bytes into `acceptance_gates` and ZERO bytes into
+// `scope.allow`. Its only output is text a human reads. `questions` does stop
+// dispatch, so the influence on the machine is not nil — the exact line is that
+// it STOPS the machine and never TELLS IT WHAT TO DO. L1 above is allowed into
+// the scope because it applies a RULE to declared paths; L3 reads intent out of
+// prose, so it is not.
+//
+// ---- Why the precision work below is the feature ----------------------------
+//
+// The two questions this one joins (`no_acceptance_criteria`,
+// `no_suspected_files`) are `length === 0` tests: nothing is interpreted, so they
+// cannot be wrong about what a body says. This one reads Japanese and English
+// prose, and it shares their channel — the flag that waves it through,
+// `--allow-questions`, applies to the WHOLE plan. One false positive here teaches
+// an operator to reach for that flag by habit, which silences a real
+// `no_acceptance_criteria` along with it. Precision is bought three ways:
+//
+//   1. Only `acceptance_criteria` is scanned, never the whole body. A body that
+//      discusses testing somewhere is not a body that demands a test as a
+//      condition of done.
+//   2. A criterion must name a test AND carry an active demand, or must name a
+//      test-shaped path outright. "the unit test is green" is an observation, not
+//      a request to write one.
+//   3. Four negative shapes veto a criterion outright. Each is a thing a human
+//      actually writes, and each would otherwise fire, because "add a backoff
+//      cap, no unit test needed" carries both a test noun and the verb 追加.
+//      Exclusion is evaluated FIRST and wins: a criterion that says both is a
+//      criterion whose author already answered this question.
+
+// A test artifact, named. `spec` on its own is deliberately absent — in an
+// acceptance criterion "the spec" is as often the specification as it is an RSpec
+// file, and the `*_spec.rb` / `*.spec.ts` shapes are reached by the path rule
+// below instead. The runner names are unambiguous and worth having.
+const TEST_NOUN_RE = /テスト|\btest(?:s|ing)?\b|\btest\s+cases?\b|\btest\s+suite\b|\brspec\b|\bjest\b|\bvitest\b|\bpytest\b/i;
+
+// An ACTIVE demand: the criterion asks for the test to come into existence, or
+// makes the test the thing that DECIDES the criterion ("unit test がそれを判定
+// する" — the shape the reported issue used). 緑 / green is pointedly not here: a
+// criterion that only observes a test passing is satisfied by a repository that
+// already has it, and a scope with no test path in it is then correct.
+const TEST_DEMAND_RE =
+  /追加|作成|新規|新設|導入|用意|足す|足し|書く|書き|実装|固定|網羅|カバー|判定|証明|示す|\b(?:add(?:s|ed|ing)?|writ(?:e|es|ten|ing)|creat(?:e|es|ed|ing)|new|introduc(?:e|es|ed)|cover(?:s|ed|ing)?|assert(?:s|ed|ing)?|prov(?:e|es|en)|pin(?:s|ned)?|decid(?:e|es)|determin(?:e|es)|extend(?:s|ed)?)\b/i;
+
+// ---- Exclusion 1: a test is explicitly not wanted ---------------------------
+// 「テストは不要」/ "no new tests". The author already made this call, and a
+// planner that stops the run to ask anyway is overruling a stated decision — the
+// single fastest way for this warning to lose a reader's trust.
+//
+// The English arms allow up to two words between the negation and the noun
+// because that is where a real sentence puts them ("no new unit test is needed",
+// "without adding a test"). It buys the exclusion a shape it would otherwise
+// miss, at the price of vetoing a criterion that says "there is no way the test
+// can …" — a sentence an acceptance criterion does not write, and one whose cost
+// if it ever appears is a re-plan rather than a lost run.
+const TEST_NOT_WANTED_RE =
+  /不要|要らない|いらない|不必要|なくてよい|無くてよい|省略|\bno\s+(?:\w+\s+){0,2}tests?\b|\bnot\s+(?:required|needed|necessary)\b|\bwithout\s+(?:\w+\s+){0,2}tests?\b/i;
+
+// ---- Exclusion 2: existing tests merely have to keep passing -----------------
+// 「既存の…テストが緑のまま」/ "existing tests still pass". That is a REGRESSION
+// condition: it is satisfied by touching no test file at all, so a scope with no
+// test path in it is right rather than short. 既存 / existing alone must NOT veto
+// — 「既存のテストに1件追加する」 is a real demand — so the veto needs the
+// "stays as it is" half within the same clause, which is what the bounded gap
+// (never across a 。 / ".") enforces.
+const TESTS_STAY_GREEN_RE =
+  /(?:既存|現行|従来)[^。]{0,40}?(?:緑|パス|通る|通り|落ちない|壊れない|そのまま|まま)|\b(?:existing|current)\b[^.]{0,50}?\b(?:stay|stays|remain|remains|still|keep|keeps|unchanged|green|pass|passes|passing)\b|\b(?:stay|stays|remain|remains)\s+green\b|\bstill\s+pass(?:es)?\b/i;
+
+// ---- Exclusion 3: the check is manual ---------------------------------------
+// 「手動テストで確認」/ "verified by hand". A manual test is not a file, so no
+// scope entry could answer the question this would raise. The veto covers the
+// whole criterion rather than the clause it sits in: a single bullet demanding
+// both an automated and a manual test is rare enough that missing it costs less
+// than stopping a run for a question with no answer.
+const MANUAL_TEST_RE = /手動|手作業|目視|\bmanual(?:ly)?\b|\bby\s+hand\b/i;
+
+// ---- Exclusion 4: the tests are explicitly out of scope ---------------------
+// 「テストは変更しない」/ "the tests are unchanged". The strongest of the four:
+// the author is saying the very file this detector would ask for must not be
+// touched. Adding it to the scope would be the opposite of what the issue wants.
+const TESTS_UNCHANGED_RE =
+  /テスト[^。]{0,24}?(?:変更しない|変えない|触らない|触れない|変わらない|いじらない)|\btests?\b[^.]{0,40}?\b(?:unchanged|untouched)\b|\bdo(?:es)?\s+not\s+(?:change|modify|touch|update)\b[^.]{0,30}?\btests?\b|\btests?\b[^.]{0,30}?\bare\s+not\s+(?:changed|modified|touched|updated)\b/i;
+
+// Four separate statements, not one fused regex: each is a line drawn for its own
+// reason above, and each has to be removable on its own to be shown — by mutation
+// — to be carrying weight rather than shadowed by a neighbour.
+function testDemandExcluded(criterion) {
+  if (TEST_NOT_WANTED_RE.test(criterion)) return true;
+  if (TESTS_STAY_GREEN_RE.test(criterion)) return true;
+  if (MANUAL_TEST_RE.test(criterion)) return true;
+  if (TESTS_UNCHANGED_RE.test(criterion)) return true;
+  return false;
+}
+
+// A path candidate as it appears inside ONE criterion. Deliberately looser than
+// CANDIDATE_WITH_EXT in one way — no leading directory is required — because that
+// is exactly the gap this branch covers: the body extractor reads an
+// un-backticked token as a path only when it contains a "/", so `retry.test.ts`
+// written bare in prose never becomes a suspected file. The criterion then asks
+// for a path the scope does not have and NOTHING ELSE in the plan says so.
+// `session_test.go` and `parser_spec.rb` need this branch for a second reason:
+// "_test" carries no word boundary, so TEST_NOUN_RE cannot see the test in them.
+const CRITERION_PATH_RE = new RegExp(
+  PATH_START + '((?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\\.(?:' + FILE_EXT + '))\\b',
+  'g',
+);
+
+// `isTestPath` is the SAME predicate applied to suspected_files below, so "the
+// criterion names a test path" and "the scope holds a test path" cannot disagree
+// about what a test path is.
+function mentionsTestPath(criterion) {
+  for (const match of criterion.matchAll(CRITERION_PATH_RE)) {
+    if (isTestPath(match[1])) return true;
+  }
+  return false;
+}
+
+// The first criterion that actively demands a test, VERBATIM, or null. The text
+// is returned rather than a boolean because the question quotes it: "why did this
+// stop" has to be readable without opening the issue, which is what makes
+// confirming a false positive a matter of seconds. It is not truncated — a
+// criterion is one bullet line, already normalised by cleanCriterion and
+// redacted, and cutting it would hide the demand whenever it sits at the end.
+function testCreationDemand(criteria) {
+  for (const criterion of criteria) {
+    if (testDemandExcluded(criterion)) continue;
+    // A named test file is a demand by itself: the author wrote down the path
+    // they expect to exist, so no verb has to agree with it.
+    if (mentionsTestPath(criterion)) return criterion;
+    if (TEST_NOUN_RE.test(criterion) && TEST_DEMAND_RE.test(criterion)) return criterion;
+  }
+  return null;
+}
+
 // Verification commands the issue text names, recognised by the binaries the
 // profile's baseline uses plus a small generic set. Nothing is hardcoded to one
 // ecosystem: the recognised binaries are derived from the active profile.
@@ -1278,6 +1438,34 @@ function analyzeIssue(issue, profile, binaries) {
       code: 'no_suspected_files',
       text: 'Affected files are unclear; add likely modules or paths.',
     });
+  }
+  // L3 of the scope-derivation ADR (Issue #145), raised LAST: the two questions
+  // above are structural, this one is read out of prose, so a reviewer meets the
+  // findings that cannot be wrong before the one that can.
+  //
+  // `suspected` here already carries `scopeDefaults`, which is what keeps this
+  // from firing on top of L1: an issue whose declared source files DID derive a
+  // conventional test path has a test path in scope and is silent. What reaches
+  // the detector is the repository whose layout L1 does not know — the residue
+  // this layer exists for. Reading `suspected` before the push above would fire
+  // on every issue L1 just fixed.
+  if (!suspected.some(isTestPath)) {
+    const demand = testCreationDemand(acceptance);
+    if (demand !== null) {
+      // The quoted criterion goes LAST on purpose. The dispatch runner prints a
+      // blocking question through its `excerpt(…, 200)`, which keeps the TAIL of
+      // an over-long string, so a question that opened with the quote would lose
+      // exactly the part that lets a reader confirm the stop — and it would lose
+      // it in the unattended run, where nobody can go read the issue instead. The
+      // prose ahead of it is kept short for the same reason: 140 characters leaves
+      // a criterion room to survive whole.
+      openQuestions.push({
+        code: 'acceptance_requires_tests_but_scope_has_none',
+        text:
+          'Acceptance asks for a test but no test path is among the affected files; ' +
+          `name it in the issue body, or say no new test is needed. Criterion: "${demand}"`,
+      });
+    }
   }
   const questions = openQuestions.map((question) => question.text);
 

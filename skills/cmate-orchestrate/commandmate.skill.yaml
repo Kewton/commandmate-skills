@@ -125,8 +125,8 @@ files:
     executable: false
     script: false
   - path: references/adr-scope-derivation.md
-    sha256: ede7ab944161a6549c4edde45d3dff8603c59c93ae0592f86852a46cc9d9fc10
-    size: 25959
+    sha256: 7c22b0ad0133992e55a3479f070c1e4931edfd5bd199c1aadcffbcac2de22721
+    size: 33252
     kind: instruction
     executable: false
     script: false
@@ -155,8 +155,8 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: 7b7185bf15b41f7ef9f2ebdba741303ca443874e18999e8844a954a4c031e33a
-    size: 24118
+    sha256: e7eae9bb54b19fdb90cfaabf92cec4854d0df5953b714e277c7052ed5d65004a
+    size: 26501
     kind: instruction
     executable: false
     script: false
@@ -173,8 +173,8 @@ files:
     executable: false
     script: false
   - path: references/plan-contract.md
-    sha256: 77be7a13fbd935e2e2c54c8b3bed4a32e9d2345535f204cab31493a0a00d9a38
-    size: 17109
+    sha256: c0b28ea67bc9fc82ea5816840ecb8a0dd8c97b6a55ffbb2baa520bf51af79cec
+    size: 20373
     kind: instruction
     executable: false
     script: false
@@ -257,8 +257,8 @@ files:
     executable: true
     script: true
   - path: scripts/orchestrate.mjs
-    sha256: dda853a2c5fc98974e6a40d3ededdb7ca4f7e66764315422ad4944ec77749335
-    size: 91890
+    sha256: 12b264d19ef10f99038849c7c499614dca9b3cdadb809c05e38a98b5260d31be
+    size: 103932
     kind: script
     executable: true
     script: true

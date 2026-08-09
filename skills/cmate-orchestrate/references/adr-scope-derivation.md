@@ -1,6 +1,6 @@
 # ADR: scope の導出 — 宣言から認可境界へ（[#145](https://github.com/Kewton/commandmate-skills/issues/145) を含むクラス）
 
-status: **accepted / 段1（L1）・段2（L4）実装済み・段3（#145）と段4（#149）は未着手**（2026-08-09 承認）。裁定 0 と4層の分割、
+status: **accepted / 段1（L1）・段2（L4）・段3（L3）実装済み・段4（#149）は未着手**（2026-08-09 承認）。裁定 0 と4層の分割、
 契約 schema を分けない判断、L3 を question とする判断が承認された。
 実装は本 ADR の裁定に従い、実装で形が変わったら**正本を直したうえでこの文書に追記する**。
 
@@ -433,3 +433,93 @@ Rust の unit test はソースファイルの中（`#[cfg(test)] mod tests`）�
 上限を超えた list は導出済み path が宣言済み path を押し出す —— 本 ADR が消そうとしている
 障害そのものである。したがって導出は、issue の重複除去後の合計が 200 に達する前に
 **source file 単位で打ち切る**。fixture の実測はどれも1桁である。
+
+---
+
+## 14. 実装時の追記（段3・[#145](https://github.com/Kewton/commandmate-skills/issues/145)）
+
+段3（L3・残余の検出）を `orchestrate.mjs` の `testCreationDemand` / `testDemandExcluded` /
+`mentionsTestPath` と `analyzeIssue` の1分岐として実装した。code は
+`acceptance_requires_tests_but_scope_has_none`、正本は
+[plan-contract.md](./plan-contract.md) 第5.2節、対処は
+[codes-and-recovery.md](./codes-and-recovery.md) 第2節・第4節である。
+第7節の裁定（question にする）・第8節の裁定 A・第9節（`warnings` と `questions` の両方に出す、
+`plan_schema_version` は上げない）は**そのまま実装されている**。新しい field は1つも作っていない。
+
+### 14.1 「テストらしき path」は L1 と同じ述語を使う
+
+第2の条件（`suspected_files` にテストらしき path が1件も無い）の判定には、L1 が
+「この path は既にテストだから導出しない」に使っている `isTestPath` を**そのまま**使った。
+別の述語を書けば、L1 が「テストだ」と見た path を L3 が「テストでない」と読む余地が生まれ、
+**二重発火しないことが実装の偶然になる**。同じ関数を通す限り、両者は同じ path 集合について
+同じことを言う。
+
+### 14.2 残余の実体は「L1 に規則が無い ecosystem」だった
+
+第7節と #145 本文は残余を「段1 の形と実際の配置が違う repo」と述べていた。**実装してみると
+そこは掴めない。** 第2の条件が「**導出結果を含めて**テスト path が1件も無い」である以上、
+`.ts` / `.go` / `.py` / `.rb` / JVM のソースを宣言した Issue は **L1 が形を1つでも出した時点で
+沈黙する** —— その形が当たっているかどうかを planner は知らない（対象リポジトリを開かない。
+第10節）。したがって L3 が実際に話すのは次の3つである。
+
+- 第13.2節が「規則を持たない」と明示した ecosystem（`rs` / `sh` / `c` / `h` / `cpp` /
+  `sql` / `css` / `html`）だけを宣言した Issue
+- ソースでない file（`.md` / `.json` / `.yaml` / lockfile / `Makefile`）だけを宣言した Issue
+- 宣言が空の Issue（このときは `no_suspected_files` も同時に出る）
+
+**第13.2節が「導出しない」と決めた集合とちょうど一致する。** 条件を「導出結果を含めない」に
+変えれば「配置が違う repo」も掴めるが、それは **L1 が直した Issue すべてで発火する** ので
+採らない（第11節の「段1と段2だけで観測された障害は消える」を壊す）。条件は #145 本文が
+指定したとおりに実装し、掴める範囲がそこで決まる、というのが実装の結論である。
+
+**JS / Go / Python / Ruby / JVM の repo で「L1 の形が当たらずに run を失う」事例が実際に出たら、
+それが第12節の4件目である。** 個別の検出器を足す前に本 ADR に戻り、L2（段4・#149）の
+`scope_companions` に宣言させるのか L1 の形を増やすのかを、その事例とともに裁定する。
+
+### 14.3 精度で引いた線（第7節「ただし精度は作り込む」の実装）
+
+第7節の採用/除外リストに対して、実装で**線を2つ足した**。
+
+- **`spec` 単独は「テスト」と読まない。** 受入条件の "the spec" は RSpec の spec file と
+  同じ頻度で「仕様」を指す。`*_spec.rb` / `*.spec.ts` は path 規則（`isTestPath`）が拾うので
+  取りこぼしは無い。`rspec` / `jest` / `vitest` / `pytest` は曖昧でないので noun に入れた。
+- **`既存` / `existing` 単独では除外しない。** 「既存のテストに1件追加する」は本物の要求である。
+  除外2（「既存の…が緑のまま」）は「そのままである」側の語を**同じ節の中**（`。` / `.` を
+  跨がない範囲）に要求する。
+
+**除外は4本の独立した文にした。** 1本ずつ外して赤になることを実測するためであり、
+融合した1本の正規表現ではどの線が効いているかを測れない（第14.4節）。
+
+`questions` の**語順**は dispatch の実装に合わせた。`dispatch.mjs` の `excerpt(…, 200)` は
+**末尾 200 文字を残す**ので、原文を先頭に置いた question は**無人運転でちょうど原文を失う**
+（原文が読めることが偽陽性を数秒で確認できる根拠だったので、失ってはいけない部分である）。
+そこで原文を最後に置き、前置きを 140 文字以内に収めた。
+
+### 14.4 変異注入の実測
+
+第7節が要求した「除外分岐を1つずつ外して赤になることの実測」を、`orchestrate.mjs` を
+1箇所ずつ書き換えて fixture 全体（`node tests/fixtures/cmate-orchestrate/run_tests.mjs`）を
+回すことで行った。**9件すべてが赤になった。** 空振りの分岐は無い。
+
+| 変異 | 結果（赤になった case） |
+|---|---|
+| 除外1（テストは不要 / no new tests）を外す | 赤 5件 —— `40-acceptance-tests-not-required` |
+| 除外2（既存のテストが緑のまま / existing still pass）を外す | 赤 5件 —— `41-acceptance-tests-stay-green` |
+| 除外3（手動テストで確認 / manual）を外す | 赤 5件 —— `42-acceptance-tests-manual` |
+| 除外4（テストは変更しない / tests unchanged）を外す | 赤 5件 —— `43-acceptance-tests-unchanged` |
+| 散文中の test path 分岐を外す | 赤 4件 —— `37-…-other-shapes`（#452 だけが落ちる。#451 は noun 分岐で残る） |
+| noun + 能動語 分岐を外す | 赤 32件 —— `36-…-no-scope`, `37-…-other-shapes`, `d66-…-refused`, 裁定 A の不変条件テスト |
+| 第2条件を **L1 導出前**の `suspected_files` で見る | 赤 15件 —— `38-…-derived-covers` と `31` / `34` / `35`（段1 との二重発火） |
+| 能動的要求の判定をやめる（受入条件があれば発火） | 赤 52件 —— `39`〜`43`, `20-markdown-deliverable`, `21-open-questions`, `33-test-companions-non-source`, `d37` / `d38`（偽陽性が既存 case を巻き込む） |
+| 検出そのものを外す | 赤 37件 —— `36`, `37`, `d66`, 裁定 A の不変条件テスト |
+
+除外1〜4 が**それぞれ自分の case だけを落とす**（他の8 case は緑のまま）のが、4本を独立した文に
+した理由の実測である。融合していれば1本外すだけで4 case が落ち、どの線が効いているかは読めない。
+
+### 14.5 status runner の hint は入れていない
+
+`status.mjs` の `NEXT_ACTION_HINTS` は plan の warning code を1つ残らず持っていたが、本 code は
+**入っていない**（`status.mjs` は本変更の宣言 scope の外だった）。したがって `status.mjs` は
+この warning について「detail と `summary_markdown` を読む」の既定に落ちる。運転で人間が出会う
+停止は dispatch 側の `open_questions` であり、そちらは hint を持ち、質問の本文（＝受入条件の
+原文）をそのまま出す。**hint を足すのは次の変更の仕事である。**

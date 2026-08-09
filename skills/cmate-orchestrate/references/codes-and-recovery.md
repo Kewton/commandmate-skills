@@ -49,9 +49,17 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | `no_suspected_files` | 対象 file を1件も読み取れない。worker に与える scope が空になる |
 | `unrecognized_file_extension` | 既知拡張子外の backtick path が抽出から落ちた |
 | `shadowed_file_candidate` | 他候補の path 境界つき suffix だったため候補から落とした |
+| `acceptance_requires_tests_but_scope_has_none` | 受入条件がテストの**作成**を能動的に要求しているのに、対象 file（**段1 の導出結果を含めて**）にテストらしき path が1件も無い |
 
-`no_acceptance_criteria` / `no_suspected_files` は dispatch の open question ゲートと対になる。
-**この2つを放置したまま `--allow-questions` で押し通さないこと。**
+`no_acceptance_criteria` / `no_suspected_files` / `acceptance_requires_tests_but_scope_has_none`
+は dispatch の open question ゲートと対になる。**これらを放置したまま `--allow-questions` で
+押し通さないこと。** このフラグは plan 全体に効くので、1件を黙らせるつもりで全部を黙らせる。
+
+`acceptance_requires_tests_but_scope_has_none` は前2つと違って**推論**である
+（[adr-scope-derivation.md](./adr-scope-derivation.md) 第7節・第8節、第14節）。判定の元になった
+**受入条件が原文で detail に入っている**ので、偽陽性かどうかはその1行を読めば決まる。
+「テストは不要」「既存のテストが緑のまま」「手動テストで確認」「テストは変更しない」と
+書いた受入条件は**検出から除外される**ので、これらで止まったら実装側の欠陥である。
 
 
 ## 3. limitation code（停止はしていないが、後から効いてくる制約）
@@ -102,9 +110,16 @@ limitation ではなく **stop_reason / blocking reason** である。**停止�
 status runner はそれを引くだけなので、**ここに無い code は status runner も推測しない**
 （「detail と `summary_markdown` を読む」に落ちる）。
 
+> `acceptance_requires_tests_but_scope_has_none` は現時点で status runner の hint 表に
+> **入っていない**（`status.mjs` は本表を追加した変更の宣言 scope の外だった）。したがって
+> `status.mjs` はこの plan warning について detail を読ませる既定に落ちる。**運転で人間が
+> 出会う停止は dispatch 側の `open_questions`** であり、そちらは hint を持っていて
+> 質問の本文（＝受入条件の原文）をそのまま出す。
+
 | 止まり方 | 何が起きたか | 人間がすること |
 |---|---|---|
 | plan `status: partial` + `no_acceptance_criteria` / `no_suspected_files` | Issue に受入条件か対象 file が書かれていない | **Issue 本文に書き足して re-plan する。** run_id は本文を含む hash なので自動的に別 run になる |
+| plan `status: partial` + `acceptance_requires_tests_but_scope_has_none`（dispatch 側では `open_questions` として止まる） | 受入条件はテストの作成を要求しているのに、宣言された file からテスト path が1件も導出できていない。**そのまま dispatch すれば worker は正しくテストを書いて scope ゲートで落ち、契約 scope は send 時 snapshot なので worker 側に回復手段は無い** | **Issue 本文の対象 file にテスト path を書いて re-plan する。** テストが本当に不要なら受入条件にそう書く（否定形は検出から除外される）。判定の元になった受入条件が warning detail と question に原文で入っているので、偽陽性の確認はその1行で済む。**`--allow-questions` で押し通すのは、そのまま worker 1人分の run を捨てることである** |
 | plan `cycle_detected` / `override_incomplete` / `dependency_order_violation` | 依存グラフが実行不能 | `dependency-plan.md` の edge `reason`（どの方向語をどの行から読んだか）を見て、Issue 本文か `--depends` を直す |
 | plan `run_exists` | 入力が完全に同一の再実行 | 本文を直すか、`--run-id <new-id>` / `--runs-dir <dir>` を渡す |
 | plan `profile_repository_mismatch` | cwd の origin と profile の対象リポジトリが違う | `--profile` / `--profile-json` / `--repo` のどれかを渡して意図を明示する |

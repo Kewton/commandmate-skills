@@ -1,0 +1,34 @@
+{
+  "description": "Issue #145, and the case that proves the two layers do not double-fire: both issues demand a unit test as actively as the firing fixture does, and NEITHER raises anything, because L1 (#147) already derived a conventional test path for the source file each one declared. That is the whole ordering argument of the ADR — 段1 removes the failure without a human, and L3 only speaks about the residue. The detector reads suspected_files AFTER the derived paths are appended; reading it before would fire on every issue L1 just fixed, so a plan whose scope_defaults is non-empty and whose questions are empty is exactly what pins that.",
+  "args": ["453", "454", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "fixture", "--no-infer"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[453, 454]],
+    "merge_order": [453, 454],
+    "dependencies": [],
+    "classifications": { "453": "independent", "454": "independent" },
+    "risk_level": "low",
+    "suspected_files": {
+      "453": [
+        "web/src/lib/session.ts",
+        "web/src/lib/session.test.ts",
+        "web/src/lib/session.spec.ts",
+        "web/src/lib/__tests__/session.ts",
+        "web/src/lib/__tests__/session.test.ts"
+      ],
+      "454": ["internal/store/index.go", "internal/store/index_test.go"]
+    },
+    "scope_defaults": {
+      "453": [
+        "web/src/lib/session.test.ts",
+        "web/src/lib/session.spec.ts",
+        "web/src/lib/__tests__/session.ts",
+        "web/src/lib/__tests__/session.test.ts"
+      ],
+      "454": ["internal/store/index_test.go"]
+    },
+    "questions_count": { "453": 0, "454": 0 }
+  }
+}

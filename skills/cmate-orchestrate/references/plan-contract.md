@@ -190,6 +190,48 @@ Wave 生成の規則は次の3つ。
 `scope_defaults` は既存 field であり、この拡張で `plan_schema_version` は上げない
 （意味は「planner が既定で許可した path」のままで、由来が1つ増えただけである）。
 
+## 5.2 テスト要求と scope の食い違い（`acceptance_requires_tests_but_scope_has_none`）
+
+第5.1節の導出は**当たらないことがある**。テスト配置は repo の規約なので、慣習と違う置き方を
+している repo では1件も当たらない。そのとき残るのは第5.1節が消そうとした障害そのもの ——
+**受入条件はテストを要求し、scope にテスト path は無く、worker はどちらかを裏切るしかない**
+という分岐の無い状態である。
+
+そこで planner は、次の**両方**が成り立つとき warning と `issues[].questions` を**1件ずつ**出す
+（裁定の記録は [adr-scope-derivation.md](./adr-scope-derivation.md) 第7節・第8節・第14節）。
+
+1. `acceptance_criteria` に**テストの作成を能動的に要求する**記述がある
+2. `suspected_files` に（**第5.1節の導出結果を含めたうえで**）テストらしき path が1件も無い
+
+`questions` に載るので、dispatch は既存の open question ゲートで**1人も dispatch せずに停止する**
+（`no_acceptance_criteria` / `no_suspected_files` と同じ運用 —— Issue 本文を直して re-plan する）。
+`warnings` だけでは止まらない: **dispatch は `plan.status` を読まない。**
+
+判定は Issue 本文全体ではなく `acceptance_criteria` **だけ**を走査し、次を分ける。
+
+| | 例 |
+|---|---|
+| **採る**（能動的な作成要求） | 「unit test がそれを判定する」「テストを追加する」「〜のテストで固定する」「Add a unit test that asserts …」、散文中の `retry.test.ts` / `test_render.c` 形の path 言及 |
+| **除外**（4形） | 「テストは不要」「既存のテストが緑のまま」「手動テストで確認」「テストは変更しない」／ "no new test is needed" "existing tests still pass" "verified by manual testing" "leave the tests unchanged" |
+
+除外を持たない検出は自分の存在意義を壊す。「テストは不要」と書いた Issue が「テストが要るのに
+scope に無い」で止まるのは**警告が読み手の信用を失う典型**であり、そうなると運用者は
+`--allow-questions` を常用し始め、**plan 全体に効く**このフラグが本物の
+`no_acceptance_criteria` まで一緒に黙らせる。
+
+**question には判定の元になった受入条件を原文で載せる。** 「なぜ止まったか」がその1行で読めれば、
+偽陽性の確認は数秒で済む。
+
+### この検出が書かないもの（裁定 A）
+
+> **推論は機械を止めてよいが、機械に指示してはならない。**
+
+本検出は `acceptance_gates` にも `suspected_files` / `scope_defaults`（= 契約の `scope.allow`）にも
+**1バイトも書かない。** 出力先は `warnings` と `questions`、つまり人間だけである。第5.1節の導出が
+scope に書いてよいのは、それが**宣言済み path への規則の適用**だからで、こちらは prose から
+意図を読む**推論**である。この非対称が両者を別の層に置く理由であり、`plan_schema_version` を
+上げない理由でもある（新しい field を1つも作らない）。
+
 ## 6. risk
 
 `risk.level` は factor の最大 severity である。factor は決定的に導く。
