@@ -1,0 +1,63 @@
+{
+  "description": "Issue #148: 'the same answer' means two CONSECUTIVE turns. #201's scope gate names the same two paths, then a turn that is not a scope failure at all (exit 21, work-evidence found nothing) intervenes and is nudged as before, then the same two paths come back. The comparison resets across that turn, so the repeat is only recognised on turns 3 and 4 — 4 sends under --max-turns 6, not 3. A guard that kept comparing across the intervening turn would cut a worker off one turn earlier than the rule it is written from.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "6"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "verification_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      201
+    ],
+    "never_sent": [
+      200
+    ],
+    "send_counts": {
+      "201": 4
+    },
+    "worker_states": {
+      "201": "completed"
+    },
+    "worker_notes_include": {
+      "201": [
+        "stopped after 4 turn(s)"
+      ]
+    },
+    "verification_outcomes": {
+      "201": "fail"
+    },
+    "blocking_codes": [
+      "scope_unsatisfiable"
+    ],
+    "blocking_details_include": [
+      "web/package-lock.json | web/src/session.test.ts"
+    ],
+    "wave0_all_verifications_passed": false,
+    "verify_calls": 3,
+    "wait_verify_calls_min": 4
+  }
+}

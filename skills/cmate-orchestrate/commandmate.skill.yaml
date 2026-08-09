@@ -125,8 +125,8 @@ files:
     executable: false
     script: false
   - path: references/adr-scope-derivation.md
-    sha256: d3104bd0575f7c9a53d9b1c89fb2977a7d12012ba2e7981848fd2c65375a545e
-    size: 23945
+    sha256: ede7ab944161a6549c4edde45d3dff8603c59c93ae0592f86852a46cc9d9fc10
+    size: 25959
     kind: instruction
     executable: false
     script: false
@@ -155,14 +155,14 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: 9e0e2763ab54cd7886b714a1b31f7a2cc7f33dd431646c4d82b97642efff1668
-    size: 23108
+    sha256: 7b7185bf15b41f7ef9f2ebdba741303ca443874e18999e8844a954a4c031e33a
+    size: 24118
     kind: instruction
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: 8ac4e9b530a51e923d3822415bb2d39e8283afa0082301fe439609a46dd54d40
-    size: 97716
+    sha256: 93a267f13ceabafbeae34d4206e0e2ae6ffa62c7c7d2ae13a501116c7e91d494
+    size: 101276
     kind: instruction
     executable: false
     script: false
@@ -239,8 +239,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: 25ee2a0c79f22df318c2ea70cbc001c8e294dfdece937457fe02dad7f4d357d5
-    size: 295402
+    sha256: 16ee2e074ca786faf099822e3d2ec66a837cece78cd9fa251020bb87201a4a15
+    size: 302045
     kind: script
     executable: true
     script: true

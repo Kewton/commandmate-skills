@@ -1,0 +1,65 @@
+{
+  "description": "Issue #148: the guard is about SCOPE and nothing else. #201 fails the same lint gate with the same log on every turn — the identical shape the scope case stops on — and is still driven to the --max-turns 3 cap (3 sends), because a lint failure is inside the worktree and one more turn really can fix it. scope.allow is the one gate a worker cannot satisfy from where it stands; generalising the guard to every gate would turn the runner into something that gives up on ordinary work.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "verification_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      201
+    ],
+    "never_sent": [
+      200
+    ],
+    "send_counts": {
+      "201": 3
+    },
+    "worker_states": {
+      "201": "completed"
+    },
+    "worker_notes_include": {
+      "201": [
+        "the --max-turns 3 cap was reached"
+      ]
+    },
+    "verification_outcomes": {
+      "201": "fail"
+    },
+    "completed_but_unverified": [
+      201
+    ],
+    "absent_blocking_codes": [
+      "scope_unsatisfiable"
+    ],
+    "summary_includes": [
+      "verification 失敗の worktree を診断し"
+    ],
+    "verify_calls": 3,
+    "wait_verify_calls_min": 3
+  }
+}

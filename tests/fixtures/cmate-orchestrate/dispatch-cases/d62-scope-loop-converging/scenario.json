@@ -1,0 +1,38 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "201": {
+      "state": "completed",
+      "verify_exits": [20, 20, 0],
+      "failed_gates_by_turn": [
+        [
+          {
+            "id": "scope",
+            "exit": 20,
+            "logTail": "2 file(s) changed outside scope.allow:\nweb/src/session.test.ts\nweb/package-lock.json"
+          }
+        ],
+        [
+          {
+            "id": "scope",
+            "exit": 20,
+            "logTail": "1 file(s) changed outside scope.allow:\nweb/package-lock.json"
+          }
+        ],
+        []
+      ]
+    },
+    "200": {
+      "state": "completed",
+      "verify_exits": [0]
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "201": {
+      "state": "completed",
+      "verify_exits": [20, 20, 20],
+      "failed_gates": [
+        {
+          "id": "lint",
+          "exit": 1,
+          "logTail": "web/src/session.ts:12:1  error  Unexpected any"
+        }
+      ]
+    },
+    "200": {
+      "state": "completed",
+      "verify_exits": [0]
+    }
+  }
+}
