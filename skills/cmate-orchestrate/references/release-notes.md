@@ -608,6 +608,33 @@ worker は直せず（契約の scope は send 時 snapshot）、planner も直�
 **推論は機械を止めてよいが、機械に指示してはならない。** この検出は `acceptance_gates` にも
 `scope.allow` にも1バイトも書かない。
 
+### #157 — `run_id` が profile の3 field しか hash せず、中身の違う plan が同じ id を持てた
+
+`run_id` は「plan を決める入力の hash」として文書化されているのに、profile からは
+**`base` / `id` / `repository` の3つしか hash していなかった**。plan を決める profile field は
+他に5つある —— `baseline`（`verifyBinaries` 経由で `test_expectations`）・`branch_template` /
+`worktree_template`（`issues[].branch` / `.worktree`）・`verified`（`unverified_profile` warning と
+high severity の risk）・`scope_companions`（`suspected_files` / `scope_defaults`。#149）。
+**`baseline` は #149 より前から外にあった**ので、新しい退行ではなく元からの誤りである。
+
+→ **解決後の profile を丸ごと hash に入れる。** 5つを列挙し直す案を採らなかったのは、
+**列挙こそが失敗した当のものだから**である —— 列挙は profile に field が増えるたび人間が
+見直さねばならず、忘れても誰も検出しない。コストは受容している: profile のどの field を
+編集しても新しい既定 id になる。それは安全な方向であり（**共有された古い id のほうが、
+違う2つの plan を1つの run に見せかける**）、`--resume` は dispatch ディレクトリを名指すので影響しない。
+
+**`run_exists` のメッセージも直した。** 従来は
+`so this means nothing changed since that run` と**断定**していたが、profile を編集しただけの
+re-plan ではこれは偽である。しかも **profile 全体を入れてもなお断定はできない** ——
+既定 profile の cwd 突合が読む cwd は hash に入っておらず、片方の plan にだけ
+`profile_repository_mismatch` を入れうるからである。断定をやめ、
+**その directory の `plan.json` を読んで確かめてもらう**形にした。
+
+実装では key 順の正規化パスを**一度書いてから削除**している。`normalizeProfile` が profile を
+field ごとに組み立て直すので、**このローダーが受け付けるどの入力でも両版を区別できない** ——
+観測できない防御は、この Issue が扱っている「コードを超えた主張」と同じ形をしている。
+性質自体は、それを実際に提供している層に対する fixture で固定してある。
+
 ### #149 — planner が聞いたことのない規約は、誰にも宣言できなかった
 
 L1（#147）が導出できるのは**慣習的な**テスト path だけである。`spec/` が `app/` を鏡写しにする木、
@@ -887,6 +914,17 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 ---
 
 ## パッケージ
+
+### 0.26.0 — `run_id` が plan を一意に指すようになった（#157）
+
+`run_id` の入力集合に **解決後の profile が丸ごと**入った。
+`baseline` / `branch_template` / `worktree_template` / `verified` / `scope_companions` を
+編集すれば、既定 `run_id` は変わる。`run_exists` のメッセージも、
+**runner が主張できないことを主張しない**形に直した。
+
+`run_id` が plan を一意に指さない性質は #149 の実装中に見つかり、
+`adr-scope-derivation.md` 第15.7節に「profile 全体としてまとめて裁定すること」と
+記録されていた。本リリースはその裁定である。
 
 ### 0.25.0 — scope 導出の4層が揃った（#149）
 
