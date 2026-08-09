@@ -202,7 +202,11 @@ byte 単位で同一になる**（fixture `45-scope-companions-absent` が golde
 `scope_companions` を持つ profile の plan は、`plan.profile` にその宣言をそのまま載せる ——
 `scope_defaults` の1行がどの宣言から来たのかを、plan 単体で辿れるようにするためである。
 
-守る不変条件は3つで、いずれも実装が破ったら実装が誤りである。
+守る不変条件は4つで、いずれも実装が破ったら実装が誤りである。1〜3 は**足す側**の規範で、
+[adr-scope-derivation.md](./adr-scope-derivation.md) 第2節の3件をそのまま写している。
+4 は**引く側**の規範で、[#161](https://github.com/Kewton/commandmate-skills/issues/161) /
+[#162](https://github.com/Kewton/commandmate-skills/issues/162) で足した（番号は動かしていない ——
+1〜3 は他文書から番号で参照されている）。
 
 1. **導出元は必ず宣言済みファイルである。** 単独の glob（`**/*.test.*` 等）は足さない。
    したがって `suspected_files` が空なら `scope_defaults` も空であり、影響範囲は宣言に比例する。
@@ -213,6 +217,19 @@ byte 単位で同一になる**（fixture `45-scope-companions-absent` が golde
 3. **plan は入力の純粋関数のままである。** 導出は決定的で順序も安定しており、planner は
    対象リポジトリを開かない（規約の観測ではなく規則の適用である）。profile 由来の規則も
    plan の中（profile は plan の一部である）だけを入力に取るので、この性質は変わらない。
+4. **引いた分も必ず可視である（2 の対）。** 宣言された path が実行契約の `scope.allow` に
+   入らないなら、**その事実と、落ちた path と、落ちた理由**がどこかに出る。plan では
+   `contract_scope_dropped` warning、dispatch では同名の blocking reason（`--unattended`）
+   または limitation として出る。**黙って落とすことは禁じられている。**
+
+   2 と 4 が非対称だった間に何が起きていたかが、この規範の根拠である。足した1件は必ず
+   `scope_defaults` に名指しされるのに、消えた50件は1バイトも残らなかった。しかも消え方は
+   「plan は 205 件と言い、契約は 200 件しか運ばず、report はどちらも言わない」であり、
+   **plan を読んだ人間には「全部入った」と読める。** worker は Issue が明記した file を
+   編集して scope ゲートで落ちるが、契約の `scope.allow` は send 時 snapshot なので
+   **worker 側に回復手段は無い。** 落とさなければ CommandMate の契約 parser が件数もエントリも
+   名指しして exit 2 で拒否するので、**大きな声の拒否を、静かな誤った成功に化けさせていた**
+   ことになる。
 
 テスト path の導出は**当たらないことがある** —— テスト配置は repo の規約だからである。
 それでも成立するのは、`scope.allow` が指示ではなく**権限**だからで、使われなかった許可は
@@ -223,6 +240,11 @@ byte 単位で同一になる**（fixture `45-scope-companions-absent` が golde
 打ち切る。dispatch は `scope.allow` を sort してから切り詰めるので、上限を超えた list は
 **宣言済みファイルを導出済みファイルに奪われる**からである。profile 由来の導出は最後に走り、
 **3つの由来の合計**に対して同じ上限で打ち切る。
+
+この打ち切りは**導出側にしか無い**（#147 / #149）。**宣言そのものが 200 件を超えたとき**は
+導出が1件も足さずに終わるだけで、超過分は dispatch の切り詰めに落ちる —— それを可視にするのが
+不変条件4であり、上限そのものは CommandMate 側の契約上限なので planner にも dispatch にも
+上げる手段は無い。直し方は Issue の分割である。
 
 `scope_defaults` は既存 field であり、この拡張で `plan_schema_version` は上げない
 （意味は「planner が既定で許可した path」のままで、由来が1つ増えただけである）。

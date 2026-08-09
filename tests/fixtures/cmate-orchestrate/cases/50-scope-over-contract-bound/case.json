@@ -1,0 +1,39 @@
+{
+  "description": "Issue #161（切り詰めの可視化・plan 側）: 対象ファイルを 205 件宣言した Issue は、dispatch が `scope.allow` を sort してから 200 件で切り詰めるため、アルファベット順で後ろの 5 件（`src/m201.ts`〜`src/m205.ts`）が実行契約から消える。0.9.0 以来この切り詰めは何も報告せず、plan には 205 件がそのまま 載るので「全部入った」と読めた。planner は dispatch より前、plan の review 時点で `contract_scope_dropped` を出し、**落ちた件数・落ちた path・落ちた理由**を名指しする。理由が要るのは、`over_bound` の直し方（Issue を 分割する）と形の問題の直し方（path を書き直す）が正反対だからである。上限そのものは CommandMate 側の契約上限 なので planner にも dispatch にも上げる手段は無い。L1/L2 の導出は #147 / #149 の guard どおり 1 件も足していない （205 件で既に上限を超えているため、最初の source file の手前で打ち切られる）—— 導出側の guard は壊していない。",
+  "args": [
+    "490",
+    "--profile",
+    "node-commandmate"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "contract_scope_dropped"
+    ],
+    "warning_details_include": [
+      "#490: the dispatch runner's execution contract cannot carry 5 of the 205 path(s)",
+      "(over_bound x5)",
+      "over_bound `src/m201.ts`; over_bound `src/m202.ts`; over_bound `src/m203.ts`; …and 2 more",
+      "200 is CommandMate's bound, which no flag here raises"
+    ],
+    "waves": [
+      [
+        490
+      ]
+    ],
+    "merge_order": [
+      490
+    ],
+    "dependencies": [],
+    "classifications": {
+      "490": "independent"
+    },
+    "scope_defaults": {
+      "490": []
+    },
+    "questions_count": {
+      "490": 0
+    }
+  }
+}

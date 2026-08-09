@@ -1,0 +1,64 @@
+{
+  "description": "Issue #161 / #162 停止系（宣言されたのに契約から消える path。二点測定の unattended 側。対になるのは d70）: #240 は対象 file を 205 件宣言しているが、実行契約が運べるのは 200 件までなので、sort 後の後ろ 5 件が消える。0.9.0 以来この差は blocking reason にも limitation にも出ず、契約は受理され dispatch は成功し、worker だけが Issue が明記した file を編集して scope ゲートで落ちていた —— 契約の `scope.allow` は send 時 snapshot なので worker 側に回復手段は無い。`--unattended` はこれを **plan の全 Wave の全 Issue について pre-flight で** 検査し、**`--out` を作らず・1人も dispatch せずに** 停止する。scope が空ではないので `contract_scope_unknown` は出ない —— これは「空」ではなく「黙って狭まった」欠陥であり、別の code である。detail には落ちた件数・落ちた path・落ちた 理由が入る（それが唯一 actionable な情報である）。file を 1 件も共有しない #241 も送られないのが all-or-nothing。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-scope-dropped.json",
+    "orchestrate_args": [
+      "240",
+      "241",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--unattended",
+    "--wall-clock-budget",
+    "600"
+  ],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": true,
+    "waves_count": 0,
+    "never_sent": [
+      240,
+      241
+    ],
+    "no_respond": true,
+    "no_contract_calls": true,
+    "out_dir_created": false,
+    "completion_check_passed": false,
+    "blocking_codes": [
+      "contract_scope_dropped"
+    ],
+    "absent_blocking_codes": [
+      "contract_scope_unknown",
+      "open_questions"
+    ],
+    "blocking_details_include": [
+      "#240: 5 of the 205 path(s) this issue declares do NOT reach its execution contract",
+      "(over_bound x5)",
+      "over_bound \"src/m201.ts\"; over_bound \"src/m202.ts\"; over_bound \"src/m203.ts\"; …and 2 more",
+      "no worker of any wave was started and --out was not created"
+    ],
+    "limitation_codes": [
+      "unattended_mode"
+    ],
+    "limitation_code_counts": {
+      "unattended_mode": 1,
+      "unattended_baseline": 0,
+      "contract_scope_dropped": 0
+    },
+    "summary_includes": [
+      "宣言された対象 file の一部が実行契約の `scope.allow` に入らない",
+      "`--out` は消費していない"
+    ]
+  }
+}

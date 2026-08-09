@@ -704,3 +704,111 @@ glob 文字の検査と「placeholder が1つも無い」の検査である。gl
 **本変更の宣言 scope の外**だったので、新しい code（`scope_companions_undetermined` /
 `multiple_test_layouts`）と `--emit profile` の増えた field を反映していない。
 第14.5節が `status.mjs` の hint について書いたのと同じで、**それは次の変更の仕事である。**
+
+---
+
+## 16. 実装時の追記（段5・[#161](https://github.com/Kewton/commandmate-skills/issues/161) / [#162](https://github.com/Kewton/commandmate-skills/issues/162)）
+
+### 16.1 何が見つかったか —— guard は導出側にしか無かった
+
+第13.3節と第15.5節は、上限を**導出側**の要求として書いた。「導出済み path が宣言済み path を
+押し出す」を防ぐために、L1 と L2 は宣言済みファイル単位で打ち切る。これは実装されており、
+本変更でも**一切触っていない**（fixture `50` が、205 件宣言した Issue で導出が1件も出ないことを
+固定している）。
+
+**押し出されないだけで、宣言そのものが 200 件を超えたときは切り詰められる。**
+`dispatch.mjs` の `contractScopeAllow` は sort してから `slice(0, 200)` するので、
+アルファベット順で後ろの宣言が契約から消える。同じ関数は、絶対 path・ドライブレター・
+バックスラッシュ・`..` セグメント・200 字超・NUL のいずれかに当たるパターンも per-item で落とす。
+**どちらも何も報告していなかった。** dispatch 前の pre-flight も `length > 0` しか見ておらず、
+「200 件を超えて切り詰めた」は素通りしていた。
+
+`orchestrate.mjs:1159` 付近のコメントはこの危険を正確に名指ししている。**guard は導出側にしか
+実装されなかった**、というのが本件である。0.26.0 の退行ではなく、切り詰めが入った 0.9.0 からの挙動。
+
+### 16.2 「送る前に落とす」は、ここでは成り立っていなかった
+
+`contractScopeAllow` の doc comment は「parser が拒否するものは送る前に落とす
+（a contract rejected at `send` is a dispatch that never happens）」と述べていた。
+CommandMate 0.22.2 の契約 parser と突き合わせた実測は次のとおりで、**doc comment は2箇所で
+実装と食い違っていた**（本変更で訂正した）。
+
+| 落とす対象 | parser の実際 |
+|---|---|
+| 件数超過 | `at most 200 entries (got 250)` と**件数を名指しして拒否**する |
+| 絶対 path / `..` / NUL / 200 字超 | `validateScopePattern` / `validateStringList` が**エントリ番号と理由を名指しして拒否**する（`send` は exit 2 で全違反を列挙） |
+| ドライブレター（`C:`）/ バックスラッシュ | **拒否しない。** `validateScopePattern` の検査は NUL・先頭 `/`・`..` の3つだけである |
+
+前2群では、落とさなければ**大きな声で拒否される**ところを、落とすことで**契約は受理され、
+権限だけが黙って狭まった状態で dispatch が成功**していた。**大きな声の拒否が、静かな誤った成功に
+化けていた。** 最後の1群は parser の判断ではなく runner の判断なので、runner が報告しなければ
+どこにも残らない。ドライブレターとバックスラッシュは**落とし続ける** —— repository-relative な
+path に一致しないので、送っても scope ゲートで同じ場所に落ちるだけである。
+
+### 16.3 裁定: 上限は変えない。診断を足す。可視性の規範を対にする
+
+上限値は CommandMate 側の hard limit なので**変えられない**。したがって足せるのは診断だけである。
+
+1. `contractScopeReview(issue)` が `{ allow, dropped }` を返す。`dropped` は
+   `{ pattern, reason }` の list で、reason は `over_bound`（件数）と6つの形の理由に分かれる。
+   **理由を1つに丸めない** —— `over_bound` の直し方（Issue の分割）と形の直し方（path の書き直し）は
+   正反対で、区別できない読み手は動けない。契約生成側は従来どおり配列だけを使う
+   （`contractScopeAllow` は薄い view として残した）。
+2. **pre-flight（`unattendedPlanReasons`）で blocking にする。** 既に全 Issue を走査しているので
+   追加コストは無い。`--out` を作る前に止まるので、`contract_scope_unknown` / `open_questions` と
+   同じく「Issue を直して re-plan する」に接続できる。**同じ Issue で両方立つときは
+   `contract_scope_dropped` を先に積む** —— 全件落ちて scope が空になった場合、drop は
+   emptiness の**説明**であり、後に読むと別の問題に見える。
+3. 人間が居る run（`--unattended` 無し）では**停止しない**。wave は既に走っているからである。
+   代わりに `limitation` を Issue ごとに1件積み、狭まった権限のまま dispatch する。
+   **無言の切り詰めは「全部入った」と読める**ので、停止しない判断をする以上、最低でも
+   ここに載っていなければならない。
+4. planner（`orchestrate.mjs`）は `contract_scope_dropped` warning を出す。dispatch より前、
+   **plan の review 時点**で気づける。
+
+規範としては [plan-contract.md](./plan-contract.md) 第5.1節に**不変条件4「引いた分も必ず可視である」**を
+足した。第5.1節は導出側（不変条件2「足した分は必ず可視である」）にだけ可視性を要求していて、
+**足した1件は必ず名指しされるのに、消えた50件は1バイトも残らない**という非対称だった。
+番号は 1〜3 を動かしていない —— 他文書がその番号で参照している。
+
+### 16.4 却下した案
+
+| 案 | 却下の理由 |
+|---|---|
+| 上限を上げる / 切り詰めをやめる | CommandMate 側の契約上限である。超えた契約は `send` が exit 2 で拒否するので、**dispatch が1人も起動しなくなる**。runner 側で選べる話ではない |
+| 落とさずにそのまま送り、parser の exit 2 に語らせる | 「絶対 path 1行」で run 全体が dispatch 不能になる。**現状より悪い** —— しかも停止するのは `--out` を作った後で、pre-flight の「`--out` を消費しない」性質を失う |
+| 形の理由を1つの `invalid` に丸める | 直し方が正反対の2群を同じ名前で呼ぶことになる（第16.3節 1） |
+| plan / dispatch で別 code にする | 同じ1件の finding を2つの時点で読んでいるだけなので、**同じ名前**で呼ぶ。plan の warning 表と dispatch の limitation 表の両方に同名で行を足した |
+| 人間が居る run でも停止する | wave は既に走っている。止めても後始末は人間の仕事で、`--out` は既に消費済み。**検出時点を早める価値は無人 run にしか無い** |
+
+### 16.5 変異注入の実測
+
+| 変異 | 結果 |
+|---|---|
+| `contractScopeReview` から `dropped` の記録を外す | 赤 —— `50` / `51` / `d69` / `d70` |
+| pre-flight の drop 検査を外す（`length > 0` に戻す） | 赤 —— `d69`（`--out` が作られ、2人とも dispatch される） |
+| wave loop の limitation を外す | 赤 —— `d70` |
+| planner の `contractScopeWarnings` を外す | 赤 —— `50` / `51` |
+| L1 / L2 の導出側 guard を外す | 赤 —— `#147` / `#149` の bound test（本変更でも触っていないことの裏） |
+
+**修正前のコードで4 case・37 assertion が赤**であることを先に確認してから実装を入れている
+（空振りする緑を作らないため）。
+
+### 16.6 測れていないもの
+
+絶対 path・ドライブレター・バックスラッシュ・`..`・NUL の5形は、**fixture では測れていない。**
+`orchestrate.mjs` の `isSafeRepoPath` が抽出時にすべて落とすので、planner が作る plan には
+到達しない —— そして dispatch の fixture harness は plan を**必ず planner に作らせる**
+（`run_tests.mjs` の `generatePlan`。harness 自体は本変更の宣言 scope の外だったので、
+plan を直接注入する口は足していない）。測れているのは `too_long`（`51`）と `over_bound`
+（`50` / `d69` / `d70`）で、これは**形の drop と件数の drop の両方**を1つずつ通す。
+dispatch 側の判定は5形も含めて完全な mirror のまま残してある —— **穴のある mirror が本件そのもの**
+だからで、`isSafeRepoPath` は plan の入口の防御であって契約の防御ではない。
+
+### 16.7 触っていない正本
+
+`dispatch-contract.md` 第3.0.3節（pre-flight の scope 検査の説明）と `status.mjs` の hint map は
+**本変更の宣言 scope の外**だったので、`contract_scope_dropped` を反映していない。
+前者は「1件でも空なら」と書いたままで、**「宣言より狭ければ」も止めるようになった**ことを
+述べていない。後者は第14.5節と同じ扱いで、`codes-and-recovery.md` 第5節末尾に
+「hint map にまだ無い code」として名前を足してある。**それは次の変更の仕事である。**

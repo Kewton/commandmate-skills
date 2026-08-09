@@ -1746,26 +1746,36 @@ function unattendedBaselineLimitation(issue, sha) {
 
 // The plan-only gates, evaluated together BEFORE `--out` exists (ADR section 3).
 //
-// Two findings, one refusal:
+// Three findings, one refusal:
 //
 //   - `open_questions` — the existing gate (Issue #52), which under
 //     `--unattended` can no longer be waived (`--allow-questions` is refused);
-//   - `contract_scope_unknown` — the scope declaration, per issue. Today this is
+//   - `contract_scope_dropped` — a path the plan DECLARES that the contract will
+//     not carry (Issue #161 / #162). The old reading of this gate was
+//     `length > 0`: an issue that declared 250 files or wrote one absolute path
+//     passed it while the contract quietly went out with a narrower permission
+//     than the plan had, and the worker met the difference as a scope-gate
+//     failure it could not resolve. Half a scope is not a scope;
+//   - `contract_scope_unknown` — no scope at all, per issue. Today this is
 //     decided inside the wave loop, by which time the other workers of the wave
 //     have already been sent to: the refusal is real but it lands on a world
 //     that is already mutating, and no one is present to clean it up.
 //
-// Both are pure functions of the plan, so evaluating them here costs nothing and
-// buys the property #90 established for missing worktrees: the run stops without
-// consuming `--out`, so the same command can be re-run after the issue bodies
-// are fixed and re-planned. Reporting them TOGETHER matters because an issue
-// with no declared files usually also carries the planner's "affected files are
-// unclear" question — reporting only one of the two would hide half the fix.
+// All three are pure functions of the plan, so evaluating them here costs nothing
+// and buys the property #90 established for missing worktrees: the run stops
+// without consuming `--out`, so the same command can be re-run after the issue
+// bodies are fixed and re-planned. Reporting them TOGETHER matters because an
+// issue with no declared files usually also carries the planner's "affected files
+// are unclear" question — reporting only one of the two would hide half the fix.
+// For the same reason the drop is reported BEFORE the empty-scope finding of the
+// same issue: when every declared path was dropped, the drop is the explanation
+// of the emptiness, and a reader who meets it second reads it as a second
+// problem.
 //
-// The scope condition is the CONTRACT's, not the plan's: `contractScopeAllow`
-// drops patterns the contract parser would reject, so an issue can name files
-// and still produce an empty `scope.allow`. That is the condition the wave loop
-// refuses on, so it is the condition checked here.
+// The scope condition is the CONTRACT's, not the plan's: `contractScopeReview`
+// drops patterns the contract will not carry, so an issue can name files and
+// still produce a shorter — or an empty — `scope.allow`. That is the condition
+// the wave loop refuses on, so it is the condition checked here.
 function unattendedPlanReasons(plan) {
   const reasons = [];
   const openQuestions = collectOpenQuestions(plan);
@@ -1778,7 +1788,17 @@ function unattendedPlanReasons(plan) {
     });
   }
   for (const issue of plan.issues ?? []) {
-    if (contractScopeAllow(issue).length > 0) continue;
+    const scope = contractScopeReview(issue);
+    if (scope.dropped.length > 0) {
+      reasons.push({
+        code: 'contract_scope_dropped',
+        detail: `${contractScopeDroppedDetail(issue.number, (issue.suspected_files ?? []).length, scope.dropped)}. `
+          + 'Under --unattended this is checked for EVERY issue of the plan before anything is dispatched, so no worker of any '
+          + 'wave was started and --out was not created (with a human present the same issue is dispatched with the narrowed '
+          + 'scope and the loss is recorded as a limitation)',
+      });
+    }
+    if (scope.allow.length > 0) continue;
     reasons.push({
       code: 'contract_scope_unknown',
       detail: `#${issue.number}: the plan names no file this issue may write, so its execution contract would declare no scope. `
@@ -2224,29 +2244,119 @@ function yamlBlockScalar(key, text, indent = '  ') {
   return `${key}: |\n${body}`;
 }
 
-// `scope.allow` for one issue: the files the plan says this issue owns.
+// Why one declared path is not in the contract. The reason is not decoration:
+// it is the only thing that decides the fix, and the two families need OPPOSITE
+// fixes — a shape reason is repaired by rewriting the path, while `over_bound`
+// cannot be repaired by rewriting anything (the bound is CommandMate's, not this
+// runner's) and is repaired by declaring fewer files, i.e. by splitting the
+// issue. A single "invalid" would tell a reader neither.
+const SCOPE_DROP_HINT = {
+  not_a_string: 'suspected_files carried a non-string entry (the plan schema says string)',
+  empty: 'the entry is empty once trimmed, so it names no path',
+  too_long: `the pattern is longer than ${MAX_SCOPE_PATTERN_LENGTH} characters`,
+  absolute: 'the pattern is an absolute path (leading "/"), and scope patterns are repository-relative',
+  drive_letter: 'the pattern opens with a Windows drive letter ("C:"), which cannot match a repository-relative path',
+  backslash: 'the pattern contains a backslash, which is not a path separator in a scope pattern',
+  parent_escape: 'the pattern has a ".." segment, which escapes the repository',
+  nul_byte: 'the pattern contains a NUL byte',
+  over_bound: `the contract accepts at most ${MAX_SCOPE_PATTERNS} patterns and this issue declared more`,
+};
+
+// A dropped pattern as it can safely be printed. Control characters (the NUL
+// case above is one) are escaped rather than embedded, so the report stays
+// readable and stays free of bytes a terminal would eat; an over-long pattern is
+// cut with its true length stated, because the length IS the finding there and
+// 200+ characters of noise would bury the entries beside it.
+function scopePatternLabel(pattern) {
+  const text = String(pattern).replace(/[\x00-\x1f\x7f]/g, (ch) => `\\u${ch.codePointAt(0).toString(16).padStart(4, '0')}`);
+  return text.length > 80 ? `"${text.slice(0, 80)}…" (${text.length} chars)` : `"${text}"`;
+}
+
+// `scope.allow` for one issue: the files the plan says this issue owns, AND the
+// declared paths that did not reach it (Issue #161 / #162).
 //
-// Patterns the contract parser would reject (absolute, `..`-escaping, over-long,
-// NUL-bearing, Windows drive or backslash paths) are dropped rather than sent —
-// a contract rejected at `send` is a dispatch that never happens. The result is
-// sorted so the contract does not depend on the plan's iteration order, and
-// de-duplicated so a file listed twice does not produce two identical patterns.
-function contractScopeAllow(issue) {
+// The doc comment this replaces said the drops were free — "a contract rejected
+// at `send` is a dispatch that never happens" — and that CommandMate's contract
+// parser would reject every shape dropped here. Measured against CommandMate
+// 0.22.2, both halves are wrong in the direction that matters:
+//
+//   - `validateScopePattern` tests exactly THREE things: a NUL byte, a leading
+//     `/`, and a `..` segment. A Windows drive letter and a backslash are NOT
+//     rejected there, so the old comment named two shapes the parser never
+//     refuses. They are still dropped here — a backslash-bearing pattern cannot
+//     match a repository-relative path on any platform this ships to — but that
+//     drop is this runner's decision, and it has to be reported as one.
+//   - For everything else the parser is LOUD: it names the offending entry and
+//     its reason (`validateScopePattern` / `validateStringList`), and refuses a
+//     list over the bound BY NUMBER (`at most 200 entries (got 250)`), exiting 2
+//     with every violation listed. So dropping does not avoid a failed dispatch —
+//     it converts a refusal that says exactly what is wrong into a dispatch that
+//     SUCCEEDS with a narrower permission than the plan declared. The worker then
+//     edits the file its own issue named, fails the scope gate, and has no way
+//     back: the contract's `scope.allow` is a send-time snapshot.
+//
+// So the drops stay (a list `send` will accept is still the only list worth
+// sending), but they are no longer silent: the caller gets them, the pre-flight
+// refuses on them before `--out` exists, and the wave loop records them.
+//
+// `dropped` is deterministic, like everything else that feeds a contract: the
+// shape drops come first, in the plan's declaration order, then the over-bound
+// drops in the sorted order they were cut in. A duplicate is NOT a drop — the
+// path is still in the contract, just once. The result is sorted so the contract
+// does not depend on the plan's iteration order.
+function contractScopeReview(issue) {
   const seen = new Set();
   const allow = [];
+  const dropped = [];
+  const drop = (pattern, reason) => dropped.push({ pattern: String(pattern), reason });
   const files = Array.isArray(issue.suspected_files) ? issue.suspected_files : [];
   for (const raw of files) {
-    if (typeof raw !== 'string') continue;
+    if (typeof raw !== 'string') { drop(raw, 'not_a_string'); continue; }
     const pattern = raw.trim();
-    if (pattern === '' || pattern.length > MAX_SCOPE_PATTERN_LENGTH) continue;
-    if (pattern.startsWith('/') || /^[A-Za-z]:/.test(pattern) || pattern.includes('\\')) continue;
-    if (pattern.split('/').includes('..') || pattern.includes('\u0000')) continue;
+    if (pattern === '') { drop(raw, 'empty'); continue; }
+    if (pattern.length > MAX_SCOPE_PATTERN_LENGTH) { drop(pattern, 'too_long'); continue; }
+    if (pattern.startsWith('/')) { drop(pattern, 'absolute'); continue; }
+    if (/^[A-Za-z]:/.test(pattern)) { drop(pattern, 'drive_letter'); continue; }
+    if (pattern.includes('\\')) { drop(pattern, 'backslash'); continue; }
+    if (pattern.split('/').includes('..')) { drop(pattern, 'parent_escape'); continue; }
+    if (pattern.includes('\u0000')) { drop(pattern, 'nul_byte'); continue; }
     if (seen.has(pattern)) continue;
     seen.add(pattern);
     allow.push(pattern);
   }
   allow.sort();
-  return allow.slice(0, MAX_SCOPE_PATTERNS);
+  for (const pattern of allow.slice(MAX_SCOPE_PATTERNS)) drop(pattern, 'over_bound');
+  return { allow: allow.slice(0, MAX_SCOPE_PATTERNS), dropped };
+}
+
+// The array-only view, for the two callers that build the contract itself. They
+// sit downstream of a gate that has already reported `dropped`, so nothing about
+// them changes.
+function contractScopeAllow(issue) {
+  return contractScopeReview(issue).allow;
+}
+
+// The sentence both the pre-flight refusal and the wave-loop limitation open
+// with. What it carries is fixed by what a reader can act on: HOW MANY paths went
+// missing out of how many were declared, WHICH ones (the first few — fifty lines
+// of paths read as noise and their reasons repeat), and WHY each went, because
+// the two reason families need opposite fixes. The paths are `redact`ed like
+// every other body-derived text in a report, which is also what keeps an
+// `absolute` drop from printing a host path back out.
+function contractScopeDroppedDetail(number, declared, dropped) {
+  const counts = new Map();
+  for (const entry of dropped) counts.set(entry.reason, (counts.get(entry.reason) ?? 0) + 1);
+  const tally = [...counts.entries()].map(([reason, count]) => `${reason} x${count}`).join(', ');
+  const samples = dropped.slice(0, 3).map((entry) => `${entry.reason} ${scopePatternLabel(entry.pattern)}`).join('; ');
+  const more = dropped.length > 3 ? `; …and ${dropped.length - 3} more` : '';
+  const hints = [...counts.keys()].map((reason) => `${reason}: ${SCOPE_DROP_HINT[reason]}`).join('. ');
+  return redact(
+    `#${number}: ${dropped.length} of the ${declared} path(s) this issue declares do NOT reach its execution contract's `
+    + `scope.allow (${tally}). Dropped: ${samples}${more}. ${hints}. `
+    + 'The contract scope is a send-time snapshot, so a worker told to edit one of these files fails the scope gate '
+    + `and cannot widen it from inside the worktree. Declare fewer files (${MAX_SCOPE_PATTERNS} is CommandMate's contract bound, `
+    + 'not this runner\'s — split the issue) or write the offending paths as plain repository-relative paths, then re-plan',
+  );
 }
 
 function contractTitle(issue) {
@@ -4410,7 +4520,26 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
 
       let contractPath = null;
       if (contractMode) {
-        const allow = contractScopeAllow(res.issue);
+        const scope = contractScopeReview(res.issue);
+        const allow = scope.allow;
+        // Issue #161 / #162, the human-present half. The unattended pre-flight
+        // refuses on this before `--out` exists; here the wave is already
+        // running, so the run continues with the narrowed scope — but it says
+        // so. A silent truncation reads as "everything the issue declared is in
+        // the contract", which is the one thing that is not true, and the plan
+        // side already holds itself to the opposite rule (plan-contract.md
+        // §5.1: what was added is always visible, and so is what was removed).
+        // Recorded BEFORE the empty-scope limitation below, because when the
+        // drop is what emptied the scope it is the explanation of it.
+        if (scope.dropped.length > 0) {
+          report.limitations.push({
+            code: 'contract_scope_dropped',
+            detail: `${contractScopeDroppedDetail(number, (res.issue.suspected_files ?? []).length, scope.dropped)}. `
+              + (allow.length === 0
+                ? 'Nothing was left to declare, so the issue is not dispatched (see contract_scope_unknown below)'
+                : `The issue IS dispatched, under the ${allow.length} pattern(s) that survived — under --unattended the same finding stops the run in pre-flight instead`),
+          });
+        }
         if (allow.length === 0) {
           // Issue #50: an empty scope used to be dispatched with
           // `requireScopeClean: false`, which disabled the scope gate entirely —
@@ -5082,6 +5211,13 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
     if (report.blocking_reasons.some((reason) => reason.code === 'wall_clock_budget_exhausted')) {
       lines.push('- next: `--wall-clock-budget` に到達して打ち切った。**成功ではない。** 何に時間を使ったか（baseline / acceptance コマンドは自前の timeout を持たない）を確認し、原因を潰すか budget を実測に合わせて増やしたうえで `--resume` で再開する（owner: operator）。');
     }
+    // Issue #161 / #162. Placed BEFORE the empty-scope line because the drop is
+    // what emptied the scope whenever both fire on the same issue, and because
+    // its action differs: the empty case is "write the target files", this one
+    // is "write FEWER, or write them differently".
+    if (report.blocking_reasons.some((reason) => reason.code === 'contract_scope_dropped')) {
+      lines.push(`- next: 宣言された対象 file の一部が実行契約の \`scope.allow\` に入らない（件数上限 ${MAX_SCOPE_PATTERNS} 超過、または契約が扱えない形の path）。**落ちた path と理由が blocking reason に出ている。** 上限超過なら Issue を分割し、形の問題なら repository-relative な path に書き直して re-plan する。上限は CommandMate 側の契約上限なので runner 側では上げられない（\`--out\` は消費していない）（owner: human）。`);
+    }
     if (report.blocking_reasons.some((reason) => reason.code === 'contract_scope_unknown')) {
       lines.push('- next: 対象 file を1件も宣言していない Issue がある。**Issue 本文に対象ファイルを書いて re-plan する。** `--unattended` は plan 全体を pre-flight で検査するので、1件でも欠けていれば1人も dispatch しない（`--out` は消費していない）（owner: human）。');
     }
@@ -5093,6 +5229,12 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
     }
     if (report.limitations.some((reason) => reason.code === 'contract_unsupported')) {
       lines.push('- next: 契約非対応の CLI だったため裁定はフォールバック（baseline 再実行）である。契約ゲートで裁定したい場合は CommandMate を 0.17.0 以上へ更新する（owner: operator）。');
+    }
+    // The attended twin of the pre-flight stop above (Issue #161 / #162). The
+    // run went on, so this is not a next action for the run — it is the reason a
+    // pass here does not mean the issue's whole declaration was in force.
+    if (report.limitations.some((reason) => reason.code === 'contract_scope_dropped')) {
+      lines.push(`- next: 宣言された対象 file の一部が実行契約の \`scope.allow\` に入らないまま dispatch した（件数上限 ${MAX_SCOPE_PATTERNS} 超過、または契約が扱えない形の path）。**worker の権限は Issue の宣言より狭い。** 落ちた path が limitation に出ているので、その file の編集が要るなら Issue を分割するか path を書き直して re-plan する（owner: human）。`);
     }
     // `commandmate sync` is the only fix for "the worktree is on disk but the
     // server never scanned it", so a CLI without it turns a registration gap into

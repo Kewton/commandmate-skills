@@ -1,0 +1,45 @@
+{
+  "description": "Issue #162（形チェックによる per-item drop の可視化・plan 側）: 対象ファイル欄に 200 字を超える path を 1 行 書くと、dispatch の `contractScopeAllow` はそれを無記録で落としていた。plan には 2 件載っているのに worker の 権限は 1 件、という差が report のどこにも出ない。planner は `contract_scope_dropped` を `too_long` として 名指しする。**もう 1 件（`docs/readme.md`）は残るので、これは「scope が空になった」（`contract_scope_unknown`）とは別の欠陥である** —— 空なら 0.9.0 以来止まっていた。落ちるのが 1 件だけだから通っていた、というのがこの Issue の主張であり、この case はその 1 件を可視にする。他の形（絶対 path・ドライブレター・バックスラッシュ・`..`）は `isSafeRepoPath` が抽出時に落とすので plan には到達しない。dispatch 側の mirror はそれでも全形を持つ —— 穴のある mirror が本件そのものだからである。",
+  "args": [
+    "492",
+    "--profile",
+    "node-commandmate"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "contract_scope_dropped"
+    ],
+    "warning_details_include": [
+      "#492: the dispatch runner's execution contract cannot carry 1 of the 2 path(s)",
+      "(too_long x1)",
+      "too_long `segment00xxxxxxxxxxxxxxx/segment01xxxxxxxxxxxxxxx/",
+      "write it as a plain repository-relative path of at most 200 characters"
+    ],
+    "waves": [
+      [
+        492
+      ]
+    ],
+    "merge_order": [
+      492
+    ],
+    "dependencies": [],
+    "classifications": {
+      "492": "independent"
+    },
+    "suspected_files": {
+      "492": [
+        "docs/readme.md",
+        "segment00xxxxxxxxxxxxxxx/segment01xxxxxxxxxxxxxxx/segment02xxxxxxxxxxxxxxx/segment03xxxxxxxxxxxxxxx/segment04xxxxxxxxxxxxxxx/segment05xxxxxxxxxxxxxxx/segment06xxxxxxxxxxxxxxx/segment07xxxxxxxxxxxxxxx/segment08xxxxxxxxxxxxxxx/segment09xxxxxxxxxxxxxxx/segment10xxxxxxxxxxxxxxx/segment11xxxxxxxxxxxxxxx/notes.md"
+      ]
+    },
+    "scope_defaults": {
+      "492": []
+    },
+    "questions_count": {
+      "492": 0
+    }
+  }
+}
