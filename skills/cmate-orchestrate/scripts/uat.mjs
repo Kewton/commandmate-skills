@@ -97,6 +97,12 @@ const ACCEPTANCE_SKILL_ID = 'cmate-acceptance-test';
 const SUPPORTED_ACCEPTANCE_SCHEMA_VERSION = 1;
 // How many findings/conditions are lifted out of one acceptance document. The
 // report stays bounded; the document itself remains the full record.
+//
+// The cap is never silent (Issue #163). When it bites, the LAST of the slots holds
+// a note naming how many entries were left out and of what kind — a list that was
+// quietly shortened reads as a complete one, and `conditions` is the list of what a
+// human still has to close. The note takes a slot rather than being appended after
+// the cap, so the bound (and the schema's `maxItems`) still holds exactly.
 const MAX_ACCEPTANCE_ITEMS = 8;
 
 // A CommandMate worktree id (mirrors the CLI's isValidWorktreeId).
@@ -591,33 +597,83 @@ function acceptanceState(state, note) {
   };
 }
 
+// Fit per-kind groups of excerpts into `max` slots. Two rules, both lifted from
+// merge.mjs's capped()/droppedNote() (Issue #163):
+//
+//   1. The cap is always STATED. A dropped entry is counted in a trailing note, so
+//      a reader can tell "there were 8" from "8 is all this report shows".
+//   2. Every kind that has something to say keeps at least one slot. Items are
+//      concatenated kind by kind, so without a reservation a long run of failing
+//      criteria eats the whole budget and the next_actions and limitations behind
+//      it disappear entirely — the very entries a human is supposed to close.
+//
+// `groups` is [{ label, items }] in the order the report wants them. The result is
+// never longer than `max`: when anything is dropped the note SPENDS a slot instead
+// of being appended past the cap, so the bound the schema pins is unchanged.
+function fitAcceptanceItems(groups, max) {
+  const present = groups.filter((group) => group.items.length > 0);
+  const total = present.reduce((sum, group) => sum + group.items.length, 0);
+  if (total <= max) return present.flatMap((group) => group.items);
+
+  const quota = present.map(() => 0);
+  let left = max - 1; // the note itself costs one slot
+  for (let i = 0; i < present.length && left > 0; i += 1) {
+    quota[i] = 1;
+    left -= 1;
+  }
+  for (let i = 0; i < present.length && left > 0; i += 1) {
+    const room = Math.min(left, present[i].items.length - quota[i]);
+    quota[i] += room;
+    left -= room;
+  }
+
+  const shown = present.flatMap((group, i) => group.items.slice(0, quota[i]));
+  const dropped = present
+    .map((group, i) => ({ label: group.label, count: group.items.length - quota[i] }))
+    .filter((entry) => entry.count > 0);
+  const count = dropped.reduce((sum, entry) => sum + entry.count, 0);
+  const breakdown = dropped.map((entry) => `${entry.count} ${entry.label}`).join(', ');
+  shown.push(
+    `Not listed here: ${count} further item(s) — ${breakdown}. This list is capped at ${max} entries to keep the report bounded; the acceptance result document holds the full record.`,
+  );
+  return shown;
+}
+
 // What a fix worker has to repair: the criteria that resolved to a failure, plus
 // the reasons the acceptance run itself called blocking.
 function acceptanceFindings(doc) {
-  const items = [];
+  const failures = [];
   for (const criterion of doc.criteria) {
     if (criterion && criterion.outcome === 'fail') {
-      items.push(`${criterion.id} fail: ${criterion.text}${criterion.notes ? ` — ${criterion.notes}` : ''}`);
+      failures.push(clip(`${criterion.id} fail: ${criterion.text}${criterion.notes ? ` — ${criterion.notes}` : ''}`, 300));
     }
   }
-  for (const reason of doc.blocking_reasons) items.push(`blocking: ${String(reason)}`);
-  return items.slice(0, MAX_ACCEPTANCE_ITEMS).map((item) => clip(item, 300));
+  const blocking = doc.blocking_reasons.map((reason) => clip(`blocking: ${String(reason)}`, 300));
+  return fitAcceptanceItems([
+    { label: 'failing criterion/criteria', items: failures },
+    { label: 'blocking reason(s)', items: blocking },
+  ], MAX_ACCEPTANCE_ITEMS);
 }
 
 // What a human has to close: the criteria that never resolved, and the next
 // actions the acceptance run attached to them.
 function acceptanceConditions(doc) {
-  const items = [];
+  const unresolved = [];
   for (const criterion of doc.criteria) {
     if (criterion && UNRESOLVED_CRITERION_OUTCOMES.has(criterion.outcome)) {
-      items.push(`${criterion.id} ${criterion.outcome}: ${criterion.text}${criterion.notes ? ` — ${criterion.notes}` : ''}`);
+      unresolved.push(clip(`${criterion.id} ${criterion.outcome}: ${criterion.text}${criterion.notes ? ` — ${criterion.notes}` : ''}`, 300));
     }
   }
+  const actions = [];
   for (const action of doc.next_actions) {
-    if (action && typeof action === 'object') items.push(`next: ${String(action.action)}（owner: ${String(action.owner)}）`);
+    if (action && typeof action === 'object') actions.push(clip(`next: ${String(action.action)}（owner: ${String(action.owner)}）`, 300));
   }
-  for (const limitation of doc.limitations) items.push(`limitation: ${String(limitation)}`);
-  return items.slice(0, MAX_ACCEPTANCE_ITEMS).map((item) => clip(item, 300));
+  const limitations = doc.limitations.map((limitation) => clip(`limitation: ${String(limitation)}`, 300));
+  return fitAcceptanceItems([
+    { label: 'unresolved criterion/criteria', items: unresolved },
+    { label: 'next action(s)', items: actions },
+    { label: 'limitation(s)', items: limitations },
+  ], MAX_ACCEPTANCE_ITEMS);
 }
 
 // Load one issue's acceptance result. Only the file NAME is ever recorded, never
