@@ -579,6 +579,35 @@ true のままである（barrier が測っているのは completion と verifi
 
 ---
 
+### #145 — 段1 が知らない規約の repo では、まだ run が丸ごと失われていた
+
+#147（段1）が消したのは「**planner が知っている規約の repo**」の分だけである。
+L1 が出さない配置（独自の spec ツリー等）の repo では、受入条件が unit test を要求していて
+`## 対象ファイル` にテストが無い Issue が、**今も dispatch すれば必ず scope ゲートで落ちる**。
+worker は直せず（契約の scope は send 時 snapshot）、planner も直せない（repo を開かない）。
+
+→ planner が **dispatch の前に人間へ返す**: warning 1件 ＋ open question 1件
+（`acceptance_requires_tests_but_scope_has_none`）。`plan.status` は誰も読まないが、
+**question は dispatch の pre-flight が拒否する** —— しかも `--out` を作る前なので、
+**偽陽性のコストは、真陽性が払わせるはずだった re-plan と同じ**である。
+
+**段1 との二重発火は構造で防いでいる。** 検出は `suspected` を **`scopeDefaults` を push した後に**
+読むので、L1 が導出でテスト path を足した Issue は自動的に沈黙する。`isTestPath` は L1 と同一の
+述語なので、「criterion がテスト path を名指した」と「scope が持っている」が食い違うこともない。
+
+**精度がこの機能の本体である。** 既存の2つの question は `length === 0` の構造的判定で間違えようが
+ないが、これは推論であり、しかもそれを通す `--allow-questions` は **plan 全体に効く** ——
+1件の偽陽性が運用者にそのフラグを習慣づけ、本物の `no_acceptance_criteria` まで一緒に黙らせる。
+走査は `acceptance_criteria` に限定し、「テストの名詞 ＋ 能動的な要求」か「テスト形 path の名指し」
+だけを採り、**4つの否定形**（不要 / 既存が緑のまま / 手動 / 変更しない）が criterion 単位で veto する。
+除外は**先に評価して勝たせる** ——「上限を追加する、unit test は不要」は名詞と `追加` の両方を持つので、
+除外が無ければ必ず誤爆する。**4つは融合した1本の正規表現にせず独立した4文**にしてある。
+1つずつ外して赤になることを変異注入で実測できる形にするためである（実測: 4本とも赤）。
+
+裁定 A（[adr-scope-derivation.md](./adr-scope-derivation.md) 第8節）:
+**推論は機械を止めてよいが、機械に指示してはならない。** この検出は `acceptance_gates` にも
+`scope.allow` にも1バイトも書かない。
+
 ### #148 — 直せない scope 違反に、上限まで再指示を送り続けていた
 
 Kewton/BorderFreeKidsMap #35 の note は `supervision exceeded its hard iteration bound` である。
@@ -823,6 +852,15 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 ---
 
 ## パッケージ
+
+### 0.24.0 — scope 導出の段3（#145）
+
+段1（#147）が届かない残余 —— **planner が知らないテスト配置の repo** —— を、
+**dispatch の前に人間へ返す**ようになった。`acceptance_requires_tests_but_scope_has_none` は
+warning と open question の両方に載り、dispatch の pre-flight が `--out` を作る前に停止する。
+
+これで [adr-scope-derivation.md](./adr-scope-derivation.md) の4層のうち **L1 / L3 / L4 が揃った**。
+残るは L2（#149・profile の `scope_companions`）である。**CommandMate は引き続き1バイトも変わっていない。**
 
 ### 0.23.0 — scope は「推測」から「宣言の閉包」へ（#147 / #148）
 
