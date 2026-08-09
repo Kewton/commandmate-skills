@@ -1,0 +1,38 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "201": {
+      "state": "completed",
+      "verify_exits": [20, 20, 0],
+      "failed_gates_by_turn": [
+        [
+          {
+            "id": "scope",
+            "exit": 20,
+            "logTail": "22 file(s) changed outside scope.allow:\nweb/src/a01.ts\nweb/src/a02.ts\nweb/src/a03.ts\nweb/src/a04.ts\nweb/src/a05.ts\nweb/src/a06.ts\nweb/src/a07.ts\nweb/src/a08.ts\nweb/src/a09.ts\nweb/src/a10.ts\nweb/src/a11.ts\nweb/src/a12.ts\nweb/src/a13.ts\nweb/src/a14.ts\nweb/src/a15.ts\nweb/src/a16.ts\nweb/src/a17.ts\nweb/src/a18.ts\nweb/src/a19.ts\nweb/src/z20.ts\nweb/src/z21.ts\nweb/src/z22.ts"
+          }
+        ],
+        [
+          {
+            "id": "scope",
+            "exit": 20,
+            "logTail": "22 file(s) changed outside scope.allow:\nweb/src/a01.ts\nweb/src/a02.ts\nweb/src/a03.ts\nweb/src/a04.ts\nweb/src/a05.ts\nweb/src/a06.ts\nweb/src/a07.ts\nweb/src/a08.ts\nweb/src/a09.ts\nweb/src/a10.ts\nweb/src/a11.ts\nweb/src/a12.ts\nweb/src/a13.ts\nweb/src/a14.ts\nweb/src/a15.ts\nweb/src/a16.ts\nweb/src/a17.ts\nweb/src/a18.ts\nweb/src/a19.ts\nweb/src/y20.ts\nweb/src/y21.ts\nweb/src/y22.ts"
+          }
+        ],
+        []
+      ]
+    },
+    "200": {
+      "state": "completed",
+      "verify_exits": [0]
+    }
+  }
+}
