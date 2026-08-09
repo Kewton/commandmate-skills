@@ -130,6 +130,22 @@ commandmate skill install cmate-acceptance-test
 run は劣化していない）。report には `acceptance.configured` / `acceptance.verdicts` の内訳と、
 per-issue の `baseline` / `acceptance` / `verdict` / `verdict_source` を記録する。
 
+### 4.2.1 findings / conditions の上限と、切ったことの明記
+
+per-issue の `acceptance.findings`（`fail` した criterion ＋ blocking reason）と
+`acceptance.conditions`（未解決 criterion ＋ next_actions ＋ limitations）は **各 8 件が上限**である
+（report を小さく保つため。全量は acceptance result document 側に残る）。この上限には二つの規則がある。
+
+- **切ったことを必ず書く。** 上限に達したときは **8 枠目を注記に使い**、
+  `Not listed here: N further item(s) — <種別ごとの内訳>.` を最後の要素として載せる。
+  8 件のリストが全量なのか切られたのかを読み分けられる（merge.mjs の `capped()` / `droppedNote()`
+  と同じ扱い）。注記は 9 件目としてではなく 8 枠目として入るので、上限そのものは動かない。
+- **種別ごとに最低 1 枠を確保する。** items は種別順（criteria → next_actions → limitations）に
+  並ぶので、確保が無いと `fail` した criterion が枠を食い尽くして next_actions と limitations が
+  1 件も載らない。`conditions` は **人が閉じるべき残件**であり、丸ごと沈黙してよいものではない。
+
+上限値も合成 verdict の裁定もこの注記に影響されない（読み取りの問題であって、合否の問題ではない）。
+
 ### 4.3 write_uat（read-only assessment）
 
 各 eligible Issue の worktree 内で **profile の `baseline` を実行**し（`commandmate uat`

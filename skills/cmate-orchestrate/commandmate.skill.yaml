@@ -197,8 +197,8 @@ files:
     executable: false
     script: false
   - path: references/uat-contract.md
-    sha256: 082133f343f473f8c8edc1d19fb672bf6f3d8d32b575ed99116f12c139dd2438
-    size: 27295
+    sha256: 00dc1686305a1c61af8d0770464cde56e08c3690cf652e8c652e57e3b9f0b89c
+    size: 28702
     kind: instruction
     executable: false
     script: false
@@ -275,8 +275,8 @@ files:
     executable: true
     script: true
   - path: scripts/uat.mjs
-    sha256: 2961c8b64f51675bf31b71d2c7b64e86cdcce661a1d5ee58778757e0725f8cd5
-    size: 83447
+    sha256: 82b026dcbd72ac7ca3030972c24e17e49b18cec3320288677375a9465888725b
+    size: 86315
     kind: script
     executable: true
     script: true
