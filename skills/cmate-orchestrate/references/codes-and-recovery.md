@@ -121,7 +121,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | plan `status: partial` + `no_acceptance_criteria` / `no_suspected_files` | Issue に受入条件か対象 file が書かれていない | **Issue 本文に書き足して re-plan する。** run_id は本文を含む hash なので自動的に別 run になる |
 | plan `status: partial` + `acceptance_requires_tests_but_scope_has_none`（dispatch 側では `open_questions` として止まる） | 受入条件はテストの作成を要求しているのに、宣言された file からテスト path が1件も導出できていない。**そのまま dispatch すれば worker は正しくテストを書いて scope ゲートで落ち、契約 scope は send 時 snapshot なので worker 側に回復手段は無い** | **Issue 本文の対象 file にテスト path を書いて re-plan する。** テストが本当に不要なら受入条件にそう書く（否定形は検出から除外される）。判定の元になった受入条件が warning detail と question に原文で入っているので、偽陽性の確認はその1行で済む。**`--allow-questions` で押し通すのは、そのまま worker 1人分の run を捨てることである** |
 | plan `cycle_detected` / `override_incomplete` / `dependency_order_violation` | 依存グラフが実行不能 | `dependency-plan.md` の edge `reason`（どの方向語をどの行から読んだか）を見て、Issue 本文か `--depends` を直す |
-| plan `run_exists` | 入力が完全に同一の再実行 | 本文を直すか、`--run-id <new-id>` / `--runs-dir <dir>` を渡す |
+| plan `run_exists` | **同じ既定 run_id に hash された run が既にある**（Issue 集合・Issue 内容・**profile 全体**・CLI option がすべて同じ、が典型）。「何も変えていない」とまでは断定できない —— 既定 profile の cwd `origin` 判定は hash の外にある（Issue #157） | エラーが指す既存の `plan.json` と突き合わせて、意図した plan かを確かめる。違うなら Issue 本文か profile を直す（**profile はどの field を編集しても別 run_id になる**）。同じでよいなら `--run-id <new-id>` / `--runs-dir <dir>` を渡す |
 | plan `profile_repository_mismatch` | cwd の origin と profile の対象リポジトリが違う | `--profile` / `--profile-json` / `--repo` のどれかを渡して意図を明示する |
 | dispatch `open_questions` + `human_required` | 未回答の question を持つ Issue がある | blocking reason に**質問の本文**が出ている。Issue 本文に回答を書いて re-plan する |
 | dispatch `drift` | plan 承認後に branch / HEAD / 権限が動いた | drift の内容を確認し、必要なら re-plan する。**drift の上に dispatch しない** |

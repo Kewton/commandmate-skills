@@ -2185,6 +2185,44 @@ function canonicalInputSignature(inputs, profile, issues) {
   // a NEW run id — while a byte-identical re-run still derives the same id and
   // is still refused, so the no-overwrite intent stands. Labels are sorted:
   // their order carries no meaning and must not shift the id.
+  //
+  // The RESOLVED PROFILE goes in WHOLE (Issue #157, option A of three). It used
+  // to contribute three hand-picked fields — `base` / `id` / `repository` — while
+  // five more of its fields decide plan content: `baseline` feeds verifyBinaries
+  // and therefore `issues[].test_expectations`, `branch_template` and
+  // `worktree_template` expand into `issues[].branch` / `.worktree`, `verified`
+  // decides the `unverified_profile` warning and a high-severity risk factor, and
+  // `scope_companions` (#149, ADR layer L2) derives `suspected_files` /
+  // `scope_defaults`. Two plans with different content could therefore claim the
+  // same default run id. The enumeration was not merely incomplete — `baseline`
+  // was already outside it before #149 added a fifth field.
+  //
+  // Whole-profile is chosen over re-listing the five (option B) precisely
+  // because the listing is what failed: a list has to be re-audited by a human
+  // every time a profile field is added, and nothing detects it when they forget.
+  // Hashing the resolved object is correct by construction and follows PROFILE_FIELDS
+  // for free. The cost is accepted, not overlooked: editing ANY profile field —
+  // including one that turns out not to reach the plan — derives a new default
+  // run id. That is the safe direction (a new id writes a new directory; a stale
+  // shared id is what silently misrepresents two different plans as one run), and
+  // `--resume` is unaffected because it names a dispatch directory, not a run id.
+  //
+  // It is the RESOLVED profile, after --repo / --base overrides and after the
+  // verification downgrade they can trigger, because that is the profile the plan
+  // is actually built from.
+  //
+  // Serialized as-is, with no key-order canonicalization, because the profile
+  // reaching here is already canonically ordered: normalizeProfile REBUILDS the
+  // object field by field (and normalizeScopeCompanions rebuilds every rule as
+  // `{when, add}`), so a hand-written --profile-json whose keys are in any order
+  // arrives here in one fixed order, and the built-ins are object literals. A
+  // sorting pass was written first and then removed: no input this loader accepts
+  // could tell the two versions apart, and an unobservable defense is the same
+  // shape of claim-beyond-the-code this Issue is about. The property it was there
+  // for — re-ordering a profile's keys must not fork the run id — is pinned by a
+  // fixture against the layer that actually provides it. If a profile field is
+  // ever added that passes a caller-supplied object through UNREBUILT, that
+  // fixture is what will catch it, and canonicalization belongs in the loader.
   return JSON.stringify({
     issues: inputs.issues,
     issue_content: issues.map((issue) => ({
@@ -2193,9 +2231,7 @@ function canonicalInputSignature(inputs, profile, issues) {
       body: issue.body,
       labels: [...issue.labels].sort(),
     })),
-    base: profile.base,
-    profile: profile.id,
-    repository: profile.repository,
+    profile,
     max_parallel: inputs.maxParallel,
     phase: inputs.phase,
     infer: inputs.infer,
@@ -2531,11 +2567,24 @@ function run(argv) {
 
   const runDir = join(inputs.runsDir, runId);
   if (existsSync(runDir)) {
+    // What this message may and may not claim (Issue #157). It hashes the issue
+    // set with each title/body/labels, the whole resolved profile, and the CLI
+    // inputs — so an earlier run reaching this id is CONSISTENT with nothing
+    // having changed, and an edited issue body or an edited profile field derives
+    // a new id by itself. It is not proof: the cwd origin the default-profile
+    // cross-check reads is not in the hash, and it can put a
+    // `profile_repository_mismatch` warning into one plan and not the other.
+    // Saying "so this means nothing changed" was an assertion the runner cannot
+    // make; point at the existing plan.json instead and let the operator settle
+    // it. The directory is named once and not re-interpolated: redact() rewrites
+    // an absolute path to [REDACTED-PATH], so a second copy would only add noise.
     throw new SkillError(
       'run_exists',
       `run directory ${runDir} already exists; refusing to overwrite. ` +
-        'The default run id hashes the planner inputs INCLUDING each issue title/body/labels, so this means ' +
-        'nothing changed since that run (an edited issue body derives a new id by itself). ' +
+        'The default run id hashes the planner inputs — the issue set INCLUDING each title/body/labels, the ' +
+        'resolved profile (every field, so editing baseline/branch_template/worktree_template/verified/' +
+        'scope_companions derives a new id), and the CLI options — so an earlier run hashed to this same id. ' +
+        'Read the plan.json already in that directory to see whether it is the plan you meant to produce. ' +
         'To re-plan anyway: pass --run-id <new-id> (e.g. --run-id plan-retry-1) or --runs-dir <dir> to write elsewhere.',
       4,
     );
