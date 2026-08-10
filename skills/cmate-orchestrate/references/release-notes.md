@@ -149,6 +149,45 @@ worker は本文に残る古い方針を実装した。
 → 挙動は変えず（コメントは読まない）、この入力範囲を plan の `notes` に**毎回明記**する。
 コメントで決めた内容は dispatch 前に本文へ畳み込む運用にする（cmate-issue-refinement が使える）。
 
+### #161 / #162 — 宣言した対象ファイルが、契約に入らないまま dispatch が成功していた
+
+`dispatch.mjs` の `contractScopeAllow` は、Issue が `## 対象ファイル` に書いた path を
+**2 通りの経路で無言のうちに落として**いた。件数上限 200 の `slice`（宣言が 201 件以上なら
+アルファベット順で後ろが消える）と、形チェックの per-item drop（絶対パス・`..`・NUL・200 字超・
+ドライブレター・バックスラッシュ）である。どちらも warning も limitation も blocking reason も
+残さない。
+
+**#147 が消そうとした障害クラスそのもの**で、トリガが「Issue の書き忘れ」ではなく
+「**宣言の件数と書式**」であるだけである。worker は Issue が明記したファイルを編集して scope
+ゲートで落ち、契約の `scope.allow` は send 時 snapshot なので worker 側に回復手段が無い。
+L4（#148）が発火しても detail は「違反 path を対象ファイルに足して re-plan せよ」と言うが、
+**その path は既に書かれている**ため、運用者は指示どおり動いても何も変わらない。
+
+落としていた理由は doc comment に書いてあった —— 「parser が拒否するものは送る前に落とす。
+send で拒否される契約は、起きなかった dispatch である」。**不正な形については妥当だが、
+件数上限には当てはまらない。** CommandMate の契約 parser は 200 件超過を
+`at most 200 entries (got 250)` と**件数を名指しして拒否**し、絶対パスや `..` も
+**エントリ番号と理由を名指しして拒否**する。つまり切り詰めなければ **send が大きな声で
+拒否する**ところを、切り詰めることで**契約は受理され、権限だけが黙って狭まった状態で
+dispatch が成功**していた。大きな声の拒否が、静かな誤った成功に化けていた。
+
+実測で doc comment 自体の誤りも 1 件見つかった。**ドライブレター（`C:`）とバックスラッシュを
+parser は拒否しない**（`validateScopePattern` の検査は NUL・先頭 `/`・`..` の 3 つだけ）。
+記述を実装に合わせて訂正した。
+
+→ `contractScopeReview` が `{allow, dropped}` を返し、`dropped` は理由つき
+（`absolute` / `escaping` / `too_long` / `over_bound` 等）で持つ。**理由は装飾ではない** ——
+shape 系は path の書き直しで直り、`over_bound` は Issue の分割が要る。直し方が逆になる。
+pre-flight で `contract_scope_dropped` を blocking にし、`--out` を作る前に止める。
+planner 側でも `plan.warnings` に出すので、dispatch より前、plan のレビュー時点で気づける。
+
+**上限値そのものは変えていない**（CommandMate 側の hard limit である）。変えたのは、
+引かれた事実が残るかどうかだけである。
+
+この非対称は [plan-contract.md](./plan-contract.md) 第5.1節にも現れていた。導出側には
+「**足した分は必ず可視である**」があるのに、引いた分に同じ規範が無かった。足した 1 件は必ず
+名指しされるのに、消えた 50 件は 1 バイトも残らない。対の規範として明文化した。
+
 ---
 
 ## dispatch（`scripts/dispatch.mjs`）
@@ -693,6 +732,96 @@ Kewton/BorderFreeKidsMap #35 の note は `supervision exceeded its hard iterati
 `summary_markdown` では「worktree を診断して再 dispatch」の行を**併記ではなく置換**する。
 ここではその助言が積極的に誤りだからである（同じ plan を再投入すれば同じ所で止まる）。
 
+### #160 / #170 — `GATE` 行は stderr に出ていたのに、runner は stdout しか読んでいなかった
+
+`commandmate wait --verify` は `GATE <id> PASS|FAIL` 行を **stderr** に出す
+（stdout は prompt JSON 契約のために予約されている。CommandMate 側の意図的な設計である）。
+ところが `runCliAsync` は成功枝で `stderr: ''` を返して捨てており、`gatesFromWaitOutput` は
+stdout しか走査していなかった。**契約経路で pass した検証の `verification.gates` は
+原理的に常に空**になる。
+
+#47 が入れた「report 単体で pass の根拠が読める」性質は、契約経路の pass では**一度も
+成立していなかった**。そして #142 が `verification_gates_unrecorded` を `--unattended` で
+blocking に昇格させたため、**無人運転の段階 C は全ゲート pass でも wave 1 の直後に必ず
+停止していた。** ADR 第6.5節の意図（根拠を名指しできない pass の上に無人 merge を積まない）は
+正しいが、その前提である「GATE 行を読む」経路が機能していなかった。
+
+fail 経路（exit 20 / 21）は catch 枝で stderr を捕捉しており、かつ `describeFailingGates`
+（`verify --json` の stdout JSON）という別経路の代替があったため、症状が表面化していなかった。
+
+**なぜテストが捕まえなかったか。** テストダブルが実 CLI と逆の stream を使っていた。
+`tests/fixtures/cmate-orchestrate/fake-cli.mjs` は GATE 行を **stdout** に書いており、
+コメントは "Like the real CLI (verify-runner's reportGates)" と実機準拠を謳いながら、
+**何を印字するかだけを写し、どこへ印字するかを写していなかった**。その結果、
+`verification_gates` が埋まることを assert していた既存の緑ケース群は、**実機では成立しない
+stdout 経路**を検証していた。fake を stderr に寄せたうえで実装だけを戻すと、新設ケースに加えて
+**既存の 5 ケースも `verification.gates []` で落ちる** —— 修正前まで幻の経路に対して緑だった
+ことの実測である。
+
+**#83 は原因を取り違えていた。** 当時これは「契約経路の `wait --verify` が exit 0 を返したのに
+`GATE` 行を 1 本も出さない CLI が在る」と、**CLI の出力欠落**として記述された。実測では CLI は
+出力しており、**読み手が別の stream を見ている**というのが実際の姿だった。誤診は fixture
+（`d26` の description）と復旧手順（SKILL.md / codes-and-recovery.md）に焼き込まれ、以後この
+症状を観測しても「既知の CLI 差異」に見える自己強化構造になっていた。
+
+→ `runCliAsync` の成功枝で stderr を保持し、`waitStreams()` が両 stream を連結して
+`gatesFromWaitOutput` の呼び出し 3 箇所すべてに渡す（`GATE_LINE_RE` は行頭一致なので混在しても
+誤検出しない）。fake-cli の GATE 行を `writeGateLine()` で stderr に寄せ、実機と一致させた。
+同期版 `runCli` の `stderr: ''` は `execFileSync` の API 上の制約なので**そのまま**である
+（そこから GATE 行を読む箇所は無い）。
+
+**#170 はその後始末である。** 復旧手順は SKILL.md と codes-and-recovery.md では訂正されたが、
+**運用者が実際に読む唯一の場所** —— dispatch サマリの next 行 —— に旧文言が残っていた。
+「`GATE` 行を出す CommandMate で再実行する」は二重に誤っている: CommandMate は元から出力して
+おり、直すべきは **runner の版**である。ADR 第17.3節も同じ誤診を**論拠として**使っていた
+（`human_required` を false に保つ理由）。結論は維持し、理由を差し替えたうえで
+`contract_unsupported` との違いを書き分けた —— あちらは CommandMate を上げれば runner は
+そのままで解けるが、こちらは runner 自身の更新が要る。
+
+再発防止として、**実際に描画された next 行**と codes-and-recovery.md / SKILL.md / ADR 第17.3節が
+「まず runner の版」「stderr」「#160」で一致し、反証済みの文言が summary に戻らないことを
+1 本のテストで固定した。recovery 表と next 行の一般的な対応（表に在る code は next 行にも在る）は
+**採らなかった** —— 表の `dispatch` 行 21 本のうち 5 本は reason code ではなく stop_reason か
+summary を描画しない経路を指しており、例外表が要る。3 つ目の同期先を作ることになり、
+二重管理の治療にならない。
+
+### #164 — 表示の都合が、run を止めるかどうかを決めていた
+
+`scopeViolationLines` は scope ゲートの logTail を先頭 20 行で打ち切っていたが、その打ち切りが
+**dedup / sort より前**に掛かっていた。L4 ループ判定（#148）が比べていたのは「違反集合」ではなく
+「**logTail 先頭 20 行の集合**」であり、違反が 21 件以上あると**窓の外だけが異なる 2 ターン
+（＝ worker は前進している）が「同一の答え」と読まれ、前進中の worker が
+`scope_unsatisfiable` で止まる**。逆向きもあり得た —— 窓の中の 1 件を直すと後ろの行が繰り上がり、
+停滞している 2 ターンが「異なる」と読まれて turn を浪費する。切ったこと自体はどこにも残らない。
+
+前提は現実的である。CommandMate の logTail は既定 8192 bytes
+（`DEFAULT_MAX_LOG_TAIL_BYTES`）なので 21 行以上は普通に載り、違反が数十件になるのは worker が
+formatter や `lint --fix` を repo 横断で走らせた事故のとき —— **まさに scope ゲートが捕まえたい
+状況**である。
+
+→ **判定と表示を分ける。** `scopeViolationLines` は全行を返し、`MAX_SCOPE_VIOLATION_LINES` は
+表示上限として残す。比較は文字列一致なので全行を持つコストはほぼ無い。新設した
+`scopeViolationDisplay` が `{shown, dropped, total}` を返し、再指示文と
+`blocking_reasons[].detail` の両方がこれを使う。worker record の note には「メッセージが何行中
+何行を伝えたか」を残す —— 20 path を並べた report が「違反が 20 件だった run」と読まれないため。
+
+**ガードは弱めていない。** 本当に同じ違反集合を 2 ターン連続で返した worker は従来どおり
+打ち切られることを、相方の fixture で二点測定している。
+
+### #165 / #171 — 切り捨てが無言だった箇所と、切り捨ての注記が切り捨てられうる経路
+
+`MAX_REPORTED_GATES`（50）と `MAX_SETUP_REASONS`（5）の切り詰めが何も残していなかった。
+`merge.mjs` は同じ問題を `capped()` / `droppedNote()` で解いており、PR 本文の表はすべて
+「_Not listed here: N further ..._」を明記する。同じ規則を dispatch にも適用した。
+**上限値そのものは report サイズ抑制として妥当なので変えていない。**
+
+**#171 はその副作用である。** #165 以降、gate を上限で切った事実は `checks` の**末尾**に 1 行
+足される —— つまり `checks` は伸びる。ところが `carriedWorkerRecord` / `transcribedVerification`
+が過去 report を再転記するとき同じ上限で無言に切り直すため、**末尾から落ちるのはまさにその
+注記**だった。50 件ちょうどの `checks` を持つ carried record が「全部載っている」と読める状態に
+戻る。新設した `transcribeCapped` が注記のぶんの枠を先に確保し、**この転記で何を切ったか**を
+名乗る（上流で既に切られている可能性があるため「HERE」であることが分かる文言にした）。
+
 ## merge（`scripts/merge.mjs`）
 
 ### #142 — 無人運転の段階 C（`merge --merge-prs`）
@@ -810,6 +939,26 @@ fix 回数は `--max-attempts` を超えない。上限到達でなお不合格�
 （`max_attempts_reached`）** で停止し、未解決 Issue と next action を返す。回数無制限のループは
 スコープ外である。
 
+### #163 — 「人が閉じるべき残件」が 8 件で黙って切れていた
+
+`acceptanceFindings` / `acceptanceConditions` は集めた項目を `MAX_ACCEPTANCE_ITEMS`（8）で
+切っていたが、切ったことをどこにも書かなかった。9 件目以降の fail や未解決基準が uat-report から
+読めなくなり、**リストは全量であるかのように見える**。8 件ちょうどのとき、それが「全部で 8 件」
+なのか「8 件で切れた」のか区別できない。
+
+さらに items の組み立て順（criteria → next_actions → limitations）により、**criteria が 8 枠を
+食い尽くすと next_actions と limitations は 1 件も載らない**。acceptance 側が明示した次アクションが
+report から丸ごと消える。`conditions` は「人が閉じるべき残件」の一覧なので、誤読の代償が大きい。
+
+→ 新設した `fitAcceptanceItems(groups, max)` が 2 つの規則で枠を配る。いずれも `merge.mjs` の
+`capped()` / `droppedNote()` から持ってきた考え方である。**(1) 切ったら必ず名乗る** ——
+落とした件数と種別ごとの内訳を末尾の注記に書く。注記は上限の外に足すのではなく **1 枠を消費する**
+ので、schema の `maxItems` 境界は変わらない。**(2) 発言のある種別は最低 1 枠を確保する** ——
+長い fail の列が予算を食い尽くして後ろの種別が丸ごと消えることを防ぐ。
+
+上限値 8 そのものは report サイズ抑制として妥当なので変えていない。合否裁定（`outcome`）にも
+触れていない —— 変えたのは読み取りだけである。
+
 ---
 
 ## 設計（ADR のみ。実装は後続）
@@ -914,6 +1063,40 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 ---
 
 ## パッケージ
+
+### 0.27.0 — 無言で消える情報を潰した（#160 / #161 / #162 / #163 / #164 / #165 / #170 / #171）
+
+**契約経路の pass が、根拠を名指しできるようになった。** `wait --verify` の `GATE` 行は
+**stderr** に出るのに runner は stdout しか読んでおらず、`verification.gates` は契約経路の pass で
+**常に空**だった（#160）。#142 が `verification_gates_unrecorded` を `--unattended` で blocking に
+昇格させていたため、**無人運転の段階 C は全ゲート pass でも必ず停止していた** —— 0.26.0 まで、
+段階 C は実物の CommandMate で 1 度も成功していない。**0.27.0 で初めて成立する。**
+
+残る 7 件は同じ形の欠陥である: **宣言された、または測定された情報が、どこにも記録されずに
+消えていた。**
+
+- **宣言した対象ファイルが契約から消える**（#161 / #162）。件数上限 200 の切り詰めと形チェックの
+  per-item drop。worker は Issue が明記したファイルを編集して scope ゲートで落ち、
+  send 時 snapshot なので**回復手段が無い**。pre-flight で `contract_scope_dropped` を blocking に
+  した。
+- **表示の都合が run を止めるかどうかを決めていた**（#164）。scope 違反の 20 行打ち切りが L4 の
+  比較集合を汚し、前進中の worker を `scope_unsatisfiable` で止めうる。判定は全行、表示は上限、
+  切ったら名乗る、に分けた。
+- **「人が閉じるべき残件」が 8 件で黙って切れていた**（#163）。種別ごとに 1 枠を確保し、
+  切った件数と内訳を注記する。
+- **gate リスト・setup 失敗理由・再転記の切り捨てが無言だった**（#165 / #171）。特に #171 は
+  **切り捨ての注記そのものが切り捨てられる**経路である。
+- **誤った復旧手順が run 出力に残っていた**（#170）。#83 は本症状を「GATE 行を出さない CLI が
+  在る」と誤診しており、その復旧手順（「GATE 行を出す CommandMate で再実行する」）が
+  dispatch サマリの next 行と ADR 第17.3節に残っていた。**この原因では何度再実行しても解決しない。**
+
+**上限値は 1 つも変えていない。** 変えたのは、引かれた事実が残るかどうかだけである。
+[plan-contract.md](./plan-contract.md) 第5.1節の「足した分は必ず可視である」に対して、
+**「引いた分も必ず可視である」**を対の規範として明文化した。
+
+破壊的変更は無い。report の schema も enum も増えていない。`--unattended` を使っている run では
+`contract_scope_dropped` で**新たに止まりうる** —— ただしそれは 0.26.0 までなら黙って権限が
+狭まったまま dispatch されていたケースであり、止まる方が正しい。
 
 ### 0.26.0 — `run_id` が plan を一意に指すようになった（#157）
 
