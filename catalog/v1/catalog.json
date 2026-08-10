@@ -750,7 +750,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.26.0",
+      "latest": "0.27.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -1602,6 +1602,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.26.0/cmate-orchestrate-0.26.0.tar.gz",
             "sha256": "0ef376143d6a6cc322738a5e73e3923bef66e3ff8c19eafc72f89e2af4b8e73f",
             "size": 467057,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.27.0",
+          "changelog": "0.26.0 以降の 8 件の修正（#160 / #161 / #162 / #163 / #164 / #165 / #170 / #171）を公開する。\n\n`commandmate wait --verify` の `GATE <id> PASS|FAIL` 行は **stderr** に出る（stdout は\nprompt JSON 契約のために予約されている）のに、runner は stdout しか読まず、成功時は stderr を\n捨てていた。契約経路で pass した検証の `verification.gates` は**原理的に常に空**になる。\n\n0.26.0（#142）が `verification_gates_unrecorded` を `--unattended` で blocking に昇格させた\nため、**全ゲート pass でも wave 1 の直後に必ず停止していた** —— 段階 C は 0.26.0 まで実物の\nCommandMate で 1 度も成功していない。本リリースで初めて成立する。\n\n両 stream を読むよう修正し、あわせてテストダブルを実機に合わせた（fake-cli は GATE 行を\nstdout に書いており、`verification_gates` を assert する既存ケースは実機では成立しない経路を\n検証していた）。#83 の誤診に基づく復旧手順も、run 出力と ADR 第17.3節から除いた。\n\n- **#161 / #162**: Issue が宣言した対象ファイルが、件数上限 200 の切り詰めと形チェックの\n  per-item drop で契約から消える。`scope.allow` は send 時 snapshot なので **worker 側に\n  回復手段が無い**。pre-flight で `contract_scope_dropped` を blocking にした。\n- **#164**: scope 違反の表示 20 行上限が L4 ループ判定の比較集合を汚し、**前進中の worker を\n  `scope_unsatisfiable` で止めうる**状態だった。判定は全行、表示は上限、切ったら名乗る、に分けた。\n- **#163**: uat レポートの「人が閉じるべき残件」が 8 件で黙って切れ、種別によっては丸ごと\n  消えていた。種別ごとに 1 枠を確保し、切った件数と内訳を注記する。\n- **#165 / #171**: gate リスト・setup 失敗理由・再転記の切り捨てが無言だった。#171 は\n  **切り捨ての注記そのものが切り捨てられる**経路である。\n\n破壊的変更は無い。report の schema も enum も増えていない。**上限値は 1 つも変えていない** ——\n変えたのは、引かれた事実が残るかどうかだけである。\n\n`--unattended` の run は `contract_scope_dropped` で新たに止まりうるが、それは 0.26.0 までなら\n黙って権限が狭まったまま dispatch されていたケースであり、止まる方が正しい。",
+          "published_at": "2026-08-10T01:01:37Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.27.0",
+            "commit": "0503e7ba7db929679f33a79ae96f5394730c6450"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.27.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.27.0/cmate-orchestrate-0.27.0.tar.gz",
+            "sha256": "4ddc128f02ae7e7a8bbdef4a460b8499bfad66171480bad76446b0ff88548e3e",
+            "size": 492352,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
