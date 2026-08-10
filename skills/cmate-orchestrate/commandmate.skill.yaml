@@ -131,8 +131,8 @@ files:
     executable: false
     script: false
   - path: references/adr-unattended-mode.md
-    sha256: 5dd91ab4dfa508fc7cd343c80a810a21de8854a0d1df2c604a7a6e5bb5cca6a5
-    size: 117062
+    sha256: 580126196ef2954caee98737564c221245a118aa867f639a0934ae553a0aa917
+    size: 118319
     kind: instruction
     executable: false
     script: false
@@ -239,8 +239,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: 3cb35baa2e29d3243568344f01d4daae2ca734844649d58a556622cb4dd98a65
-    size: 320996
+    sha256: c26bbab4eac4c6334cf6633f5a8b3c971bb671d6a619220262d0d5be36a32608
+    size: 324201
     kind: script
     executable: true
     script: true

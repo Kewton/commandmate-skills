@@ -1,0 +1,33 @@
+{
+  "_comment": "r08 の attempt 2 と同じ世界: #100 は引き継ぎ（completed + pass）、#101 は worktree に commit も未 commit の変更も無いので `--reverify` は判定し直さず、前回の record をそのまま転記する。転記される record は上限を超える `gates` / `checks` を持つので、ここが Issue #171 の切り捨て地点になる。",
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "100": {
+      "state": "completed",
+      "verify_exits": [
+        0
+      ],
+      "commits": 1,
+      "pass_gates": [
+        "lint",
+        "test"
+      ]
+    },
+    "101": {
+      "state": "completed",
+      "uncommitted": false,
+      "pass_gates": [
+        "lint",
+        "test"
+      ]
+    }
+  }
+}

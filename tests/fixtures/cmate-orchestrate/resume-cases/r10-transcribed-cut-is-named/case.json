@@ -1,0 +1,473 @@
+{
+  "description": "Issue #171: 上限で切ったこと自体が上限で消えないこと。#165 以降、gate を切った事実は `checks` の**末尾**に 1 行足される —— つまり `checks` は伸びる。過去 report を再転記する `carriedWorkerRecord` / `transcribedVerification` が同じ上限で無言に切り直すと、末尾から落ちるのはまさにその注記であり、切られた record が「全部載っている」と読める状態に戻る。ここでは #101 が**実行経路で** 61 行の `checks` を持つ record を作り（60 本の gate が落ち、`describeFailingGates` が 1 行ずつ書き、`capGates` の注記が末尾に付く）、attempt 2 の `--reverify` がそれを転記する。引き継ぎ側 (#100) は pass 経路が 2 行しか書かないので上限を超える record を実行経路から作れない —— 転記元の report は INPUT なので（`prior_report_patch` と同じ理由）、`prior_worker_verification_patch` で 61 本の `gates` と 61 行の `checks` を置き、`carriedWorkerRecord` の gate 側 / check 側の両方を通す。空振り検証: `transcribeCapped` を修正前の無言の `.slice()` に戻すと、注記そのものが出なくなり 3 本の assertion（#100 の gate 側 / check 側、#101 の check 側）がすべて赤になる —— そのとき #100 の `checks` は先頭 50 行だけになり、末尾に置いた #165 形式の注記が消えていることが実測で確認できる。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "100",
+      "101",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "attempts": [
+    {
+      "scenario": "attempt-1.json",
+      "dispatch_args": [
+        "--expect-branch",
+        "feature/integration",
+        "--max-turns",
+        "1"
+      ],
+      "expect": {
+        "exit": 7,
+        "status": "partial",
+        "waves_count": 1,
+        "sent": [
+          100,
+          101
+        ],
+        "worker_states": {
+          "100": "completed",
+          "101": "completed"
+        },
+        "verification_outcomes": {
+          "100": "pass",
+          "101": "fail"
+        },
+        "verification_checks_include": {
+          "101": [
+            "gate gate-01: failed",
+            "the gate list was cut to 50 entries to bound this report",
+            "11 further gate(s) are not listed"
+          ]
+        },
+        "report_file": "dispatch-report.json",
+        "merge_eligible": [
+          100
+        ],
+        "history_length": 1,
+        "stop_reason": "verification_failed"
+      }
+    },
+    {
+      "scenario": "attempt-2.json",
+      "reverify": true,
+      "prior_worker_verification_patch": {
+        "100": {
+          "gates": [
+            {
+              "id": "carried-gate-01",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-02",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-03",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-04",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-05",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-06",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-07",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-08",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-09",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-10",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-11",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-12",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-13",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-14",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-15",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-16",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-17",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-18",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-19",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-20",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-21",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-22",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-23",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-24",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-25",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-26",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-27",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-28",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-29",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-30",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-31",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-32",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-33",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-34",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-35",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-36",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-37",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-38",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-39",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-40",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-41",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-42",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-43",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-44",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-45",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-46",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-47",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-48",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-49",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-50",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-51",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-52",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-53",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-54",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-55",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-56",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-57",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-58",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-59",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-60",
+              "verdict": "pass",
+              "origin": "repo"
+            },
+            {
+              "id": "carried-gate-61",
+              "verdict": "pass",
+              "origin": "repo"
+            }
+          ],
+          "checks": [
+            "gate carried-gate-01: passed (exit 0)",
+            "gate carried-gate-02: passed (exit 0)",
+            "gate carried-gate-03: passed (exit 0)",
+            "gate carried-gate-04: passed (exit 0)",
+            "gate carried-gate-05: passed (exit 0)",
+            "gate carried-gate-06: passed (exit 0)",
+            "gate carried-gate-07: passed (exit 0)",
+            "gate carried-gate-08: passed (exit 0)",
+            "gate carried-gate-09: passed (exit 0)",
+            "gate carried-gate-10: passed (exit 0)",
+            "gate carried-gate-11: passed (exit 0)",
+            "gate carried-gate-12: passed (exit 0)",
+            "gate carried-gate-13: passed (exit 0)",
+            "gate carried-gate-14: passed (exit 0)",
+            "gate carried-gate-15: passed (exit 0)",
+            "gate carried-gate-16: passed (exit 0)",
+            "gate carried-gate-17: passed (exit 0)",
+            "gate carried-gate-18: passed (exit 0)",
+            "gate carried-gate-19: passed (exit 0)",
+            "gate carried-gate-20: passed (exit 0)",
+            "gate carried-gate-21: passed (exit 0)",
+            "gate carried-gate-22: passed (exit 0)",
+            "gate carried-gate-23: passed (exit 0)",
+            "gate carried-gate-24: passed (exit 0)",
+            "gate carried-gate-25: passed (exit 0)",
+            "gate carried-gate-26: passed (exit 0)",
+            "gate carried-gate-27: passed (exit 0)",
+            "gate carried-gate-28: passed (exit 0)",
+            "gate carried-gate-29: passed (exit 0)",
+            "gate carried-gate-30: passed (exit 0)",
+            "gate carried-gate-31: passed (exit 0)",
+            "gate carried-gate-32: passed (exit 0)",
+            "gate carried-gate-33: passed (exit 0)",
+            "gate carried-gate-34: passed (exit 0)",
+            "gate carried-gate-35: passed (exit 0)",
+            "gate carried-gate-36: passed (exit 0)",
+            "gate carried-gate-37: passed (exit 0)",
+            "gate carried-gate-38: passed (exit 0)",
+            "gate carried-gate-39: passed (exit 0)",
+            "gate carried-gate-40: passed (exit 0)",
+            "gate carried-gate-41: passed (exit 0)",
+            "gate carried-gate-42: passed (exit 0)",
+            "gate carried-gate-43: passed (exit 0)",
+            "gate carried-gate-44: passed (exit 0)",
+            "gate carried-gate-45: passed (exit 0)",
+            "gate carried-gate-46: passed (exit 0)",
+            "gate carried-gate-47: passed (exit 0)",
+            "gate carried-gate-48: passed (exit 0)",
+            "gate carried-gate-49: passed (exit 0)",
+            "gate carried-gate-50: passed (exit 0)",
+            "gate carried-gate-51: passed (exit 0)",
+            "gate carried-gate-52: passed (exit 0)",
+            "gate carried-gate-53: passed (exit 0)",
+            "gate carried-gate-54: passed (exit 0)",
+            "gate carried-gate-55: passed (exit 0)",
+            "gate carried-gate-56: passed (exit 0)",
+            "gate carried-gate-57: passed (exit 0)",
+            "gate carried-gate-58: passed (exit 0)",
+            "gate carried-gate-59: passed (exit 0)",
+            "gate carried-gate-60: passed (exit 0)",
+            "the gate list was cut to 50 entries to bound this report; 11 further gate(s) are not listed (failing gates were kept first, so the cut fell on passing ones)"
+          ]
+        }
+      },
+      "dispatch_args": [
+        "--expect-branch",
+        "feature/integration"
+      ],
+      "expect": {
+        "waves_count": 1,
+        "sent": [],
+        "never_sent": [
+          100,
+          101
+        ],
+        "worker_states": {
+          "100": "completed",
+          "101": "completed"
+        },
+        "verification_outcomes": {
+          "100": "pass",
+          "101": "fail"
+        },
+        "verification_checks_include": {
+          "100": [
+            "the transcribed gate list was cut to 50 entries HERE; 11 further gate(s) recorded by the prior report are not carried forward",
+            "the transcribed check list was cut to 50 entries HERE; 13 further check line(s) recorded by the prior report are not carried forward"
+          ],
+          "101": [
+            "the transcribed check list was cut to 50 entries HERE; 12 further check line(s) recorded by the prior report are not carried forward"
+          ]
+        },
+        "limitation_codes": [
+          "reverify_attempt",
+          "reverify_no_work_evidence"
+        ],
+        "report_file": "resume-attempt-2/dispatch-report.json",
+        "history_length": 2,
+        "exit": 7,
+        "status": "partial",
+        "stop_reason": "verification_failed"
+      }
+    }
+  ]
+}
