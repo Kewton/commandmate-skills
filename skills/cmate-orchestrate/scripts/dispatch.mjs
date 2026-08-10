@@ -986,6 +986,41 @@ function isCarryable(worker) {
     && worker.verification.outcome === 'pass';
 }
 
+// Re-cap a prior record's `gates` / `checks` on the way into a new report, and
+// say what THIS cut ate (Issue #171). A bare `.slice(0, MAX_REPORTED_GATES)` on
+// `checks` is not the harmless no-op it looks like: since #165 the line that says
+// a gate list was cut is APPENDED TO THE TAIL of `checks`, so re-slicing at the
+// same bound drops the truncation note first and a transcribed record that lost
+// entries reads as one that never lost any — the exact reading #165 closed.
+//
+// MEASURED, against the issue's wording: the loss needs `checks.length` to EXCEED
+// the bound, not merely reach it (at exactly 50 the slice is a no-op). It is a
+// live path all the same — `describeFailingGates` writes one check line per
+// failing gate and is not itself capped, so a run with 50+ failing gates records
+// 51+ checks with #165's note last, and a later `--reverify` transcribes it.
+//
+// Both counts say "cut HERE" on purpose: `gates` was very likely already capped
+// upstream by `capGates`, whose own note is one of the check lines being copied,
+// and this number must not be read as the run's total loss. One window slot is
+// reserved per note, so the transcribed list still fits the bound it explains.
+function transcribeCapped(gates, checks) {
+  const notes = [];
+  const gatesDropped = Math.max(0, gates.length - MAX_REPORTED_GATES);
+  if (gatesDropped > 0) {
+    notes.push(`the transcribed gate list was cut to ${MAX_REPORTED_GATES} entries HERE; `
+      + `${gatesDropped} further gate(s) recorded by the prior report are not carried forward`);
+  }
+  const room = MAX_REPORTED_GATES - notes.length;
+  const checksDropped = checks.length > room ? checks.length - (room - 1) : 0;
+  const kept = checksDropped > 0 ? checks.slice(0, room - 1) : checks;
+  if (checksDropped > 0) {
+    notes.push(`the transcribed check list was cut to ${MAX_REPORTED_GATES} entries HERE; `
+      + `${checksDropped} further check line(s) recorded by the prior report are not carried forward `
+      + '(anything that report noted about ITS OWN cut may be among them)');
+  }
+  return { gates: gates.slice(0, MAX_REPORTED_GATES), checks: [...kept, ...notes] };
+}
+
 // A carried worker record for the new report. The verification is TRANSCRIBED,
 // never re-judged: this attempt ran no gate against this issue, so it may only
 // repeat what the attempt that did ran, and it says so in the note. Every field
@@ -994,21 +1029,21 @@ function isCarryable(worker) {
 // rejects, which would make the whole new report unreadable.
 function carriedWorkerRecord(prior, priorAttempt) {
   const verification = prior.verification;
-  const gates = (Array.isArray(verification.gates) ? verification.gates : [])
-    .filter((gate) => gate !== null && typeof gate === 'object'
-      && typeof gate.id === 'string' && gate.id.length > 0
-      && (gate.verdict === 'pass' || gate.verdict === 'fail'))
-    .slice(0, MAX_REPORTED_GATES)
-    .map((gate) => (gate.origin === 'repo' || gate.origin === 'issue'
-      // Carried, never invented: a report written before origin existed has none,
-      // and filling one in here would turn "nobody recorded this" into a claim
-      // about where the gate came from (ADR §8.2).
-      ? { id: redact(gate.id), verdict: gate.verdict, origin: gate.origin }
-      : { id: redact(gate.id), verdict: gate.verdict }));
-  const checks = (Array.isArray(verification.checks) ? verification.checks : [])
-    .filter((check) => typeof check === 'string' && check.length > 0)
-    .slice(0, MAX_REPORTED_GATES)
-    .map((check) => redact(check));
+  const { gates, checks } = transcribeCapped(
+    (Array.isArray(verification.gates) ? verification.gates : [])
+      .filter((gate) => gate !== null && typeof gate === 'object'
+        && typeof gate.id === 'string' && gate.id.length > 0
+        && (gate.verdict === 'pass' || gate.verdict === 'fail'))
+      .map((gate) => (gate.origin === 'repo' || gate.origin === 'issue'
+        // Carried, never invented: a report written before origin existed has none,
+        // and filling one in here would turn "nobody recorded this" into a claim
+        // about where the gate came from (ADR §8.2).
+        ? { id: redact(gate.id), verdict: gate.verdict, origin: gate.origin }
+        : { id: redact(gate.id), verdict: gate.verdict })),
+    (Array.isArray(verification.checks) ? verification.checks : [])
+      .filter((check) => typeof check === 'string' && check.length > 0)
+      .map((check) => redact(check)),
+  );
   const worker = {
     issue: prior.issue,
     task_id: typeof prior.task_id === 'string' && prior.task_id.length > 0 ? redact(prior.task_id) : null,
@@ -1045,18 +1080,19 @@ const WORKER_STATE_VALUES = ['completed', 'failed', 'timeout', 'prompt', 'not_di
 // attempt found for the issues it does not re-judge; it never promotes them.
 function transcribedVerification(verification) {
   const source = (verification !== null && typeof verification === 'object' && !Array.isArray(verification)) ? verification : {};
-  const gates = (Array.isArray(source.gates) ? source.gates : [])
-    .filter((gate) => gate !== null && typeof gate === 'object'
-      && typeof gate.id === 'string' && gate.id.length > 0
-      && (gate.verdict === 'pass' || gate.verdict === 'fail'))
-    .slice(0, MAX_REPORTED_GATES)
-    .map((gate) => (gate.origin === 'repo' || gate.origin === 'issue'
-      ? { id: redact(gate.id), verdict: gate.verdict, origin: gate.origin }
-      : { id: redact(gate.id), verdict: gate.verdict }));
-  const checks = (Array.isArray(source.checks) ? source.checks : [])
-    .filter((check) => typeof check === 'string' && check.length > 0)
-    .slice(0, MAX_REPORTED_GATES)
-    .map((check) => redact(check));
+  // Same bound, and the same reason it may not be applied silently (Issue #171).
+  const { gates, checks } = transcribeCapped(
+    (Array.isArray(source.gates) ? source.gates : [])
+      .filter((gate) => gate !== null && typeof gate === 'object'
+        && typeof gate.id === 'string' && gate.id.length > 0
+        && (gate.verdict === 'pass' || gate.verdict === 'fail'))
+      .map((gate) => (gate.origin === 'repo' || gate.origin === 'issue'
+        ? { id: redact(gate.id), verdict: gate.verdict, origin: gate.origin }
+        : { id: redact(gate.id), verdict: gate.verdict })),
+    (Array.isArray(source.checks) ? source.checks : [])
+      .filter((check) => typeof check === 'string' && check.length > 0)
+      .map((check) => redact(check)),
+  );
   return {
     ran: source.ran === true,
     report_schema_version: Number.isInteger(source.report_schema_version) ? source.report_schema_version : null,
@@ -5224,8 +5260,16 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
     // The stage-C promotion (Issue #142). The verdict itself is not in doubt —
     // it is an exit code — so the action is about the EVIDENCE, and the line
     // says so rather than sending the operator to debug a worker.
+    //
+    // The action names the RUNNER's version, not CommandMate's (Issue #170). It
+    // used to say "re-run with a CommandMate that prints GATE lines", which #160
+    // disproved twice over: CommandMate already printed them (verify-runner's
+    // `reportGates`, measured on 0.22.2) and printed them to STDERR, which the
+    // dispatch runner did not read until 0.26.0 — so on that runner the advised
+    // re-run stops in exactly the same place, every time. This is the only place
+    // an operator sees, and codes-and-recovery.md is the wording of record.
     if (report.blocking_reasons.some((reason) => reason.code === 'verification_gates_unrecorded')) {
-      lines.push('- next: pass の根拠となった gate を report が名指しできていない。`GATE <id> PASS|FAIL` 行を出す CommandMate で再実行して根拠を残す。**裁定（exit code）は pass のままだが、無人 merge の根拠にはしない**（段階 C）。人間が読む運転に戻すなら `--unattended` を外せば従来どおり limitation として続行する（owner: operator）。');
+      lines.push('- next: pass の根拠となった gate を report が名指しできていない。**まず runner の版を疑う** —— `GATE <id> PASS|FAIL` 行は **stderr に出る**のに 0.26.0 までの dispatch は stdout しか読んでおらず、**その版では再実行しても必ず同じ所で止まる**（#160 で修正済み。直すのは CommandMate の版ではなく runner の版である）。修正版でも空なら、その run が本当に `GATE` 行を出していないということなので、`commandmate wait <worktree-id> --verify` を手で回して **stderr** を確かめる。**裁定（exit code）は pass のままだが、無人 merge の根拠にはしない**（段階 C）。人間が読む運転に戻すなら `--unattended` を外せば従来どおり limitation として続行する（owner: operator）。');
     }
     if (report.limitations.some((reason) => reason.code === 'contract_unsupported')) {
       lines.push('- next: 契約非対応の CLI だったため裁定はフォールバック（baseline 再実行）である。契約ゲートで裁定したい場合は CommandMate を 0.17.0 以上へ更新する（owner: operator）。');

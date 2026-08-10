@@ -1401,8 +1401,20 @@ Issue #83 が「裁定そのものは exit code なので pass のまま」と�
 ### 17.3 `human_required` は false（第6.2節の表に足していない）
 
 昇格した停止は **`human_required` を true にしない。** この field が意味するのは
-「**再実行では解けない**」であり（第6.1節）、`GATE` 行を出す CommandMate で回せば解ける。
-`contract_unsupported` と同じ扱いで、CI が読むべき signal も「再実行に意味がある」である。
+「**再実行では解けない**」であり（第6.1節）、**読めなかった原因を潰せば解ける** ——
+人間の判断を要する停止ではない。結論はこのままだが、**理由は当初の記述から差し替えてある**
+（Issue #170）。当初は「`GATE` 行を出す CommandMate で回せば解ける」と書いていたが、
+#160 がこれを反証した: `GATE` 行は CommandMate 0.22.2 の時点で既に出ており（verify-runner の
+`reportGates`）、しかも **stderr** に出ていた。読み落としていたのは **runner 側**（0.26.0 までの
+dispatch は stdout しか読んでいない）である。**潰す対象は CommandMate の版ではなく runner の版**
+であり、#160 で両方の stream を読むよう修正した。
+
+`contract_unsupported` とは**扱いが違う。** あちらは CLI 側の能力不足で、CommandMate を
+0.17.0 以上へ更新すれば **runner はそのまま**解ける —— CI が「再実行に意味がある」と読んで
+差し支えない。こちらは **runner 自身の更新**が要る停止であり、**0.26.0 までの runner で起きた
+この停止は、同じ runner のまま再実行しても必ず同じ所で止まる。** したがって CI が読むべき
+signal は「再実行に意味がある」ではなく、**「runner を上げれば解ける（人間の判断は要らない）」**
+である。`human_required` = false はこの理由で擁護できる。
 
 ### 17.4 uat の cwd 検査は `--expect-branch` を要求する（ADR に無いフラグ）
 

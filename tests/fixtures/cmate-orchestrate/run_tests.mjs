@@ -1762,6 +1762,22 @@ function runResumeCase(caseId) {
       const document = JSON.parse(readFileSync(priorPath, 'utf8'));
       writeFileSync(priorPath, `${JSON.stringify({ ...document, ...attemptSpec.prior_report_patch }, null, 2)}\n`);
     }
+    // The same reasoning one level down, per issue (Issue #171). Some shapes a
+    // transcription must handle cannot be produced by the runner that writes the
+    // report — a PASSING run records two check lines, so a carried record whose
+    // `checks` overflows the report bound only ever arrives from a report this
+    // runner did not write. That is a real input (an older runner, a hand-edited
+    // report), and the only way to exercise it is to hand one over.
+    if (attemptSpec.prior_worker_verification_patch) {
+      const document = JSON.parse(readFileSync(priorPath, 'utf8'));
+      for (const wave of document.waves ?? []) {
+        for (const worker of wave.workers ?? []) {
+          const entry = attemptSpec.prior_worker_verification_patch[String(worker.issue)];
+          if (entry) worker.verification = { ...worker.verification, ...entry };
+        }
+      }
+      writeFileSync(priorPath, `${JSON.stringify(document, null, 2)}\n`);
+    }
     const before = snapshotTree(outDir);
 
     const state = join(work, `state-${index + 1}`);
@@ -3884,8 +3900,11 @@ function unattendedGatesTest() {
     `the promotion must not rewrite the verdict, got ${JSON.stringify(judged.map((w) => w.verification.outcome))}`);
   check(unattended.report?.waves?.[0]?.barrier?.advanced === true,
     'the wave barrier itself measures completion and verification, and both held; the stop is a separate finding');
-  // Not a human_required stop: a CommandMate that prints GATE lines resolves it,
-  // which is an operator change to the invocation, not a judgement call.
+  // Not a human_required stop: whatever swallowed the GATE lines can be fixed
+  // without a judgement call — since #160/#170 the first suspect is the RUNNER's
+  // own version (the lines go to stderr, which dispatch did not read until
+  // 0.26.0), not CommandMate's. Either way it is a version to raise, not a
+  // decision to make, so `human_required` stays false.
   check(unattended.report?.human_required === false,
     `an unattributed pass is re-runnable, so human_required should stay false, got ${unattended.report?.human_required}`);
   // dispatch owns no merge-side code: `change_evidence_unavailable` is stage B's
@@ -3893,6 +3912,59 @@ function unattendedGatesTest() {
   check(!codesOf(unattended.report?.blocking_reasons).includes('change_evidence_unavailable')
     && !codesOf(unattended.report?.limitations).includes('change_evidence_unavailable'),
   'the dispatch runner must not touch change_evidence_unavailable (stage B promoted it in merge)');
+
+  // --- point 3: the next action agrees with the recovery table (Issue #170) ---
+  //
+  // The line below is the ONLY place an operator meets this stop, and it is the
+  // short form of one row of codes-and-recovery.md. #160 disproved what both used
+  // to say — "re-run with a CommandMate that prints GATE lines" — twice over:
+  // CommandMate printed them all along (measured on 0.22.2's verify-runner
+  // `reportGates`) and printed them to STDERR, which the dispatch runner did not
+  // read until 0.26.0, so on that runner the advised re-run stops in the same
+  // place forever. The correction reached the two documents and was left out of
+  // the runner's own output; this asserts the pair together so a later correction
+  // cannot land on one side only.
+  //
+  // Deliberately NOT a general table-vs-next-line equivalence, which was
+  // considered and dropped: of the recovery table's `dispatch` rows, several name
+  // a stop_reason rather than a reason code (`drift`, `worker_failed`,
+  // `verification_failed`) or a refusal that never renders a summary
+  // (`resume_plan_mismatch`, `resume_invalid`), so the check would need an
+  // exception list — a THIRD place to keep in sync, which is the disease rather
+  // than the cure. `status.mjs`'s hint map carries the same refuted sentence and
+  // is outside this change's declared scope, so it is not asserted here either.
+  const summary = unattended.report?.summary_markdown ?? '';
+  const nextLine = summary.split('\n').find((line) => line.startsWith('- next:') && line.includes('gate を report が名指しできていない'));
+  if (check(nextLine !== undefined, 'the unattended stop must render a next action for the unattributed pass')) {
+    for (const needle of ['runner の版', 'stderr', '#160']) {
+      check(nextLine.includes(needle),
+        `the next action must name ${needle} (the runner's version is what #160 measured), got ${JSON.stringify(nextLine)}`);
+    }
+  }
+  check(!summary.includes('行を出す CommandMate で再実行'),
+    'the refuted advice ("re-run with a CommandMate that prints GATE lines") must not be back in the summary');
+  const recoveryRow = readFileSync(join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'references', 'codes-and-recovery.md'), 'utf8')
+    .split('\n').find((line) => line.startsWith('| dispatch `verification_gates_unrecorded`'));
+  if (check(recoveryRow !== undefined, 'codes-and-recovery.md has no verification_gates_unrecorded row')) {
+    for (const needle of ['まず runner の版を疑う', 'stderr']) {
+      check(recoveryRow.includes(needle), `the recovery row must name ${needle}`);
+    }
+  }
+  const skillRow = readFileSync(join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'SKILL.md'), 'utf8')
+    .split('\n').find((line) => line.includes('dispatch `verification_gates_unrecorded`'));
+  if (check(skillRow !== undefined, 'SKILL.md has no verification_gates_unrecorded row')) {
+    for (const needle of ['runner の版', 'stderr']) {
+      check(skillRow.includes(needle), `the SKILL.md row must name ${needle}`);
+    }
+  }
+  // The ADR defends `human_required: false` from this same fact, so its reasoning
+  // is part of the pair: the fix is a RUNNER version, which is why no human
+  // judgement is required (§17.3).
+  const adr = readFileSync(join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'references', 'adr-unattended-mode.md'), 'utf8');
+  const adrSection = adr.slice(adr.indexOf('### 17.3'), adr.indexOf('### 17.4'));
+  for (const needle of ['runner の版', '#160']) {
+    check(adrSection.includes(needle), `ADR §17.3 must name ${needle} as the reason human_required stays false`);
+  }
 }
 
 function launcherTest() {
