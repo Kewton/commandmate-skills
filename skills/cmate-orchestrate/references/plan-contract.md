@@ -469,6 +469,59 @@ Issue 本文の検査器と planner が同じ path 集合を読むという保�
 - *どちらも落とさず、黙って両方入れる。* scope が黙って1ディレクトリ広がる。
   第5.1節の不変条件2/4（足した分も引いた分も可視）と同じ理由で採らない。
 
+## 5.5 著者が宣言した未決の問い（`open_question_declared`）
+
+Issue 本文の ```open-questions ブロックの転記である。**記法の正本は
+[open-questions-notation.md](./open-questions-notation.md)**（YAML subset と違反の扱いは
+[acceptance-gates-notation.md](./acceptance-gates-notation.md) 第3節・第7節を継承する）。
+
+````markdown
+```open-questions
+version: 1
+questions:
+  - 座標変換を保存時に行うか、描画時に行うか
+```
+````
+
+1件につき **1件の blocking question** が `issues[].questions` に載り、同じ code の warning が
+`plan.warnings` にも載るので run は `partial` に落ちる。dispatch は既存の open question ゲートで
+その Issue を送らない —— **新しい停止経路も新しい緩和フラグも足していない**
+（[#178](https://github.com/Kewton/commandmate-skills/issues/178)）。
+
+question の本文は planner の1〜2文のあとに**著者の原文を最後に**置く。最後に置くのは
+`acceptance_requires_tests_but_scope_has_none` と同じ理由で、dispatch は blocking question を
+末尾を残す `excerpt(…, 200)` で印字するからである（先頭に置くと、停止を確かめられる部分だけが
+無人 run で落ちる）。
+
+**この question だけは planner の推論ではない。** 第5.2節・第5.4節や
+`no_acceptance_criteria` / `no_suspected_files` は「本文から X を読み取れなかった」という
+**不在についての報告**であり、偽陽性がありうる。ここで運ぶのは
+「**X をまだ決めていない**」という、決められる唯一の人間による事実の申告である。
+planner が計算しても答えは出ない。したがって `_openQuestions` の**先頭**で立てる ——
+読み手は、間違いうる findings より先に、間違いようのない findings に会う。
+
+止めなかった場合に何が起きるかは実測されている（2026-08-10、利用リポジトリ
+Kewton/BorderFreeKidsMap#63）: 「未決の問い」3件を本文に残したまま plan すると
+`questions: []` で dispatch は止まらず、worker は本文の他節から推測するか自分で決める。
+**どちらに転んだかは diff を読むまで分からない。** 3件を「決定事項」へ書き換えて re-plan
+したら、worker はコメントに理由まで書いてそのとおり実装した。
+
+- ブロックが読めないときは `open_question_block_invalid` の question 1件になり、
+  **「ブロックが無かった」には丸めない**（acceptance-gates 記法 第7節をそのまま適用）。
+  黙って捨てると、著者が未決と書いたはずのものが消えた run が緑で終わる。
+- ブロックは**散文抽出の入力から取り除かれてから** `acceptance_criteria` /
+  `suspected_files` / `test_expectations` / topic token が計算される（第10.1節と同じ2つの
+  理由。実測: strip しないと後続 ```bash が終了 fence の誤対応で丸ごと飲まれ、
+  問いの中に書いた path が `scope.allow` に入る）。
+- **ブロックが無い本文の plan は byte 単位で従来どおりである。** fixture
+  `61-open-questions-heading-not-read` の golden は**この機能が実装される前の runner が
+  生成した**もので、それがこの主張の測定である。
+
+**見出し規約（`## 未決の問い` / `undecided` / `Open questions`）は採らなかった。**
+理由は open-questions-notation.md 第5節にある（誤検出・散文から停止を作らない・
+生成と解消が機械化できる）。同 fixture が「3つの綴りすべてを持つ本文で question が
+1件も立たない」ことを固定している。
+
 ## 6. risk
 
 `risk.level` は factor の最大 severity である。factor は決定的に導く。

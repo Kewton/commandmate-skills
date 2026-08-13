@@ -1,0 +1,47 @@
+{
+  "description": "Issue #178, the fail-closed half — the same rule the `acceptance-gates` block already follows (acceptance-gates-notation.md section 7): a broken `open-questions` block is NEVER rounded to 'there was no block'. Four ways to break it — two blocks in one body, a version this runner does not implement, a key the v1 block does not define, and a block that asks nothing — each raise `open_question_block_invalid` as an open question and drop the run to `partial`, so dispatch refuses the issue. Rounding a broken block to an absent one is how a run ends green with the author's declared undecidables silently gone, which is the exact failure this notation exists to prevent.",
+  "args": [
+    "440",
+    "441",
+    "442",
+    "443",
+    "--profile",
+    "node-commandmate",
+    "--max-parallel",
+    "3",
+    "--run-id",
+    "fixture",
+    "--no-infer"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "open_question_block_invalid",
+      "open_question_block_invalid",
+      "open_question_block_invalid",
+      "open_question_block_invalid"
+    ],
+    "warning_details_include": [
+      "#440: The `open-questions` block could not be read: the body carries 2 blocks and exactly one is allowed",
+      "#441: The `open-questions` block could not be read: version must be exactly 1 (got \"2\")",
+      "#442: The `open-questions` block could not be read: unknown key \"answers\"",
+      "#443: The `open-questions` block could not be read: the block asks nothing",
+      "It is NOT treated as absent",
+      "The planner never reads an open question out of prose.",
+      "The dispatch runner refuses an issue with an unanswered question"
+    ],
+    "questions_count": {
+      "440": 1,
+      "441": 1,
+      "442": 1,
+      "443": 1
+    },
+    "acceptance_gates": {
+      "440": null,
+      "441": null,
+      "442": null,
+      "443": null
+    }
+  }
+}

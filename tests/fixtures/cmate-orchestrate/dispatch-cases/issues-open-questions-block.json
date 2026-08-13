@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 460,
+      "title": "feat: 施設の座標系を切り替える",
+      "body": "施設の座標を新しい座標系へ移す。\n\n## 対象ファイル\n- `src/geo.ts`\n\n## 受入条件\n- [ ] 施設の座標が新しい座標系で描画される\n\n```open-questions\nversion: 1\nquestions:\n  - 座標変換を保存時に行うか、描画時に行うか\n```\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 461,
+      "title": "feat: 施設の一覧を並べ替える",
+      "body": "施設の一覧を距離順に並べ替える。\n\n## 対象ファイル\n- `src/sort.ts`\n\n## 受入条件\n- [ ] 施設の一覧が距離順に並ぶ\n",
+      "labels": ["feature"]
+    }
+  ]
+}

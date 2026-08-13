@@ -1,0 +1,119 @@
+{
+  "description": "Issue #178: the author WROTE DOWN that something is undecided, and until this case that statement — the strongest reason there is to stop — reached the plan as `questions: []`. #430 carries one ```open-questions block with two entries and gets one blocking question per entry, transcribed verbatim and in the author's order, so the dispatch runner refuses it on the existing open-question gate. #431 is the SAME body with the block deleted, and pins the other half at once: the block is machine notation, never prose, so `test_expectations`, `suspected_files` and `scope_defaults` must be byte-identical with and without it. Both halves were measured red on HEAD — without the strip the block's CLOSING fence pairs with the following ```bash block's OPENING fence (3 commands drop to 1) and `src/legacy/topo.ts`, a path named INSIDE a question, walks into scope.allow with its four test companions behind it.",
+  "args": [
+    "430",
+    "431",
+    "--profile",
+    "node-commandmate",
+    "--max-parallel",
+    "3",
+    "--run-id",
+    "fixture",
+    "--no-infer"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "open_question_declared",
+      "open_question_declared"
+    ],
+    "warning_details_include": [
+      "#430: The issue body declares this undecided, so no worker may decide it.",
+      "delete the `open-questions` block and re-plan",
+      "Question: \"旧実装の `src/legacy/topo.ts` を残すか、この Issue で消すか\"",
+      "Question: \"座標変換を保存時に行うか、描画時に行うか\"",
+      "The dispatch runner refuses an issue with an unanswered question"
+    ],
+    "questions_count": {
+      "430": 2,
+      "431": 0
+    },
+    "questions_include": {
+      "430": [
+        "Question: \"旧実装の `src/legacy/topo.ts` を残すか、この Issue で消すか\"",
+        "Question: \"座標変換を保存時に行うか、描画時に行うか\""
+      ]
+    },
+    "acceptance_gates": {
+      "430": null,
+      "431": null
+    },
+    "test_expectations": {
+      "430": [
+        "pytest -q",
+        "python3 scripts/validate.py",
+        "node tests/fixtures/cmate-orchestrate/run_tests.mjs"
+      ],
+      "431": [
+        "pytest -q",
+        "python3 scripts/validate.py",
+        "node tests/fixtures/cmate-orchestrate/run_tests.mjs"
+      ]
+    },
+    "suspected_files": {
+      "430": [
+        "src/geo.ts",
+        "scripts/validate.py",
+        "tests/fixtures/cmate-orchestrate/run_tests.mjs",
+        "src/geo.test.ts",
+        "src/geo.spec.ts",
+        "src/__tests__/geo.ts",
+        "src/__tests__/geo.test.ts",
+        "scripts/test_validate.py",
+        "tests/test_validate.py"
+      ],
+      "431": [
+        "src/geo.ts",
+        "scripts/validate.py",
+        "tests/fixtures/cmate-orchestrate/run_tests.mjs",
+        "src/geo.test.ts",
+        "src/geo.spec.ts",
+        "src/__tests__/geo.ts",
+        "src/__tests__/geo.test.ts",
+        "scripts/test_validate.py",
+        "tests/test_validate.py"
+      ]
+    },
+    "scope_defaults": {
+      "430": [
+        "src/geo.test.ts",
+        "src/geo.spec.ts",
+        "src/__tests__/geo.ts",
+        "src/__tests__/geo.test.ts",
+        "scripts/test_validate.py",
+        "tests/test_validate.py"
+      ],
+      "431": [
+        "src/geo.test.ts",
+        "src/geo.spec.ts",
+        "src/__tests__/geo.ts",
+        "src/__tests__/geo.test.ts",
+        "scripts/test_validate.py",
+        "tests/test_validate.py"
+      ]
+    },
+    "reference_files": {
+      "430": [],
+      "431": []
+    },
+    "classifications": {
+      "430": "conflicting",
+      "431": "conflicting"
+    },
+    "waves": [
+      [
+        430
+      ],
+      [
+        431
+      ]
+    ],
+    "merge_order": [
+      430,
+      431
+    ],
+    "dependencies": [],
+    "risk_level": "moderate"
+  }
+}
