@@ -114,6 +114,8 @@ Issue が `## 対象ファイル`（成果物見出し）に書いた場合だ�
 | `unsafe_branch` | merge | branch 名が safe-ref guard に弾かれた |
 | `change_evidence_unavailable` | merge | branch の実変更 file を読めなかった（worktree 不在など）。PR 本文もそう書く。**scope 内に収まっていた証拠ではない** |
 | `branch_changed_outside_declared_scope` | merge | 実変更に宣言 scope（`scope.allow`）外の file がある。PR 本文が違反 path を名指しする |
+| `integration_verify_not_run` | merge | `--integration-verify` を渡したが、この invocation は1件も merge していない（preview / eligible 無し / 最初の merge の前に停止）ので合流後を測っていない。**「測っていない」であって「green」ではない**（`integration_verify.outcome` は `not_run`） |
+| `integration_verify_tree_left` | merge | 統合検証に使った**使い捨ての detached checkout**（`<out>/integration-tree`）を畳めなかった。裁定は baseline の結果のまま。`git worktree remove --force` で消す |
 | `acceptance_not_run` | uat | 意味ゲートが verdict を出せず、baseline のみで裁定した |
 | `no_eligible_issues` | merge / uat | dispatch report に completed かつ verification pass の Issue が無い |
 | `completion_check_failed` | dispatch / merge / uat | completion check のどれかが passed でない |
@@ -170,6 +172,8 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | merge `ci_failed` / `ci_pending` | CI が green でない | CI を直す。**green 無しに merge しない** |
 | merge `pr_missing` / `merge_failed` | PR が無い / conflict | PR の状態を確認し、conflict は手で解消する |
 | merge `issue_autoclose_not_default_branch` | base がデフォルトブランチでない | merge 後に **Issue を手動でクローズする** |
+| merge `integration_verify_failed`（**`--integration-verify`**。`stop_reason: merge_failed` / `partial`） | **合流後の統合ブランチで profile baseline が赤い。** 各 PR の CI は green だったが、それらは**兄弟 PR が入る前の base** で走ったものである（[#175](https://github.com/Kewton/commandmate-skills/issues/175) の実測）。merge 自体は成功しており、赤いのは**合流の結果**である | **既に merge 済みなので、この phase の再実行では戻らない。** 統合ブランチを green にする（前進修正、または revert）まで **次の wave を dispatch しない**（`integration_verify.outcome` が `fail` の間は barrier が満たされていない）。この code は **file 重なりに出ない意味的衝突**の徴候なので、同じ wave の Issue が**同じデータ・同じ前提を別方向へ動かしていないか**を読む（owner: human）。**「PR 個別の CI は緑だったのだから大丈夫」で押し通さない** |
+| merge `integration_verify_unavailable`（同上） | 統合検証を実行できなかった。2通りある: **(a) profile が `baseline` を宣言していない**（`stop_reason: preflight_failed` / `failure`。**1件も merge していない**）／**(b) merge 後の probe が失敗した**（`git fetch` / `rev-parse` / 検証用 checkout。`stop_reason: merge_failed` / `partial`。**merge は済んでいる**） | (a) **profile に `baseline` を書いて同じコマンドを再実行する。** 世界は動いていないので取り消すものは無い（統合検証をしない運転に戻すなら `--integration-verify` を外す）。(b) **merge は済んでいるのに結果を測れていない。** remote 到達性 / base の解決 / worktree 作成の失敗要因を直し、**統合ブランチで profile baseline を手で1回通してから**次の wave へ進む（owner: operator） |
 | uat `acceptance_conditional` | 受入判定が `conditional_go` | **条件を読んで人間が判断する。** 自動修正の対象ではない |
 | uat `blocked` / `max_attempts_reached` | 上限まで直しても不合格 | `unresolved_issues` と `next_actions` を読む。**success に丸めない** |
 | uat `acceptance_not_run` | 意味ゲートを掛けずに baseline だけで裁定した | cmate-acceptance-test を入れて result を用意し、必要なら `--require-acceptance` で必須にする |
@@ -209,11 +213,16 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 
 `worktree_setup_unavailable` / `worktree_setup_failed` / `worktree_profile_mismatch` と
 `resume_attempt` / `resume_no_work` / `resume_invalid` / `resume_plan_mismatch`、
-そして `scope_unsatisfiable` / `contract_scope_dropped` / `harness_path_in_scope` は、
+`scope_unsatisfiable` / `contract_scope_dropped` / `harness_path_in_scope`、
+そして `integration_verify_failed` / `integration_verify_unavailable` は、
 この表には在るが **status runner の hint map にはまだ無い**（`status.mjs` は別 Issue で追随する。
 `contract_scope_dropped` については `status.mjs` が #161 / #162 の宣言 scope の外だった。
 `harness_path_in_scope` も同じく [#177](https://github.com/Kewton/commandmate-skills/issues/177)
-の宣言 scope の外である）。
+の宣言 scope の外であり、`integration_verify_*` も
+[#175](https://github.com/Kewton/commandmate-skills/issues/175) の宣言 scope の外である。
+なお #175 の停止は `stop_reason` としては既存の `merge_failed` / `preflight_failed` に載るので、
+status runner はそちらの hint（conflict の解消 / gh・base の復旧）を引く —— **その1行では
+足りない停止**なので、`blocking_reasons` の code と `summary_markdown` の「統合検証」節を読むこと）。
 それまで `status.mjs --run` はこれらを「detail と `summary_markdown` を読む」に落として表示する。
 **推測で別の対処を出さない**のが status runner の約束なので、これは劣化ではなく既定の振る舞いである。
 dispatch report の `summary_markdown` には上表と同じ next action が出ている。

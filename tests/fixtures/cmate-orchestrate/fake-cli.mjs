@@ -87,6 +87,17 @@
 // caller exactly as before, which is the other real ordering. `workers.<n>.
 // prompt_type` chooses the type the policy is judged against (default `yes_no`).
 //
+// Integration verification (Issue #175). `merge.mjs --merge-prs
+// --integration-verify` judges the state its merges ADD UP TO: it runs `git fetch
+// origin <base>`, checks the fetched tip out with `git worktree add --detach`,
+// runs the profile baseline in that throwaway checkout and removes it again. The
+// scenario's `integration` block drives all four — `verify: "pass"` puts the
+// `cmate-verify-ok` marker in the detached checkout (so the baseline exits 0),
+// anything else leaves it out (red), and `fetch` / `worktree_add` / `remove` set
+// to `"fail"` model the probes that make the verification impossible rather than
+// red. That distinction matters: "could not measure the merged state" must never
+// be reported as "the merged state is green".
+//
 // A PR number in this fake is always equal to its issue number, so that
 // `pr view` (keyed by branch) and `pr checks`/`pr merge` (keyed by number) can
 // look the same worker's behavior up by a single key.
@@ -99,7 +110,7 @@
 // Node stdlib only. Not part of the release pipeline; used only by run_tests.mjs.
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, appendFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, appendFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -901,8 +912,58 @@ function main() {
     process.stdout.write(dirty ? ' M some/file.ts\n' : '');
     process.exit(0);
   }
+  if (sub === 'fetch') {
+    // `git fetch origin <base-branch>` from merge.mjs's integration verification
+    // (Issue #175): the runner re-reads the base branch from the remote before it
+    // judges the state the merges add up to. `integration.fetch: "fail"` models an
+    // unreachable remote, which must NOT be rounded up to "the merged state is
+    // green" — the merges have already landed at that point.
+    const integration = spec.integration ?? {};
+    if (integration.fetch === 'fail') fail('fatal: could not read from remote repository');
+    process.stdout.write('');
+    process.exit(0);
+  }
   if (sub === 'worktree') {
     const action = argv[1] ?? '';
+    // `git worktree add --detach <dir> FETCH_HEAD` — the throwaway checkout of the
+    // MERGED base merge.mjs runs the profile baseline in (Issue #175). No `-b`:
+    // this one carries no branch and belongs to no issue, which is how it is told
+    // apart from the uat fix loop's `worktree add <dir> -b <branch> <sha>` below.
+    //
+    // The green/red difference is the DELIVERABLE, exactly as it is for a worker's
+    // worktree: `integration.verify: "pass"` drops the `cmate-verify-ok` marker the
+    // node-fake profile's baseline (`cat cmate-verify-ok`) reads, and anything else
+    // leaves the checkout without it so the same baseline exits non-zero. The two
+    // cases are then the same world with one file's presence flipped.
+    if (action === 'add' && argv.includes('--detach')) {
+      const integration = spec.integration ?? {};
+      if (integration.worktree_add === 'fail') fail('fatal: could not create work tree: destination already exists');
+      const dir = argv[argv.length - 2];
+      const absDir = resolve(process.cwd(), dir ?? '.');
+      try {
+        mkdirSync(absDir, { recursive: true });
+        if (integration.verify === 'pass') writeFileSync(join(absDir, VERIFY_MARKER), 'ok');
+      } catch {
+        // best effort; a missing directory surfaces as a baseline failure, which
+        // is a red integration verification rather than a silent pass
+      }
+      process.stdout.write(`Preparing worktree (detached HEAD ${(argv[argv.length - 1] || 'deadbeef').slice(0, 8)})\n`);
+      process.exit(0);
+    }
+    if (action === 'remove') {
+      // `git worktree remove --force <dir>`. `integration.remove: "fail"` models a
+      // checkout the runner could not clean up, which it must say out loud rather
+      // than leave for the next `git worktree add` to discover.
+      const integration = spec.integration ?? {};
+      if (integration.remove === 'fail') fail('fatal: validation failed, cannot remove working tree');
+      const absDir = resolve(process.cwd(), argv[argv.length - 1] ?? '.');
+      try {
+        rmSync(absDir, { recursive: true, force: true });
+      } catch {
+        // best effort; the directory simply stays behind in the temp world
+      }
+      process.exit(0);
+    }
     if (action === 'add') {
       // `git worktree add <dir> -b <branch> <sha>` from uat.mjs's fix loop. On
       // success create the real directory so the runner's baseline can cwd into
