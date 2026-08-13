@@ -1,0 +1,21 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "101": {
+      "state": "timeout",
+      "capture": "unparseable"
+    },
+    "102": {
+      "state": "timeout",
+      "capture": "fail"
+    }
+  }
+}

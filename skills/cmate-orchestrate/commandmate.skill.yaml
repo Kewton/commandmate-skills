@@ -107,8 +107,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: 370c07a1bbe8c523fcbfdd2df9184651c554ff8a27a5d0324134f52dd775886e
-    size: 56772
+    sha256: 6c9e28b5a8e9edb66d4e0b574250c6b057a7ce6699f2e5402781fcca598ef354
+    size: 58213
     kind: skill_md
     executable: false
     script: false
@@ -155,14 +155,14 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: 498d0fccd0ebe704ee045028c8ba9db938d2e4d846c778d18979058bf7c67d67
-    size: 46858
+    sha256: fe1074f4c2cd8a9136a8a72febb124dd7dcb3ed536acc0b387208df9bfc1d107
+    size: 49635
     kind: instruction
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: f5e3c2de50135cb9d5d88b9cbf82a43aca1ecc0a5f3d33d4d0e5d1135faef230
-    size: 112202
+    sha256: 250a166ddae2a5c144d2eb24fc5c60fe3f142d32cd727531374ae9536cb88f75
+    size: 117894
     kind: instruction
     executable: false
     script: false
@@ -197,8 +197,8 @@ files:
     executable: false
     script: false
   - path: references/runner-operations.md
-    sha256: 19a23dd9a1ad6a90bc1dc522ffd308ea3ab4b059d9006800bcb8d2d3f607eb65
-    size: 33926
+    sha256: 70609e8f48b67f1faf74c9ce9b4498a31f8e53a59be6cbaafc513f10e4f1872c
+    size: 34755
     kind: instruction
     executable: false
     script: false
@@ -209,8 +209,8 @@ files:
     executable: false
     script: false
   - path: schemas/dispatch-report.v1.json
-    sha256: 7643a4fa738d9920a185e32c8a3c0fae3d7bd83c87eb359b53739b11238b29d7
-    size: 14790
+    sha256: 3633036eeb571a3b64f35a99e38a6ec0e129c1102ceeb7595a134b8ad4b7c2b7
+    size: 17591
     kind: asset
     executable: false
     script: false
@@ -245,8 +245,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: a7a3832a58239cee7634ed1203caefb545b446aca54a8f0a09133edd58a14bd2
-    size: 346373
+    sha256: b977ff3872f7a1e66e46b16eff06689a5efe1579b7b489b391059470f232bcd8
+    size: 358490
     kind: script
     executable: true
     script: true
