@@ -9,6 +9,7 @@ goal: |
   Base branch: origin/develop
   Work branch: feature/issue-310-docs-write-the-acceptance-gates-adr
   Worktree: ../CommandMate-issue-310-docs-write-the-acceptance-gates-adr
+  Issue body: `gh issue view 310` — the authority. This goal is a summary of it.
 
   ## Objective
   Write the acceptance-gates ADR and land it.
@@ -25,6 +26,9 @@ goal: |
   issue itself. They take part in the verdict; run them and make them pass.
 
   ## Rules
+  - A prohibition this contract does not state is NOT a permission — it is text the
+    summary did not carry. Read the issue body (read-only) before you decide
+    anything it might constrain. 契約が言及していない禁止事項は、許可ではない。
   - Stay within this issue. Do not modify files another issue in the plan owns.
   - The completion criterion above is the contract's, not a suggestion: run those
     commands yourself and make them pass before reporting done. Do not report done

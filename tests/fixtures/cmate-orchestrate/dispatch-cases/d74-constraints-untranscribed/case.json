@@ -1,0 +1,78 @@
+{
+  "description": "[#176] 原文転記が **完走しなかった** ときに、goal が黙って短くならないか。Issue #361 は `## 禁止事項` の表（973 文字）・`## セキュリティ上の考慮`（375 文字）・`## テスト方針`（75 文字）の3ブロックを持ち、転記予算は 1200 文字である。最初のブロックは全行が原文で載り、収まらない2つ目でそこで転記を打ち切る——後ろの短い `## テスト方針` も、詰め込めるからといって載せない（載せると transcript が本文の prefix でなくなり、読み手からは「中抜けした要約」と区別できない）。落とした2件は goal に名指しされ、`本文に他節がある。gh issue view 361 で全文を読め` の1行が入り、report は `issue_constraints_untranscribed` を記録する。**ブロックを途中で切らない**ことが要点で、禁止の表を半分だけ載せた goal は、落とした半分を許可したのと同じである。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-negative-constraints.json",
+    "orchestrate_args": [
+      "361",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      361
+    ],
+    "send_counts": {
+      "361": 1
+    },
+    "worker_states": {
+      "361": "completed"
+    },
+    "verification_outcomes": {
+      "361": "pass"
+    },
+    "task_ids": {
+      "361": "task-issue-361"
+    },
+    "contract_issues": [
+      361
+    ],
+    "contract_contains": {
+      "361": [
+        "  [原文転記] 本文「## 禁止事項」の節",
+        "  | してはいけないこと | 理由 |",
+        "  | 鍵の平文を log へ出す | log は集約先へ複製されるので、消しても消えない |",
+        "  | 鍵の scope 判定を client 側だけで行う | client の判定は差し替えられる |",
+        "  転記しきれず落とした: 「## セキュリティ上の考慮」の節（over_budget）、「## テスト方針」の節（over_budget）。",
+        "  本文に他節がある。`gh issue view 361` で全文を読め"
+      ]
+    },
+    "contract_absent": {
+      "361": [
+        "鍵の scope は宣言された集合の内側でのみ解決し、推測で補完しない",
+        "scope 宣言の無い鍵が拒否されることを、実 exit code で測る",
+        "本文を読み取れなかった"
+      ]
+    },
+    "limitation_codes": [
+      "issue_constraints_untranscribed"
+    ],
+    "limitation_details_include": [
+      "1 constraint block(s) from the issue body were transcribed verbatim into the task text and 2 were NOT"
+    ],
+    "absent_limitation_codes": [
+      "issue_constraints_transcribed",
+      "issue_body_unreadable"
+    ],
+    "verify_calls": 0,
+    "wait_verify_calls_min": 1
+  }
+}

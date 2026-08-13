@@ -141,6 +141,26 @@ const MAX_SCOPE_PATTERN_LENGTH = 200;
 const MAX_GATE_IDS = 32;
 const GATE_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
+// Bounds on the issue-body text the goal transcribes verbatim (Issue #176).
+// Both are this runner's, not CommandMate's, and they exist for one reason: the
+// transcript must never be what pushes a goal into the 8000-char truncation,
+// because the truncation cuts from the END and would take `## Rules` with it.
+//
+// MEASURED against the checked-in contract goldens: an ordinary goal's fixed
+// part (header, objective, criteria, files, rules) is ~1,700 chars, and
+// `## Files you may change` is the only part that grows without a bound of its
+// own (the scope bound alone allows 200 patterns). 1200 keeps the transcript
+// BELOW that fixed part — the goal stays a brief with the prohibitions quoted
+// into it rather than becoming a body dump — and leaves the file list the room it
+// had. An issue that states more prohibition text than this is one where reading
+// the body IS the better instruction, and saying so is what the pointer line does.
+//
+// The COUNT bound is the pair scope already uses (MAX_SCOPE_PATTERNS beside
+// MAX_SCOPE_PATTERN_LENGTH): a goal carrying thirty transcribed fragments is not
+// a goal anybody reads, however short each fragment is.
+const MAX_CONSTRAINT_TRANSCRIPT = 1200;
+const MAX_CONSTRAINT_BLOCKS = 8;
+
 // The id `send --contract` prints on stdout. Kept deliberately permissive (the
 // real one is a UUID) but bounded, so a stray log line never becomes a task id.
 const TASK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -2249,11 +2269,16 @@ function probeContractSupport(inputs) {
 // is an error, and `scope.allow` is effectively required because
 // `success.requireScopeClean` defaults to true.
 //
-// Everything below is derived from the approved plan alone, in a fixed order,
-// with no clock, no randomness and no environment read: the same plan must
-// produce a BYTE-IDENTICAL contract. That is the same Claude/Codex parity rule
-// the planner already lives under, and it is what makes a contract reviewable —
-// a diff between two runs is a change in the plan, never a change in the runner.
+// Everything below is derived from the approved plan and from the artifacts the
+// CALLER measured for this run — the worktree's `verify.yaml` gate ids (§2.9),
+// the worker-method Skill installed in that worktree (§3.0.2) and, since Issue
+// #176, the issue body — in a fixed order, with no clock, no randomness and no
+// other environment read: the same plan against the same world must produce a
+// BYTE-IDENTICAL contract. That is the same Claude/Codex parity rule the planner
+// already lives under, and it is what makes a contract reviewable — a diff
+// between two runs is a change in the plan or in the world, never a change in
+// the runner, and every world input is named in `limitations` so a reader can
+// tell which of the two moved.
 
 // A double-quoted YAML scalar. JSON string escaping is a strict subset of YAML
 // 1.2's double-quoted style, so JSON.stringify is both correct and stable — and,
@@ -2442,6 +2467,336 @@ function workerMethodSection(skillId) {
   ];
 }
 
+// =============================================================================
+// Negative constraints, transcribed from the issue body (Issue #176)
+// =============================================================================
+//
+// MEASURED (2026-08-09, Kewton/BorderFreeKidsMap #35). The issue body carried a
+// 「送ってよい / 送ってはいけない」table with THREE prohibitions. The plan's prose
+// extraction carried two of them into `acceptance_criteria`; the goal is built
+// from the plan, so the third one reached the worker as NOTHING — not as "not
+// permitted", but as text that does not exist. The worker read the contract,
+// nothing in it forbade a facility id in the payload, and it shipped one. Every
+// gate was green: `scope.allow` constrains PATHS and `verify.gates` constrain
+// EXIT CODES, and a prohibition is neither. A human found it in review.
+//
+// So the goal stops summarising this one class of text. A section or block that
+// states a prohibition is TRANSCRIBED — the body's own bytes — and when one
+// cannot be carried whole the goal SAYS SO instead of shortening it. A shortened
+// prohibition is the failure above with extra steps.
+//
+// WHY THE BODY IS RE-READ HERE, at dispatch, with `gh issue view`:
+// the plan does not carry it. It carries `objective` (the body's first non-empty
+// line), `acceptance_criteria` (checkbox/bullet extraction) and `suspected_files`
+// — all POSITIVE-form extraction, which is the structural cause of this bug: the
+// prohibition is not in any of those three fields, so no amount of re-reading the
+// plan can recover it. The one artifact that holds it is the body, and the body
+// is also the authority (the plan is a derived summary of it). It is read
+// READ-ONLY, once per issue, with the same `gh` binary the pre-flight repo probe
+// already uses, and a failed read degrades to the pointer line below rather than
+// stopping a dispatch: the body is what the worker is being pointed AT, so being
+// unable to read it is a reason to say so, not a reason to send nothing.
+
+// The heading words that make a whole section a constraint, and the words that
+// make a TABLE or a LIST one wherever it sits.
+//
+// HARDCODED, deliberately, not declared per profile (the decision Issue #176
+// asks for; recorded in references/dispatch-contract.md §2.4.1):
+//
+//   - A profile-declared set means the repository whose profile forgot a word
+//     gets a goal with the prohibition silently missing — which is this bug,
+//     re-created by configuration. A default that has to be declared is not a
+//     default.
+//   - A narrowable list of "which prohibitions get transcribed" is a
+//     permission-widening knob wearing a configuration hat. §2.9 already refuses
+//     the same shape for gates: `--verify-gates` cannot narrow what the issue
+//     declared.
+//   - `scope_companions` IS profile-declared because test-file layout genuinely
+//     differs per repository. Prohibition vocabulary does not: it is a property
+//     of the language issues are written in, not of the repository's toolchain.
+//
+// The list is a FLOOR, not a ceiling: the block rule below fires on prohibition
+// wording under any heading at all, which is what covers the headings this list
+// does not know. Over-capture (transcribing a section that turns out to be
+// ordinary prose) costs goal length, and length is bounded and reported.
+// Under-capture costs the run above.
+const CONSTRAINT_HEADING_RE = new RegExp([
+  '非対象', 'やらないこと', 'やってはいけない', '対象外', '禁止', '禁じ',
+  'しないこと', 'してはいけない', 'してはならない', 'セキュリティ', 'テスト方針',
+  'non-?goals?', 'out of scope', 'must ?not', 'security', 'testing (policy|strategy)',
+].join('|'), 'i');
+
+const CONSTRAINT_TEXT_RE = new RegExp([
+  'してはいけない', 'してはならない', 'しないこと', '使ってはいけない',
+  '送ってはいけない', '触ってはいけない', '入れてはいけない', '載せてはいけない',
+  '禁止', '禁じ', '不可', '\\bNG\\b',
+  "\\bmust\\s+not\\b", "\\bmust\\s+never\\b", "\\bmay\\s+not\\b", '\\bnever\\b',
+  '\\bforbidden\\b', '\\bprohibited\\b', "\\bdo\\s+not\\b", "\\bdon'?t\\b",
+].join('|'), 'i');
+
+// Why a constraint block did not reach the goal. Both reasons are repaired the
+// same way — read the body — which is exactly what the pointer line says.
+const CONSTRAINT_DROP_HINT = {
+  over_budget: `the transcript is bounded at ${MAX_CONSTRAINT_TRANSCRIPT} characters and this block did not fit in what was left`,
+  over_count: `the goal transcribes at most ${MAX_CONSTRAINT_BLOCKS} blocks`,
+};
+
+// The issue body, split at ATX headings. Fenced blocks are tracked so a `#` line
+// inside a fence is content, not a heading — the ```acceptance-gates block the
+// planner reads is exactly such a fence, and a body whose fences were mis-paired
+// would slice into the wrong sections.
+function issueBodySections(body) {
+  const sections = [];
+  let current = { heading: null, lines: [] };
+  let fence = null;
+  for (const line of String(body).replace(/\r/g, '').split('\n')) {
+    const opener = /^\s*(```|~~~)/.exec(line);
+    if (opener !== null) {
+      if (fence === null) fence = opener[1];
+      else if (opener[1] === fence) fence = null;
+      current.lines.push(line);
+      continue;
+    }
+    const heading = fence === null ? /^(#{1,6})\s+(.+)$/.exec(line) : null;
+    if (heading === null) {
+      current.lines.push(line);
+      continue;
+    }
+    sections.push(current);
+    current = { heading: `${heading[1]} ${heading[2].trim()}`, lines: [] };
+  }
+  sections.push(current);
+  return sections;
+}
+
+// The tables and lists inside one section, as contiguous runs of lines. A table
+// is every line that opens with `|` — header, separator and data rows together,
+// because a prohibition table's meaning is in the pairing of its columns and a
+// row lifted out of it says nothing. A list keeps its indented continuation
+// lines for the same reason.
+function markdownBlocks(lines) {
+  const blocks = [];
+  let run = null;
+  const close = () => { if (run !== null) blocks.push(run); run = null; };
+  for (const line of lines) {
+    const kind = /^\s*\|/.test(line) ? 'table'
+      : /^\s*([-*+]|\d+[.)])\s/.test(line) ? 'list'
+        : null;
+    if (kind !== null) {
+      if (run === null || run.kind !== kind) { close(); run = { kind, lines: [] }; }
+      run.lines.push(line);
+      continue;
+    }
+    // An indented non-blank line continues the list item above it.
+    if (run !== null && run.kind === 'list' && /^\s+\S/.test(line)) { run.lines.push(line); continue; }
+    close();
+  }
+  close();
+  return blocks;
+}
+
+function trimBlankEdges(lines) {
+  const out = [...lines];
+  while (out.length > 0 && out[0].trim() === '') out.shift();
+  while (out.length > 0 && out[out.length - 1].trim() === '') out.pop();
+  return out;
+}
+
+// Where a transcribed block came from, as the body wrote it. Truncated from the
+// HEAD (unlike `excerpt`, which keeps the tail): a heading identifies itself in
+// its first words.
+function constraintLabel(text) {
+  const label = redact(String(text).replace(/\s+/g, ' ').trim());
+  return label.length > 80 ? `${label.slice(0, 79)}…` : label;
+}
+
+// Every constraint block in one body, in the body's own order.
+//
+// A section whose HEADING matches is taken whole and its inner blocks are not
+// taken again — the section already contains them, and a second copy of a
+// prohibition in the same goal reads as two different prohibitions.
+function collectConstraintBlocks(body) {
+  const found = [];
+  for (const section of issueBodySections(body)) {
+    const label = section.heading === null ? '（本文冒頭）' : section.heading;
+    if (section.heading !== null && CONSTRAINT_HEADING_RE.test(section.heading)) {
+      const lines = trimBlankEdges(section.lines);
+      if (lines.length > 0) found.push({ label, what: '節', lines });
+      continue;
+    }
+    for (const block of markdownBlocks(section.lines)) {
+      if (!CONSTRAINT_TEXT_RE.test(block.lines.join('\n'))) continue;
+      const lines = trimBlankEdges(block.lines);
+      if (lines.length > 0) found.push({ label, what: block.kind === 'table' ? '表' : '箇条書き', lines });
+    }
+  }
+  return found;
+}
+
+// The body of one issue, read once per run. Memoized because the goal is built
+// TWICE for every dispatched issue — once into the contract, once into the
+// `<out>/prompts/` artifact that records what the worker read — and the two must
+// be the same bytes. A second `gh` call could answer differently (somebody edits
+// the issue mid-wave) and the artifact would then disagree with the contract
+// about what was sent.
+const issueBodyReads = new Map();
+
+function readIssueBody(inputs, plan, number) {
+  if (issueBodyReads.has(number)) return issueBodyReads.get(number);
+  const result = runCli(inputs.gh, ['issue', 'view', String(number), '--repo', plan.profile.repository, '--json', 'body']);
+  const parsed = parseCliJson(result);
+  const value = parsed !== null && typeof parsed.body === 'string'
+    ? { ok: true, body: parsed.body, reason: null }
+    : { ok: false, body: '', reason: excerpt(result.stderr || result.stdout || 'gh issue view returned no body field', 160) ?? 'gh issue view returned nothing' };
+  issueBodyReads.set(number, value);
+  return value;
+}
+
+// What the goal will carry for one issue: the blocks that fit, and the ones that
+// did not.
+//
+// Two rules, both about not producing a transcript that misleads:
+//
+//   - A block is NEVER cut to fit. Half a prohibition table authorises the half
+//     it dropped, and half a `## 非対象` section reads as a complete one.
+//   - The first block that does not fit ENDS the transcript; everything after it
+//     is dropped too, even a short block that would have fitted. Best-fit packing
+//     would keep a trailing `## テスト方針` while dropping the
+//     `## セキュリティ上の考慮` above it, and a reader has no way to see that the
+//     transcript is not a prefix of the body. A prefix plus "there is more, go
+//     read it" is honest; a subset in body order that silently skips the middle
+//     is a summary again, chosen by length.
+function issueBodyConstraints(inputs, plan, issue) {
+  const read = readIssueBody(inputs, plan, issue.number);
+  if (!read.ok) return { read: false, reason: read.reason, blocks: [], dropped: [] };
+  const found = collectConstraintBlocks(read.body);
+  const blocks = [];
+  const dropped = [];
+  let used = 0;
+  for (const block of found) {
+    if (dropped.length > 0) { dropped.push({ ...block, reason: dropped[0].reason }); continue; }
+    const size = block.lines.join('\n').length;
+    if (blocks.length >= MAX_CONSTRAINT_BLOCKS) { dropped.push({ ...block, reason: 'over_count' }); continue; }
+    if (used + size > MAX_CONSTRAINT_TRANSCRIPT) { dropped.push({ ...block, reason: 'over_budget' }); continue; }
+    used += size;
+    blocks.push(block);
+  }
+  return { read: true, reason: null, blocks, dropped };
+}
+
+// The ONE line Issue #176 requires whenever the transcription is incomplete. It
+// names the command rather than the fact, because a worker that has just been
+// told "there is more" and not told how to get it will proceed without it.
+function issueBodyPointerLine(number) {
+  return `本文に他節がある。\`gh issue view ${number}\` で全文を読め`;
+}
+
+// The `## Constraints…` section, or nothing at all.
+//
+// Nothing at all is the common case and it matters: an issue whose body states no
+// prohibition produces the goal this runner produced before #176, byte for byte.
+//
+// It sits immediately after `## Objective` — see the placement note in
+// buildContractGoal — and it is the same text in the contract goal and in the
+// fallback worker prompt. Carrying it in only ONE of the two would put the
+// prohibitions in every run except the ones with the older CLI, which is the
+// asymmetry ADR §1.2 refuses for `## Method`.
+function constraintSection(constraints, number) {
+  if (constraints === null) return [];
+  const rule = [
+    'A prohibition this contract does not state is NOT a permission: it is text the',
+    'summary did not carry. The issue body is the authority.',
+    '契約が言及していない禁止事項は、契約が許可したのではなく書いていないだけである。',
+  ];
+  // Two headings, one prefix. A heading that says "transcribed" above nothing at
+  // all is the same false statement in miniature; a reader (or a grep) still finds
+  // either one by `## Prohibitions and constraints`.
+  if (!constraints.read) {
+    return [
+      '## Prohibitions and constraints — the issue body could not be read',
+      `本文を読み取れなかった（${constraints.reason}）ので、本文由来の転記はこの goal に1件も無い。`,
+      ...rule,
+      issueBodyPointerLine(number),
+      '',
+    ];
+  }
+  if (constraints.blocks.length === 0 && constraints.dropped.length === 0) return [];
+  const heading = '## Prohibitions and constraints — transcribed from the issue body';
+  const body = [];
+  for (const block of constraints.blocks) {
+    body.push(`[原文転記] 本文「${constraintLabel(block.label)}」の${block.what}`);
+    body.push(...block.lines);
+    body.push('');
+  }
+  const tail = [];
+  if (constraints.dropped.length > 0) {
+    const named = constraints.dropped
+      .map((block) => `「${constraintLabel(block.label)}」の${block.what}（${block.reason}）`)
+      .join('、');
+    tail.push(`転記しきれず落とした: ${named}。`);
+    tail.push(issueBodyPointerLine(number));
+    tail.push('');
+  }
+  return [
+    heading,
+    'これは要約ではない。以下は Issue 本文からの原文転記である。',
+    ...rule,
+    '',
+    ...body,
+    ...tail,
+  ];
+}
+
+// The report entry for one issue's transcription — exactly one, or none. Which
+// one is what a reader (or a CI step) acts on, so the three facts get three
+// codes rather than one code with three details:
+//
+//   issue_body_unreadable          nothing was transcribed and nobody knows what
+//                                  is in the body. The goal carries the pointer.
+//   issue_constraints_untranscribed a prohibition was FOUND and did not fit. This
+//                                  is the machine-readable half of the pointer
+//                                  line Issue #176 asks for: the line lives in a
+//                                  file the worker it constrains can rewrite,
+//                                  while the report is a run artifact, so a CI
+//                                  step that must not ship a silently shortened
+//                                  contract has something to test.
+//   issue_constraints_transcribed   a prohibition was found and carried whole.
+//                                  Positive evidence, the shape
+//                                  `worker_method_applied` already takes: 転記
+//                                  したことは、守られたことではない.
+//
+// An issue whose body states no prohibition records NOTHING — a limitation per
+// dispatched issue saying "there was nothing to say" is noise that hides the
+// entries above.
+function constraintLimitation(number, constraints) {
+  if (!constraints.read) {
+    return {
+      code: 'issue_body_unreadable',
+      detail: redact(`#${number}: the issue body could not be read (${constraints.reason}), so no prohibition from it was transcribed into the task text. `
+        + 'The goal carries the "read the body" pointer instead. scope.allow and verify.gates are unaffected — they come from the plan — but a negative '
+        + 'constraint has nowhere else to ride, so treat this run as one where the worker was told to go read the issue and may not have'),
+    };
+  }
+  if (constraints.dropped.length > 0) {
+    return {
+      code: 'issue_constraints_untranscribed',
+      detail: redact(`#${number}: ${constraints.blocks.length} constraint block(s) from the issue body were transcribed verbatim into the task text and `
+        + `${constraints.dropped.length} were NOT (${[...new Set(constraints.dropped.map((block) => block.reason))].map((reason) => CONSTRAINT_DROP_HINT[reason]).join('; ')}). `
+        + 'Nothing was shortened — a half-transcribed prohibition authorises the half it drops — so the dropped blocks are named in the goal beside the '
+        + `\`gh issue view ${number}\` pointer. Split the issue, or shorten the body's constraint sections, if the worker must have them all in the contract`),
+    };
+  }
+  if (constraints.blocks.length > 0) {
+    return {
+      code: 'issue_constraints_transcribed',
+      detail: redact(`#${number}: ${constraints.blocks.length} constraint block(s) from the issue body were transcribed verbatim into the task text `
+        + `(${constraints.blocks.map((block) => `「${constraintLabel(block.label)}」の${block.what}`).join('、')}). `
+        + '転記したことは、守られたことではない — dispatch can see the text was carried, not that the worker honoured it'),
+    };
+  }
+  return null;
+}
+
 // The contract's `goal` — the body CommandMate sends after the preamble it
 // composes itself.
 //
@@ -2458,7 +2813,7 @@ function workerMethodSection(skillId) {
 // mechanized part of the acceptance criteria: until now the goal told the worker
 // that "the same gates decide the verdict" while the verdict was actually the
 // repository's common gate set, which the issue had no way to speak to (ADR §1.1).
-function buildContractGoal(plan, issue, requiredGates = [], workerMethod = null) {
+function buildContractGoal(plan, issue, requiredGates = [], workerMethod = null, constraints = null) {
   const goal = [
     `# Issue #${issue.number} — ${issue.title ?? 'no title'}`,
     '',
@@ -2466,11 +2821,24 @@ function buildContractGoal(plan, issue, requiredGates = [], workerMethod = null)
     `Base branch: ${plan.profile.base}`,
     `Work branch: ${issue.branch ?? '(from profile template)'}`,
     `Worktree: ${issue.worktree ?? '(from profile template)'}`,
+    // Issue #176, and placed HERE for the reason the `## Method` note gives: this
+    // block sits at a fixed offset from the top of every goal, so the 8000-char
+    // truncation — which cuts from the END — cannot reach it. The one line that
+    // must survive in EVERY goal is the one that names the authority.
+    `Issue body: \`gh issue view ${issue.number}\` — the authority. This goal is a summary of it.`,
     '',
     ...workerMethodSection(workerMethod),
     '## Objective',
     issue.objective ?? issue.title ?? `Resolve issue #${issue.number}.`,
     '',
+    // Immediately after the objective, and before everything else, for two
+    // reasons. A worker reads top to bottom, and a prohibition read after the
+    // work has started arrives too late (ADR §3.3's argument for `## Method`).
+    // And the goal truncates from the END: the earlier a section sits, the less
+    // reachable it is by the cut. It follows the objective rather than preceding
+    // it because "what must not happen" is unreadable before "what is being
+    // asked for".
+    ...constraintSection(constraints, issue.number),
     '## Acceptance criteria',
     bullets(issue.acceptance_criteria, 'Derive from the issue; if unclear, stop and ask.'),
     '',
@@ -2485,6 +2853,15 @@ function buildContractGoal(plan, issue, requiredGates = [], workerMethod = null)
       '',
     ]),
     '## Rules',
+    // FIRST in Rules (Issue #176). Rules are last in the goal and last is what the
+    // truncation eats first, so the one rule that cannot be allowed to disappear
+    // goes at the top of the list. It is stated for EVERY issue, including the ones
+    // whose body the heuristic above found no prohibition in: a heuristic that
+    // missed one leaves the worker with exactly the belief that produced the
+    // measured failure.
+    '- A prohibition this contract does not state is NOT a permission — it is text the',
+    '  summary did not carry. Read the issue body (read-only) before you decide',
+    '  anything it might constrain. 契約が言及していない禁止事項は、許可ではない。',
     '- Stay within this issue. Do not modify files another issue in the plan owns.',
     '- The completion criterion above is the contract\'s, not a suggestion: run those',
     '  commands yourself and make them pass before reporting done. Do not report done',
@@ -2554,7 +2931,7 @@ const AUTO_YES_ALLOWED_PROMPT_TYPES = ['yes_no', 'multiple_choice'];
 // declared none). It is passed in rather than re-read here because the CALLER is
 // what verified those ids exist in the worktree — a contract must never name a
 // gate this run has not seen in `.commandmate/verify.yaml`.
-function buildTaskContract(plan, issue, inputs, requiredGates = [], workerMethod = null) {
+function buildTaskContract(plan, issue, inputs, requiredGates = [], workerMethod = null, constraints = null) {
   const allow = contractScopeAllow(issue);
   const verifyGates = contractVerifyGates(inputs.verifyGates, requiredGates);
   const lines = [];
@@ -2562,7 +2939,7 @@ function buildTaskContract(plan, issue, inputs, requiredGates = [], workerMethod
   lines.push('# Do not edit by hand: the same plan regenerates this file byte for byte.');
   lines.push('version: 1');
   lines.push(`title: ${yamlString(contractTitle(issue))}`);
-  lines.push(yamlBlockScalar('goal', buildContractGoal(plan, issue, requiredGates, workerMethod)));
+  lines.push(yamlBlockScalar('goal', buildContractGoal(plan, issue, requiredGates, workerMethod, constraints)));
   lines.push('scope:');
   if (allow.length === 0) {
     lines.push('  allow: []');
@@ -2817,7 +3194,7 @@ function bullets(items, fallback) {
 // any worker CLI because it names the objective, the boundary (only the
 // issue's files), the branch/worktree, the baseline to run, and the rule that a
 // blocking question must stop and ask rather than be guessed.
-function buildWorkerPrompt(plan, issue, workerMethod = null) {
+function buildWorkerPrompt(plan, issue, workerMethod = null, constraints = null) {
   return [
     `# Worker task — issue #${issue.number}`,
     '',
@@ -2825,11 +3202,15 @@ function buildWorkerPrompt(plan, issue, workerMethod = null) {
     `Base branch: ${plan.profile.base}`,
     `Work branch: ${issue.branch ?? '(from profile template)'}`,
     `Worktree: ${issue.worktree ?? '(from profile template)'}`,
+    // Same line, same reason, as the contract goal's (Issue #176). This path is the
+    // one an older CLI takes, and it is the path nobody is watching.
+    `Issue body: \`gh issue view ${issue.number}\` — the authority. This prompt is a summary of it.`,
     '',
     ...workerMethodSection(workerMethod),
     '## Objective',
     issue.objective ?? issue.title ?? `Resolve issue #${issue.number}.`,
     '',
+    ...constraintSection(constraints, issue.number),
     '## Acceptance criteria',
     bullets(issue.acceptance_criteria, 'Derive from the issue; if unclear, stop and ask.'),
     '',
@@ -2840,6 +3221,9 @@ function buildWorkerPrompt(plan, issue, workerMethod = null) {
     bullets(plan.profile.baseline, 'Run the repository baseline.'),
     '',
     '## Rules',
+    '- A prohibition this prompt does not state is NOT a permission — it is text the',
+    '  summary did not carry. Read the issue body (read-only) before you decide',
+    '  anything it might constrain. 契約が言及していない禁止事項は、許可ではない。',
     '- Stay within this issue. Do not modify files another issue in the plan owns.',
     '- Run the verification above and report its real result. Do not report done on a failing baseline.',
     '- Keep working across turns until the whole task is finished; do not stop half-done.',
@@ -4554,6 +4938,24 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
         }
       }
 
+      // The issue body's prohibitions (Issue #176), read once per issue and used by
+      // BOTH task-text generators below, so the contract and the `<out>/prompts/`
+      // artifact can never disagree about what the worker was told.
+      //
+      // Lazy, and called only from the two generators, because the limitation it
+      // records claims the text reached a worker: an issue refused below (an empty
+      // scope, an unplaceable contract) has no task text for a prohibition to be in,
+      // and a run that says otherwise about an issue it never dispatched is the same
+      // class of wrong statement this Issue is about.
+      let constraints = null;
+      const constraintsFor = () => {
+        if (constraints !== null) return constraints;
+        constraints = issueBodyConstraints(inputs, plan, res.issue);
+        const note = constraintLimitation(number, constraints);
+        if (note !== null) report.limitations.push(note);
+        return constraints;
+      };
+
       let contractPath = null;
       if (contractMode) {
         const scope = contractScopeReview(res.issue);
@@ -4592,7 +4994,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
           continue;
         }
         try {
-          contractPath = placeContract(res.worktreePath, number, buildTaskContract(plan, res.issue, inputs, requiredGates, inputs.workerMethod), contractsDir);
+          contractPath = placeContract(res.worktreePath, number, buildTaskContract(plan, res.issue, inputs, requiredGates, inputs.workerMethod, constraintsFor()), contractsDir);
         } catch (error) {
           worker.worker_state = 'failed';
           worker.note = redact(`could not place the execution contract in the worktree: ${error.message}`);
@@ -4605,8 +5007,8 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
       // In contract mode the artifact is the goal — the body CommandMate sends
       // after its own preamble — so the file still shows what the worker read.
       const prompt = contractMode
-        ? buildContractGoal(plan, res.issue, requiredGates, inputs.workerMethod)
-        : buildWorkerPrompt(plan, res.issue, inputs.workerMethod);
+        ? buildContractGoal(plan, res.issue, requiredGates, inputs.workerMethod, constraintsFor())
+        : buildWorkerPrompt(plan, res.issue, inputs.workerMethod, constraintsFor());
       writeFileSync(promptFile, `${prompt}\n`, 'utf8');
 
       // The per-issue half of the evidence (ADR section 9): the Skill was found
