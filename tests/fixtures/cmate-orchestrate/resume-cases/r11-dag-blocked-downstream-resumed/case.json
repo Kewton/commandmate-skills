@@ -1,0 +1,59 @@
+{
+  "description": "[#183] **`blocked_by_upstream_failure` が名指しする回復経路が本当に通ることの実証。** dispatch-contract 第3.2節と対処表は「上流を直して `--resume`」と書いているので、`--schedule dag` と `--resume` の組み合わせは opt-in の飾りではなく**その指示の実装**である。attempt 1（dag）は #310 が failed し、下流 #312 だけが止まり、独立系列の #313 は完走する。attempt 2 は同じ `--schedule dag` で `--resume` し、pass 済みの #311 / #313 を1件も再 dispatch せず（＝ DAG の ready 判定が引き継ぎ record を「満たされた依存」として読む）、直した #310 を送り、**それが green になった時点で #312 を投入**して success で終わる。引き継ぎを満たされた依存として読まない実装は、ここで #312 を永久に投入できない。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-dag-failure.json",
+    "orchestrate_args": ["310", "311", "312", "313", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "attempts": [
+    {
+      "scenario": "attempt-1.json",
+      "dispatch_args": ["--expect-branch", "feature/integration", "--schedule", "dag", "--max-turns", "4"],
+      "expect": {
+        "exit": 7,
+        "status": "partial",
+        "stop_reason": "worker_failed",
+        "waves_count": 3,
+        "wave_dispatched": [[310, 311], [313], []],
+        "sent": [310, 311, 313],
+        "never_sent": [312],
+        "worker_states": { "310": "failed", "311": "completed", "312": "not_dispatched", "313": "completed" },
+        "verification_outcomes": { "311": "pass", "312": "not_run", "313": "pass" },
+        "limitation_codes": ["schedule_dag"],
+        "blocking_codes": ["blocked_by_upstream_failure", "worker_failed"],
+        "report_file": "dispatch-report.json",
+        "merge_eligible": [311, 313]
+      }
+    },
+    {
+      "scenario": "attempt-2.json",
+      "resume": true,
+      "dispatch_args": ["--expect-branch", "feature/integration", "--schedule", "dag", "--max-turns", "4"],
+      "expect": {
+        "exit": 0,
+        "status": "success",
+        "stop_reason": "completed",
+        "completion_check_passed": true,
+        "waves_count": 3,
+        "wave_dispatched": [[], [310], [312]],
+        "sent": [310, 312],
+        "never_sent": [311, 313],
+        "first_sent": 310,
+        "worker_states": { "310": "completed", "311": "completed", "312": "completed", "313": "completed" },
+        "verification_outcomes": { "310": "pass", "311": "pass", "312": "pass", "313": "pass" },
+        "worker_notes_include": { "311": ["carried over from attempt 1"] },
+        "limitation_codes": ["schedule_dag", "resume_attempt"],
+        "absent_limitation_codes": ["resume_no_work"],
+        "blocking_codes": [],
+        "summary_includes": ["## スケジューリング（dag）", "Round 3: dispatch=#312"],
+        "report_file": "resume-attempt-2/dispatch-report.json",
+        "merge_eligible": [310, 311, 312, 313],
+        "history": {
+          "attempt": 2,
+          "kind": "resume",
+          "carried_over": [311, 313],
+          "dispatched": [310, 312]
+        }
+      }
+    }
+  ]
+}

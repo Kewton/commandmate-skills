@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/dispatch-report.v1.json",
   "title": "cmate-orchestrate dispatch report v1",
-  "description": "Report printed to stdout and written to dispatch-report.json by the cmate-orchestrate dispatch runner. Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records the supervised execution of an already-approved plan: per-wave dispatch, worker supervision, the wave barrier, and the verification gate. Worker completion and verification success are reported as separate facts and are never conflated. Since Skill 0.9.0 the verification verdict may come either from CommandMate's execution contract (`commandmate wait --verify`'s exit code) or from the profile-baseline fallback; the field set and the meaning of every enum value are identical in both modes, so a reader (the merge and UAT runners) needs no change. Which mode ran is stated in limitations/blocking_reasons and in summary_markdown.",
+  "description": "Report printed to stdout and written to dispatch-report.json by the cmate-orchestrate dispatch runner. Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records the supervised execution of an already-approved plan: per-wave dispatch, worker supervision, the wave barrier, and the verification gate. Worker completion and verification success are reported as separate facts and are never conflated. Since Skill 0.9.0 the verification verdict may come either from CommandMate's execution contract (`commandmate wait --verify`'s exit code) or from the profile-baseline fallback; the field set and the meaning of every enum value are identical in both modes, so a reader (the merge and UAT runners) needs no change. Which mode ran is stated in limitations/blocking_reasons and in summary_markdown. Since Issue #183 the run may also be scheduled by dependency satisfaction rather than by wave (`--schedule dag`, opt-in); the field set is identical in both, and the optional `schedule` field is what says which reading waves[] and max_parallel take.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -59,6 +59,10 @@
       "description": "Whether Auto Yes was enabled. Default off: a detected prompt halts for a human rather than being answered."
     },
     "max_parallel": { "type": "integer", "minimum": 1, "maximum": 3 },
+    "schedule": {
+      "enum": ["wave", "dag"],
+      "description": "OPTIONAL, and written ONLY by a `--schedule dag` run (Issue #183). Which reading max_parallel and waves[] below take. ABSENT means the default wave scheduling — the plan's waves with a barrier between them — and it is absent rather than written as \"wave\" so a run without the flag is byte-for-byte the run it was before the flag existed. \"dag\": issues were admitted by DEPENDENCY SATISFACTION — an issue was dispatched as soon as every EFFECTIVE dependency of it (plan.dependencies minus the `basis: lexical` edges Issue #182 refuses to treat as edges) reached `completed` AND `verification.outcome: pass`, and a slot was free. There max_parallel is the concurrency cap and nothing else, plan.waves is reference information, and the waves[] entries below are ADMISSION ROUNDS whose `barrier` is descriptive rather than a gate. Added optionally, so reports written before this field keep validating and dispatch_schema_version stays 1."
+    },
     "profile": {
       "type": "object",
       "additionalProperties": false,
@@ -100,7 +104,7 @@
     },
     "waves": {
       "type": "array",
-      "description": "Ordered waves, in plan order. A wave is only present if the loop reached it; a wave present with an empty dispatched list means drift halted it before any send.",
+      "description": "Ordered waves, in plan order. A wave is only present if the loop reached it; a wave present with an empty dispatched list means drift halted it before any send. Under `schedule: \"dag\"` (Issue #183) an entry is an ADMISSION ROUND instead — the issues admitted at one scheduling decision, in the order the decisions were made — and rounds OVERLAP in time, so a later entry may have been dispatched while an earlier one was still running. A trailing entry with an empty dispatched list then carries the issues that were never started at all, each with a blocking reason naming why (blocked_by_upstream_failure / schedule_halted_unattended).",
       "items": { "$ref": "#/$defs/wave" }
     },
     "blocking_reasons": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
@@ -172,7 +176,7 @@
         "index": { "type": "integer", "minimum": 0 },
         "dispatched": {
           "type": "array",
-          "description": "Issues actually sent in this wave. Never longer than max_parallel.",
+          "description": "Issues actually sent in this wave. Never longer than max_parallel — under `schedule: \"dag\"` because a round only fills the FREE slots, which is that same bound read as a concurrency cap.",
           "items": { "$ref": "#/$defs/issue_number" }
         },
         "workers": { "type": "array", "items": { "$ref": "#/$defs/worker" } },
@@ -191,7 +195,7 @@
             },
             "advanced": {
               "type": "boolean",
-              "description": "The next wave was allowed to dispatch. True only when workers completed AND verifications passed."
+              "description": "The next wave was allowed to dispatch. True only when workers completed AND verifications passed. Under `schedule: \"dag\"` the computation is unchanged but the field is DESCRIPTIVE, not a gate: there is no next wave to allow, and what released each downstream issue is that issue's own dependency records. Read it there as \"this admission round came out wholly green\"."
             }
           }
         }

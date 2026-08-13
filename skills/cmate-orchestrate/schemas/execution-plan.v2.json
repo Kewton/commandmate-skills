@@ -119,7 +119,7 @@
     },
     "waves": {
       "type": "array",
-      "description": "Ordered waves. Every issue appears in exactly one wave; a later wave runs after all earlier waves complete.",
+      "description": "Ordered waves. Every issue appears in exactly one wave; a later wave runs after all earlier waves complete. That is what the DEFAULT dispatch scheduling does with them. Under `dispatch.mjs --schedule dag` (Issue #183) they become REFERENCE INFORMATION: the dispatcher gates each issue on its own effective dependencies (this plan's `dependencies`, minus the `basis: lexical` edges section 3.1 of plan-contract.md refuses to treat as edges) and admits it as soon as they are completed + verified, so a wave boundary is no longer a synchronisation point. Two things they still ARE in that mode, and neither is optional: `merge_order` is this array flattened, and the packing rule that keeps two file-overlapping issues out of one wave is the rule the dag scheduler re-enforces itself (it never runs two issues that name a file in common at the same time). The planner is unchanged either way — it always computes and emits the waves.",
       "items": {
         "type": "array",
         "items": {

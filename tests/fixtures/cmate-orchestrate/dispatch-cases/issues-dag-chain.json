@@ -1,0 +1,28 @@
+{
+  "issues": [
+    {
+      "number": 300,
+      "title": "feat: add the palette loader",
+      "body": "Add the palette loader in `src/palette.ts`.\n\n## Acceptance criteria\n- [ ] `src/palette.ts` reads a palette from disk\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 301,
+      "title": "feat: add the ledger writer",
+      "body": "Add the ledger writer in `src/ledger.ts`.\n\n## Acceptance criteria\n- [ ] `src/ledger.ts` appends one row per entry\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 302,
+      "title": "feat: add the sitemap renderer",
+      "body": "Add the sitemap renderer in `src/sitemap.ts`.\n\n## Acceptance criteria\n- [ ] `src/sitemap.ts` renders every route\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 303,
+      "title": "feat: add the palette picker widget",
+      "body": "Add the palette picker widget in `src/picker.ts`.\n\n## Acceptance criteria\n- [ ] `src/picker.ts` shows the palette\n\n## Dependencies\n- Depends on #300\n",
+      "labels": ["feature"]
+    }
+  ]
+}

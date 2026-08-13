@@ -1,0 +1,10 @@
+{
+  "cli_available": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "400": { "state": "timeout" },
+    "401": { "state": "timeout", "capture": "idle" },
+    "402": { "state": "completed", "verify": "pass" }
+  }
+}

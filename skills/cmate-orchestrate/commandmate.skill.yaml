@@ -107,8 +107,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: f74a58f4168479b48f476f53f501b770b4e48328e9e48e852ae6ab813f564639
-    size: 59110
+    sha256: 89c530777e7731dc08fc1d9a5c354d5200191d55633d6b9ebfd61e0313aee171
+    size: 59536
     kind: skill_md
     executable: false
     script: false
@@ -155,20 +155,20 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: ba349be970f001234e4b69acd4109f432d1531eb009fc68fb0b74e4133c87e95
-    size: 50510
+    sha256: f0aed857d314fee11eb7b65950ca64c869f55868985a6a5f445ec547443e2687
+    size: 53744
     kind: instruction
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: 60cc5f7e54f52cde47cc056eb491d5e45b451d2d3777ca84082c2c2aaa5e9641
-    size: 121890
+    sha256: 2c683649913901155cbfb4cb7bc8f946c1bf6e190b4e83141b28c07e510cbbf6
+    size: 134892
     kind: instruction
     executable: false
     script: false
   - path: references/merge-contract.md
-    sha256: 9b0cbd5530dfaed5c534dfe4d5382276e853c18b7e230f3c29aba80056410e7d
-    size: 35423
+    sha256: 2b1e8ee750547e5de29acf75c735e5f0763d164f7a625129095692cb1c986924
+    size: 37625
     kind: instruction
     executable: false
     script: false
@@ -209,8 +209,8 @@ files:
     executable: false
     script: false
   - path: schemas/dispatch-report.v1.json
-    sha256: 3633036eeb571a3b64f35a99e38a6ec0e129c1102ceeb7595a134b8ad4b7c2b7
-    size: 17591
+    sha256: 4b601e0f50f0ceb0de065a20d22e05f1251d57e90099613c18bdbc5a3a794e03
+    size: 19746
     kind: asset
     executable: false
     script: false
@@ -221,8 +221,8 @@ files:
     executable: false
     script: false
   - path: schemas/execution-plan.v2.json
-    sha256: b0a6037ea340a5c11abd06d58e3e224d81b6511f5cefc4ae852d4955489ec251
-    size: 18165
+    sha256: b7b4b2beeefaa404cff52c8eff2ae818d017fdb8c1d6e30fb4521360253dc89a
+    size: 18991
     kind: asset
     executable: false
     script: false
@@ -245,8 +245,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: bedac48ef410a3b7bd6e4fa26b7a1157fc59379837a2dcbaecfa2fb70cff9537
-    size: 371433
+    sha256: 55b87df4be0e6429dec9bee34ead4e1a7c7594ec2a287ef5fb1e189bab91b1dd
+    size: 411195
     kind: script
     executable: true
     script: true

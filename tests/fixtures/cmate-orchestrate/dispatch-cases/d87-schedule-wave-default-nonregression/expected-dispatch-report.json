@@ -1,0 +1,240 @@
+{
+  "dispatch_schema_version": 1,
+  "skill_id": "cmate-orchestrate",
+  "skill_version": "0.27.0",
+  "status": "success",
+  "stop_reason": "completed",
+  "human_required": false,
+  "plan_run_id": "plan",
+  "out_dir": "<out>",
+  "auto_yes": false,
+  "max_parallel": 3,
+  "profile": {
+    "id": "node-fake",
+    "repository": "Kewton/CommandMate",
+    "base": "origin/develop",
+    "verified": true
+  },
+  "drift_checks": [
+    {
+      "wave_index": 0,
+      "code": "cli_available",
+      "ok": true,
+      "blocking": true,
+      "detail": "commandmate CLI is runnable"
+    },
+    {
+      "wave_index": 0,
+      "code": "repo_access",
+      "ok": true,
+      "blocking": true,
+      "detail": "repo Kewton/CommandMate is reachable"
+    },
+    {
+      "wave_index": 0,
+      "code": "base_resolvable",
+      "ok": true,
+      "blocking": true,
+      "detail": "base origin/develop resolves"
+    },
+    {
+      "wave_index": 0,
+      "code": "integration_clean",
+      "ok": true,
+      "blocking": false,
+      "detail": "integration worktree is clean"
+    },
+    {
+      "wave_index": 0,
+      "code": "worktrees_present",
+      "ok": true,
+      "blocking": true,
+      "detail": "planned worktrees resolve (commandmate ls branch match or git worktree list)"
+    },
+    {
+      "wave_index": 1,
+      "code": "cli_available",
+      "ok": true,
+      "blocking": true,
+      "detail": "commandmate CLI is runnable"
+    },
+    {
+      "wave_index": 1,
+      "code": "repo_access",
+      "ok": true,
+      "blocking": true,
+      "detail": "repo Kewton/CommandMate is reachable"
+    },
+    {
+      "wave_index": 1,
+      "code": "base_resolvable",
+      "ok": true,
+      "blocking": true,
+      "detail": "base origin/develop resolves"
+    },
+    {
+      "wave_index": 1,
+      "code": "integration_clean",
+      "ok": true,
+      "blocking": false,
+      "detail": "integration worktree is clean"
+    },
+    {
+      "wave_index": 1,
+      "code": "worktrees_present",
+      "ok": true,
+      "blocking": true,
+      "detail": "planned worktrees resolve (commandmate ls branch match or git worktree list)"
+    }
+  ],
+  "waves": [
+    {
+      "index": 0,
+      "dispatched": [
+        300,
+        301,
+        302
+      ],
+      "workers": [
+        {
+          "issue": 300,
+          "task_id": "commandmate-feature-issue-300-feat-add-the-palette-loader",
+          "worker_state": "completed",
+          "verification": {
+            "ran": true,
+            "report_schema_version": null,
+            "outcome": "pass",
+            "gates": [],
+            "checks": [
+              "cat cmate-verify-ok"
+            ]
+          },
+          "prompt": {
+            "detected": false,
+            "excerpt": null
+          },
+          "note": "completed; new commit detected; verification passed (profile baseline re-run; it declares no gates)"
+        },
+        {
+          "issue": 301,
+          "task_id": "commandmate-feature-issue-301-feat-add-the-ledger-writer",
+          "worker_state": "completed",
+          "verification": {
+            "ran": true,
+            "report_schema_version": null,
+            "outcome": "pass",
+            "gates": [],
+            "checks": [
+              "cat cmate-verify-ok"
+            ]
+          },
+          "prompt": {
+            "detected": false,
+            "excerpt": null
+          },
+          "note": "completed; new commit detected; verification passed (profile baseline re-run; it declares no gates)"
+        },
+        {
+          "issue": 302,
+          "task_id": "commandmate-feature-issue-302-feat-add-the-sitemap-renderer",
+          "worker_state": "completed",
+          "verification": {
+            "ran": true,
+            "report_schema_version": null,
+            "outcome": "pass",
+            "gates": [],
+            "checks": [
+              "cat cmate-verify-ok"
+            ]
+          },
+          "prompt": {
+            "detected": false,
+            "excerpt": null
+          },
+          "note": "completed after 5 nudge(s); new commit detected; verification passed (profile baseline re-run; it declares no gates)"
+        }
+      ],
+      "barrier": {
+        "all_workers_completed": true,
+        "all_verifications_passed": true,
+        "advanced": true
+      }
+    },
+    {
+      "index": 1,
+      "dispatched": [
+        303
+      ],
+      "workers": [
+        {
+          "issue": 303,
+          "task_id": "commandmate-feature-issue-303-feat-add-the-palette-picker-widget",
+          "worker_state": "completed",
+          "verification": {
+            "ran": true,
+            "report_schema_version": null,
+            "outcome": "pass",
+            "gates": [],
+            "checks": [
+              "cat cmate-verify-ok"
+            ]
+          },
+          "prompt": {
+            "detected": false,
+            "excerpt": null
+          },
+          "note": "completed; new commit detected; verification passed (profile baseline re-run; it declares no gates)"
+        }
+      ],
+      "barrier": {
+        "all_workers_completed": true,
+        "all_verifications_passed": true,
+        "advanced": true
+      }
+    }
+  ],
+  "blocking_reasons": [],
+  "limitations": [
+    {
+      "code": "contract_unsupported",
+      "detail": "commandmate is missing send --contract and wait --verify (the execution contract needs CommandMate >= 0.17.0); falling back to the profile-baseline verification (the pre-contract behaviour)"
+    }
+  ],
+  "redactions": [],
+  "completion_check": {
+    "passed": true,
+    "checks": [
+      {
+        "id": "plan_approved",
+        "passed": true,
+        "detail": "an approved plan was loaded and validated"
+      },
+      {
+        "id": "drift_reconfirmed",
+        "passed": true,
+        "detail": "drift was re-checked before dispatch"
+      },
+      {
+        "id": "parallelism_bounded",
+        "passed": true,
+        "detail": "no wave dispatched more than max_parallel workers"
+      },
+      {
+        "id": "barrier_enforced",
+        "passed": true,
+        "detail": "the next wave dispatched only after completion AND verification"
+      },
+      {
+        "id": "no_auto_prompt_response",
+        "passed": true,
+        "detail": "no prompt was answered without explicit --auto-yes"
+      },
+      {
+        "id": "verification_recorded",
+        "passed": true,
+        "detail": "every completed worker carries the verification verdict that judged it"
+      }
+    ]
+  },
+  "summary_markdown": "## 対象と結論\nplan plan を Kewton/CommandMate に dispatch: success（完了, stop=completed）。\n裁定: 実行契約は使わず、profile baseline を worktree 内で再実行するフォールバックで判定した。\n\n## Wave\n- Wave 1: dispatch=#300, #301, #302 / worker完了=true / verify pass=true / 次waveへ=true\n- Wave 2: dispatch=#303 / worker完了=true / verify pass=true / 次waveへ=true\n\n## worker と verification\n- #300: worker=completed / verify=pass\n- #301: worker=completed / verify=pass\n- #302: worker=completed / verify=pass\n- #303: worker=completed / verify=pass\n\n## drift 再確認\n- cli_available: ok\n- repo_access: ok\n- base_resolvable: ok\n- integration_clean: ok（非blocking）\n- worktrees_present: ok\n\n## 未解決と next action\n- limitation: contract_unsupported — commandmate is missing send --contract and wait --verify (the execution contract needs CommandMate >= 0.17.0); falling back to the profile-baseline verification (the pre-contract behaviour)\n- next: 契約非対応の CLI だったため裁定はフォールバック（baseline 再実行）である。契約ゲートで裁定したい場合は CommandMate を 0.17.0 以上へ更新する（owner: operator）。"
+}

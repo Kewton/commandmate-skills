@@ -1,0 +1,13 @@
+{
+  "_comment": "#310 の worktree が直された世界。#311 / #313 は既に pass 済みなので resume は触れず、#310 が green になった時点で #312 が空き枠へ入る。",
+  "cli_available": true,
+  "cli_contract": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "310": { "state": "completed", "verify_exits": [0] },
+    "311": { "state": "completed", "verify_exits": [0] },
+    "312": { "state": "completed", "verify_exits": [0] },
+    "313": { "state": "completed", "verify_exits": [0] }
+  }
+}
