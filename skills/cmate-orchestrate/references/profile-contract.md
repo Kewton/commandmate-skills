@@ -32,7 +32,7 @@ worktree path、baseline 検証 — を **profile** から解決する。planner
 | `worktree_template` | 必須 | worktree path の雛形。同じ placeholder を展開 |
 | `baseline` | 必須 | 各 worker が実行する検証 command の配列 |
 | `verified` | 任意 | 実機確認済みなら `true`。既定は `false` |
-| `scope_companions` | 任意 | このリポジトリ固有の**伴走ファイル規約**。第9節。**未指定なら宣言が無いのと同じ**で、planner は組み込みの導出だけを行う |
+| `scope_companions` | 任意 | このリポジトリ固有の**伴走ファイル規約**。宣言済み path の関数を書く `derive` と、名前が固定された伴走を書く `require` の2 key。第9節。**未指定なら宣言が無いのと同じ**で、planner は組み込みの導出だけを行う |
 
 placeholder は次のとおり展開する。
 
@@ -153,7 +153,7 @@ node scripts/orchestrate.mjs 123 --profile-json /tmp/my-profile.json --allow-unv
 | `baseline` | toolchain manifest（`package.json` / `Cargo.toml` / `pyproject.toml` / `go.mod` / `Makefile`）と lockfile。cargo clippy はリポジトリが clippy を使っている証跡があるときだけ入れる | 後述の失敗する placeholder |
 | `id` | `<toolchain>-<repository 名>`（内蔵 profile と同じ命名） | `custom-repo` |
 | `verified` | — | **常に `false`。この runner が変えることはない** |
-| `scope_companions` | `spec/` `test/` `tests/` の実ファイルと、それが写している `src/` `app/` `lib/` の実ファイルの**対**。両方が実在するときだけ1件起案する（第9.4節） | `{"derive": []}`（空。＝宣言が無いのと同じ挙動） |
+| `scope_companions` | `spec/` `test/` `tests/` の実ファイルと、それが写している `src/` `app/` `lib/` の実ファイルの**対**。両方が実在するときだけ `derive` を1件起案する。`require` は起案しない（第9.4節） | `{"derive": []}`（空。＝宣言が無いのと同じ挙動） |
 
 toolchain が複数ある場合は `node` > `rust` > `python` > `go` > `make` の固定順で
 1つを選び、選ばなかったものを warning `multiple_ecosystems` に載せる。npm 系 lockfile が
@@ -257,6 +257,8 @@ repo には planner が知りようのない規約がある。
 - `app/` を `spec/` が写す独自のテスト配置
 - 生成物（`.proto` → `*_pb.ts`、locale 辞書、snapshot）
 - 宣言済みファイルから決まる、repo が要求する更新
+- **名前が固定された伴走** —— 複数モジュールをまとめて検証する集約テスト、repo が更新を
+  要求する docs。どのソース名とも対応しないので、規則からは出てこない（第9.2節 `require`）
 
 **planner は対象リポジトリを開かない**（開けば plan が入力の純関数でなくなる）し、
 **dispatch が worktree を観測する案は却下されている**（契約が worktree ごとに変わり、
@@ -265,14 +267,23 @@ repo には planner が知りようのない規約がある。
 
 ### 9.2 形
 
+key は2つある。**`derive` は宣言済み path の関数**を、**`require` は名前が固定された
+伴走ファイル**を宣言する。どちらも任意で、**併存する**。
+
 ```json
 "scope_companions": {
   "derive": [
     { "when": "app/{dir}{base}.rb", "add": ["spec/{dir}{base}_spec.rb"] },
     { "when": "src/{dir}{base}.proto", "add": ["src/{dir}{base}_pb.ts"] }
+  ],
+  "require": [
+    { "when": "scripts/{dir}{base}.mjs", "add": ["scripts/tests/shared-contract.test.mjs"] },
+    { "when": "web/src/shared/{base}.mjs", "add": ["scripts/tests/shared-contract.test.mjs"] }
   ]
 }
 ```
+
+#### `derive` —— テンプレートの対
 
 1つの規則は、**共通の語彙で書かれた2つの path テンプレートの対**である。
 `when` が**宣言済み path** に一致して placeholder を束縛し、`add` がその束縛を
@@ -288,6 +299,35 @@ repo には planner が知りようのない規約がある。
 
 **glob は書けない。** `*` `?` `[` `]` は両テンプレートで拒否され、wildcard は placeholder
 だけである。したがって `add` が生む path は必ず**宣言済み path の一部を literal に含む**。
+`when` で `**` を書きたくなったら `{dir}{base}`、`*` を書きたくなったら `{base}` である
+（`scripts/**` は `scripts/{dir}{base}`）。エラー文がこの対応を名指しする。
+
+#### `require` —— 名前が固定された伴走（[#181](https://github.com/Kewton/commandmate-skills/issues/181)）
+
+`add` に **placeholder を含まないリテラル path** だけを書く。`when` は `derive` と同じ
+語彙で、**宣言済み path に一致したときだけ**その literal を足す。
+
+複数モジュールをまとめて検証する**集約テスト**がこれを必要とする。
+`scripts/tests/shared-contract.test.mjs` はどのソース名とも対応しない —— **対応しないことが
+集約テストの定義**である —— ので、L1 の慣習導出にも `derive` にも乗らない。#181 以前は
+Issue 本文の `## 対象ファイル` へ毎回手書きする運用しか残っておらず、書き忘れた worker は
+テストを更新できないまま scope ゲートで落ちていた。
+
+- **何件一致しても1回だけ出る。** 最初に一致した宣言済みファイルの位置に1件入る
+- **`when` は placeholder を持たなくてよい。** `{ "when": "docs/data-contract.md", "add": [...] }`
+  は「この file を触るなら、あの file も触ってよい」という完結した規則である
+  （`derive` では逆に拒否される —— 束縛が無ければ `add` を宣言の関数にできない）
+- **`derive` は緩まない。** placeholder を1つも含まない `add` は `derive` では依然
+  `load_error` である。**括弧の誤記が literal に化けることはない** —— `{Base}` や `{base`
+  はどちらの key でも拒否され、括弧ごと落とした誤記（`spec/dir/base_spec.rb`）は
+  `derive` で拒否される。key を移して初めて合法になる、つまり**判別しているのは
+  中身の推測ではなく著者が書いた key** である
+
+`require` の literal は宣言済み path の関数**ではない**（`derive` との唯一の違いである）。
+それでも `when` に gate されているので「宣言が無ければ1件も出ない」は保たれる。
+第9.1節の強い言明を `derive` に残したまま、弱い方を key の名前で可視にするのが
+この形の目的である（[adr-scope-derivation.md](./adr-scope-derivation.md) 第15.2節が
+「実例が出たら別 key として足す」と裁定していた、その実例である）。
 
 ### 9.3 拒否される宣言（すべて `load_error` / exit 6）
 
@@ -295,16 +335,24 @@ Issue を読む前、profile を読んだ時点で止まる。
 
 | 宣言 | なぜ拒否するか |
 |---|---|
-| `add: ["spec/**/*_spec.rb"]` | 単独 glob。宣言と無関係な許可であり、[#50](https://github.com/Kewton/commandmate-skills/issues/50) が塞いだ穴を profile 経由で開ける |
-| `add: ["docs/module-reference.md"]` | placeholder を1つも含まない。宣言済み path の関数になっていない |
-| `add` が `when` の束縛していない placeholder を使う | 同上 |
-| `when` が placeholder を1つも持たない / 同じ placeholder を2回持つ | 前者は固定 path 1件にしか一致せず、後者は意味が定義できない |
-| `{ext}` など未知の placeholder、`{base` のような括弧の不整合 | typo が literal に化けると「一致しない規則」が黙って残る |
+| `derive[].add: ["spec/**/*_spec.rb"]` | 単独 glob。宣言と無関係な許可であり、[#50](https://github.com/Kewton/commandmate-skills/issues/50) が塞いだ穴を profile 経由で開ける |
+| `derive[].add: ["docs/module-reference.md"]` | placeholder を1つも含まない。宣言済み path の関数になっていない（固定名なら `require` へ書く） |
+| `derive[].add` が `when` の束縛していない placeholder を使う | 同上 |
+| `derive[].when` が placeholder を1つも持たない | 固定 path 1件にしか一致せず、そこから何も導出できない（`require` では正当） |
+| どちらかの `when` が同じ placeholder を2回持つ | 意味が定義できない（compile は独立した capture group にするので「等しいこと」を要求しない） |
+| `require[].add` が placeholder を含む | literal として書かれた path はそのまま許可される。展開する束縛が無い以上、`{base}` の6文字が scope へ入るだけである |
+| `require[].add` が repo の外を指す（`users/…` `C:/…` `https://…`、制御文字） | **literal だけは宣言済み path から作られない**ので、ここを通さないと profile 経由の path traversal になる。`..` / 先頭 `/` / `\` はテンプレート parser が先に落とす |
+| `require[].add` が harness path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`） | 第9.6節 |
+| `{ext}` など未知の placeholder、`{base` のような括弧の不整合 | typo が literal に化けると「一致しない規則」が黙って残る。**両方の key で拒否する** |
 | `..` を含む / 絶対 path | 対象リポジトリの外を指す |
-| `derive` 以外の key、規則の `when` / `add` 以外の key | 未知 field を持つ profile を拒否するのと同じ（第1節）。**新しい runner 向けの profile は古い runner で黙って半分無視されるのではなく、はっきり落ちなければならない** |
-| `add: []`、`derive` が配列でない、`scope_companions` が object でない | 形が違う |
+| `derive` / `require` 以外の key、規則の `when` / `add` 以外の key | 未知 field を持つ profile を拒否するのと同じ（第1節）。**新しい runner 向けの profile は古い runner で黙って半分無視されるのではなく、はっきり落ちなければならない** |
+| `add: []`、`derive` / `require` が配列でない、`scope_companions` が object でない | 形が違う |
+| `scope_companions: {}` | どちらの key も無い。「宣言する規約が無い」は `{"derive": []}` と書く |
 
-`{"derive": []}` は**正当で、かつ何もしない**。未指定と同じ導出になる。
+`{"derive": []}` は**正当で、かつ何もしない**。未指定と同じ導出になる（`{"require": []}` も同じ）。
+
+**正規化は宣言した key しか持たない。** `derive` だけを書いた profile の plan は
+`require` が増える前と 1 byte も変わらない（`plan.profile` の echo も `{"derive": …}` のまま）。
 
 ### 9.4 起案（`profile-init.mjs`）と provenance
 
@@ -318,6 +366,15 @@ Issue を読む前、profile を読んだ時点で止まる。
 対の TODO `scope_companions_undetermined` を必ず添える。**起案は常に1規則である** ——
 draft は人間が広げる出発点であり、`verified: false` がそう言っている。
 
+**`require` は起案しない**（[#181](https://github.com/Kewton/commandmate-skills/issues/181)）。
+literal 伴走とソースの関係は**意味の関係**であって配置の関係ではない —— 集約テストは
+どのソース名とも対応しないからこそ集約テストなので、対で裏を取れる実ファイルが存在しない。
+どの宣言がそれを引き込むべきか（`when`）も「その file が何を覆っているか」の言明であり、
+著者にしか書けない。起案すれば規則の両側を発明して `detected` と名乗ることになり、
+それは第9.4節の規律そのものに反する。代わりに **TODO `scope_companions_undetermined` の
+文面が `require` を名指しする** —— この TODO は「何も検出できなかった」ときに出る、
+つまり人間がちょうどこの field を読んでいるときに出る。
+
 ### 9.5 運用上の注意
 
 - **宣言を直して plan を取り直すと `run_exists`（exit 4）になる。** run_id の入力は
@@ -329,3 +386,22 @@ draft は人間が広げる出発点であり、`verified: false` がそう言�
 - **書きすぎは無害ではない。** dispatch は `scope.allow` を sort してから 200 件に切り詰めるので、
   導出が増えすぎると宣言済みファイルが押し出される。planner は合計が 200 に達する手前で
   宣言済みファイル単位に打ち切るが、規則を増やすほど1 Issue あたりの導出は増える。
+  `require` の literal は何件一致しても1回しか出ないので、この観点では `derive` より安い。
+
+### 9.6 harness path は `require` に書けない（[#177](https://github.com/Kewton/commandmate-skills/issues/177) の境界）
+
+`.claude/skills/` / `.agents/skills/` / `.commandmate/` —— worker と検証役が**である** Skill
+package と、「verified とは何か」を決める設定 —— は、planner が既定で `scope.allow` から外す。
+審判を書き換えられる被審判は審判されていないからである。**profile はこの境界を緩められない。**
+#177 は除外集合を hardcode する理由として「`scope_companions` 的な key で緩められる境界は、
+静かな2つ目の扉を持つ境界である」と述べており、literal 伴走はまさにその key である。
+
+- **literal（`require[].add`）は profile 読み込み時に `load_error` で拒否する。**
+  literal は静的に判定できるし、後で黙って落とせば「一致しない規則が黙って残る」ことになる。
+  profile は人がレビューする成果物なので、その場で落とすほうが直せる
+- **template（`derive[].add`）が harness に展開されたときは導出時に落とす。**
+  ただし**宣言済み path 自身が harness の中にあるとき**は落とさない —— それは Issue が
+  成果物見出しで名指しし、`harness_path_in_scope` warning で記録された、#177 が認めている
+  唯一の許可であり、L1 も同じ宣言から慣習テスト path を導出している
+
+出口は今までどおり Issue 本文の成果物見出し1つだけで、そこには warning が付く。

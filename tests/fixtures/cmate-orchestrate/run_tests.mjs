@@ -537,6 +537,22 @@ function runCase(caseId) {
       result.errors.some((e) => e.code === expect.error_code),
       `error code "${expect.error_code}" not in ${JSON.stringify(result.errors.map((e) => e.code))}`,
     );
+    // The code alone is a weak assertion for a REFUSAL case, and measurably so
+    // (Issue #181): every malformed `scope_companions` shape exits 6 with
+    // `load_error`, including the ones an older runner refuses merely because it
+    // has never heard of the key. A case that pins only the code therefore stays
+    // green against a runner that rejects the declaration for the wrong reason —
+    // which is exactly the state these cases have to be RED in before the
+    // feature exists. Each listed substring must appear in some error's detail.
+    if (expect.error_details_include) {
+      const details = result.errors.map((e) => e.detail);
+      for (const needle of expect.error_details_include) {
+        check(
+          details.some((detail) => detail.includes(needle)),
+          `no error detail contains "${needle}"; details: ${JSON.stringify(details)}`,
+        );
+      }
+    }
     check(result.completion_check.passed === false, 'completion_check.passed should be false on failure');
     return;
   }
@@ -4386,6 +4402,17 @@ function runProfileInitCase(caseId) {
     deepEqual((result.todos ?? []).map((todo) => todo.code), expect.todos ?? []),
     `todo codes ${JSON.stringify((result.todos ?? []).map((t) => t.code))} != ${JSON.stringify(expect.todos ?? [])}`,
   );
+  // A TODO's TEXT is the whole deliverable of a `default` field: the code says
+  // "look here", the text says what to write. Keyed by code, each listed
+  // substring must appear in that TODO's detail (Issue #181, where the text was
+  // telling profile authors to declare a shape `derive` cannot express).
+  for (const [code, needles] of Object.entries(expect.todo_details_include ?? {})) {
+    const todo = (result.todos ?? []).find((item) => item.code === code);
+    if (!check(todo !== undefined, `no TODO with code ${code}`)) continue;
+    for (const needle of needles) {
+      check(todo.detail.includes(needle), `TODO ${code} detail does not contain "${needle}": ${todo.detail}`);
+    }
+  }
   check(
     deepEqual((result.warnings ?? []).map((warning) => warning.code), expect.warnings ?? []),
     `warning codes ${JSON.stringify((result.warnings ?? []).map((w) => w.code))} != ${JSON.stringify(expect.warnings ?? [])}`,
@@ -4979,13 +5006,63 @@ function profileCompanionRejectionTest() {
     ['an unknown rule key', { derive: [{ when: 'app/{base}.rb', add: ['spec/{base}_spec.rb'], unless: 'x' }] }],
     ['an empty add', { derive: [{ when: 'app/{base}.rb', add: [] }] }],
     ['a list instead of an object', []],
+    // ---- the literal companion key (Issue #181) ------------------------------
+    //
+    // `require` is a NEW ROUTE, not a relaxation of the rows above: a
+    // placeholder-free `add` is still refused inside `derive` (the "a constant
+    // add" row, which stays), and `require` refuses the exact inverse. That pair
+    // is what keeps a MISTYPED template from becoming a literal — a template
+    // whose braces are intact is refused by `require`, and one whose braces were
+    // dropped is refused by `derive`, so neither key accepts what the other's
+    // typo looks like.
+    //
+    // Every row from here down names a SUBSTRING of the message its own check
+    // produces. Asserting only `load_error` would be no assertion at all against
+    // a runner that has never heard of `require`: it refuses the whole key as
+    // unknown and exits 6 with a `scope_companions` detail, which is exactly the
+    // state these rows must be red in before the feature exists.
+    ['a template in require.add', { require: [{ when: 'scripts/{base}.mjs', add: ['scripts/tests/{base}.test.mjs'] }] }, 'must be a literal path'],
+    // The three shapes only `isSafeRepoPath` refuses. A literal is granted
+    // VERBATIM — nothing about it is built out of a declared path — so this is
+    // the branch where a profile could otherwise name something outside the
+    // repository entirely.
+    ['a system root in require.add', { require: [{ when: 'scripts/{base}.mjs', add: ['users/kewton/notes/contract.test.mjs'] }] }, 'is not a repository-relative path'],
+    ['a drive letter in require.add', { require: [{ when: 'scripts/{base}.mjs', add: ['C:/repo/contract.test.mjs'] }] }, 'is not a repository-relative path'],
+    ['a URL in require.add', { require: [{ when: 'scripts/{base}.mjs', add: ['https://example.com/contract.test.mjs'] }] }, 'is not a repository-relative path'],
+    // ...and the two the template parser already refuses, kept so the pair of
+    // predicates is measured rather than assumed.
+    ['an escaping require.add', { require: [{ when: 'scripts/{base}.mjs', add: ['../contract.test.mjs'] }] }, 'must be a relative repository path'],
+    ['an absolute require.add', { require: [{ when: 'scripts/{base}.mjs', add: ['/etc/contract.test.mjs'] }] }, 'must be a relative repository path'],
+    // Issue #177's boundary, on the profile side (case 65 is the same refusal as
+    // a plan case; this row measures the OTHER two harness roots).
+    ['a harness path in require.add', { require: [{ when: 'scripts/{base}.mjs', add: ['.commandmate/verify.yaml'] }] }, 'part of the agent harness'],
+    ['an agents-skills path in require.add', { require: [{ when: 'scripts/{base}.mjs', add: ['.agents/skills/cmate-verify/scripts/verify-run.sh'] }] }, 'part of the agent harness'],
+    // `when` keeps the vocabulary it has in `derive`, so the glob refusal is the
+    // same one — and the message has to carry the translation, because a `when`
+    // is the one place an author reaches for `**` (Issue #181 proposes the rule
+    // with `"when": "scripts/**"` in as many words).
+    ['a glob in require.when', { require: [{ when: 'scripts/**', add: ['scripts/tests/contract.test.mjs'] }] }, 'write "{dir}{base}"'],
+    ['a repeated placeholder in require.when', { require: [{ when: '{dir}{base}{dir}.mjs', add: ['scripts/tests/contract.test.mjs'] }] }, 'repeats a placeholder'],
+    ['an empty add in require', { require: [{ when: 'scripts/{base}.mjs', add: [] }] }, 'non-empty array'],
+    ['an unknown key in a require rule', { require: [{ when: 'scripts/{base}.mjs', add: ['scripts/tests/contract.test.mjs'], unless: 'x' }] }, 'unknown key'],
+    ['a require that is not an array', { require: {} }, '"require" must be an array of rules'],
+    // The degenerate object. `{}` declares the key and then declares nothing
+    // under it, which is a profile mid-edit rather than a statement about the
+    // repository — `{"derive": []}` is how you say "there is no convention".
+    ['neither derive nor require', {}, 'must declare "derive" and/or "require"'],
   ];
-  bad.forEach(([label, declaration], index) => {
+  bad.forEach(([label, declaration, needle], index) => {
     const profilePath = writeProfile(dir, `bad-${index}.json`, declaration);
     const result = runRunner(buildArgs(['100', '--profile-json', profilePath], issuesPath, join(dir, `runs-${index}`)));
     if (!check(result.exit === 6, `${label} should be refused with exit 6, exited ${result.exit}`)) return;
     const parsed = JSON.parse(result.stdout);
     check(parsed.plan === null, `${label}: a refused profile must not produce a plan`);
+    if (needle !== undefined) {
+      check(
+        parsed.errors.some((error) => error.detail.includes(needle)),
+        `${label}: no error detail contains "${needle}", got ${JSON.stringify(parsed.errors)}`,
+      );
+    }
     check(
       parsed.errors.some((error) => error.code === 'load_error' && error.detail.includes('scope_companions')),
       `${label}: expected a load_error naming scope_companions, got ${JSON.stringify(parsed.errors)}`,
@@ -4994,12 +5071,18 @@ function profileCompanionRejectionTest() {
 
   // And the degenerate declaration is legal and inert: an EMPTY `derive` derives
   // what no declaration derives, which is what lets profile-init emit the key on
-  // every draft without changing any plan's scope.
+  // every draft without changing any plan's scope. An empty `require` is the same
+  // statement about the other key (Issue #181), and a profile carrying both empty
+  // lists is still just a profile that declares no convention.
   const emptyPath = writeProfile(dir, 'empty.json', { derive: [] });
+  const emptyBothPath = writeProfile(dir, 'empty-both.json', { derive: [], require: [] });
   const nonePath = writeProfile(dir, 'none.json', undefined);
-  const [empty, none] = [emptyPath, nonePath].map((path, index) =>
+  const [empty, emptyBoth, none] = [emptyPath, emptyBothPath, nonePath].map((path, index) =>
     runRunner(buildArgs(['100', '--profile-json', path], issuesPath, join(dir, `ok-${index}`))));
-  if (!check(empty.exit === 0 && none.exit === 0, 'an empty declaration and no declaration should both plan')) return;
+  if (!check(
+    empty.exit === 0 && emptyBoth.exit === 0 && none.exit === 0,
+    'an empty declaration and no declaration should both plan',
+  )) return;
   const strip = (result) => {
     const plan = JSON.parse(JSON.stringify(JSON.parse(result.stdout).plan));
     plan.run_id = null;
@@ -5010,6 +5093,150 @@ function profileCompanionRejectionTest() {
   check(
     deepEqual(strip(empty), strip(none)),
     'an empty scope_companions changed the plan somewhere other than the echoed profile',
+  );
+  check(
+    deepEqual(strip(emptyBoth), strip(none)),
+    'an empty derive+require changed the plan somewhere other than the echoed profile',
+  );
+  // The echo carries only what the profile declared, in a fixed order. A
+  // normalizer that filled the absent key in would put a byte into `plan.profile`
+  // that was never in the profile — the property case 45 measures for a profile
+  // with no declaration at all, measured here one level down.
+  const echo = (result) => JSON.parse(result.stdout).plan.profile.scope_companions;
+  check(
+    JSON.stringify(echo(empty)) === '{"derive":[]}',
+    `a derive-only declaration should echo as itself, got ${JSON.stringify(echo(empty))}`,
+  );
+  check(
+    JSON.stringify(echo(emptyBoth)) === '{"derive":[],"require":[]}',
+    `a two-key declaration should echo derive first, got ${JSON.stringify(echo(emptyBoth))}`,
+  );
+}
+
+// The literal companion, and the two boundaries it must not move (Issue #181).
+//
+// Case 62 pins what a matching `require` rule adds and case 63 that a
+// non-matching one adds nothing. Two properties no case fixture can see live
+// here: a literal is granted at most ONCE however many declared paths pull it
+// in, and the agent-harness boundary (#177) holds for a companion that only
+// becomes a harness path when a template is expanded.
+function profileLiteralCompanionTest() {
+  log('  a literal companion is granted once, and never into the agent harness (#181)');
+  const dir = mkdtempSync(join(tmpdir(), 'cmate-orch-l2-lit-'));
+
+  // ---- once, not once per declared file ------------------------------------
+  //
+  // Three declared paths match three different `require` rules that all name the
+  // same aggregate contract test. `scope.allow` is a SET of permissions, but the
+  // plan's list is not deduplicated by the schema — dispatch sorts it and cuts it
+  // at 200 — so a literal emitted per matching file would spend the budget three
+  // times over for one grant.
+  const profilePath = writeProfile(dir, 'literal.json', {
+    require: [
+      { when: 'scripts/{dir}{base}.mjs', add: ['scripts/tests/shared-contract.test.mjs'] },
+      { when: 'web/src/shared/{base}.mjs', add: ['scripts/tests/shared-contract.test.mjs'] },
+      // A `when` that binds nothing is legal here and refused in `derive`: with
+      // no binding to write back, a fixed `when` is a complete rule ("if you
+      // touch THIS file, you may touch THAT one") rather than a rule that can
+      // only ever match one path and derive nothing from it. It adds its own
+      // literal so that this route is measured by what it GRANTS — pointed at the
+      // shared one it would be indistinguishable from a rule that never matched.
+      { when: 'docs/data-contract.md', add: ['scripts/tests/data-contract.test.mjs'] },
+    ],
+  });
+  const issuesPath = join(dir, 'issues.json');
+  writeFileSync(issuesPath, JSON.stringify({
+    issues: [{
+      number: 492,
+      title: 'feat: tile 名の正規化を共有する',
+      body: '## 対象ファイル\n- `scripts/build-tiles.mjs`\n- `web/src/shared/format.mjs`\n- `docs/data-contract.md`\n\n'
+        + '## Acceptance criteria\n- [ ] 正規化の結果が一致する\n',
+      labels: ['feature'],
+    }],
+  }));
+  const result = runRunner(buildArgs(['492', '--profile-json', profilePath], issuesPath, join(dir, 'runs')));
+  if (!check(result.exit === 0, `the planner should succeed, exited ${result.exit}`)) return;
+  const issue = JSON.parse(result.stdout).plan.issues[0];
+  const literal = 'scripts/tests/shared-contract.test.mjs';
+  check(
+    issue.scope_defaults.filter((path) => path === literal).length === 1,
+    `the literal companion appears ${issue.scope_defaults.filter((p) => p === literal).length} times in scope_defaults`,
+  );
+  check(
+    issue.suspected_files.filter((path) => path === literal).length === 1,
+    `the literal companion appears ${issue.suspected_files.filter((p) => p === literal).length} times in suspected_files`,
+  );
+  // Read in order: L1's four shapes for each of the two `.mjs` files, then the
+  // shared literal (pulled in by the FIRST declared path that matches a rule, not
+  // by each of them), then the literal the fixed `when` grants. The whole list is
+  // re-derivable by hand from the profile and the issue.
+  check(
+    deepEqual(issue.scope_defaults, [
+      'scripts/build-tiles.test.mjs',
+      'scripts/build-tiles.spec.mjs',
+      'scripts/__tests__/build-tiles.mjs',
+      'scripts/__tests__/build-tiles.test.mjs',
+      'web/src/shared/format.test.mjs',
+      'web/src/shared/format.spec.mjs',
+      'web/src/shared/__tests__/format.mjs',
+      'web/src/shared/__tests__/format.test.mjs',
+      'scripts/tests/shared-contract.test.mjs',
+      'scripts/tests/data-contract.test.mjs',
+    ]),
+    `scope_defaults are not the declaration read in order: ${JSON.stringify(issue.scope_defaults)}`,
+  );
+
+  // ---- the harness boundary, both directions -------------------------------
+  //
+  // A literal harness companion is refused at load (case 65). What cannot be
+  // decided there is a TEMPLATE, because whether its expansion lands inside
+  // `.claude/skills/` can depend on what the declaration bound. Both rules below
+  // are legal declarations; the difference is where the harness path comes from.
+  //
+  //   * `src/{dir}{base}.mjs` -> `.claude/skills/{dir}{base}.test.mjs` reaches the
+  //     harness from a declaration that is NOT in it. That is the profile doing
+  //     the granting, which is the door #177 says must not exist, so it is
+  //     dropped at derivation.
+  //   * `.claude/skills/{dir}{base}.mjs` -> `…{base}.contract.mjs` reaches it from
+  //     a harness path THE ISSUE declared under a deliverable heading — the one
+  //     grant #177 honours, reported as `harness_path_in_scope`. Dropping that
+  //     one would also contradict L1, which derives the four conventional test
+  //     shapes of the same declared path and is not filtered.
+  const harnessProfile = writeProfile(dir, 'harness.json', {
+    derive: [
+      { when: 'src/{dir}{base}.mjs', add: ['.claude/skills/{dir}{base}.test.mjs'] },
+      { when: '.claude/skills/{dir}{base}.mjs', add: ['.claude/skills/{dir}{base}.contract.mjs'] },
+    ],
+  });
+  const harnessIssues = join(dir, 'harness-issues.json');
+  writeFileSync(harnessIssues, JSON.stringify({
+    issues: [{
+      number: 493,
+      title: 'chore: worker skill の runner を直す',
+      body: '## 対象ファイル\n- `src/lib/normalize.mjs`\n- `.claude/skills/cmate-worker/scripts/run.mjs`\n\n'
+        + '## Acceptance criteria\n- [ ] runner が新しい引数を読む\n',
+      labels: ['chore'],
+    }],
+  }));
+  const harnessResult = runRunner(buildArgs(['493', '--profile-json', harnessProfile], harnessIssues, join(dir, 'harness-runs')));
+  if (!check(harnessResult.exit === 0, `the harness plan should succeed, exited ${harnessResult.exit}`)) return;
+  const harnessIssue = JSON.parse(harnessResult.stdout).plan.issues[0];
+  check(
+    !harnessIssue.suspected_files.includes('.claude/skills/lib/normalize.test.mjs'),
+    `a profile granted a harness path off a non-harness declaration: ${JSON.stringify(harnessIssue.suspected_files)}`,
+  );
+  check(
+    harnessIssue.suspected_files.includes('.claude/skills/cmate-worker/scripts/run.contract.mjs'),
+    `the companion of a DECLARED harness path was dropped: ${JSON.stringify(harnessIssue.suspected_files)}`,
+  );
+  // The declaration itself is in scope because the issue named it under a
+  // deliverable heading, and #177 says so out loud. If this ever stops holding,
+  // the assertion above becomes vacuous — the companion would be missing because
+  // its source was, not because of anything this test is about.
+  check(
+    harnessIssue.suspected_files.includes('.claude/skills/cmate-worker/scripts/run.mjs')
+      && warningCodesOf(JSON.parse(harnessResult.stdout)).includes('harness_path_in_scope'),
+    'the declared harness path should be in scope and reported (#177)',
   );
 }
 
@@ -5175,6 +5402,7 @@ function main() {
   profileCompanionDeterminismTest();
   profileCompanionBoundTest();
   profileCompanionRejectionTest();
+  profileLiteralCompanionTest();
 
   log('');
   if (failures > 0) {

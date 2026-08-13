@@ -1085,6 +1085,20 @@ function detectWorktreeTemplate(ctx) {
 // others, the same discipline `multiple_ecosystems` follows: never silently pick
 // one of several. The draft is a starting point a human extends, and
 // `verified: false` says so.
+//
+// Only `derive` is ever drafted — the `require` key (Issue #181) is never
+// proposed, and that is a decision rather than an omission. A literal companion
+// is the shape whose relationship to the sources is SEMANTIC: an aggregate
+// contract test is called `shared-contract.test.mjs` precisely because its name
+// corresponds to no source name, so there is no pair of files a scan could hold
+// up as evidence, and its `when` — WHICH declarations should pull it in — is a
+// statement about what the file covers that only its author can make. Drafting
+// it would mean inventing both halves of a rule and marking them `detected`,
+// which is the quiet guess this runner exists to avoid (ADR §15.6). What the
+// runner does instead is name the key in the `scope_companions_undetermined`
+// TODO, so an author reading the draft's gaps learns the shape exists; the TODO
+// fires exactly when nothing was detected, which is also when a human is already
+// reading this field.
 
 // Fixed scan order. The first (test root, source root, affix) triple that pairs
 // two real files wins, so this order is part of the runner's determinism, not an
@@ -1205,9 +1219,18 @@ function detectScopeCompanions(ctx) {
       todo: {
         field: 'scope_companions',
         code: 'scope_companions_undetermined',
+        // The text names BOTH keys, because the shapes it lists do not all fit
+        // one of them (Issue #181): a mirrored test tree and a generated file are
+        // functions of the source path and belong in "derive", while an aggregate
+        // contract test and a required document have fixed names and are only
+        // expressible as a "require" literal. Until #181 this TODO asked for the
+        // second kind and the runner then refused it — advice that cost the
+        // author a load_error to discover.
         detail:
-          'if this repository keeps its tests, its generated files or a required document somewhere the ' +
-          'planner cannot reach from a source path, declare the rule here — a companion missing from a ' +
+          'if this repository keeps its tests or its generated files somewhere the planner cannot reach ' +
+          'from a source path, declare the rule under "derive" — and if a file with a FIXED name has to ' +
+          'be edited alongside them (an aggregate contract test, a required document), declare it as a ' +
+          'literal under "require", whose "when" gates it on a declared path. A companion missing from a ' +
           'worker\'s scope fails the scope gate in a way the worker cannot resolve ' +
           '(references/profile-contract.md §9). If there is no such convention, leave "derive" empty.',
       },

@@ -236,6 +236,28 @@
     }
   },
   "$defs": {
+    "companion_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "when",
+        "add"
+      ],
+      "properties": {
+        "when": {
+          "type": "string",
+          "minLength": 1
+        },
+        "add": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
     "run_id": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
@@ -308,33 +330,18 @@
         "scope_companions": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "derive"
-          ],
+          "minProperties": 1,
           "properties": {
             "derive": {
               "type": "array",
               "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "when",
-                  "add"
-                ],
-                "properties": {
-                  "when": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "add": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  }
-                }
+                "$ref": "#/$defs/companion_rule"
+              }
+            },
+            "require": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/companion_rule"
               }
             }
           }

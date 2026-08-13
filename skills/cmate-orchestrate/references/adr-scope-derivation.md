@@ -592,7 +592,7 @@ placeholder は `{dir}`（0個以上の segment、各々に末尾 `/`）と `{ba
 
 | 入れなかったもの | 理由 |
 |---|---|
-| **定数の伴走 path**（「この repo は `docs/module-reference.md` の更新を要求する」） | placeholder を1つも含まない `add` を許すと、不変条件1の検査が「glob でないこと」だけに痩せる。`|closure| ≤ k × |declared|` は保てるが、**「宣言と無関係な許可が書けない」という強い言明が「書けるが狭い」に落ちる。** 実例が出たら `derive` とは別の key（例: `require`）として足す —— そのとき「宣言と無関係」であることを key の名前が明示する |
+| **定数の伴走 path**（「この repo は `docs/module-reference.md` の更新を要求する」）<br>**→ 段7（[#181](https://github.com/Kewton/commandmate-skills/issues/181)）で `require` として着地。第18節** | placeholder を1つも含まない `add` を許すと、不変条件1の検査が「glob でないこと」だけに痩せる。`|closure| ≤ k × |declared|` は保てるが、**「宣言と無関係な許可が書けない」という強い言明が「書けるが狭い」に落ちる。** 実例が出たら `derive` とは別の key（例: `require`）として足す —— そのとき「宣言と無関係」であることを key の名前が明示する |
 | **`{ext}` placeholder** | 拡張子ごとに1規則書くほうが明示的で、当たる範囲も読んで分かる。`{ext}` は placeholder を1つ足すだけの互換な拡張である |
 | **規則の除外条件**（`unless`） | 除外が要る事例をまだ1件も持っていない。規則の未知 key は拒否されるので、足すときは runner の側で解禁する |
 | **profile が L1 を*上書き*すること** | 第5節の裁定どおり L2 は**足すだけ**である。上書きを許すと「設定ゼロで効く」L1 の保証が profile 次第になる |
@@ -950,3 +950,145 @@ status runner の約束なので、これは劣化ではなく既定の振る舞
 「散文でハーネス path を書いた Issue」を今も planner-ready と判定する ——
 **その判定は今も正しい**（他に対象 file が在れば `suspected_files` は空にならない）が、
 「その path は scope に入らない」ことは言わない。**それも次の変更の仕事である。**
+
+---
+
+## 18. 実装時の追記（段7・[#181](https://github.com/Kewton/commandmate-skills/issues/181)）
+
+第15.2節は「定数の伴走 path」を第1版から外し、**入れるとしたらどう入れるか**まで書いていた
+——「実例が出たら `derive` とは別の key（例: `require`）として足す —— そのとき『宣言と無関係』
+であることを key の名前が明示する」。本節はその**実例が出たこと**と、書いてあったとおりに
+足したことの記録である。正本は [profile-contract.md](./profile-contract.md) 第9.2節
+（`require` の形）・第9.3節（拒否表）・第9.6節（harness 境界）と
+[plan-contract.md](./plan-contract.md) 第5.1節（4つ目の導出元）である。
+
+### 18.1 実例は「集約テスト」だった
+
+利用リポジトリ（Kewton/BorderFreeKidsMap）の実測。`scripts/**` と `web/src/shared/*.mjs` を
+触る Issue は、毎回 `scripts/tests/shared-contract.test.mjs` —— 複数モジュールを1本で検証する
+契約テスト —— を `## 対象ファイル` へ**手書きする運用ルール**になっていた。
+
+- L1（段1）が導出するのは**ソース名規則**の配置だけである。0.26.0 実測で、L1 は5ファイルの
+  宣言から18 path を導出した。集約テストはその18件に入らない
+- `derive`（段4）にも書けない。`add` は `when` が束縛した placeholder を必ず含まなければ
+  ならず、`shared-contract` はどの `{base}` でもない
+
+**どのソース名とも対応しないことが集約テストの定義**なので、これは規則の抜けではなく
+**規則で表現できない種類の伴走**である。残った経路は Issue 本文への手書きだけで、
+書き忘れれば worker はテストを更新できないまま scope ゲートに当たる ——
+第1節が3回測った、あの失敗そのものである。
+
+### 18.2 裁定: `derive` を緩めず、`require` を足す
+
+第15.2節の予告どおり**別 key** にした。`add` に placeholder を要求しないことを `derive` の
+側で許すのが最短だが、そうすると不変条件1の検査が「glob でないこと」だけに痩せる ——
+第15.2節が既に書いていた理由である。加えて #181 が名指しした劣化条件がある:
+**誤記した placeholder が「リテラル path」として黙って通ってはならない。**
+
+判別は**中身の推測ではなく key** で行う。両者は互いの形を拒否する。
+
+| | `derive[].add` | `require[].add` |
+|---|---|---|
+| placeholder | **1つ以上**必須（すべて `when` が束縛） | **0個**必須 |
+| 安全性 | 宣言済み path から組み立てるので抽出時に検査済み | `isSafeRepoPath` ＋ harness 拒否を **load 時に**通す |
+
+括弧が残っている誤記（`{Base}` / `{ext}` / `{base`）は、そもそも
+`parseCompanionTemplate` が**両方の key で**トークン化して拒否するので literal に化けない。
+残るのは**括弧ごと落とした誤記**（`spec/{dir}{base}_spec.rb` のつもりで
+`spec/dir/base_spec.rb`）で、これは `derive` に書いてある限り拒否される。合法になるのは
+**key を移したとき**だけ、つまり著者が「この path は固定である」と宣言したときだけである。
+
+不変条件1は `require` について**弱くなった**（literal は宣言済み path の関数ではない）。
+弱くなったことを隠さないために key を分けている。**gate は残っている** —— `when` に一致する
+宣言が1つも無ければ1件も出ないので、`|closure| ≤ (add 総数) × |declared|` も
+「`suspected_files` が空なら `scope_defaults` も空」も成り立つ。不変条件2・3 は同一である
+（同じ1本の list に合流し、disk も clock も読まない）。
+
+`when` の語彙は**変えていない**。#181 の提案本文は `{ "when": "scripts/**" }` と書いているが、
+glob を `when` に入れると「glob 構文が存在しない」という第15.1節の言明が消える。
+`scripts/**` は `scripts/{dir}{base}` と等価に書けるので、**エラー文にこの対応を載せた**
+（`**` → `{dir}{base}`、`*` → `{base}`）。本文と実装が食い違う唯一の点であり、
+**本文の意図（`scripts/**` に一致する宣言で発火する）はそのまま実現されている。**
+
+### 18.3 入れなかったもの（第15.2節の表の更新）
+
+`{ext}` placeholder・規則の除外条件（`unless`）・profile が L1 を上書きすること・
+`scope_defaults` の `{path, origin}` 化は**いずれも入れていない**。理由は第15.2節のままである。
+`require` の `when` に glob を許すことも入れていない（第18.2節）。
+
+`require[].when` が placeholder を持たないことは**許した**。束縛を書き戻さない key では
+固定 `when` が完結した規則（「この file を触るならあの file も触ってよい」）であり、
+`derive` で同じ形を拒否している理由（束縛が無ければ `add` を宣言の関数にできない）が
+そもそも当てはまらない。
+
+### 18.4 #177 の境界は profile 側にも引いた
+
+[#177](https://github.com/Kewton/commandmate-skills/issues/177) 第17.4節は、ハーネスの
+既定除外を hardcode した理由として「`scope_companions` 的な key で緩められる境界は、
+静かな2つ目の扉を持つ境界である」と書いている。literal 伴走は**まさにその key** なので、
+穴が profile 側に開き直らないよう2か所で塞いだ。
+
+- **literal（`require[].add`）は load 時に `load_error`。** 静的に判定できるし、
+  profile は人がレビューする成果物なので、その場で落とすほうが直せる。
+  黙って落とせば「一致しない規則が黙って残る」ことになる
+- **template（`derive[].add`）が harness に展開されたときは導出時に落とす。**
+  ただし**宣言済み path 自身が harness の中にあるとき**は落とさない —— それは Issue が
+  成果物見出しで名指しし `harness_path_in_scope` で記録された、#177 が認めている唯一の
+  許可だからである。L1 は同じ宣言から慣習テスト path を derive しており（除外されない）、
+  L2 だけを落とせば「どの層が出したか」で境界が変わることになる
+
+`derive` 側の template 判定を load 時にしなかったのは、展開結果が束縛に依存するからである
+（`{dir}` が harness の中を束縛しうる）。**判定できる所で落とし、できない所は出口で落とす。**
+
+### 18.5 profile-init は `require` を起案しない（裁定）
+
+第15.6節の規律 —— **対で裏が取れた配置だけを起案する** —— を literal に当てると、起案できない。
+集約テストは定義上どのソース名とも対応しないので、対になる実ファイルが存在しない。
+`when`（どの宣言が引き込むべきか）も「その file が何を覆っているか」という意味の言明であって、
+tree からは読めない。起案すれば規則の**両側を発明して** `detected` と名乗ることになり、
+それはこの runner が避けるために存在している「黙った推測」そのものである。
+
+代わりに TODO `scope_companions_undetermined` の**文面**が `require` を名指しするようにした。
+この TODO は検出が0件のときに出る、つまり人間がちょうどこの field を読んでいるときに出る。
+（それまでの文面は「repo が要求する docs」を宣言せよと勧めていたが、それは `derive` では
+表現できない形だった —— 助言どおりに書くと `load_error` になる文面だったことになる。）
+
+`detected` で出る draft には TODO を足していない。第15.6節が書いたとおり、
+**全 field に根拠がある draft が `success` である**という suite の性質を壊さないためである。
+
+### 18.6 赤→緑の実測（fixture が空振りでないこと）
+
+追加した6つの case / 15行の拒否表を、**実装前の runner**（`git show HEAD:…/orchestrate.mjs`
+を別 directory へ出したもの）で回して**全件赤**を確認してから実装した。
+
+拒否 case は `exit 6` と `load_error` だけでは**空振りになる** —— `require` を知らない runner は
+その key を未知として同じ code で落とすからである。そこで harness に
+`error_details_include` / `todo_details_include` を足し、**どの検査が落としたか**を
+detail の部分文字列で固定した。第15.8節が case `46` について記録した
+「2つの検査に引っかかる行はどちらも測れていない」と同じ規律である。
+
+`expected-plan.json` を持つ4 case（`02` / `31` / `45` / `61`）は literal companion を
+持たない profile の case なので、**1 byte も変わっていない。再生成もしていない。**
+
+さらに、追加した検査が**空振りでない**ことを変異注入で実測した（runner の copy を作業 tree の
+外に置いて回した。作業 tree は書き換えていない）。
+
+| 変異 | 実測 |
+|---|---|
+| `require[].add` の `isSafeRepoPath` を外す | case `64` が赤（`exit 6` → `0`）。**ただし path は scope に出ない** —— 導出時の `isSafeRepoPath` が2枚目として落としている |
+| `require[].add` の harness 拒否を外す | case `65` が赤（`exit 6` → `0`）。同じく導出時の harness 落としが2枚目として効き、path は出ない |
+| 導出時の harness 落としを外す | `.claude/skills/lib/normalize.test.mjs` が **非 harness の宣言から生える**（`profileLiteralCompanionTest` が赤）。宣言済み harness path から derive した `…/run.contract.mjs` は両方で出る |
+| `require[].add` の「placeholder 禁止」を外す | 拒否表 "a template in require.add" が赤。`require` が `derive` の別名に化ける |
+| `derive[].add` の「placeholder 必須」を外す | **既存 case `47` が赤** —— `docs/module-reference.md` が `scope_defaults` に生える。`derive` を緩めていないことは、この case が今も緑であることで測られている |
+
+上2行が示すとおり、literal の安全性は **load 時の拒否と導出時の落としの2枚**で守られている。
+case が測っているのは**声の大きいほう**（load 時）で、静かなほうは変異注入で測った。
+
+### 18.7 触っていない正本
+
+`release-notes.md` は本変更の宣言 scope の外なので触っていない。`status.mjs` の hint map も
+同様である（新しい code は増えていないので、追記すべきものも無い）。
+`cmate-issue-authoring` の planner mirror は companion 系の関数を写していないため無関係である
+——`mirror-conformance.mjs` の照合領域は `firstNonEmptyLine` から `isSafeRepoPath` の直前までで、
+本変更が触った関数はすべてそれより前にある。`isSafeRepoPath` 自体は**呼んだだけで
+変更していない**。

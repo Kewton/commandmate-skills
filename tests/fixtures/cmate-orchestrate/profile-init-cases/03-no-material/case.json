@@ -23,6 +23,9 @@
       "scope_companions_undetermined"
     ],
     "warnings": [],
+    "todo_details_include": {
+      "scope_companions_undetermined": ["\"require\"", "\"derive\""]
+    },
     "evidence_files": {
       "id": [],
       "repository": [],

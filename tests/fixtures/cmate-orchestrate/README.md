@@ -98,6 +98,10 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 | `59-open-questions-declared` | 著者が ```open-questions ブロックで宣言した未決の問いが、1件につき1件の blocking question になるか。**ブロックを消した双子の Issue** と `test_expectations` / `suspected_files` / `scope_defaults` が byte 一致するか（#178。strip しないと終了 fence が後続 ```bash の開始として拾われ 3件が1件に落ち、問いの中に書いた path が scope に入る） |
 | `60-open-questions-block-invalid` | 2個・未知 version・未知 key・空ブロックを `open_question_block_invalid` として open question にし、**「ブロックが無かった」に丸めない**か（#178。acceptance-gates 記法 第7節をそのまま適用） |
 | `61-open-questions-heading-not-read` | 見出し（未決 / undecided / open questions）**だけ**の本文では question が1件も立たないか。golden は**この機能の実装前の runner が生成した**もので、ブロックの無い本文の plan が byte 単位で従来どおりであることの測定である（#178） |
+| `62-scope-companions-literal-required` | profile の `scope_companions.require` が宣言した**リテラル path**（どのソース名とも対応しない集約テスト）が、`when` 一致時に `scope_defaults` へ入るか。2つの宣言が一致しても**1件しか出ない**か。`derive` の placeholder 形式と**併存**するか（#181） |
+| `63-scope-companions-literal-not-matched` | 逆向き: 同じ profile で、どの `when` にも一致しない Issue には literal が出ないか。literal も**宣言に gate されている**ことの測定（#181） |
+| `64-scope-companions-reject-literal-escape` | literal は宣言済み path から作られないので、`isSafeRepoPath` を通していなければ profile 経由の path traversal になる。`users/…`（`..` でも絶対 path でもなく、**この述語だけが落とせる**形）が load 時に拒否されるか（#181） |
+| `65-scope-companions-reject-literal-harness` | #177 の既定除外（`.claude/skills/` 等）を profile が literal で開け直せないか。**静かな2つ目の扉**を作らないことの測定（#181） |
 
 ## dispatch case 一覧
 

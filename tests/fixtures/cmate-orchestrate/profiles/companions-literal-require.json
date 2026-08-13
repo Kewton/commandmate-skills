@@ -1,0 +1,18 @@
+{
+  "id": "companions-literal-require",
+  "repository": "Kewton/CommandMate",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": ["npm test"],
+  "verified": true,
+  "scope_companions": {
+    "derive": [
+      { "when": "scripts/{dir}{base}.mjs", "add": ["scripts/tests/{base}.test.mjs"] }
+    ],
+    "require": [
+      { "when": "scripts/{dir}{base}.mjs", "add": ["scripts/tests/shared-contract.test.mjs"] },
+      { "when": "web/src/shared/{base}.mjs", "add": ["scripts/tests/shared-contract.test.mjs"] }
+    ]
+  }
+}

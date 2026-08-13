@@ -1,0 +1,14 @@
+{
+  "description": "Issue #181: a literal companion is granted VERBATIM, so it is the one companion shape whose safety no placeholder can guarantee. A `derive` add is built out of a declared path, which extraction already refused to invent outside the repository; a `require` add is whatever the profile wrote. `users/kewton/notes/shared-contract.test.mjs` is the shape an author produces by pasting an absolute path and deleting the leading slash — it is repository-relative in form and outside the repository in fact, so it must be refused at profile load (load_error, exit 6) before an issue is read. The path is chosen so that ONLY the safety predicate can be refusing it (§15.8's lesson from case 46): `..`, a leading `/` and a backslash are all caught by the template parser instead, and a fixture that trips two checks measures neither. Drop the `isSafeRepoPath` call from the literal branch and this case is the one that goes red.",
+  "args": ["490", "--profile-json", "PROFILE:companions-invalid-literal-escape.json"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "require[0].add",
+      "is not a repository-relative path"
+    ],
+    "plan_null": true
+  }
+}
