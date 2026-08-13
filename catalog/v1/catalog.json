@@ -2800,7 +2800,7 @@
         "issue",
         "contract"
       ],
-      "latest": "0.1.0",
+      "latest": "0.2.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -2816,6 +2816,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worker-development-v0.1.0/cmate-worker-development-0.1.0.tar.gz",
             "sha256": "6f13caad9215023980f3ca72cd7b0e178aa6e9eb506144f6afcc40ab91f6efa4",
             "size": 17592,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. The package ships instructions only, so the procedure is readable and usable by hand; discovery and reload are unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. The package ships instructions only, so the procedure is readable and usable by hand; discovery and reload are unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.2.0",
+          "changelog": "0.1.0 以降の 1 件（#176）を公開する。\n\nworker は実行契約の `goal` を読んで着手するが、`goal` は Issue 本文の**要約**であり、\n生成側（cmate-orchestrate の dispatch）の抽出は肯定形（やること・受入条件・対象ファイル）に\n偏っていた。その結果、本文の「送ってはいけない」表や `## 非対象` / `## セキュリティ上の考慮`\nといった**否定的制約が goal に載らず**、worker から見るとその制約は\n「許可されていない」ではなく「**存在しない**」ように見えた。\n\n実測（2026-08-09、Kewton/BorderFreeKidsMap #35）では、禁止 3 件のうち転記されたのは 2 件で、\nworker は残る 1 件（施設の個別 ID と結び付いた閲覧履歴）を payload に載せた成果物を commit した。\n**全ゲート green のまま受入条件違反**で、発見は人間のレビューだった。\nscope は path を、`verify.gates` は exit code を締めるが、否定的制約はそのどちらでもない。\n\n- **A 段（読取）の必須手順**として、「`goal` が Issue 番号を参照しているなら、契約とは別に\n  Issue 本文の全文を読み取り専用で取得して読む」を明記した。従来の記述は\n  「契約 file が在るならそれを読む」で止まりうる形だった。\n- 規則を明文化した: **契約が言及していない禁止事項は、契約が許可したのではなく\n  書いていないだけであり、Issue 本文が正本である。**\n\n生成側の対（否定的制約を要約せず原文転記し、転記しきれなければ\n`issue_constraints_untranscribed` で名乗る）は cmate-orchestrate 0.28.0 で公開する。\n片側だけでは、禁止事項が「古い CLI の run だけ落ちる」という非対称になる。\n\n`.commandmate/verify.yaml` の全 10 ゲートが exit 0。",
+          "published_at": "2026-08-13T13:44:42Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-worker-development-v0.2.0",
+            "commit": "902b21ce2a713d8e3927529d46039bed316e8e0b"
+          },
+          "artifact": {
+            "asset_name": "cmate-worker-development-0.2.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worker-development-v0.2.0/cmate-worker-development-0.2.0.tar.gz",
+            "sha256": "d7737029001c037d54878514439652280c70f61de73a697bd2c35d919593d38e",
+            "size": 18507,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
