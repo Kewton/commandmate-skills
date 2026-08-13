@@ -202,6 +202,7 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 | worktree を dispatch に用意させる | `--prepare-worktrees` / `--worktree-setup` | [runner-operations.md](./references/runner-operations.md) 第4節 | [dispatch-contract.md](./references/dispatch-contract.md) 第3.0.1節 |
 | worker に開発の方法（HOW）を渡す | `--worker-method <skill-id>` | 同 第5節 | 同 第1節・第3.0節 |
 | Issue が名指ししたゲートを裁定に必ず入れる | Issue 本文の `acceptance-gates` ブロック | 同 第6節 | 同 第2.9節 ／ [acceptance-gates-notation.md](./references/acceptance-gates-notation.md) |
+| **決めていないことを worker に決めさせない** | Issue 本文の `open-questions` ブロック | — | [plan-contract.md](./references/plan-contract.md) 第5.5節 ／ [open-questions-notation.md](./references/open-questions-notation.md) |
 | 部分失敗した run を再開する | `--resume <前回の --out>` | 同 第7節 | 同 第8節 |
 | 送らずに裁定だけ取り直す | `--reverify <前回の --out>` | 同 第8節 | 同 第8.5節 |
 | 裁定機構（契約経路 / baseline）を選ぶ | `--contract-mode` | 同 第9節 | 同 第2.4節・第2.7節 |
@@ -507,6 +508,13 @@ plan の失敗 code と exit、plan の warning code、limitation code の**全�
 - 失敗時も stdout に `status: failure` の result を出す。**plan を推測で埋めない。**
 - `no_acceptance_criteria` / `no_suspected_files` は dispatch の open question ゲートと対になる。
   **この2つを放置したまま `--allow-questions` で押し通さないこと。**
+- Issue 本文の ```open-questions ブロック（[references/open-questions-notation.md](./references/open-questions-notation.md)）は
+  1件につき1件の blocking question になる（`open_question_declared`、#178）。**これだけは planner の推論ではない** ——
+  他の question は「本文から読み取れなかった」という不在についての報告だが、これは
+  「**まだ決めていない**」という著者自身の申告なので、planner が計算しても答えは出ない。
+  **その問いを決めて本文へ畳み込み、ブロックを消して re-plan する**（ブロックの削除が「決めた」の記録である）。
+  ブロックが読めなければ `open_question_block_invalid` で、**「ブロックが無かった」には丸めない**。
+  見出し（`## 未決の問い` 等）は**検出しない** —— 散文から停止を作らないためである（同記法 第5節）。
 - planner は**推測で決めない2つ**を question にする（#182）。同じ file の2つの綴りが本文に在れば
   `ambiguous_file_candidate`（**どちらも落とさず**両方 scope に入れて訊く）、生産者/消費者の推論が
   **共有 topic token だけ**を根拠にしていれば `unconfirmed_lexical_dependency`（**edge にせず**、
@@ -547,6 +555,8 @@ report/artifact に残さない（redaction）。
 | 止まり方 | 人間がすること |
 |---|---|
 | plan `no_acceptance_criteria` / `no_suspected_files` | **Issue 本文に受入条件と対象 file を書いて re-plan する** |
+| plan `open_question_declared` | Issue 本文の ```open-questions ブロックが「まだ決めていない」と宣言している（著者の申告であり、推論ではない）。**その問いを決めて答えを本文へ畳み込み、ブロックを消して re-plan する。** `--allow-questions` は「決めていないことを worker に決めさせる」という判断である |
+| plan `open_question_block_invalid` | ```open-questions ブロックを読めなかった。**構文を直すか、ブロックごと消して re-plan する。** 「ブロックが無かった」には丸めていない（warning detail が壊れ方を名指しする） |
 | plan `harness_path_in_scope` | Issue が `## 対象ファイル` に agent ハーネス（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）の path を書いたので scope に入れた（既定は「入れない」）。**その Issue の成果物が本当にハーネスなのかを読んで決める。** 違うなら成果物見出しから外して散文か参考見出しへ移し、re-plan する |
 | plan `ambiguous_file_candidate` | 同じ file の2つの綴り（例: `data/demo/facilities.json` と `web/public/dist/data/demo/facilities.json`）が本文に在る。**どちらが対象かを決めて、もう片方を本文から消して re-plan する。** 両方とも対象なら `--allow-questions`（両方 scope に入っている） |
 | plan `unconfirmed_lexical_dependency` | 語彙は共有するが file は共有しない2 Issue が在る。**順序が要るなら本文に `depends on #N` を書くか `--depends <consumer>:<producer>` を渡す。** 独立なら `--allow-questions` で進めてよい。**`--no-infer` はこの答えではない**（推論を丸ごと切るだけである） |

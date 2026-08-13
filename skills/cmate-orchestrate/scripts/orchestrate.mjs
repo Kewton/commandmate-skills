@@ -1841,6 +1841,184 @@ function readAcceptanceGates(body) {
   return { gates: parsed.value, error: null };
 }
 
+// =============================================================================
+// Author-declared open questions (Issue #178)
+// =============================================================================
+//
+// The notation's 正本 is references/open-questions-notation.md, which defers to
+// references/acceptance-gates-notation.md §3 for the YAML subset: this is the
+// SAME block shape with a different info string, deliberately, so that an author
+// who has written one has written both.
+//
+// What this reads is the strongest stop signal an issue can carry. Every other
+// question the planner raises is the planner saying "I could not read X out of
+// this body" — an inference about an absence, and therefore wrong sometimes.
+// This one is the author saying "I have not decided X yet", which is a statement
+// of fact by the only person able to make it. Until Issue #178 it reached the
+// plan as `questions: []` and dispatch did not stop; the worker then guessed from
+// the other sections or decided for itself, and which of the two it did was not
+// knowable without reading the diff. Measured 2026-08-10 on
+// Kewton/BorderFreeKidsMap#63: three undecidables left in the body planned clean,
+// and rewriting them as decisions made the worker implement them — with reasons —
+// on the next re-plan.
+//
+// The notation is a fenced block and NOT a heading convention (未決 / undecided /
+// open questions), even though a heading would also have found that body. A
+// heading is prose, and reading a stop out of prose is the category error
+// acceptance-gates-notation.md §5 refuses for gates: the same word appears in
+// bodies that are merely describing what USED TO BE undecided, and a false stop
+// teaches operators to reach for --allow-questions by habit. The block also gives
+// cmate-issue-authoring / cmate-issue-refinement something to WRITE and something
+// to DELETE, which a heading does not: refinement emits an open question, the
+// author leaves it in the body as a block, and deleting the block is what records
+// that it was decided.
+const OPEN_QUESTIONS_INFO = 'open-questions';
+const OPEN_QUESTIONS_VERSION = 1;
+
+// Counted on its own so "two blocks" is detected even when the second one is
+// malformed; `m` makes `^`/`$` line anchors and the info string must be the whole
+// word, so ```open-questions-v2 is not this block. Same shape as
+// ACCEPTANCE_GATES_OPEN_RE / ACCEPTANCE_GATES_BLOCK_RE above, on purpose.
+const OPEN_QUESTIONS_OPEN_RE = /^```open-questions[ \t]*$/gm;
+const OPEN_QUESTIONS_BLOCK_RE = /^```open-questions[ \t]*\r?\n([\s\S]*?)^```[ \t]*(?:\r?\n|$)/gm;
+
+// Same bound as the acceptance block's id list. An issue that cannot state what
+// it is doing in 32 undecidables is not an issue, it is a design phase.
+const MAX_OPEN_QUESTIONS = 32;
+
+// A question's value is free text, so the id regex that rejects YAML's reserved
+// leading characters for gate ids cannot do it here. These are the shapes
+// acceptance-gates-notation.md §3 forbids outright (anchor / alias / flow
+// collection / block scalar) and they are refused for the same reason: read as
+// plain text they would silently mean something other than what a YAML reader
+// would make of them.
+const OPEN_QUESTION_RESERVED_RE = /^[&*[{|>]/;
+
+// Stripped from the prose extractors' input for the same two measured reasons the
+// acceptance block is (see stripAcceptanceGateBlocks): the fence pattern in
+// `extractTestExpectations` cannot match `open-questions` as an INFO STRING (the
+// hyphen is outside [a-zA-Z]) but does match this block's CLOSING fence as an
+// opening one, swallowing the following ```bash block whole — measured on fixture
+// 59-open-questions-declared, where 3 test_expectations drop to 1 — and a
+// `  - …` line inside the block is shaped like a bullet, so an unstripped body
+// reads the author's questions as acceptance criteria and any path inside one as
+// a file to WRITE. The second half is not hypothetical either: the same fixture's
+// `src/legacy/topo.ts`, named inside a question, reaches scope.allow with its
+// four derived test companions behind it.
+function stripOpenQuestionBlocks(text) {
+  return String(text).replace(OPEN_QUESTIONS_BLOCK_RE, '');
+}
+
+function countOpenQuestionBlocks(text) {
+  return [...String(text).matchAll(OPEN_QUESTIONS_OPEN_RE)].length;
+}
+
+// The same YAML subset `parseAcceptanceGatesBlock` reads, with `questions:` in
+// place of `require:`. Kept as a separate function rather than parameterising the
+// gates parser: the two notations are allowed to diverge (they are separate
+// documents with separate versions), and a shared parser would make a change to
+// one silently a change to the other. Returns {ok, value} or {ok:false, reason}.
+function parseOpenQuestionsBlock(raw) {
+  const bad = (reason) => ({ ok: false, reason });
+  const lines = String(raw).split(/\r?\n/);
+  const value = { version: OPEN_QUESTIONS_VERSION, questions: [] };
+  const seenKeys = new Set();
+  let sawVersion = false;
+  let section = null; // null | 'questions'
+
+  for (const line of lines) {
+    if (line.includes('\t')) return bad('a tab character is not allowed; the block is indented with 2 spaces');
+    if (line.trim() === '') continue;
+    // 行頭 `#` のみコメント: a `#` anywhere else is part of the value. Here that
+    // rule earns its keep twice over — a question ending in "…, or #63?" keeps
+    // its issue reference instead of losing half the sentence.
+    if (line.startsWith('#')) continue;
+    if (line === '---' || line === '...') return bad('YAML document markers are not part of the subset');
+
+    const indent = line.length - line.trimStart().length;
+    const content = line.slice(indent);
+
+    if (indent === 0) {
+      section = null;
+      const match = /^([a-zA-Z][a-zA-Z0-9_]*):[ \t]*(.*)$/.exec(content);
+      if (match === null) return bad(`"${content}" is not a "key: value" line at the top level`);
+      const [, key, rest] = match;
+      if (seenKeys.has(key)) return bad(`duplicate key "${key}"`);
+      seenKeys.add(key);
+      if (!sawVersion && key !== 'version') {
+        return bad('"version: 1" must be the first key of the block');
+      }
+      if (key === 'version') {
+        sawVersion = true;
+        if (rest !== String(OPEN_QUESTIONS_VERSION)) {
+          // Not rounded forward, for the reason the gates parser gives: an
+          // unknown version means the block was written against a notation this
+          // runner does not implement.
+          return bad(`version must be exactly ${OPEN_QUESTIONS_VERSION} (got "${rest}")`);
+        }
+        continue;
+      }
+      if (key === 'questions') {
+        if (rest !== '') return bad('"questions:" takes a block sequence on the following lines, not an inline value');
+        section = 'questions';
+        continue;
+      }
+      return bad(`unknown key "${key}" (the v1 block accepts only version, questions)`);
+    }
+
+    if (indent !== 2) return bad(`unexpected indentation of ${indent} space(s); list items are indented by exactly 2`);
+    if (section !== 'questions') return bad(`"${content}" is indented but no list is open above it`);
+    const item = /^-[ \t]+(.*)$/.exec(content);
+    if (item === null) return bad(`"${content}" is not a "- <question>" list item`);
+    const question = item[1];
+    if (question === '') return bad('an empty question; write the undecided thing, or delete the item');
+    if (OPEN_QUESTION_RESERVED_RE.test(question)) {
+      return bad(`"${question}" starts with a character YAML reserves (${OPEN_QUESTION_RESERVED_RE.source}); anchors, flow collections and block scalars are not part of the subset`);
+    }
+    if (value.questions.includes(question)) return bad(`duplicate question "${question}"`);
+    value.questions.push(question);
+    if (value.questions.length > MAX_OPEN_QUESTIONS) {
+      return bad(`at most ${MAX_OPEN_QUESTIONS} open questions may be declared`);
+    }
+  }
+
+  if (!sawVersion) return bad('the block declares no "version: 1"');
+  // The empty block is the same contract error `require: []` is: it announces
+  // that something is undecided and then names nothing, exactly where the author
+  // meant to state it.
+  if (value.questions.length === 0) return bad('the block asks nothing; remove it, or write at least one question under "questions:"');
+  return { ok: true, value };
+}
+
+// The whole block reading for one issue body. Returns {questions, error} —
+// `questions` is the author's list in the author's order (empty when there is no
+// block), `error` is the open question describing an unreadable block (null when
+// there is nothing to say). The two are never both set: "no block" and "broken
+// block" are different states and the second must never be rounded to the first
+// (acceptance-gates-notation.md §7, applied unchanged).
+function readOpenQuestions(body) {
+  const text = String(body ?? '');
+  const opens = countOpenQuestionBlocks(text);
+  if (opens === 0) return { questions: [], error: null };
+  const invalid = (reason) => ({
+    questions: [],
+    error: {
+      code: 'open_question_block_invalid',
+      text: `The \`${OPEN_QUESTIONS_INFO}\` block could not be read: ${reason}. `
+        + 'It is NOT treated as absent: fix the block or remove it, then re-plan. '
+        + 'The planner never reads an open question out of prose.',
+    },
+  });
+  if (opens > 1) {
+    return invalid(`the body carries ${opens} blocks and exactly one is allowed (they are not merged, and the first does not win)`);
+  }
+  const blocks = [...text.matchAll(OPEN_QUESTIONS_BLOCK_RE)];
+  if (blocks.length !== 1) return invalid('the block is never closed by a ``` fence at the start of a line');
+  const parsed = parseOpenQuestionsBlock(blocks[0][1]);
+  if (!parsed.ok) return invalid(parsed.reason);
+  return { questions: parsed.value.questions, error: null };
+}
+
 // Topic tokens power the inferred-dependency heuristic. Short and stopword-like
 // tokens carry no domain signal, so they are dropped.
 const STOPWORDS = new Set([
@@ -1862,16 +2040,19 @@ const PRODUCER_RE = /(schema|contract|interface|protocol|type\s*def|定義|ス�
 const CONSUMER_RE = /(implement|integrat|consume|connect|wire|apply|利用|連携|接続|適用|参照|使用)/i;
 
 function analyzeIssue(issue, profile, binaries, companionRules) {
-  // The machine-readable block is read from the RAW body, and every prose
-  // extractor below reads the body with the block removed. Both halves matter:
-  // reading the block from the stripped text would find nothing, and running the
+  // The machine-readable blocks are read from the RAW body, and every prose
+  // extractor below reads the body with those blocks removed. Both halves matter:
+  // reading a block from the stripped text would find nothing, and running the
   // prose extractors over the raw text mis-pairs the fences (see
   // stripAcceptanceGateBlocks) and reads gate ids as acceptance-criteria bullets.
-  // With no block in the body, `body`/`text` are the raw strings unchanged, so a
-  // plan for such an issue is byte-identical to the one this runner produced
-  // before acceptance gates existed (ADR §7).
+  // With neither block in the body, `body`/`text` are the raw strings unchanged,
+  // so a plan for such an issue is byte-identical to the one this runner produced
+  // before acceptance gates (ADR §7) and before declared open questions
+  // (Issue #178) existed — pinned by fixture 61-open-questions-heading-not-read,
+  // whose golden was generated by the runner as it stood before this change.
   const acceptanceGates = readAcceptanceGates(issue.body);
-  const body = stripAcceptanceGateBlocks(issue.body);
+  const declaredQuestions = readOpenQuestions(issue.body);
+  const body = stripOpenQuestionBlocks(stripAcceptanceGateBlocks(issue.body));
   const text = `${issue.title}\n\n${body}`;
   const objective = redact(firstNonEmptyLine(body) || issue.title);
   const acceptance = extractAcceptanceCriteria(body).map(redact);
@@ -1938,7 +2119,30 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
   // disagree about what is missing (Issue #52). `questions` stays a string list —
   // that is the plan schema — and the codes stay private to the planner.
   const openQuestions = [];
-  // Raised FIRST: a body whose acceptance block is broken is a body whose author
+  // Raised FIRST of all (Issue #178). Every question below this point is the
+  // planner reporting something it could NOT read out of the body — an inference
+  // about an absence. These two are the author reporting something they have not
+  // DECIDED, which outranks every inference: it cannot be a false positive, and
+  // no answer the planner could compute would settle it. A reviewer meets it
+  // before the findings that might be wrong.
+  if (declaredQuestions.error !== null) openQuestions.push(declaredQuestions.error);
+  for (const question of declaredQuestions.questions) {
+    openQuestions.push({
+      code: 'open_question_declared',
+      // The author's sentence goes LAST and VERBATIM, for the two reasons the
+      // other body-quoting questions give: dispatch prints a blocking question
+      // through an `excerpt(…, 200)` that keeps the TAIL, so what identifies the
+      // finding must not sit where a truncation would take it; and a transcribed
+      // question is answerable without opening the issue, which is the whole
+      // point in an unattended run. Redacted like every other quoted body text —
+      // this is issue prose, and the plan is an artifact somebody else reads.
+      text:
+        'The issue body declares this undecided, so no worker may decide it. ' +
+        'Answer it in the body, delete the `open-questions` block and re-plan. ' +
+        `Question: "${redact(question)}"`,
+    });
+  }
+  // Raised next: a body whose acceptance block is broken is a body whose author
   // did write acceptance conditions, so this question is the one to read before
   // `no_acceptance_criteria`.
   if (acceptanceGates.error !== null) openQuestions.push(acceptanceGates.error);

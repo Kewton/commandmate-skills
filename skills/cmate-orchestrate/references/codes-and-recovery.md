@@ -51,13 +51,33 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | `ambiguous_file_candidate` | 同じ file の2つの綴り（一方が他方の path 境界つき suffix）が本文に在り、どちらを意図したか決められない。**どちらも落とさず**両方 scope に入れたうえで訊いている |
 | `unconfirmed_lexical_dependency` | 生産者/消費者の推論が**共有 topic token だけ**を根拠にしていたので、依存 edge にしなかった。順序が要るなら人間が述べる |
 | `harness_path_in_scope` | agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を、Issue が**成果物見出しで明示的に宣言した**ので scope に入れた。既定は「入れない」である |
+| `open_question_declared` | Issue 本文の ```open-questions ブロックが「これはまだ決めていない」と宣言している。**planner の推論ではなく、著者自身の申告**である。1件につき1件 |
+| `open_question_block_invalid` | ```open-questions ブロックが読めない（2個以上・未知 version・未知 key・空・重複・subset 違反）。**「ブロックが無かった」に丸めない** |
 | `acceptance_requires_tests_but_scope_has_none` | 受入条件がテストの**作成**を能動的に要求しているのに、対象 file（**段1 の導出結果を含めて**）にテストらしき path が1件も無い |
 | `contract_scope_dropped` | 宣言された対象 file の一部が、dispatch の実行契約の `scope.allow` に**入らない**（件数上限 200 超過、または契約が扱えない形の path）。detail に**落ちた件数・落ちた path（先頭3件）・落ちた理由**が入る |
 
+`open_question_declared` / `open_question_block_invalid` /
 `no_acceptance_criteria` / `no_suspected_files` / `acceptance_requires_tests_but_scope_has_none` /
 `ambiguous_file_candidate` / `unconfirmed_lexical_dependency`
 は dispatch の open question ゲートと対になる。**これらを放置したまま `--allow-questions` で
 押し通さないこと。** このフラグは plan 全体に効くので、1件を黙らせるつもりで全部を黙らせる。
+
+先頭2つは [#178](https://github.com/Kewton/commandmate-skills/issues/178) で足した。
+**この2つだけは planner の推論ではない。** 他はすべて「本文から X を読み取れなかった」という
+不在についての報告であり偽陽性がありうるが、`open_question_declared` が運ぶのは
+「**X をまだ決めていない**」という、決められる唯一の人間による事実の申告である。
+planner が計算しても答えは出ないので、`questions` の**先頭**に立つ。
+
+- `open_question_declared`: Issue 本文に ```open-questions ブロックが在り、その問いを
+  そのまま転記している。**その問いを決めて、答えを本文へ畳み込み、ブロックを消して
+  re-plan する。** 止めなかった場合の実測（2026-08-10、Kewton/BorderFreeKidsMap#63）は
+  「worker が本文の他節から推測するか自分で決め、**どちらに転んだかは diff を読むまで
+  分からない**」である。記法は
+  [open-questions-notation.md](./open-questions-notation.md)。
+- `open_question_block_invalid`: ブロックの構文を直すか、ブロックごと消して re-plan する。
+  `acceptance_gate_block_invalid` と同じ fail-closed（同記法 第4節）であり、
+  **「ブロックが無かった」に丸めない** —— 丸めると、著者が未決と書いたはずのものが
+  黙って消えた run が緑で終わる。
 
 後ろ2つは [#182](https://github.com/Kewton/commandmate-skills/issues/182) で足した。どちらも
 **planner が推測をやめて訊く**ようにした結果であり、以前は前者が warning だけ
@@ -176,6 +196,8 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | 止まり方 | 何が起きたか | 人間がすること |
 |---|---|---|
 | plan `status: partial` + `no_acceptance_criteria` / `no_suspected_files` | Issue に受入条件か対象 file が書かれていない | **Issue 本文に書き足して re-plan する。** run_id は本文を含む hash なので自動的に別 run になる |
+| plan `status: partial` + `open_question_declared`（dispatch 側では `open_questions` として止まる） | Issue 本文の ```open-questions ブロックが「これはまだ決めていない」と宣言している。**推測ではなく著者の申告**であり、planner が計算しても答えは出ない。止めなければ worker は本文の他節から推測するか自分で決め、**どちらに転んだかは diff を読むまで分からない**（実測 2026-08-10、Kewton/BorderFreeKidsMap#63） | **その問いを決めて、答えを Issue 本文へ畳み込み、`open-questions` ブロックを消して re-plan する。** ブロックの削除が「決めた」の記録である。question に著者の原文が入っているので、判断は本文を開かずに始められる。**`--allow-questions` は「決めていないことを worker に決めさせる」という判断である** —— そう決めたのなら通してよいが、それが run の command line に残る |
+| plan `status: partial` + `open_question_block_invalid`（同上） | ```open-questions ブロックを読めなかった（2個以上・未知 version・未知 key・空・重複・subset 違反）。**「ブロックが無かった」には丸めていない** | **ブロックの構文を直すか、ブロックごと消して re-plan する。** warning detail が壊れ方を名指ししている。記法は [open-questions-notation.md](./open-questions-notation.md)（YAML subset は acceptance-gates 記法 第3節と同じ: 2スペース・tab 禁止・行頭 `#` のみコメント） |
 | plan `status: partial` + `acceptance_requires_tests_but_scope_has_none`（dispatch 側では `open_questions` として止まる） | 受入条件はテストの作成を要求しているのに、宣言された file からテスト path が1件も導出できていない。**そのまま dispatch すれば worker は正しくテストを書いて scope ゲートで落ち、契約 scope は send 時 snapshot なので worker 側に回復手段は無い** | **Issue 本文の対象 file にテスト path を書いて re-plan する。** テストが本当に不要なら受入条件にそう書く（否定形は検出から除外される）。判定の元になった受入条件が warning detail と question に原文で入っているので、偽陽性の確認はその1行で済む。**`--allow-questions` で押し通すのは、そのまま worker 1人分の run を捨てることである** |
 | plan `status: partial` + `ambiguous_file_candidate`（dispatch 側では `open_questions` として止まる） | 同じ file の2つの綴りが本文に在る（一方が他方の path 境界つき suffix）。**どちらも scope に入れてある** —— 以前は長い方を残して短い方を落としており、実測では「宣言した path が落ちて、触るなと書いたビルド生成物が scope に残る」向きに外れた | **どちらが対象かを決めて、もう片方を本文から消して re-plan する。** 両方とも対象なら `--allow-questions` で進めてよい（両方入っている）。question の本文が2つの path を名指ししているので、判断は本文を開かずに済む |
 | plan `status: partial` + `unconfirmed_lexical_dependency`（同上） | 生産者/消費者の推論が当たったが、根拠が**共有 topic token だけ**で共有 file が無かったので edge にしていない。**その2 Issue は同じ wave に入る** | **順序が要るなら述べる**（Issue 本文に `depends on #N`、または `--depends <consumer>:<producer>`）。要らないなら `--allow-questions` で進めてよい。散文の語が一致しただけで3 Issue が3 wave に直列化していたのが元の障害なので、**「独立である」が正しい答えであることが多い**。**edge が欲しいのに `--no-infer` を足さない** —— それは推論を丸ごと切るだけで、この question の答えにはならない |
@@ -249,6 +271,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 `resume_attempt` / `resume_no_work` / `resume_invalid` / `resume_plan_mismatch`、
 そして `scope_unsatisfiable` / `contract_scope_dropped` / `harness_path_in_scope` /
 `ambiguous_file_candidate` / `unconfirmed_lexical_dependency` /
+`open_question_declared` / `open_question_block_invalid` /
 `integration_verify_failed` / `integration_verify_unavailable` は、
 この表には在るが **status runner の hint map にはまだ無い**（`status.mjs` は別 Issue で追随する。
 `contract_scope_dropped` については `status.mjs` が #161 / #162 の宣言 scope の外だった。
@@ -256,6 +279,11 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 の宣言 scope の外であり、`ambiguous_file_candidate` / `unconfirmed_lexical_dependency` は
 [#182](https://github.com/Kewton/commandmate-skills/issues/182) の、`integration_verify_*` は
 [#175](https://github.com/Kewton/commandmate-skills/issues/175) の宣言 scope の外である。
+`open_question_declared` / `open_question_block_invalid` も同じく
+[#178](https://github.com/Kewton/commandmate-skills/issues/178) の宣言 scope
+（planner の `orchestrate.mjs` だけ）の外である —— **運転で人間が出会う停止は
+dispatch 側の `open_questions`** であり、そちらは hint を持っていて question の本文
+（＝著者が書いた問いの原文）をそのまま出すので、実害は status runner の1行だけである。
 #182 は `status.mjs` に在る `shadowed_file_candidate` の hint —— 「候補から落ちた」と述べる
 1行 —— を**古くしている**: planner はもう落とさないし、その code も出さない。文面としては
 「Issue 本文で path を完全形で書き直す」が今も対処として正しいので、実害は

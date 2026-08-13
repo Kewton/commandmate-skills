@@ -1,0 +1,46 @@
+{
+  "description": "Issue #178 (a): a declared open question rides the EXISTING gate, so nothing new had to be taught to the dispatch runner. #460's body carries one ```open-questions block; the plan therefore carries one question, and by default dispatch refuses the WHOLE plan before the first `send`. #461 would have succeeded (the scenario has both workers completing with verify 0) — the refusal comes from the plan, not from the world. The blocking reason quotes the author's own sentence, which is what lets the operator answer it without opening the issue.",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-open-questions-block.json",
+    "orchestrate_args": [
+      "460",
+      "461",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": true,
+    "waves_count": 0,
+    "never_sent": [460, 461],
+    "no_respond": true,
+    "no_contract_calls": true,
+    "cli_subcommand_counts": {
+      "send": 0
+    },
+    "blocking_codes": ["open_questions"],
+    "blocking_details_include": [
+      "#460: The issue body declares this undecided, so no worker may decide it.",
+      "Question: \"座標変換を保存時に行うか、描画時に行うか\"",
+      "Nothing was dispatched",
+      "--allow-questions"
+    ],
+    "summary_includes": [
+      "## open question",
+      "Question: \"座標変換を保存時に行うか、描画時に行うか\"",
+      "worker を 1 人も dispatch せずに停止した"
+    ]
+  }
+}

@@ -14,6 +14,7 @@ dispatch-cases/issues-multifile.json  複数 file を保有する Issue fixture�
 dispatch-cases/issues-negative-constraints.json  否定的制約（禁止の表・非対象節）を持つ Issue
                                 fixture（#176 の転記 case 用）
 dispatch-cases/issues-acceptance-gates*.json  受入ゲート case の Issue fixture（ブロック有り / 無し / 未知 id）
+dispatch-cases/issues-open-questions-block.json  著者が宣言した未決の問いを持つ Issue fixture（#178 の case 用）
 resume-cases/<id>/case.json     複数 attempt を1つの run directory に append する case。
                                 `--resume`（再 dispatch）と `--reverify`（送らずに再裁定）の両方が
                                 ここに入る: attempt の配置規約・append-only 不変条件・台帳・
@@ -94,6 +95,9 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 | `56-context-heading-issue-number` | `## 根拠` 配下で**否定するために**書いた `depends on #N` が phantom 依存にならず、かつ CONTEXT の外に書いた依存は残るか（#182） |
 | `57-shadowed-path-is-a-question` | 宣言した短い path が、説明文の長い path に shadow されて scope から落ちないか（両方 scope に入り question になるか。#182） |
 | `58-shadowed-path-cited-as-context` | 逆向き: 長い方を `## 根拠` で引用しただけなら**訊かない**か（著者が既に区別を書いている。かつ、旧規則ではこの形が scope 空になっていた。#182） |
+| `59-open-questions-declared` | 著者が ```open-questions ブロックで宣言した未決の問いが、1件につき1件の blocking question になるか。**ブロックを消した双子の Issue** と `test_expectations` / `suspected_files` / `scope_defaults` が byte 一致するか（#178。strip しないと終了 fence が後続 ```bash の開始として拾われ 3件が1件に落ち、問いの中に書いた path が scope に入る） |
+| `60-open-questions-block-invalid` | 2個・未知 version・未知 key・空ブロックを `open_question_block_invalid` として open question にし、**「ブロックが無かった」に丸めない**か（#178。acceptance-gates 記法 第7節をそのまま適用） |
+| `61-open-questions-heading-not-read` | 見出し（未決 / undecided / open questions）**だけ**の本文では question が1件も立たないか。golden は**この機能の実装前の runner が生成した**もので、ブロックの無い本文の plan が byte 単位で従来どおりであることの測定である（#178） |
 
 ## dispatch case 一覧
 
@@ -184,6 +188,8 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 | `d73-constraints-transcribed-verbatim` | **否定的制約の原文転記（#176）。** 否定語を含まない見出しの下に在る「送ってはいけない」表と `## 非対象` 節が、要約されず**全行原文で** goal に載るか。転記が完走したので切り捨ての1行は入らない |
 | `d74-constraints-untranscribed` | 転記が上限に収まらなかったとき、**ブロックを途中で切らず**に打ち切り、落とした節を名指しして `本文に他節がある。gh issue view <n> で全文を読め` を入れ、`issue_constraints_untranscribed` を記録するか（#176） |
 | `d75-issue-body-unreadable` | `gh issue view` が落ちる世界で dispatch は止まらないが、goal が「読めなかったこと」と `gh issue view <n>` を名指しし、`issue_body_unreadable` を記録するか。**「制約なし」の goal を黙って送らない**（#176） |
+| `d76-open-questions-block-refused` | 著者が宣言した未決の問いが**既存の** open question ゲートで止めるか。`send` は 0 回で、blocking reason が著者の原文を引用するか（#178） |
+| `d77-open-questions-block-accepted` | 同じ plan が `--allow-questions` では通り、しかし question は消えず `open_questions_accepted` と summary に残るか（#178。新しい緩和フラグを足していないことの確認） |
 
 ## merge case 一覧
 

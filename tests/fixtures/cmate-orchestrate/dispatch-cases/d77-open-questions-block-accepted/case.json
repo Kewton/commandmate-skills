@@ -1,0 +1,39 @@
+{
+  "description": "Issue #178 (b): the same plan d76 refuses dispatches under --allow-questions, and the waiver is on the record — `open_questions_accepted` is a limitation and the summary still quotes the author's sentence verbatim. The question is NOT consumed by the flag: it stays in plan.issues[].questions and in the report, so 'somebody took this on' remains readable after the run. That is the whole of the new gate's behaviour: it rides the existing flag rather than inventing a second waiver.",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-open-questions-block.json",
+    "orchestrate_args": [
+      "460",
+      "461",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--allow-questions"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [true],
+    "sent": [460, 461],
+    "no_respond": true,
+    "limitation_codes": ["open_questions_accepted"],
+    "absent_blocking_codes": ["open_questions"],
+    "summary_includes": [
+      "## open question",
+      "Question: \"座標変換を保存時に行うか、描画時に行うか\"",
+      "`--allow-questions` により、次の question を未回答のまま dispatch した。"
+    ]
+  }
+}

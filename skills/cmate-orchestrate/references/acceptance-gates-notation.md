@@ -14,6 +14,12 @@
 生産側（`cmate-issue-authoring` / `cmate-issue-refinement`）はこの記法を**ミラーする側**であり、
 独自に拡張しない（ADR 第5節。後続 Issue）。
 
+**同型の別記法**が1つある: [open-questions-notation.md](./open-questions-notation.md)
+（```open-questions ブロック、[#178](https://github.com/Kewton/commandmate-skills/issues/178)）。
+本書の第3節（YAML subset）・第7節（記法違反の扱い）・第10節（変更規約）を**そのまま継承**し、
+key と意味だけが違う。**本書を変えるときはあちらも読むこと** —— 「同じ subset である」ことが
+あの記法の前提であり、著者が片方を書けたならもう片方も書ける、という設計になっている。
+
 ---
 
 ## 1. 何のための記法か
