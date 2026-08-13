@@ -1,5 +1,5 @@
 {
-  "description": "Issue #49: every candidate is anchored to a token start. A dotfile root is extracted whole (\".claude/skills/cmate-verify/scripts/verify-run.sh\", which `\\b` could never reach) and neither \"scripts/verify-run.sh\" nor \"claude/skills/...\" nor \"src/lib/store.ts\" is invented from the middle of a path — suspected_files IS scope.allow, so a partial path is write permission on a file that does not exist. A path:line reference still yields the path alone.",
+  "description": "Issue #49: every candidate is anchored to a token start. A dotfile root is extracted whole (\".claude/skills/cmate-verify/scripts/verify-run.sh\", which `\\b` could never reach) and neither \"scripts/verify-run.sh\" nor \"claude/skills/...\" nor \"src/lib/store.ts\" is invented from the middle of a path — suspected_files IS scope.allow, so a partial path is write permission on a file that does not exist. A path:line reference still yields the path alone. Since #177 the anchoring is asserted on reference_files rather than suspected_files for the harness path: the body cites the runner in prose, so it is denied by default and reported as read-not-writable. The assertion #49 exists for is unchanged — the dotfile root is still extracted WHOLE and no partial of it appears anywhere in the plan.",
   "args": ["414", "--profile", "node-commandmate"],
   "expect": {
     "exit": 0,
@@ -10,7 +10,7 @@
     "dependencies": [],
     "classifications": { "414": "independent" },
     "risk_level": "low",
-    "suspected_files": { "414": [".claude/skills/cmate-verify/scripts/verify-run.sh", "web/src/lib/store.ts", "web/src/lib/store.test.ts", "web/src/lib/store.spec.ts", "web/src/lib/__tests__/store.ts", "web/src/lib/__tests__/store.test.ts"] },
-    "reference_files": { "414": [] }
+    "suspected_files": { "414": ["web/src/lib/store.ts", "web/src/lib/store.test.ts", "web/src/lib/store.spec.ts", "web/src/lib/__tests__/store.ts", "web/src/lib/__tests__/store.test.ts"] },
+    "reference_files": { "414": [".claude/skills/cmate-verify/scripts/verify-run.sh"] }
   }
 }

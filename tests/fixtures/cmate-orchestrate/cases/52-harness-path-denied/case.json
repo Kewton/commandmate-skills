@@ -1,0 +1,17 @@
+{
+  "description": "Issue #177 (a): the acceptance criteria cite the verify runner the way a criterion normally does — `bash .claude/skills/cmate-verify/scripts/verify-run.sh --cwd .` as the command that must return RESULT passed, and `.commandmate/verify.yaml` as the gate that must go green. Neither is a deliverable; both are the harness that JUDGES this issue. Before #177 both landed in suspected_files, i.e. in the worker's scope.allow, so the worker could pass the gate by rewriting the judge — and the only thing preventing it was the author remembering not to write the path. They are now denied by default and reported in reference_files (\"read, not in scope.allow\"), which keeps the runner readable to the worker without making it writable. Nothing else moves: web/src/lib/filter.ts and its derived test companions stay in scope, and the run stays a clean success — a deny that fires on the NORMAL way to write an acceptance criterion must not cost a warning.",
+  "args": ["416", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[416]],
+    "merge_order": [416],
+    "dependencies": [],
+    "classifications": { "416": "independent" },
+    "suspected_files": { "416": ["web/src/lib/filter.ts", "web/src/lib/filter.test.ts", "web/src/lib/filter.spec.ts", "web/src/lib/__tests__/filter.ts", "web/src/lib/__tests__/filter.test.ts"] },
+    "scope_defaults": { "416": ["web/src/lib/filter.test.ts", "web/src/lib/filter.spec.ts", "web/src/lib/__tests__/filter.ts", "web/src/lib/__tests__/filter.test.ts"] },
+    "reference_files": { "416": [".commandmate/verify.yaml", ".claude/skills/cmate-verify/scripts/verify-run.sh"] },
+    "questions_count": { "416": 0 }
+  }
+}

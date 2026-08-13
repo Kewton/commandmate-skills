@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 417,
+      "title": "fix: verify-run の RESULT 判定が passed を取りこぼす",
+      "body": "`.claude/skills/cmate-verify/scripts/verify-run.sh` の RESULT 行の読み取りが誤っている。\n\n## 対象ファイル\n- `.claude/skills/cmate-verify/scripts/verify-run.sh`\n\n## Acceptance criteria\n- [ ] `bash .claude/skills/cmate-verify/scripts/verify-run.sh --cwd .` が RESULT passed を返す\n",
+      "labels": ["bug"]
+    }
+  ]
+}

@@ -49,6 +49,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | `no_suspected_files` | 対象 file を1件も読み取れない。worker に与える scope が空になる |
 | `unrecognized_file_extension` | 既知拡張子外の backtick path が抽出から落ちた |
 | `shadowed_file_candidate` | 他候補の path 境界つき suffix だったため候補から落とした |
+| `harness_path_in_scope` | agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を、Issue が**成果物見出しで明示的に宣言した**ので scope に入れた。既定は「入れない」である |
 | `acceptance_requires_tests_but_scope_has_none` | 受入条件がテストの**作成**を能動的に要求しているのに、対象 file（**段1 の導出結果を含めて**）にテストらしき path が1件も無い |
 | `contract_scope_dropped` | 宣言された対象 file の一部が、dispatch の実行契約の `scope.allow` に**入らない**（件数上限 200 超過、または契約が扱えない形の path）。detail に**落ちた件数・落ちた path（先頭3件）・落ちた理由**が入る |
 
@@ -68,6 +69,19 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 limitation になる。同じ欠陥に同じ名前を付けてあるので、plan の warning と dispatch の停止は
 **同じ1件の findings を2つの時点で読んでいる**と分かる。詳細と規範は
 [plan-contract.md](./plan-contract.md) 第5.1節の不変条件4（「引いた分も必ず可視である」）にある。
+
+`harness_path_in_scope` は他の warning と**向きが逆**である。他は「入らなかった」の報告だが、
+これは「**入れた**」の報告である —— `.claude/skills/` / `.agents/skills/` / `.commandmate/` は
+worker とその審判（verify runner）と「合格の定義」（`.commandmate/verify.yaml`）そのものなので、
+planner は**既定でこれらを `scope.allow` に入れない**。受入条件に
+`` `bash .claude/skills/cmate-verify/scripts/verify-run.sh --cwd .` が RESULT passed を返す `` と
+書くのは受入条件の**普通の書き方**であり、それが審判への書き込み権限になってはならない。
+既定で落とした path は捨てずに `reference_files`（「読むが scope.allow には入れない」）に出る
+ので、warning は付かない —— **正しい書き方に対して partial を出さない**。この code が出るのは
+Issue が `## 対象ファイル`（成果物見出し）に書いた場合だけで、そのときは人間が明示的に宣言して
+いるので通す。**通したこと自体を残すのがこの warning である。**詳細と #1756 との整合は
+[plan-contract.md](./plan-contract.md) 第5.3節と
+[adr-scope-derivation.md](./adr-scope-derivation.md) 第17節にある。
 
 
 ## 3. limitation code（停止はしていないが、後から効いてくる制約）
@@ -129,6 +143,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 |---|---|---|
 | plan `status: partial` + `no_acceptance_criteria` / `no_suspected_files` | Issue に受入条件か対象 file が書かれていない | **Issue 本文に書き足して re-plan する。** run_id は本文を含む hash なので自動的に別 run になる |
 | plan `status: partial` + `acceptance_requires_tests_but_scope_has_none`（dispatch 側では `open_questions` として止まる） | 受入条件はテストの作成を要求しているのに、宣言された file からテスト path が1件も導出できていない。**そのまま dispatch すれば worker は正しくテストを書いて scope ゲートで落ち、契約 scope は send 時 snapshot なので worker 側に回復手段は無い** | **Issue 本文の対象 file にテスト path を書いて re-plan する。** テストが本当に不要なら受入条件にそう書く（否定形は検出から除外される）。判定の元になった受入条件が warning detail と question に原文で入っているので、偽陽性の確認はその1行で済む。**`--allow-questions` で押し通すのは、そのまま worker 1人分の run を捨てることである** |
+| plan `status: partial` + `harness_path_in_scope` | Issue が `## 対象ファイル`（成果物見出し）に agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を書いたので、**worker がそれを書き換えられる状態で dispatch される**。既定では入らない path が、明示宣言によって入っている | **その Issue の成果物が本当にハーネスなのかを読んで決める。** そうなら（このリポジトリ自身の Issue のように）そのまま進めてよい —— warning は宣言の記録であって停止ではない。そうでない（ただ「その runner を実行して通ること」を言いたいだけの）なら、**成果物見出しから path を消して散文か参考見出し（`根拠` / `参考`）へ移し、re-plan する**。移しても worker はその path を読める（`reference_files` に出る）。**審判を書き換えられる worker を「たぶん大丈夫」で送らない** |
 | plan `cycle_detected` / `override_incomplete` / `dependency_order_violation` | 依存グラフが実行不能 | `dependency-plan.md` の edge `reason`（どの方向語をどの行から読んだか）を見て、Issue 本文か `--depends` を直す |
 | plan `run_exists` | **同じ既定 run_id に hash された run が既にある**（Issue 集合・Issue 内容・**profile 全体**・CLI option がすべて同じ、が典型）。「何も変えていない」とまでは断定できない —— 既定 profile の cwd `origin` 判定は hash の外にある（Issue #157） | エラーが指す既存の `plan.json` と突き合わせて、意図した plan かを確かめる。違うなら Issue 本文か profile を直す（**profile はどの field を編集しても別 run_id になる**）。同じでよいなら `--run-id <new-id>` / `--runs-dir <dir>` を渡す |
 | plan `profile_repository_mismatch` | cwd の origin と profile の対象リポジトリが違う | `--profile` / `--profile-json` / `--repo` のどれかを渡して意図を明示する |
@@ -194,9 +209,11 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 
 `worktree_setup_unavailable` / `worktree_setup_failed` / `worktree_profile_mismatch` と
 `resume_attempt` / `resume_no_work` / `resume_invalid` / `resume_plan_mismatch`、
-そして `scope_unsatisfiable` / `contract_scope_dropped` は、
+そして `scope_unsatisfiable` / `contract_scope_dropped` / `harness_path_in_scope` は、
 この表には在るが **status runner の hint map にはまだ無い**（`status.mjs` は別 Issue で追随する。
-`contract_scope_dropped` については `status.mjs` が #161 / #162 の宣言 scope の外だった）。
+`contract_scope_dropped` については `status.mjs` が #161 / #162 の宣言 scope の外だった。
+`harness_path_in_scope` も同じく [#177](https://github.com/Kewton/commandmate-skills/issues/177)
+の宣言 scope の外である）。
 それまで `status.mjs --run` はこれらを「detail と `summary_markdown` を読む」に落として表示する。
 **推測で別の対処を出さない**のが status runner の約束なので、これは劣化ではなく既定の振る舞いである。
 dispatch report の `summary_markdown` には上表と同じ next action が出ている。

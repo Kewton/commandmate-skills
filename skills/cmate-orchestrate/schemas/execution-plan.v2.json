@@ -411,7 +411,8 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/repo_path"
-          }
+          },
+          "description": "The files the worker is allowed to change: this list becomes the dispatch contract's scope.allow verbatim. Paths under the agent harness (.claude/skills/**, .agents/skills/**, .commandmate/**) are NOT here by default even when the issue names them — a worker able to edit the runner that judges it can pass by rewriting the judge — and enter only when the issue declares them under a deliverable heading (## 対象ファイル), which raises the harness_path_in_scope warning. See references/plan-contract.md section 5.3."
         },
         "scope_defaults": {
           "type": "array",
@@ -424,7 +425,8 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/repo_path"
-          }
+          },
+          "description": "Paths the planner read out of the issue and deliberately kept OUT of scope.allow: context the issue only cites (under a 根拠 / 参考 / references heading, or documentation named nowhere else), and agent-harness paths denied by default (.claude/skills/**, .agents/skills/**, .commandmate/**). The worker reads them; it may not write them. A path missing from suspected_files is otherwise indistinguishable from one the planner never noticed, so a drop is reported here rather than discarded. See references/plan-contract.md sections 5 and 5.3."
         },
         "test_expectations": {
           "type": "array",
