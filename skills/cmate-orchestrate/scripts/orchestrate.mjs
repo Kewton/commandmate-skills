@@ -992,6 +992,98 @@ function isSafeRepoPath(candidate) {
   return true;
 }
 
+// =============================================================================
+// The agent harness — deny-by-default (Issue #177)
+// =============================================================================
+//
+// The paths that make up the AGENT'S OWN HARNESS: the Skill packages the worker
+// and its verifier ARE, and the CommandMate configuration that decides what
+// "verified" means. Measured on 0.27.0 (Kewton/BorderFreeKidsMap): an issue whose
+// acceptance criterion read
+//
+//     `bash .claude/skills/cmate-verify/scripts/verify-run.sh --cwd .` が RESULT passed を返す
+//
+// put that runner into `suspected_files`, which becomes the worker's
+// `scope.allow` verbatim — so the worker could pass the gate by rewriting the
+// judge. A gate the judged party may edit is a gate that is not there.
+//
+// The extraction cannot tell the two readings apart on SHAPE. A path inside a
+// criterion is a COMMAND TO RUN at least as often as it is a file to write, and
+// both are "a slash-bearing token with an extension" (this one is not even inside
+// a single backtick token — `bash … --cwd .` carries spaces, so it is
+// CANDIDATE_WITH_EXT in prose that finds it). Until now the only thing keeping
+// the runner out of scope was the author remembering not to write its path — a
+// convention, enforced by nobody, in the one place where being wrong costs a gate.
+//
+// So the harness is denied BY DEFAULT, and the issue keeps exactly ONE way to say
+// otherwise: name the path under a deliverable heading (`## 対象ファイル`,
+// DELIVERABLE_HEADING_RE). That is a declaration rather than an aside — the same
+// distinction #50 already drew for Markdown deliverables — and it is reported as
+// `harness_path_in_scope`, so the grant is never silent and never merely implied.
+//
+// A denied path is NOT discarded: it goes to `reference_files` ("read, not in
+// scope.allow"), the channel #54 gave a context-only citation. The worker still
+// learns the runner it must satisfy; it just may not write to it. This is what
+// makes the drop visible without a warning of its own — a warning per denied path
+// would drop nearly every real run to `partial`, since citing the verify runner in
+// an acceptance criterion is the NORMAL way to write one, and a `partial` that
+// fires on correct authoring is a `partial` reviewers learn to skip.
+//
+// HARDCODED, not declarable in the profile. Three reasons, in order of weight:
+//
+//   1. The profile is data the target repository supplies, and the deny-list is
+//      the boundary that protects the judge from the judged. A boundary a
+//      `scope_companions`-style key could relax is a boundary with a second,
+//      quieter door — the hole would simply move from the issue body to the
+//      profile, where no warning is attached to walking through it.
+//   2. These three roots are fixed by the harness, not by the repository:
+//      `.claude/skills/` and `.agents/skills/` are where CommandMate installs
+//      Skill packages, `.commandmate/` is where it keeps `verify.yaml`. A
+//      repository does not get to rename them, so there is nothing per-repository
+//      to declare (contrast `scope_companions`, whose whole subject is a layout
+//      only the repository knows — ADR §5 "却下: profile 必須にする" argues the
+//      converse case for the converse reason).
+//   3. The escape hatch already exists and is auditable at the point of use: the
+//      issue's own deliverable heading, with a warning naming the path. A
+//      repository that genuinely maintains its harness in-repo — this repository
+//      does — writes `## 対象ファイル` and gets exactly that.
+//
+// Widening the set is therefore a code change with a fixture, which is the right
+// amount of friction for a permission boundary.
+const HARNESS_PATH_PREFIXES = ['.claude/skills/', '.agents/skills/', '.commandmate/'];
+
+// `./`-prefixed forms are stripped first. `isSafeRepoPath` accepts
+// `./.claude/skills/x.sh` (it is repository-relative and escapes nothing), and a
+// prefix test alone would read it as a non-harness path — a one-character bypass
+// of a permission boundary. Every other escape (`..`, absolute, backslash) is
+// already refused at extraction, so this is the only normalisation needed.
+function isHarnessPath(path) {
+  const normalized = path.replace(/^(?:\.\/)+/, '');
+  return HARNESS_PATH_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+// Splits the classified deliverable candidates into {kept, declared, denied}:
+// what stays in scope, the harness paths a deliverable heading explicitly claimed
+// (a subset of `kept`, and what the warning names), and the harness paths denied
+// (which the caller reports as reference files). Order is preserved in all three,
+// so the plan stays byte-deterministic.
+function partitionHarnessPaths(candidates, deliverable) {
+  const kept = [];
+  const declared = [];
+  const denied = [];
+  for (const candidate of candidates) {
+    if (!isHarnessPath(candidate)) {
+      kept.push(candidate);
+    } else if (deliverable.has(candidate)) {
+      kept.push(candidate);
+      declared.push(candidate);
+    } else {
+      denied.push(candidate);
+    }
+  }
+  return { kept, declared, denied };
+}
+
 // The counterpart of FILE_EXT being a closed set (CommandMate #1678 B-1): a
 // backtick path whose extension is outside it used to vanish from the plan
 // silently, and because suspected_files becomes the worker's scope.allow, the
@@ -1035,6 +1127,27 @@ function extractionWarnings(analyses) {
             'at most one of the two is the file the issue means, so the shorter path is not in ' +
             "suspected_files and stays outside the worker's scope; write the full repository-relative " +
             'path if the worker must also touch it',
+        ),
+      });
+    }
+    // The opposite direction of the two above: not a path that failed to reach
+    // `suspected_files`, but one that reached it and had to be argued for
+    // (Issue #177). It is raised only where the issue DECLARED the path under a
+    // deliverable heading — the deny is the silent-by-design case, because it is
+    // the correct default — so this warning always names a decision a human made,
+    // and always has an addressee.
+    for (const path of analysis._harnessPathsInScope) {
+      out.push({
+        code: 'harness_path_in_scope',
+        detail: redact(
+          `#${analysis.number} declares \`${path}\` under a deliverable heading (\`## 対象ファイル\` etc.), ` +
+            'and it is part of the agent harness (`.claude/skills/` / `.agents/skills/` / `.commandmate/`) — ' +
+            "the Skill packages the worker and its verifier are, and the config that decides what 'verified' means. " +
+            'The planner keeps those out of `scope.allow` by default: a worker that may edit the runner judging it ' +
+            'can pass by rewriting the judge. The declaration is honoured because it is explicit, and this warning ' +
+            'is the record of it. If the issue only needs to RUN the harness, delete the path from the deliverable ' +
+            'heading and cite it in prose or under a context heading (`根拠` / `参考`) instead, then re-plan; the ' +
+            'worker still reads it, it just cannot write to it.',
         ),
       });
     }
@@ -1759,11 +1872,29 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
   const objective = redact(firstNonEmptyLine(body) || issue.title);
   const acceptance = extractAcceptanceCriteria(body).map(redact);
   const extraction = extractFileCandidates(text);
-  const { suspected, references } = classifyFileCandidates(
+  const classified = classifyFileCandidates(
     extraction.paths,
     extraction.deliverable,
     extraction.contextOnly,
   );
+  // Deny-by-default for the agent harness (Issue #177), applied HERE — after the
+  // context/product split, before any default is derived. Both halves of that
+  // position matter: after, because a harness path a context heading already
+  // demoted needs no second opinion and must not be re-reported as a grant;
+  // before, because a path that may not be in scope must not seed companions
+  // into scope either (a cited `.commandmate/package.json` would otherwise drag
+  // `.commandmate/package-lock.json` in behind it, and a cited
+  // `.claude/skills/x/scripts/run.ts` its four conventional test companions).
+  //
+  // The denied paths join `reference_files` rather than vanishing: the plan says
+  // "read, not in scope.allow", which is a statement a reviewer can check. What
+  // is NOT filtered here is the derived list below — a profile's
+  // `scope_companions` is a reviewed declaration of the repository, not
+  // client-controlled issue prose, and its entries are all named in
+  // `scope_defaults`. See references/adr-scope-derivation.md §17.
+  const harness = partitionHarnessPaths(classified.suspected, extraction.deliverable);
+  const suspected = harness.kept;
+  const references = [...classified.references, ...harness.denied];
   // All THREE default sources feed ONE list, which is then appended to
   // suspected_files and reported as `scope_defaults` — the plan can never grant
   // a path it does not also declare it granted. Every source derives from the
@@ -1882,6 +2013,9 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
     // recognised, so it must not be re-reported as an unknown extension.
     _unrecognizedPaths: extractUnrecognizedPaths(text, extraction.found),
     _shadowedPaths: extraction.shadowed,
+    // Harness paths a deliverable heading claimed, hence granted (Issue #177).
+    // The denied ones need no private field: they are in `reference_files`.
+    _harnessPathsInScope: harness.declared,
   };
 }
 

@@ -293,6 +293,57 @@ scope に書いてよいのは、それが**宣言済み path への規則の適
 意図を読む**推論**である。この非対称が両者を別の層に置く理由であり、`plan_schema_version` を
 上げない理由でもある（新しい field を1つも作らない）。
 
+## 5.3 agent ハーネスは既定で scope に入れない（`harness_path_in_scope`）
+
+**規範。** 次の3つの接頭辞に一致する path は、`suspected_files` に**入れない**。
+
+```
+.claude/skills/**    .agents/skills/**    .commandmate/**
+```
+
+worker とその**審判**（verify runner）と「合格の定義」（`.commandmate/verify.yaml`）が、
+そこに置かれているからである。`suspected_files` はそのまま実行契約の `scope.allow` になるので、
+これらが入った plan は **worker が自分を裁く runner を書き換えられる** plan である。
+検証を通すために検証を書き換えられるなら、そのゲートは無いのと同じである。
+
+**なぜ既定なのか。**候補抽出は「拡張子を持つスラッシュ入りトークン」を拾うが、受入条件の中の
+path は**成果物であるのと同じくらい「実行するコマンド」である**。形では区別できない。そして
+
+```
+- [ ] `bash .claude/skills/cmate-verify/scripts/verify-run.sh --cwd .` が RESULT passed を返す
+```
+
+は受入条件の**普通の書き方**である。#177 以前、これを避けていたのは「受入条件に path を書かない」
+という**著者の注意力に依存する運用ルール**だけだった。規約は忘れられる。既定を裏返す。
+
+**唯一の出口は明示宣言である。** Issue が `## 対象ファイル`（成果物見出し。語彙は
+`orchestrate.mjs` の `DELIVERABLE_HEADING_RE`、本文側の正本は
+[cmate-issue-authoring/references/issue-body-contract.md](../../cmate-issue-authoring/references/issue-body-contract.md)
+第2.3節）配下に書いた場合だけ scope に入り、`harness_path_in_scope` の
+warning が付いて run は `partial` に落ちる。**通したことを黙って通さない。**
+自分のハーネスを in-repo で保守しているリポジトリ（このリポジトリがそうである）は、
+成果物見出しに書けばよい。#50 が消した障害 ——「言われたとおりに書いて scope ゲートで落ちる」——
+をここで再発させないための出口であり、それ以外の目的では使わない。
+
+**落とした path は捨てない。**`reference_files`（「読むが `scope.allow` には入れない」）に出る。
+worker は満たすべき runner を読めるが、書けない。第5.1節の不変条件4（「引いた分も必ず可視である」）
+はここでも成り立つ。この落とし方に warning を付けないのは意図的である ——
+**正しい書き方に対して `partial` を出す warning は、読み手に読み飛ばし方を教える。**
+
+**除外は hardcode である**（profile では宣言できない）。判断の根拠は
+[adr-scope-derivation.md](./adr-scope-derivation.md) 第17節にある。
+
+### Kewton/CommandMate#1756 との整合
+
+CommandMate#1756 は「`.commandmate/verify.yaml` を **scope の変更集合から除外しない**」——
+つまり worker がそれを触ったら**検出する** —— のが tamper 検出のための意図的設計である、と決めた。
+本節はそれと矛盾しない。**層が違い、向きが同じ**だからである。#1756 は core 側の
+**scope ゲート**（変更を検出して裁く側）の話であり、本節は planner 側の **`allow` の導出**
+（何を許可として渡すか）の話である。本節の向きは「`allow` に入れない」なので、#1756 の
+検出は**弱まらず、強くなる**: 今まで許可されていた編集が、これからは許可されていない編集として
+現れる。両者が食い違うのは「planner が渡さない」かつ「core が見逃す」ときだけで、
+そういう組み合わせは作っていない。
+
 ## 6. risk
 
 `risk.level` は factor の最大 severity である。factor は決定的に導く。
