@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-worker-development
 name: cmate-worker-development
-version: 0.1.0
+version: 0.2.0
 summary: Issue や実行契約を受け取ったワーカーが、読取・調査・計画・実装・検証・証拠の6段で作業を進めるための方法。権限は足さない。
 description: |-
   ワーカーへ渡る Issue や実行契約は WHAT（目的・受入条件・境界）と制約だけを伝え、HOW を伝えていない。この Skill はその HOW を、リポジトリにもスラッシュコマンドにも依存しない形で埋める手順である。

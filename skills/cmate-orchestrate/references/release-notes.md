@@ -188,6 +188,174 @@ planner 側でも `plan.warnings` に出すので、dispatch より前、plan �
 「**足した分は必ず可視である**」があるのに、引いた分に同じ規範が無かった。足した 1 件は必ず
 名指しされるのに、消えた 50 件は 1 バイトも残らない。対の規範として明文化した。
 
+### #177 — worker が、自分を裁く検証ランナーを書き換えられた
+
+受入条件に
+
+    `bash .claude/skills/cmate-verify/scripts/verify-run.sh --cwd .` が RESULT passed を返す
+
+と書くと、この `.sh` が `suspected_files` に入り、そのまま実行契約の `scope.allow` になっていた。
+**worker が自分を裁く検証ランナーを変更できる**状態で、ゲートが 1 つ機能していないのと同じである。
+
+候補抽出に落ち度は無い —— 受入条件の中の path は「成果物」であるのと同じくらい「実行するコマンド」
+であり、**形では区別できない**。区別できないなら既定をどちらへ倒すかの裁定になる。これまで倒れて
+いたのは「受入条件に path を書かない」という、**著者の注意力に依存する運用ルール**の側だった。
+
+→ `.claude/skills/**` / `.agents/skills/**` / `.commandmate/**` を導出から**既定で除外**する
+（deny-by-default）。落とした path は捨てず `reference_files`（読むが `scope.allow` には入れない）へ
+出す —— worker は満たすべき runner を**読めるが、書けない**。Issue が `## 対象ファイル` に
+**明示宣言**した場合だけ scope に入れ、`harness_path_in_scope` を付けて run を `partial` に落とす。
+#50 が消した障害（言われたとおりに書いて scope ゲートで落ちる）を再発させないための唯一の出口で、
+通したこと自体を必ず名乗らせる。**除外そのものには warning を付けない** —— 受入条件に verify runner を
+書くのは正しい書き方であり、そこに warning を出すとほぼ全ての実 run が `partial` になって、読み手に
+**読み飛ばし方を教える**。可視性は構造化された `reference_files` で担保する。
+
+**deny-list は hardcode であって profile 宣言ではない。** 理由を重い順に:
+
+1. profile は**対象リポジトリが供給するデータ**であり、この deny-list は「審判を、裁かれる側から
+   守る境界」である。`scope_companions` 型の key で緩められる境界には**静かな二つ目の扉**が在ることに
+   なり、穴が Issue 本文から profile へ**移動するだけ**になる。しかも profile 側の扉には warning が
+   付かない。
+2. この 3 つの root は**ハーネスが決めており、リポジトリが決めていない**。改名できるものではないので
+   per-repository に宣言すべき中身が無い。ADR 第5節の「却下: profile 必須にする」は逆向きの結論だが
+   理由は同じ形で、あちらの主題（テスト配置）は**リポジトリしか知らない規約**である。
+   **知っているのがハーネス側なら hardcode、リポジトリ側なら profile。**
+3. 出口は既に在り、**使う場所で監査できる**（成果物見出し＋warning）。
+
+したがって除外集合を広げるのは fixture つきの code 変更になる。**認可境界に対しては、それが適切な
+摩擦の量である。** 結果、ハーネス path が scope に入る道は明示宣言 2 つだけ（Issue の成果物見出し／
+profile の companion 規則）で、**散文からは入らない**。
+
+CommandMate #1756（core の scope ゲート）とは矛盾しない。あちらは変更を検出して裁く側、本件は
+`allow` の導出で、向きは「`allow` に入れない」。**tamper 検出は弱まらず、強くなる** —— これまで
+許可されていた編集が、これからは許可されていない編集として現れる。
+
+### #178 — 「まだ決めていない」と本文に書いてあっても、dispatch は止まらなかった
+
+dispatch の open question ゲートが発火するのは planner 自身が立てた question
+（`no_acceptance_criteria` / `no_suspected_files` 起点）だけで、Issue 著者が本文に書いた
+「まだ決めていない」は `questions: []` のまま dispatch を通過していた。止まらないまま dispatch すると
+worker は本文の他節から推測するか自分で決め、どちらに転んだかは diff を読むまで分からない。
+**最も強い停止理由が、機械に読まれていなかった。**
+
+実測（2026-08-10、Kewton/BorderFreeKidsMap#63）: 「## 未決の問い」3 件を残したまま plan →
+`questions: []` で dispatch は止まらない。3 件を「## 決定事項」へ書き換えて re-plan したら、worker は
+コメントに理由まで書いてそのとおり実装した。**本文は最初から答えを持っていなかったのではなく、
+答えが無いと書いてあった。**
+
+→ `acceptance-gates` と同型の ```open-questions ブロックを planner が読み、1 件につき 1 件の blocking
+question `open_question_declared` を per-issue に立てる。著者の原文を末尾に verbatim で転記する
+（dispatch の `excerpt` は末尾を残すので、停止を確かめられる部分が無人 run で落ちない）。
+**既存の open question ゲートにそのまま乗る** —— `--allow-questions` 無しには送らず、付ければ通るが
+question は plan と report に残る。**新しい停止経路も新しい緩和フラグも足していない**
+（`dispatch.mjs` は 1 byte も変えていない）。記法と違反の扱いは
+[acceptance-gates-notation.md](./acceptance-gates-notation.md) 第3節・第7節をそのまま継承し、
+**「ブロックが無い」と「ブロックが壊れている」は混ぜない**。
+
+question の順序は先頭に置いた。他の question はすべて「本文から X を読み取れなかった」という**不在に
+ついての報告**（偽陽性がありうる推論）だが、これは「X をまだ決めていない」という、**決められる唯一の
+人間による事実の申告**であり、planner が計算しても答えは出ない。
+
+**見出し検出（`## 未決の問い` / `Open questions`）は併設していない。** 同じ形は拾えるが、採らなかった:
+
+1. **誤検出が無いとは言えない。**「以前は未決だったが決めた」「`## Open questions（すべて解消済み）`」を
+   見出し語では区別できない。偽の停止は `--allow-questions` を習慣にさせるが、**このフラグは plan 全体に
+   効く**ので、1 件を黙らせるつもりで全部を黙らせることになる。
+2. **散文から停止を作らない。** 受入ゲートについて第5節が引いている境界（明示マークされたブロック
+   だけを運ぶ）と同じ向きである。
+3. **生成と解消が機械化できる。** 見出しには「書く対象」も「消す対象」も無いが、ブロックにはある ——
+   refinement が問いを出す → 著者が本文へブロックとして残す → 決めたらブロックを消して re-plan、が
+   一本の線になる。**削除が「決めた」の記録**になる。
+
+### #181 — 規則からは決して出てこない集約テストが、毎回手書きだった
+
+L1（隣接テスト導出）も L2 の `derive` も出せない伴走が 1 つ残っていた: 複数モジュールをまとめて検証する
+**集約テスト**である。`scripts/tests/shared-contract.test.mjs` は**どのソース名とも対応しないことが
+定義**なので、規則からは決して出てこない。残った経路は Issue 本文への手書きだけで、書き忘れれば
+worker はテストを更新できないまま scope ゲートに当たる（実測: `scripts/**` / `web/src/shared/*.mjs` を
+触る Issue は毎回手書き。0.26.0 では L1 が 5 宣言から 18 path を出したが、集約テストは出ない）。
+
+→ **`derive` を緩めず、兄弟 key `scope_companions.require` を足した。**
+[adr-scope-derivation.md](./adr-scope-derivation.md) 第15.2節は「定数の伴走 path」を第1版から外した
+うえで、**入れるときの形まで裁定していた** ——「実例が出たら `derive` とは別の key（例: `require`）
+として足す。そのとき『宣言と無関係』であることを key の名前が明示する」。本変更はその実例が出たので、
+**書いてあったとおりに足しただけ**である。`require[].when` は `derive` と同じ語彙で宣言済み path に
+一致し、一致が無ければ 1 件も出ない（「宣言が空なら `scope_defaults` も空」は保たれる）。何件一致しても
+literal は 1 回だけ出る。**宣言した key しか正規化されない**ので、`derive` だけの profile の plan は
+1 byte も変わらない。
+
+**判別しているのは中身の推測ではなく、著者が書いた key である。** 両 key は互いの形を拒否する ——
+`derive[].add` は placeholder 1 つ以上を要求し、`require[].add` は placeholder 0 個を要求する。
+括弧が残っている誤記（`{Base}` / `{base`）は**両方の key で**トークン化して拒否されるので literal に
+化ける経路がそもそも無く、残る「括弧ごと落とした誤記」は `derive` に書いてある限り拒否され、
+合法になるのは著者が key を移して**「この path は固定である」と宣言したとき**だけである。
+`derive` を緩めていないことは**既存 case 47 が今も緑である**ことで測られている。
+
+literal は宣言済み path から作られない唯一の伴走なので、通さなければ **profile 経由の path traversal**
+になる。`require[].add` は load 時に `isSafeRepoPath` を通し、**#177 のハーネス除外は profile 側にも
+引いた** —— #177 自身が hardcode の理由として「`scope_companions` 的な key で緩められる境界は、静かな
+2 つ目の扉を持つ境界である」と書いており、literal 伴走はまさにその key だからである。判定できる所で
+落とし、できない所は出口で落とす: literal は load 時に `load_error`（静的に判定でき、profile は人が
+レビューする成果物なのでその場で落とすほうが直せる）、template がハーネスへ展開されたときは導出時に
+drop。ただし**宣言済み path 自身がハーネスの中にあるとき**は落とさない —— それは #177 が認めている
+唯一の許可であり、L1 も同じ宣言から導出しているので、**L2 だけ落とせば「どの層が出したか」で境界が
+変わる**ことになる。
+
+profile-init は `require` を**起案しない**。literal 伴走とソースの関係は**意味の関係**であって配置の
+関係ではなく、集約テストには対になる実ファイルが無い。起案すれば規則の両側を発明して `detected` と
+名乗ることになり、第15.6節の「対で裏が取れた配置だけを起案する」規律に反する。代わりに TODO
+`scope_companions_undetermined` の**文面が `require` を名指しする**ようにした —— それまでの文面は
+`derive` では書けない形を勧めており、**助言どおりに書くと `load_error` になる**文面だった。
+
+### #182 — 語彙が似ているだけの Issue が 3 wave に直列化し、宣言した path の方が落ちていた
+
+planner の抽出・推論に、**推測を推測と名乗らずに実行してしまう**箇所が 3 つあった。いずれも
+「plan は成立するので、気づかなければそのまま dispatch される」形である。
+
+1. **語彙一致だけの推論 edge が、file 衝突と同格に wave を直列化する。** 実測 2026-08-11
+   （Kewton/BorderFreeKidsMap #104/#105/#106）: 相互参照ゼロの 3 Issue が
+   `shared: data, page, cmate` の 3 edge で **3 wave に直列化**した。`cmate` は受入条件の散文
+   「cmate-verify の全ゲート」から、`data` / `page` は互いの `## 参考` に書いた path 片から来ている。
+   実 file 衝突は 1 組だけで、回避策は**推論を丸ごと切る** `--no-infer` しか無かった。
+2. **CONTEXT 見出しの except が、issue 番号に効かない。** `## 根拠` は path を引用へ降格させるのに、
+   その下の issue 番号は edge になっていた。実測 2026-08-07（#33/#34）: 「旧本文の depends on #31 は
+   成立しない」と**否定するために**書いた行が phantom 依存を作る。番号を書き換えれば依存先が追従する
+   だけで、消すにはその行ごと ——つまり**「なぜ依存しないのか」の記録ごと**—— 消すしかなかった。
+3. **`shadowed_file_candidate` が、短い path（本当に書きたい方）を落とす。** `## 対象ファイル` に
+   `data/demo/facilities.json` を挙げ、説明文でビルド生成物
+   `web/public/dist/data/demo/facilities.json` に触れたところ、**宣言した方が落ちて、触るなと書いた
+   生成物が scope に残った**。しかも warning は停止しないので、そのまま dispatch される。
+
+→ dependency edge に **`basis`**（`declared` / `file_conflict` / `lexical`）を足した。`kind` が
+「**誰が言ったか**」なのに対し `basis` は「**何を根拠にその edge が在るか**」で、2 つは別の問いである。
+
+**共有 topic token しか無い組は edge にしない** —— 消費者側 Issue の question
+（`unconfirmed_lexical_dependency`）にする。question なので dispatch は `--allow-questions` 無しには
+送らず、**承認は run の command line に残る**。**共有 file が在る組は edge のまま**
+（`basis: file_conflict`、`reason` に共有 file を明記）。その組はどのみち同一 wave に置けないので、
+生産者を先に置く順序付けは待ち時間を増やさない —— **推論が元々やりたかったのはこれである。推論そのものは
+消していない。**
+
+(2) には `extractExplicitRefs` に `contextSpans` / `inSpans`（#54 が path に使っているもの**そのもの**）を
+適用した。判定は path と同じく出現ごとではなく**番号単位**で、1 度でも CONTEXT の外で述べていれば
+edge は残る（**引用は記述を取り消さない**）。
+
+(3) は「長い方が正しい」を捨てた。長さは**どちらが対象かの証拠ではなく、2 つが重なっていることの証拠**
+である。どちらも落とさず両方を `suspected_files` に入れ、どちらを意図したかを question
+（`ambiguous_file_candidate`）にした。両方残す側に倒すのは **2 つの誤りの安い方**だからである ——
+使われない許可は何も起こさないが、足りない許可は worker 1 人分の run を失わせ、契約 scope は send 時
+snapshot なので**worker 側からは直せない**。**question は「両方が scope に入った」ときだけ出す**:
+長い方が引用・doc path・#177 の deny のいずれかで reference 側へ行くなら著者は既に区別を書いているので
+訊かない —— **正しく書いた本文に blocking question を出すのは、`--allow-questions` を習慣にさせる
+最短路である。** `shadowed_file_candidate` は廃止した。
+
+`dependencies[].basis` は schema の `required` に**入れていない**。required にすると 0.27.0 以前が書いた
+v2 の `plan.json`（`status.mjs` が読む過去 run の artifact）が schema 違反になり、「古い run を
+読めなくするのは後退である」という既存の裁定の逆になる。**absent は「区別が存在する前に書かれた」で
+あって「根拠が無い」ではない。** 代わりに「planner は必ず出す」「`basis: lexical` の edge は 1 本も
+無い」を**全 plan case に対する harness 不変条件**として固定した —— schema が緩い分を test で締める
+配置であり、放置ではない。
+
 ---
 
 ## dispatch（`scripts/dispatch.mjs`）
@@ -822,6 +990,181 @@ formatter や `lint --fix` を repo 横断で走らせた事故のとき —— 
 戻る。新設した `transcribeCapped` が注記のぶんの枠を先に確保し、**この転記で何を切ったか**を
 名乗る（上流で既に切られている可能性があるため「HERE」であることが分かる文言にした）。
 
+### #176 — 禁止事項は goal に載らず、worker からは「存在しない」ように見えた
+
+契約 `goal` は Issue 本文の要約であり、plan の抽出は**肯定形**（やること・受入条件・対象 file）に
+偏っている。禁止事項を読む口が無いので、落ちた制約は worker から見ると「許可されていない」ではなく
+**「存在しない」**ように見える。
+
+実測（2026-08-09、Kewton/BorderFreeKidsMap #35）: 「送ってよい / 送ってはいけない」表の禁止 3 件の
+うち転記されたのは 2 件で、worker は残る 1 件（施設の個別 ID と結び付いた閲覧履歴）を payload に載せて
+commit した。**全ゲート green のまま受入条件違反**で、発見は人間のレビューだった。scope は path を、
+`verify.gates` は exit code を締めるが、**禁止事項はそのどちらでもない。**
+
+→ 否定的制約を含む節・表・箇条書きを要約対象から外し、**原文転記**する。配置は `## Objective` の直後
+（worker は上から読み、goal の切り詰めは末尾から効く）。本文は dispatch 時に
+`gh issue view <n> --json body` で **read-only** に Issue ごと 1 回読む —— plan は肯定形の抽出結果しか
+運んでいないので**plan からは復元できない**。読めなければ停止せず、goal がそう名乗る。
+
+**転記は切らない。** 上限に収まらないブロックはそこで打ち切り、後ろの短い節も載せない（載せると
+transcript が本文の prefix でなくなり、**中抜けした要約と区別できない**）。落とした節を goal に名指しし、
+「本文に他節がある。`gh issue view <n>` で全文を読め」の 1 行を必ず入れる。**禁止の表を半分載せた goal は、
+落とした半分を許可したのと同じである。** 切り捨ては named code（`issue_constraints_transcribed` /
+`issue_constraints_untranscribed` / `issue_body_unreadable`）で機械可読にした —— goal の 1 行は
+**それが制約する当の worker が書き換えられる file の中に在る**が、report は run artifact なので動かない
+（`contract_scope_dropped` と同じ設計）。`--unattended` で blocking へ昇格させることは検討して却下した:
+`gh` 認証の無い CI が 1 人も dispatch できなくなり、しかも re-plan では直らない。
+
+**見出し語集合は hardcode であって profile 宣言ではない。** 根拠 3 点:
+
+1. 宣言し忘れたリポジトリの goal から禁止事項が**黙って消える** —— 本件そのものを設定で再現することに
+   なる。**宣言しなければ効かない既定は、既定ではない。**
+2. 「どの禁止を転記するか」を絞れる knob は、設定の見た目をした**権限の拡大**である。
+   [dispatch-contract.md](./dispatch-contract.md) 第2.9節は `--verify-gates` に同じ形を既に禁じている。
+3. `scope_companions` が profile 宣言なのは**テスト file の配置がリポジトリごとに本当に違うから**で
+   あって、禁止表現の語彙はリポジトリの道具立てではなく **Issue を書く言語**の性質である。
+
+見出し語集合は**床であって天井ではない**: 見出しに関わらず表・箇条書きを拾う規則が取りこぼしを覆う。
+
+**Issue に関わらず**、header へ `Issue body: gh issue view <n>`、`## Rules` の先頭へ「契約が言及して
+いない禁止事項は許可ではない」を入れた —— 見出し語を取りこぼした Issue でも、**本文を読めという指示
+だけは届く**。フォールバック worker prompt にも同じ文面を入れてある。片方だけが運ぶと禁止事項が
+「古い CLI の run だけ落ちる」ことになり、ADR §1.2 が `## Method` で退けた非対称になる。
+
+同じ規則を **cmate-worker-development（0.2.0）** にも書いた: **契約が言及していない禁止事項は、契約が
+許可したのではなく書いていないだけであり、Issue 本文が正本**。狭める方向（禁止）は本文も効き、
+広げる方向（権限・対象 file）は契約が正本、という非対称である。A 段（読取）は「契約 file を読み、
+**そのうえで** goal が Issue 番号を参照しているなら本文全文を読み取り専用で取得する」を必須手順にした
+—— 従来の文面は契約だけで止まりうるものだった。取得できなかったら証拠に書く（**読まなかったことと
+読めなかったことは別の事実**である）。
+
+### #179 — `wait` の timeout が、worker の死と区別できなかった
+
+`--wait-timeout` は `commandmate wait` の**1 回あたりの上限**であって、worker の**1 ターンの上限では
+ない**。ターンが窓より長ければ runner は timeout を報告するが worker は走り続け、完走して commit まで
+載せることがある（実測: Kewton/BorderFreeKidsMap #62、1 ターン約 40 分に対して `--wait-timeout 1800`）。
+report からは「worker が死んだ」と区別できないので、ここで再 dispatch すると**完成済みの作業の上に
+別 worker を重ねる**。見分けは人間が `capture --json` を手で叩いて行っていた。
+
+→ wait が exit 124 を返した時点で `capture <worktree-id> --json` を**1 回だけ**叩き、その答えを当該
+worker の `worker_liveness` へ転記して、同じ code の blocking reason を Issue ごとに 1 件出す。
+契約経路とフォールバック経路の**両方**で行う —— どちらに乗るかは CLI の版が決めることで、operator が
+選んだことではない。
+
+**既存の `timeout` の意味は変えず、その隣に足した。** `worker_state` も `stop_reason` も `timeout` の
+まま、blocking `worker_timeout` もそのまま出て、新しい 3 code（`wait_window_exhausted` /
+`worker_stalled` / `worker_liveness_unreadable`）は**その隣に**並ぶ。理由は 2 つ:
+
+1. `worker_timeout` は「**なぜ run が止まったか**」の答えで、その答えは変わっていない。新 code が
+   答えるのは「**その timeout はどちらだったか**」という別の問いである。片方を他方で置き換えると、
+   既存の read（`status.mjs` の hint 表・resume の停止梯子・fixture）が**答えを 1 つ失う**。
+2. `stop_reason` は schema versioned な閉じた enum で、新値は `dispatch_schema_version` を上げる
+   （第7節 / ADR 第11節）。`wall_clock_budget_exhausted` が `timeout` を再利用したのと同じ判断で、
+   **上げずに済むならそうする**。`worker_liveness` は**任意 field** なので、この field を持たない既存
+   report は引き続き schema に適合する。
+
+生死の 3 code は**停止理由ではなく所見**なので、同じ wave の prompt / exit 99 が `stop_reason` を
+取った run でも記録される（**測った事実は、どの停止理由が勝ったかで消えない**）。`capture` が失敗した /
+出力が JSON でない / boolean が 1 つも読めない、はいずれも `worker_liveness_unreadable` として
+**測れなかったこと自体**を記録する —— merge の `change_evidence_unavailable` と同型の規則で、
+「見られなかった」を「何も無かった」に丸めない。読めない field は `false` ではなく `null` を記録し、
+`worker_liveness` の**不在**も「稼働していなかった」ではない。
+
+`--wait-while-generating` は実装していない。「生成中は待ち続ける」は **wait の時間意味そのものを変える
+機能**で、延長の判断根拠（polling 間隔・生成中の定義・延長回数）は本件が入れた 1 回の測定とは別に実測して
+決めるべきものである。本件の 1 回の測定と `--reverify` で、実測ケースの回収経路は閉じる。
+
+### #180 — リポジトリの事情を書いた flag の置き場が、人間の記憶しか無かった
+
+`--no-infer` / `--auto-yes` / `--wait-timeout` は run の事情ではなく**リポジトリの事情**を書いている
+flag なのに、置き場が人間の記憶と CLAUDE.md しか無かった。付け忘れは**遅い run ではなく事故**になる
+（phantom edge / 誰も答えない prompt / `wait_window_exhausted`）。planner が `develop` / `npm` を
+hardcode しないのと同じ理由で、**その知識の入口は profile だけであるべき**である。
+
+→ 任意 field `profile.dispatch_defaults`（`no_infer` / `auto_yes` / `wait_timeout` / `max_turns`）を
+足し、dispatch runner が plan の profile から読んで引数解決に混ぜる。**宣言の無い plan では entry も
+出力も 1 byte も変わらない。**
+
+`Boolean(values['auto-yes'])` は「**渡していない**」と「**off のつもりで渡した**」が同じ false になるので、
+これを**三値**で読み直した。`inputs.stated` の `null` が「誰も何も言っていない」であり、boolean の
+false を打つ手段として `--no-auto-yes` を新設した（`parseArgs` は boolean option への
+`--auto-yes=false` を先に落とすので、negation flag 以外に「この run だけ断る」を表現する方法が無い）。
+`stated` が非 null のときだけ flag を採り、それ以外で profile の宣言を採る。**どちらを採ったかは
+limitation `dispatch_defaults_applied` に 1 行で残す。**
+
+**排他は argv ではなく解決後の値に対して行う。** `--unattended` と auto-yes の排他は profile 由来の値でも
+同じく `invalid_input`（exit 3）になる。**argv だけを見る検査は、profile が回り込める検査**であり、
+人が居ない run で唯一残る停止点（exit 10）を profile が構造的に消せてしまう。判定は plan を読んだ直後・
+lock / pre-flight / `--out` の前に置いたので、拒否した run は `--out` を作らず CLI を 1 回も呼ばない。
+
+`no_infer` は planner の flag で、**承認済み plan を dispatch が un-infer することはできない**。profile は
+runner ごとに分けず 1 つの宣言にしたいので key は受け取り、plan の `inputs.infer` と突き合わせて
+**食い違いだけ**を `dispatch_defaults_no_infer_not_applied` に記録する（合致している側は何も出さない。
+黙って無視しない）。
+
+profile-init は `dispatch_defaults` を**起案しない**。起案 runner が読むのは「リポジトリが**自分について
+宣言していること**」であり、base branch は workflow に、baseline は package.json に、テスト配置は互いを
+写す 2 つの実ファイルに書いてある。**運転既定はそのどれでもない** ——「このリポジトリには `--no-infer` が
+要る」は**動かした人間が到達した結論**であって tree の中の事実ではない。起案すれば必ず推測になり、
+推測した `auto_yes: true` は**検出した値と出力上見分けがつかない**（profile-contract §7.2 が消しに来た
+性質そのもの）。`scope_companions` 式の「空宣言 + TODO」も置かない —— あちらの空宣言は「配置を決定
+できなかった」TODO と対で意味を持つが、ここは**決定すべき材料が最初から無く**、TODO はどのリポジトリでも
+永久に消えない。よって key ごと出さない（出さなければ flag の既定がそのまま効く）。
+
+### #183 — wall-clock が「各 wave の最遅 worker の合計」だった
+
+wave 方式の wall-clock は「各 wave の最遅 worker の合計」になる。worker の 1 ターンは実測で数分〜約 40 分と
+ばらつくので（Kewton/BorderFreeKidsMap #62 は e2e/build 込みで約 40 分）、依存の無い Issue が
+**「同じ wave に居合わせただけ」の最遅 worker を待つ**時間が支配的になる。
+
+→ `--schedule dag` を足し、その Issue 自身の依存が `completed` かつ `verification.outcome: pass` に
+なった時点で `--max-parallel` の空き枠へ投入する。律速が「wave の深さ × 最遅」から**最長経路**へ変わる。
+**既定は `wave` のまま**で、`--schedule` を渡さない run の report は #183 以前と byte 一致する。
+
+ready 判定は **#182 の実効 edge** に対して行う（`basis: lexical` を除いた集合）。語彙一致だけの推論は
+planner が edge にしないので正しい plan には入っていないが、**手編集や古い runner の plan が #182 の効果を
+打ち消すのを防ぐ**ため runner 側でも落とし、落としたら `schedule_dag_lexical_edge_ignored` で名乗る。
+`basis` を持たない edge は落とさない（「区別ができる前に書かれた」であって「根拠が無い」ではない）。
+file 衝突は依存ではないが、wave packing が担っていた「同じ file を宣言する 2 件を同時に走らせない」は
+scheduler 自身が守る。`plan.waves` は参考情報になる（`merge_order` はこれの平坦化であり続ける）。
+
+**barrier が兼ねていた安全装置は 3 つあり、それぞれ別の答えを出した。**
+
+1. **失敗の伝播** — fail した Issue の**下流だけ**を止め（`blocked_by_upstream_failure`）、独立系列は
+   走り続ける。`--unattended` では従来どおり全停止に倒し、依存は満たしていたのに投入しなかった Issue は
+   `schedule_halted_unattended` として**別 code**で名乗る（対処が違う: 前者は「上流を直して
+   `--resume`」、後者は「**この Issue には何も問題が無い**」）。
+2. **合流検証のタイミング** — **run の末尾に 1 回。dispatch は merge を 1 回も呼ばない。**
+   (a) #175 の受け渡しは「operator が wave 境界で手を止めて merge を回す」運用でしか成立しておらず、
+   dag には**その停止点が構造的に無い**。(b) dispatch から merge を呼ぶと 1 invocation = 1 mutating
+   phase が壊れ、承認境界（`--approve` / PR 作成 / base の fetch）が dispatch の flag 1 つに畳まれる。
+   (c)「N 件ごと」は境界の意味が run ごとに変わる（wave 境界には「そこまでの依存が閉じている」が
+   あったが、任意の N には無い）。**dag が失うのは「合流後の赤を早く見つけること」であって「合流後を
+   見ること」ではない** —— 依存を宣言している下流は上流の pass を待つので、壊れた前段の上には積まない。
+   report / summary / limitation `schedule_dag` が `merge --merge-prs --integration-verify` を 1 回
+   回す指示を必ず書く。
+3. **同時実行数の増加** — barrier は実効並列度を wave 幅に抑える副作用も持っていたので、dag では同じ
+   `--max-parallel` でも走る worker が増える。前提の Kewton/CommandMate#1771（ゲートのリソース直列化 /
+   worktree ごとの env 注入）は**現時点で OPEN のまま**であり、ゲートが何を bind するかを runner は
+   知らないので直せない。よって**直さずに宣言する**: 「検証ゲートが資源（ポート等）を共有する
+   リポジトリでは偽赤が増えうる。#1771 が着地するまでは `--max-parallel` を保守的に設定すること」を
+   SKILL.md・契約・`dag` の run の limitation の**すべて**に書いた。
+   **`--max-parallel` の既定を dag だけ下げるのは不採用にした** —— `max_parallel` は plan に載って
+   **承認された値**であり、dispatch が黙って下げるのは「承認した plan と違う run」を作ることになる
+   （無言の劣化を禁じている第2.7節と同じ規律）。下げるべきだと判断した operator は plan を作り直せばよい。
+
+`--reverify` との併用は `invalid_input` で拒否する。reverify は 1 件も send しないので短縮する wall-clock が
+無く、しかも ready 条件（依存が green）は**reverify が直しに来た状態そのものを拒否する**。
+`--schedule` を #180 の `dispatch_defaults` に足していないのは、これが**リポジトリの性質ではなく、その
+run で wall-clock と barrier のどちらを優先するかという運用判断**だからである（加えて #1771 が OPEN の間、
+「このリポジトリでは常に dag」という宣言は偽赤を常態化させる）。
+
+実装では、DAG のために per-issue の準備・監督・裁定記録を wave ループから括り出し、**両モードが同じ
+関数を通る**ようにした（2 つ目の実装は片方でしか直らない）。DAG では worker の終了順が投入順と一致
+しないので、**report に載るものは完了の中から書かない**: scope / liveness の blocking reason も裁定の
+記録も、run の最後に **plan 順**で 1 回だけ回す（完了時点で走らせるのは、下流の ready 判定に必要な
+fallback 検証だけである）。
+
 ## merge（`scripts/merge.mjs`）
 
 ### #142 — 無人運転の段階 C（`merge --merge-prs`）
@@ -882,6 +1225,85 @@ PR を出すと、merge しても Issue は open のまま残った。
 `gh repo view` が失敗した場合は**照合をスキップするだけ**で、PR 作成フローは阻害しない
 （不明を不一致として扱わない）。記録に留め、`gh issue close` を勝手に実行することはしない。
 正本: [merge-contract.md](./merge-contract.md) 第5.1節。
+
+### #174 — 非ASCII path が、PR 本文で「宣言外の変更」に化けていた
+
+`changeEvidence()` が `git diff --name-only <range>` の出力を、plan の `scope.allow`（Issue が書いた
+ままの UTF-8）と文字列比較していた。**git は path をそのまま出さない** —— `core.quotePath` が既定
+true なので非ASCII バイトを 8 進エスケープし、全体をダブルクォートで囲む。結果、同一 file が別表記で
+2 行に並び、scope 内の変更が PR 本文で `Out-of-scope changes: 1` / `Declared: no` になる。
+
+裁定（CommandMate の scope ゲート）はこの経路を通らないので **pass のまま正しく、壊れていたのは人間が
+読む本文だけ**である。ただし出るのが `branch_changed_outside_declared_scope` という**正常系の名前の
+limitation** なので、「worker がスコープを踏み越えた」と読まれる。
+
+→ 2 案のうち **`-z`（NUL 区切り）** を採った。`-c core.quotePath=false` は**非ASCII しか解かない** ——
+`"`・`\`・制御文字を含む path は quotePath に関係なく C クォートされるので残る。`-z` は munge 自体を
+止め、区切りも NUL になるので `split('\n')` が持っていた**別の穴（改行を含む path）**も同時に塞ぐ。
+実測で `-z` が使えない事象は無かったため fallback は採用していない。`--numstat` も揃えた（現状は
+件数集計にしか使っていないので出力は正しいが、**将来 path 列を読んだときに同じ欠陥が再発する**）。
+
+PR 本文と reference が引用する command 行にも `-z` を入れた。この節の目的は「run ディレクトリの JSON の
+中にしか無い証拠を残さない」ことなので、読み手が同じ command を再実行して**表の path と同じもの**を
+得られる必要がある —— `-z` 無しの command を書くと、再実行結果はエスケープ表記になり、**本件と同じ
+食い違いを読み手側に作る**。
+
+fixture 側の穴も同時に塞いだ。それまでの fake CLI は scenario の path を**そのまま echo していた**ので、
+**この不具合は fixture からは見えなかった**。本物と同じ munge 挙動（quotePath 既定 true、`"`/`\`/
+制御文字は設定に関係なくクォート、`-z` なら munge 無しの NUL 終端、`git -c k=v` の解釈）を持たせてある。
+
+### #175 — file が重ならない意味的衝突は、合流後を誰も検証していなかった
+
+wave の衝突検出は `suspected_files` の重なりしか見ず、guarded merge が確認する CI は**兄弟 PR が入る前の
+base** で走っている。したがって「片方がデータを直し、もう片方がそのデータの性質に依存する検査を書く」類の
+**意味的衝突**は file が重ならないので「衝突なし」として同一 wave に入り、**合流後の状態は誰も検証して
+いない**。実測（2026-08-12、Kewton/BorderFreeKidsMap #105 × #106）では develop に入った直後から
+`npm run test:unit` が赤で、発覚は develop → stg の promotion PR の CI だった。
+
+→ `--merge-prs` に **opt-in の `--integration-verify`（既定 OFF）** を足した。merge を 1 件でも行った
+あと、merge ループの後に**1 回だけ** `git fetch` → `FETCH_HEAD` の使い捨て detached checkout →
+profile の baseline を実行 → 畳む、を行う。
+
+- **何を実行するかは profile からしか取らない**（`develop` / `npm` は hardcode しない。planner と
+  同じ設計原則で、規約の出どころは profile だけである）。
+- **materialise するのは `FETCH_HEAD`** である。ローカルの `develop` も fetch 前の `origin/develop` も
+  「**各 PR の CI が既に green だと主張した状態**」であり、合流後を測るには remote が今持っている tip で
+  なければならない。
+- **使い捨ての detached checkout** で測り、invocation の作業ツリーには触れない。branch も持たず
+  CommandMate にも登録しないので、`cmate-worktree-setup` に委ねている worker 用 worktree の準備段では
+  ない。畳めなければ**裁定は変えずに** `integration_verify_tree_left` に残す。
+- preview / eligible 無しでは merge が無いので `outcome: not_run` + `integration_verify_not_run`。
+  **「測っていない」を green に丸めない。**
+
+**profile に baseline の宣言が無いときは error であって skip ではない**（1 件も merge せずに
+`preflight_failed` / exit 1 / `integration_verify_unavailable`）。根拠は 3 つ:
+
+1. skip にすると、**opt-in した検証が走らないまま「merge phase 完了」と報告される**。誰も合流後を
+   見ていないのに緑に見える —— **#175 が消しに来た事象そのもの**である。
+2. 同じ読みが既にこの package の 2 箇所にある。dispatch の fallback 検証は baseline が空なら
+   `outcome: fail`（「検証すべき gate が無いから pass」に化けさせない）、profile-init が埋められない
+   baseline に置く雛形は **exit 0 しない command** である（profile-contract 第7.2節）。
+   **埋め忘れた baseline は fail-closed でなければならない。**
+3. **merge の前**に拒否するので世界は動いていない。profile に `baseline` を書いて同じコマンドを
+   再実行すればよく、**取り消すものが何も無い**。
+
+`merge_schema_version` は 1 のまま、`stop_reason` / target `outcome` / `preflight[].code` にも値を
+足していない。上げると `status.mjs`（`SUPPORTED_MERGE_SCHEMA_VERSION = 1` を pin）が**フラグを使って
+いない run の report まで読めなくなる**。赤は既存の **`merge_failed`** が受ける —— `ci_failed` /
+`ci_pending` はこの report では「その PR の CI が green でないので **merge しなかった**」を意味しており、
+合流後の赤は **merge が成功した後**の話なので、そこへ流すと report の中で最も安全に関わる事実
+（**何が既に base に入ったか**）が逆に読める。名指しは `blocking_reasons[]` の code が行う。
+`--create-prs` との併用は `invalid_input`（exit 3）で拒否する —— **merge しない phase には合流後が無い**。
+受理して無視しない（段階 B の `--merge-prs --unattended` 拒否と同じ規律）。
+
+これで wave barrier の意味が「前 wave の全 worker 完了 + verification pass」から**「統合ブランチも
+green」**まで広がった。dispatch が読むのは `integration_verify.outcome` で、進んでよいのは
+**`status: success` かつ `"pass"`** のときだけ —— `"not_run"` は「測っていない」であって green ではなく、
+**field ごと無いのは「フラグを使っていない run」**である（第5.4節）。
+
+**merge queue 方式（base 更新 → CI 再走 → merge の直列化）は実装していない。** Issue 本文が「まずは
+合流後検証の 1 段で十分」と判断している。#183（`--schedule dag`）から見たこの検証の位置づけは
+dispatch 節の #183 に書いた。
 
 ---
 
@@ -1063,6 +1485,70 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 ---
 
 ## パッケージ
+
+### 0.28.0 — 推測を推測と名乗らせ、wall-clock を最長経路へ（#174 / #175 / #176 / #177 / #178 / #179 / #180 / #181 / #182 / #183）
+
+**worker が、自分を裁く検証ランナーを書き換えられた**（#177）。受入条件に書いた
+`.claude/skills/cmate-verify/scripts/verify-run.sh` がそのまま `scope.allow` に入っていた ——
+受入条件の中の path は「成果物」であるのと同じくらい「実行するコマンド」であり、**形では区別できない**。
+ハーネス root を deny-by-default にし、落とした path は `reference_files`（読めるが書けない）へ出す。
+**ゲートが 1 つ機能していなかった**ので、この 10 件の中で唯一、認可境界に開いていた穴を塞ぐ修正である。
+
+残る 9 件は 3 つの塊になる。
+
+**1. 推測を、推測と名乗らせる（planner）。** 語彙が似ているだけの 3 Issue が 3 wave に直列化し、
+「依存しない」と**否定するために**書いた行が phantom 依存を作り、宣言した path が「長い方が正しい」で
+落とされて**触るなと書いた生成物の方が scope に残っていた**（#182）。edge に `basis` を足し、語彙だけの
+推論と shadow は **question** にした（推論そのものは消していない —— file を共有する組の順序付けは残る）。
+著者が本文に書いた「**まだ決めていない**」も、```open-questions ブロックとして初めて機械に読まれる
+（#178。実測では 3 件の未決を残したまま dispatch が通り、worker が自分で決めていた）。規則からは決して
+出てこない**集約テスト**は `scope_companions.require` で宣言できるようになった（#181。ADR 第15.2節が
+`derive` を緩めず兄弟 key にすることを既に裁定していた）。
+
+**2. 契約と report が、測った事実を落とさない（dispatch）。** 禁止事項は goal に載る口が無く、worker
+からは「許可されていない」ではなく**「存在しない」**ように見えていた（#176。実測: 禁止 3 件のうち
+2 件しか転記されず、**全ゲート green のまま受入条件違反**。発見は人間のレビュー）。原文転記にし、
+切ったら名乗る。`wait` の timeout は **worker の死と区別できず**、再 dispatch が完成済みの作業の上に
+別 worker を重ねていた（#179）—— exit 124 の時点で生死を 1 回測って report へ転記する。
+リポジトリの事情を書いた flag の置き場は、人間の記憶から profile になった（#180）。
+
+**3. 合流後を見る / 待たない（merge・dispatch）。** file が重ならない**意味的衝突**は、合流後の状態を
+誰も検証していなかった（#175。実測: develop に入った直後から赤で、発覚は次段 promotion PR の CI）——
+opt-in の `--integration-verify` で **wave barrier が「統合ブランチも green」まで広がる**。非ASCII path が
+PR 本文で「宣言外の変更」に化けていたのも直した（#174。裁定は正しく、壊れていたのは人間が読む本文だけ
+だが、出る名前が正常系だったので誤読される）。そして wave の wall-clock「各 wave の最遅 worker の合計」を、
+opt-in の `--schedule dag` で**最長経路**にした（#183。barrier が兼ねていた 3 つの安全装置には
+それぞれ別の答えを出してある）。
+
+**破壊的変更は無い。** `plan_schema_version` / `dispatch_schema_version` / `merge_schema_version` は
+すべて据え置きで、`stop_reason` / `worker_state` / `completion_check[].id` の enum にも値を 1 つも
+足していない。足した field（`dependencies[].basis` / `worker_liveness` / `integration_verify` /
+`schedule` / `profile.dispatch_defaults`）は**すべて schema 上 optional** である —— したがって
+0.27.0 以前が書いた plan / report は今も valid で、`status.mjs` は過去 run を読み続けられる。
+
+**新 flag を使わない run の report は、`skill_version` の 1 行を除いて 0.27.0 と byte 一致する。**
+`m22`（merge）と `d87`（dispatch）が、**その機能が入る前の runner が書いた** golden をそのまま置いて
+byte 比較しており、「opt-in が opt-in である」ことはこの 2 件が測っている。`integration_verify` は
+`--integration-verify` を渡した run に、`schedule` は `--schedule dag` の run に、`worker_liveness` は
+wait が timeout した worker に、`dispatch_defaults` は profile が宣言した run にしか現れない。
+
+**plan は変わりうる。** `dependencies[].basis` は planner が**必ず出す**ので、edge を持つ plan は 1 行
+増える（`required` に入れていないので、`basis` を持たない過去の plan は valid のままである）。そして
+本文が #177 / #178 / #182 の拾う形を持っていれば `suspected_files` / `reference_files` / `questions` は
+当然変わる —— **それがこのリリースである。** その形を持たない本文の plan は 1 byte も動かない
+（`31` / `45` / `61` の全文 golden が、本リリースで `skill_version` の 1 行しか差分を持たないことで
+測られている）。
+
+**新たに止まりうるのは 3 つ**である。`--allow-questions` 無しの run で `open_question_declared`（#178）/
+`ambiguous_file_candidate`・`unconfirmed_lexical_dependency`（#182）が立った場合と、
+`harness_path_in_scope` で `partial` に落ちる場合（#177）—— いずれも 0.27.0 までなら**推測が推測のまま
+dispatch されていた**ケースであり、止まる方が正しい。`--schedule dag` は opt-in だが、採ると同じ
+`--max-parallel` でも実効並列度が上がる。Kewton/CommandMate#1771（ゲートのリソース直列化）が OPEN の
+うちは、**検証ゲートが資源を共有するリポジトリで偽赤が増えうる** —— 直せないので宣言してある。
+
+同梱の **cmate-worker-development も 0.2.0** に上がる（#176）。契約が言及していない禁止事項は許可では
+なく **Issue 本文が正本**であること、狭める方向（禁止）は本文も効き広げる方向（権限・対象 file）は
+契約が正本であること、そして A 段で本文全文を読み取り専用で取得することを必須手順にした。
 
 ### 0.27.0 — 無言で消える情報を潰した（#160 / #161 / #162 / #163 / #164 / #165 / #170 / #171）
 
