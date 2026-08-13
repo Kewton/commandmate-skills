@@ -1,0 +1,14 @@
+{
+  "description": "Issue #181 meeting Issue #177: the deny-by-default boundary around the agent harness must not acquire a second, quieter door on the profile side. #177 keeps `.claude/skills/` / `.agents/skills/` / `.commandmate/` out of `scope.allow` unless the ISSUE names the path under a deliverable heading — a grant that is explicit and reported as `harness_path_in_scope` — and its rationale says in as many words that a `scope_companions`-style key must not be able to relax it. A literal companion is exactly such a key, and it is statically decidable, so it is refused at profile load (load_error, exit 6) rather than dropped at derivation: a rule that never lands is a rule that never says so, and the profile is a reviewed artifact whose author can fix it. The escape hatch is unchanged and stays in the issue body, where the warning is attached.",
+  "args": ["490", "--profile-json", "PROFILE:companions-invalid-literal-harness.json"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "require[0].add",
+      "part of the agent harness"
+    ],
+    "plan_null": true
+  }
+}

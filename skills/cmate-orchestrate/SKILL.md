@@ -63,7 +63,8 @@ runner が自分で再試行ループを回すことはない。
 orchestration 全体が要求する集合である（plan にも同じ集合を提示する）。base branch・branch 名・
 worktree path・baseline は **profile から解決**し、`develop`/`npm`/`cargo` を hardcode しない
 （[profile-contract.md](./references/profile-contract.md)）。**リポジトリ固有の伴走ファイル規約
-（`spec/` ミラー等）も profile の任意 field `scope_companions` で宣言する** —— planner は
+も profile の任意 field `scope_companions` で宣言する** —— `spec/` ミラーのような
+宣言済み path の関数は `derive`、集約テストのような固定名の伴走は `require` に書く。planner は
 リポジトリを開かないので、規約の出どころは profile だけである
 （[adr-scope-derivation.md](./references/adr-scope-derivation.md) 第3節）。内蔵 profile
 （`node-commandmate` / `rust-commandagent`）以外のリポジトリで使うなら、まず

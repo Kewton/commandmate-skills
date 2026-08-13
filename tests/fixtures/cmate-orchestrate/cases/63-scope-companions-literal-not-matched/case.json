@@ -1,0 +1,33 @@
+{
+  "description": "Issue #181, the other half of the measurement in 62: a literal `require` companion is still GATED on the declaration. The profile is byte-for-byte the one 62 uses, and this issue declares `web/src/app/map.mjs` — a path neither `scripts/{dir}{base}.mjs` nor `web/src/shared/{base}.mjs` matches — so `scripts/tests/shared-contract.test.mjs` must NOT appear. Without this case the feature could be \"every literal is always granted\", which would pass 62 and would be a profile-shaped version of the bare-glob permission invariant 1 forbids: the closure would stop being bounded by what the issue declared. L1's four `.mjs` shapes are all that is derived here.",
+  "args": ["491", "--profile-json", "PROFILE:companions-literal-require.json", "--run-id", "fixture-l2-literal-miss"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[491]],
+    "merge_order": [491],
+    "dependencies": [],
+    "classifications": { "491": "independent" },
+    "risk_level": "low",
+    "suspected_files": {
+      "491": [
+        "web/src/app/map.mjs",
+        "web/src/app/map.test.mjs",
+        "web/src/app/map.spec.mjs",
+        "web/src/app/__tests__/map.mjs",
+        "web/src/app/__tests__/map.test.mjs"
+      ]
+    },
+    "scope_defaults": {
+      "491": [
+        "web/src/app/map.test.mjs",
+        "web/src/app/map.spec.mjs",
+        "web/src/app/__tests__/map.mjs",
+        "web/src/app/__tests__/map.test.mjs"
+      ]
+    },
+    "reference_files": { "491": [] },
+    "questions_count": { "491": 0 }
+  }
+}

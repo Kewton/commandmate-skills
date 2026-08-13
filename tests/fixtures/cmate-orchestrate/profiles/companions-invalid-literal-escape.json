@@ -1,0 +1,14 @@
+{
+  "id": "companions-invalid-literal-escape",
+  "repository": "Kewton/CommandMate",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": ["npm test"],
+  "verified": true,
+  "scope_companions": {
+    "require": [
+      { "when": "scripts/{dir}{base}.mjs", "add": ["users/kewton/notes/shared-contract.test.mjs"] }
+    ]
+  }
+}

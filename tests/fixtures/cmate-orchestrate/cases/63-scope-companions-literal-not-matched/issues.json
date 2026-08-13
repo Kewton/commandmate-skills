@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 491,
+      "title": "fix: 地図の初期表示位置がずれる",
+      "body": "`web/src/app/map.mjs` の初期 center が padding を考慮していない。\n\n## 対象ファイル\n- `web/src/app/map.mjs`\n\n## Acceptance criteria\n- [ ] 初期表示が指定した中心に一致する\n",
+      "labels": ["bug"]
+    }
+  ]
+}
