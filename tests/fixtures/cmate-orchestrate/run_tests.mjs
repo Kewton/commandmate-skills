@@ -1952,6 +1952,45 @@ function countCalls(cliLog, sub, action) {
   return cliLog.filter((entry) => entry.sub === sub && (action === undefined || entry.args[0] === action)).length;
 }
 
+// A merge case may rewrite the generated plan before merge reads it — the same
+// reason `patchDispatchReport` exists: the plan is an INPUT to this runner, and
+// states a real profile reaches (Issue #175: `baseline` never filled in) cannot
+// always be produced by running the planner, because the harness's own dispatch
+// step needs a working baseline to produce an eligible set at all. Only the keys
+// the patch names are replaced, one level into `profile`.
+function patchPlan(planPath, patch) {
+  const plan = JSON.parse(readFileSync(planPath, 'utf8'));
+  for (const [key, value] of Object.entries(patch)) {
+    plan[key] = value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? { ...plan[key], ...value }
+      : value;
+  }
+  writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+}
+
+// The integration verification's own record (Issue #175). Asserted field by
+// field rather than with a deep compare so a case can pin the four values that
+// carry the verdict (`outcome`, `failed_command`, `exit_code`, `merged_issues`)
+// without also pinning the prose in `detail`.
+function assertIntegrationVerify(report, expected) {
+  const actual = report.integration_verify;
+  if (!check(actual !== undefined, 'the report carries no integration_verify field')) return;
+  for (const [key, value] of Object.entries(expected)) {
+    check(deepEqual(actual[key], value),
+      `integration_verify.${key} ${JSON.stringify(actual[key])} !== ${JSON.stringify(value)}`);
+  }
+  // Independent of what a case declares: "we did not measure it" is never
+  // allowed to look like a pass, and a pass is never allowed to be a verdict
+  // nobody ran.
+  if (actual.outcome === 'pass') {
+    check(actual.ran === true, 'integration_verify says pass but ran is false — a verdict nobody ran');
+  }
+  if (actual.outcome !== 'pass') {
+    check(report.status !== 'success' || actual.merged_issues.length === 0,
+      `integration_verify outcome "${actual.outcome}" over merged PR(s) but the run reported success`);
+  }
+}
+
 function runMergeCase(caseId) {
   const caseDir = join(MERGE_CASES_DIR, caseId);
   const spec = JSON.parse(readFileSync(join(caseDir, 'case.json'), 'utf8'));
@@ -1966,6 +2005,9 @@ function runMergeCase(caseId) {
   const dispatchPath = generateDispatchReport(planPath, spec.dispatch_scenario ?? DEFAULT_DISPATCH_SCENARIO, work);
   if (!check(existsSync(dispatchPath), `dispatch-report.json was not generated at ${dispatchPath}`)) return;
   if (spec.dispatch_report_patch) patchDispatchReport(dispatchPath, spec.dispatch_report_patch);
+  // After the dispatch report, so a patched plan cannot change what the workers
+  // were judged by — only what the merge runner reads.
+  if (spec.plan_patch) patchPlan(planPath, spec.plan_patch);
 
   const mergeOut = join(work, 'merge'); // must not pre-exist; merge creates it
   const logPath = join(work, 'gh.log');
@@ -2036,6 +2078,45 @@ function runMergeCase(caseId) {
   }
   for (const code of expect.absent_limitation_codes ?? []) {
     check(!limitationCodes.includes(code), `limitation "${code}" should not have been recorded`);
+  }
+  // The blocking channel, asserted the same way in both directions. A stop the
+  // report cannot NAME is a stop the next runner cannot act on (Issue #175: the
+  // next wave's dispatch reads this list, not the prose).
+  const blockingCodes = (report.blocking_reasons ?? []).map((r) => r.code);
+  for (const code of expect.blocking_codes ?? []) {
+    check(blockingCodes.includes(code), `blocking reason "${code}" not in ${JSON.stringify(blockingCodes)}`);
+  }
+  for (const code of expect.absent_blocking_codes ?? []) {
+    check(!blockingCodes.includes(code), `blocking reason "${code}" should not have been recorded`);
+  }
+
+  // The integration verification (Issue #175): what it recorded, what it invoked,
+  // and — for the opted-out twin — that the field and the calls are both absent.
+  if (expect.integration_verify) assertIntegrationVerify(report, expect.integration_verify);
+  if (expect.no_integration_verify) {
+    check(report.integration_verify === undefined,
+      'the report carries an integration_verify field although --integration-verify was not passed');
+  }
+  for (const [sub, count] of Object.entries(expect.git_calls ?? {})) {
+    const actual = countCalls(cliLog, sub);
+    check(actual === count, `git ${sub} called ${actual} time(s) !== ${count}`);
+  }
+  for (const needle of expect.summary_contains ?? []) {
+    check(report.summary_markdown.includes(needle), `merge summary does not mention "${needle}"`);
+  }
+
+  // The byte-level non-regression golden (Issue #175 (a)). `out_dir` is the run's
+  // absolute temp path — the one value that cannot be checked in — so it is
+  // replaced in place, keeping the key order the comparison is about. The golden
+  // itself was produced by the runner as it stood BEFORE the flag existed, so a
+  // match means the opt-out path emits the same bytes it always did.
+  if (expect.golden_report) {
+    const goldenPath = join(caseDir, expect.golden_report);
+    if (check(existsSync(goldenPath), `golden ${expect.golden_report} is missing`)) {
+      const normalized = `${JSON.stringify({ ...report, out_dir: '<out>' }, null, 2)}\n`;
+      const golden = readFileSync(goldenPath, 'utf8');
+      check(normalized === golden, `merge report is not byte-identical to ${expect.golden_report} (pre-#175 output)`);
+    }
   }
 
   // The PR body artifact is the operator-facing half of the same finding.
