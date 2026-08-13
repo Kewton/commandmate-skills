@@ -111,6 +111,8 @@ Issue が `## 対象ファイル`（成果物見出し）に書いた場合だ�
 | `contract_scope_dropped` | dispatch | 宣言された対象 file の一部が実行契約の `scope.allow` に入らないまま dispatch した。**Issue ごとに1件。** worker の権限は Issue の宣言より**狭い**。detail に落ちた件数・落ちた path・落ちた理由が入る。**`--unattended` では limitation ではなく blocking reason になり、`--out` を作る前に停止する** |
 | `open_questions_accepted` | dispatch | `--allow-questions` で未回答 question を引き受けた |
 | `auto_yes_used` | dispatch | `--auto-yes` で prompt を自動応答した |
+| `dispatch_defaults_applied` | dispatch | plan の profile が `dispatch_defaults` を宣言しており、この run がそれを解決した（[#180](https://github.com/Kewton/commandmate-skills/issues/180)、[profile-contract.md](./profile-contract.md) 第10節）。**run 全体で1件。** どの値が profile 由来で、どの値が flag に上書きされたかを detail に書く。**flag は常に profile を上書きする** |
+| `dispatch_defaults_no_infer_not_applied` | dispatch | profile が `dispatch_defaults.no_infer` を宣言しているのに、渡された plan は**推論を有効にしたまま**作られている（`inputs.infer` が true）。**run 全体で1件。** dispatch は承認済み plan を後から un-infer できないので、wave が語彙一致で直列化されているなら `--no-infer` を付けて plan を取り直す |
 | `parallelism_truncated` | dispatch | wave が `max_parallel` より広かったので上限で切った |
 | `unsafe_worktree_target` | dispatch | worktree path が path-escape guard に弾かれた |
 | `worktree_sync_ran` | dispatch | `ls` で解決できず `commandmate sync` を1度実行して `ls` を読み直した（解決した branch / なお未解決の branch を detail に列挙） |

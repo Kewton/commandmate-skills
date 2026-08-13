@@ -1,0 +1,34 @@
+{
+  "description": "**dispatch が消費できない宣言を、黙って無視しない（#180）。** `no_infer` は planner の flag であり、承認済みの plan を dispatch が後から un-infer することはできない。profile がそれを宣言しているのに、渡された plan は推論を有効にしたまま作られている（`inputs.infer` が true）——「毎回 flag を付ける」運用の付け忘れが、まさにこの形で残る。dispatch は止まらない（人間が承認した plan である）が、食い違いを limitation として名指しし、`--no-infer` で plan を取り直せと言う。合致している側は d84。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "plan_patch": {
+    "profile": {
+      "dispatch_defaults": {
+        "no_infer": true
+      }
+    }
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "auto_yes": false,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "sent": [201, 200],
+    "limitation_codes": ["dispatch_defaults_no_infer_not_applied"],
+    "limitation_code_counts": {
+      "dispatch_defaults_no_infer_not_applied": 1
+    },
+    "limitation_details_include": [
+      "dispatch_defaults.no_infer"
+    ],
+    "absent_limitation_codes": ["dispatch_defaults_applied"]
+  }
+}

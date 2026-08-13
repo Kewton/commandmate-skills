@@ -35,7 +35,8 @@ CommandMate の exit code へ移しただけで、report 上の表現（field �
 | `--cli <launcher>` | 任意 | `$CM` → `commandmate` | 実行する public CommandMate ランチャー（第 2.8 節） |
 | `--git <path>` | 任意 | `git` | drift 確認に使う git |
 | `--gh <path>` | 任意 | `gh` | repo 到達性確認に使う gh |
-| `--auto-yes` | 任意 | off | worker prompt を自動応答する。既定 off（prompt で停止し human へ提示） |
+| `--auto-yes` | 任意 | off（profile 既定可） | worker prompt を自動応答する。既定 off（prompt で停止し human へ提示）。profile の `dispatch_defaults.auto_yes` が既定を宣言できる（第1.1節）。flag は常に勝つ |
+| `--no-auto-yes` | 任意 | — | **off 側を明示する**（第1.1節）。profile が `auto_yes: true` を宣言していても、この run だけ off にできる。`--auto-yes` との同時指定は `invalid_input` |
 | `--unattended` | 任意 | **off** | **この invocation に人間が居ないことの宣言**（第3.0.3節）。mutation の権限は1つも足さず、**`--approve` を含意しない**。含意するのは締め付けだけ: `--contract-mode require` / pre-flight の scope 検査（all-or-nothing・`--out` 未消費）/ worktree 単位の排他 lock / `--wall-clock-budget` の明示必須 / `unattended_baseline` の記録。緩和フラグ（`--auto-yes` / `--allow-questions` / `--contract-mode off｜auto`）との併用は `invalid_input`（exit 3）で拒否する |
 | `--wall-clock-budget <sec>` | 任意（`--unattended` では**必須**）| なし（off） | run 全体の壁時計上限（第3.0.4節）。**残り budget は run が起動する子プロセスすべての timeout でもある**（profile baseline と acceptance コマンドは自前の timeout を持たない）。到達は `partial` / `stop_reason: timeout` であって成功ではない |
 | `--prepare-worktrees` | 任意 | **off** | pre-flight で未解決だった worktree を `cmate-worktree-setup` provider に作らせてから dispatch する（第3.0.1節）。既定 off＝従来どおり停止する |
@@ -44,11 +45,55 @@ CommandMate の exit code へ移しただけで、report 上の表現（field �
 | `--contract-mode <m>` | 任意 | `auto` | `auto` / `require` / `off`。契約非対応 CLI での挙動を決める（第2.7節） |
 | `--verify-gates <ids>` | 任意 | なし | 契約の `verify.gates` に載せる gate id（comma 区切り）。既定は省略＝全ゲート |
 | `--expect-branch <name>` | 任意 | なし | plan 承認時の統合 branch。dispatch 時に不一致なら drift |
-| `--wait-timeout <sec>` | 任意 | 300 | `commandmate wait` に渡す1回あたり timeout |
-| `--max-turns <n>` | 任意 | 8 | 各 worker を駆動する最大ターン数（初回 send + nudge / 再指示）。未 commit のまま到達で当該 worker を failed とする |
+| `--wait-timeout <sec>` | 任意 | 300（profile 既定可） | `commandmate wait` に渡す1回あたり timeout。profile の `dispatch_defaults.wait_timeout`（第1.1節） |
+| `--max-turns <n>` | 任意 | 8（profile 既定可） | 各 worker を駆動する最大ターン数（初回 send + nudge / 再指示）。未 commit のまま到達で当該 worker を failed とする。profile の `dispatch_defaults.max_turns`（第1.1節） |
 | `--poll-limit <n>` | 任意 | 120 | 互換のため保持（wait は block するので poll しない） |
 
 `commandmatedev` は使わない。公式経路は public `commandmate` である（ADR [#1447](https://github.com/Kewton/CommandMate/issues/1447)）。
+
+### 1.1 profile が宣言する運転既定（[#180](https://github.com/Kewton/commandmate-skills/issues/180)）
+
+`--no-infer` / `--auto-yes` / `--wait-timeout` は、その run の事情ではなく
+**リポジトリの事情**を書いている flag である（散文の語彙が重なるリポジトリでは推論依存が出る、
+worker が書く前に訊くリポジトリでは prompt で止まる、e2e を含む baseline は 300 秒で終わらない）。
+これまでその知識の置き場は人間の記憶と CLAUDE.md しかなく、**付け忘れは遅い run ではなく事故**
+（phantom edge / 誰も答えない prompt / `wait_window_exhausted`）になっていた。
+
+planner が `develop` / `npm` を hardcode しないのと同じ理由で、リポジトリ知識の入口は profile だけ
+である。運転既定も同じ入口から入る —— profile の任意 field `dispatch_defaults`
+（[profile-contract.md](./profile-contract.md) 第10節）を plan が運び、この runner が読む。
+
+| 宣言 | 対応する flag | 誰が消費するか |
+|---|---|---|
+| `auto_yes` | `--auto-yes` / `--no-auto-yes` | この runner |
+| `wait_timeout` | `--wait-timeout` | この runner |
+| `max_turns` | `--max-turns` | この runner |
+| `no_infer` | `--no-infer` | **planner**（`orchestrate.mjs`）。この runner は plan と突き合わせて記録するだけ |
+
+規則は2つである。
+
+1. **flag は常に勝つ。明示された off も勝つ。** `Boolean(values['auto-yes'])` は
+   「渡していない」と「off のつもりで渡した」を区別できないので、引数解決は
+   **三値**（true / false / 未宣言）で読む。false を打つ手段が `--no-auto-yes` であり、
+   これが無ければ「宣言された既定を1回だけ断る」ことができない。
+2. **既存の検証は解決後の値に対して行う。** `--unattended` が `--auto-yes` を拒否するのは、
+   人が居ない run で唯一残る停止点（exit 10）を構造的に到達不能にするからである
+   （[adr-unattended-mode.md](./adr-unattended-mode.md) 第2節）。profile 由来の auto-yes は
+   同じ `send` で同じ worktree を armするので、同じく `invalid_input`（exit 3）で拒否する。
+   逃げ道は `--no-auto-yes` である。argv だけを見る検査は、profile が回り込める検査である。
+
+解決結果は limitation `dispatch_defaults_applied` に**1行で**残す（どの値が profile 由来で、
+どの値が flag に上書きされたか）。宣言が無い plan では entry が1つも出ないので、
+**その run の report は本 field が存在しなかった頃と byte 一致する。**
+
+`no_infer` はこの runner が消費できない（承認済みの plan を後から un-infer はできない）。
+黙って無視する代わりに、plan の `inputs.infer` と突き合わせ、食い違ったときだけ
+limitation `dispatch_defaults_no_infer_not_applied` を残して「`--no-infer` を付けて plan を
+取り直せ」と名指しする。
+
+宣言の形が壊れている（未知 key・boolean でない・0 以下）場合は `plan_invalid`（exit 3）で
+**dispatch を始めない**。未知 key を読み飛ばす実装だと、新しい runner 向けに書かれた profile が
+古い runner で**半分だけ効いた**状態で走ることになり、それは宣言が防ごうとした事故そのものである。
 
 ## 2. commandmate CLI の呼び出し規約（worktree-id ベース）
 

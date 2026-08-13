@@ -1,0 +1,35 @@
+{
+  "description": "**明示した off が profile の true を上書きする（#180 受入条件2）。** profile は `auto_yes: true` を宣言しており、run は `--no-auto-yes` だけを渡す。boolean flag は「渡していない」と「off のつもりで渡した」が同じ argv になるので、三値で読んでいない実装はここで profile の true を残し、prompt を `respond` で自動応答して **exit 0 の success** を返す —— つまりこの case は「宣言を断れなかった」ことを status の違いとして検出する。期待するのは d05 と同じ停止（prompt を human へ提示、`respond` 0 回、次 wave は dispatch しない）であり、`auto_yes: false` が report にもそう書かれることまで固定する。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "plan_patch": {
+    "profile": {
+      "dispatch_defaults": {
+        "auto_yes": true
+      }
+    }
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--no-auto-yes"],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "human_required",
+    "human_required": true,
+    "auto_yes": false,
+    "waves_count": 1,
+    "never_sent": [200],
+    "no_respond": true,
+    "prompt_detected": [201],
+    "absent_send_args": {
+      "201": ["--auto-yes", "--duration"]
+    },
+    "limitation_codes": ["dispatch_defaults_applied"],
+    "limitation_details_include": [
+      "auto_yes=false (--no-auto-yes overrode the profile's true)"
+    ],
+    "absent_limitation_codes": ["auto_yes_used"]
+  }
+}

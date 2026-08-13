@@ -1,0 +1,45 @@
+{
+  "description": "d79 の相方（#180 二点測定）: **世界も plan patch も d79 と同一**で、違うのは `dispatch_args` だけである。`--wait-timeout 300 --max-turns 8` を渡すと `wait` の argv が 300 に変わり、600 を運ぶ呼び出しは1つも無い。さらに `--auto-yes` は渡していないので profile 由来の true がそのまま残り、auto-yes の窓は d79 の 3h ではなく **1h**（8 × 300s = 40分）になる —— 上書きが「flag を読んだ」ではなく「解決後の値から窓を導き直した」ことの測定である。profile を素通りさせる実装（flag を無視）でも、flag だけを見る実装（profile を無視）でも、この2つの assert のどちらかが落ちる。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "plan_patch": {
+    "profile": {
+      "dispatch_defaults": {
+        "auto_yes": true,
+        "wait_timeout": 600,
+        "max_turns": 10
+      }
+    }
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--wait-timeout", "300", "--max-turns", "8"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "auto_yes": true,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "sent": [201, 200],
+    "dispatch_send_args": {
+      "201": ["--auto-yes", "--duration", "1h"],
+      "200": ["--auto-yes", "--duration", "1h"]
+    },
+    "cli_args_include": {
+      "wait": ["--timeout", "300"]
+    },
+    "cli_args_absent": {
+      "wait": ["600"]
+    },
+    "limitation_codes": ["dispatch_defaults_applied"],
+    "limitation_details_include": [
+      "auto_yes=true (from the profile)",
+      "wait_timeout=300 (--wait-timeout overrode the profile's 600)",
+      "max_turns=8 (--max-turns overrode the profile's 10)"
+    ],
+    "absent_limitation_codes": ["auto_yes_window_short"]
+  }
+}
