@@ -42,6 +42,7 @@ CommandMate の exit code へ移しただけで、report 上の表現（field �
 | `--prepare-worktrees` | 任意 | **off** | pre-flight で未解決だった worktree を `cmate-worktree-setup` provider に作らせてから dispatch する（第3.0.1節）。既定 off＝従来どおり停止する |
 | `--worktree-setup <launcher>` | 任意（`--prepare-worktrees` 指定時は実質必須） | なし | 上記 provider のランチャー（`--cli` と同じ argv 規約・同じ guard。シェルは経由しない）。`--prepare-worktrees` 無しに渡すと `invalid_input` |
 | `--worker-method <skill-id>` | 任意 | **なし（off）** | worker が従うべき開発スキルの id（例 `cmate-worker-development`）。指定すると、dispatch 対象 worktree に**その skill が install されていることを実測**してから dispatch し、契約 goal と worker prompt の**両方**に `## Method` 節を1つ足す（第3.0.2節）。**指定しない run は、この flag が存在しなかった頃と byte 一致する。** id は `^[a-z0-9][a-z0-9-]{0,63}$`（path に展開されるので、それ以外は `invalid_input`） |
+| `--schedule <mode>` | 任意 | **`wave`** | `wave`（既定）/ `dag`。**いつ dispatch してよいか**の決め方（第3.2節）。`wave` は plan の wave と barrier をそのまま使う。`dag` は **その Issue 自身の依存**が completed かつ verification pass になった時点で空き枠へ投入する。`--schedule` を渡さない run は、この flag が存在しなかった頃と **report が byte 一致**する（fixture `d87-schedule-wave-default-nonregression`）。`--reverify` との併用は `invalid_input` |
 | `--contract-mode <m>` | 任意 | `auto` | `auto` / `require` / `off`。契約非対応 CLI での挙動を決める（第2.7節） |
 | `--verify-gates <ids>` | 任意 | なし | 契約の `verify.gates` に載せる gate id（comma 区切り）。既定は省略＝全ゲート |
 | `--expect-branch <name>` | 任意 | なし | plan 承認時の統合 branch。dispatch 時に不一致なら drift |
@@ -974,6 +975,126 @@ acceptance コマンドは `execFileSync` に `timeout` を渡さずに実行さ
 worktree の場合である。この停止は既に dispatch した Wave があるので `partial` であり、
 `worker_state: 'failed'` と note（`worktree unresolved: …`）は従来どおり記録する。
 
+## 3.2 DAG スケジューリング（`--schedule dag`。既定 off）
+
+[#183](https://github.com/Kewton/commandmate-skills/issues/183) である。**wave barrier を
+「その Issue 自身の依存が満たされたか」に置き換える**のがこの節であり、置き換えは opt-in で入る
+（既定 off、フラグ無しの report は #183 以前と **byte 単位で同一**。fixture
+`d87-schedule-wave-default-nonregression` が pre-#183 の runner が書いた golden と byte 比較して
+固定している —— #175 に対する `m22` と同じ形の非回帰である）。
+
+### なぜ要るか（実測）
+
+wave 方式の wall-clock は「**各 wave の最遅 worker の合計**」になる。worker の1ターンは実測で
+数分〜約40分とばらつくので（Kewton/BorderFreeKidsMap #62 は e2e/build 込みで約40分）、
+**依存の無い Issue が、同じ wave に居合わせただけの最遅 worker を待つ**時間が支配的になる。
+
+```
+A・B・C は独立、D は A にだけ依存。A=10分 / B=15分 / C=40分 / D=20分
+wave 方式:   wave1 [A B C] → barrier（C の40分） → wave2 [D]   ≈ 60分
+dag  方式:   A が green になった時点で D を投入。律速は最長経路   ≈ 40分
+```
+
+これは [#182](https://github.com/Kewton/commandmate-skills/issues/182)（語彙一致だけの推論を
+edge にしない）と**同じ無駄の別の半分**である。#182 が「そもそも待つ必要が無い edge」を消し、
+本節が「正しい edge のもとで無駄に待たない」を消す。
+
+### ready 条件と、投入の規則
+
+| 論点 | 規定 |
+|---|---|
+| ready | その Issue の **全依存**が `worker_state: completed` **かつ** `verification.outcome: pass`。wave barrier の2条件を、wave ではなく **Issue 1件に対して**適用したものである |
+| どの edge を読むか | **`plan.dependencies` から `basis: lexical` を除いたもの**（＝#182 が言う実効 edge）。lexical だけの推論は planner が edge にせず consumer の question にするので、正しい plan にはそもそも入っていない。それでも runner 側で落とすのは、**手で編集された plan や古い runner の plan が #182 の効果を打ち消すのを防ぐ**ためで、落としたら `schedule_dag_lexical_edge_ignored` で名乗る。`basis` を**持たない** edge は落とさない（「区別ができる前に書かれた」であって「根拠が無い」ではない） |
+| 投入順 | `plan.waves` を平坦化した順（＝ `merge_order`）。plan の全 edge に対する topological order なので実効 edge に対しても topological であり、**同じ plan なら同じ順**になる |
+| 同時実行の上限 | **`--max-parallel` は「同時実行数の上限」である**（下記） |
+| file 衝突 | **同じ file を宣言している2件は同時に走らせない。** wave 方式ではこれを planner の wave packing（規則2）が担っていたが、dag には wave が無いので **scheduler 自身が守る**。これは依存ではない —— 向きが無く、順序も付けず、片方の失敗はもう片方を止めない |
+| `plan.waves` | **参考情報である**（execution-plan.v2 の `waves` 記述も同じことを書いている）。ただし `merge_order` はこれを平坦化したものであり続けるし、file 衝突の規則も上記のとおり生き続ける |
+| report | `waves[]` の1件は wave ではなく**投入ラウンド**である。ラウンドは**時間的に重なる**（後のラウンドが、前のラウンドの worker がまだ走っている最中に投入される）。`barrier` はそのラウンドの2つの事実を述べるだけで、**何も gate していない** |
+| `--reverify` との併用 | **`invalid_input` で拒否する。** reverify は1件も send しないので短縮する wall-clock が無く、しかも ready 条件（依存が green）は **reverify が直しに来た状態そのもの**を拒否する（上流が green でない Issue の再判定を止めてしまう）。受理して無視すると、report から run を再構成できなくなる |
+
+### `--max-parallel` の意味（**この節で変わるのはここである**）
+
+`--max-parallel` は **これまでも「同時実行数の上限」**だった。wave 方式ではそれが同時に
+**wave 幅の上限**でもあった（plan は wave をこの値以下に詰め、runner はその wave を並行に監督する）
+ので、2つの意味が一致していた。dag では **wave 幅の上限ではなくなる** —— wave という単位が無いので、
+残るのは「同時に何人の worker を駆動してよいか」だけである。
+
+実際の効果として**達成される並列度は上がる**。wave 方式では幅2の wave が実効2で走っていたが、
+dag では枠が空くたびに ready な Issue が入るので、**上限まで埋まり続ける**。同じ数値でも走る worker
+の数は増える、というのがこの変更の要点であり、次の節の警告の理由でもある。
+
+### 並列度が上がることの副作用（**CommandMate#1771 が着地するまでの制約**）
+
+> **`--schedule dag` は並列度を上げるため、検証ゲートが資源（ポート等）を共有するリポジトリでは
+> 偽赤が増えうる。[Kewton/CommandMate#1771](https://github.com/Kewton/CommandMate/issues/1771)
+> が着地するまでは `--max-parallel` を保守的に設定すること。**
+
+#1771（ゲートのリソース直列化 / worktree ごとの env 注入）は **本 Issue の時点で OPEN のまま**である。
+wave barrier は同期のためのものだが、**実効並列度を wave 幅に抑えるという副作用**も持っていた。
+それを外す以上、資源衝突は runner 側では解けない —— dispatch は各 worktree でゲートを走らせるだけで、
+そのゲートが何を bind するかを知らないし、決められない。だから本節は**直さずに宣言する**:
+`--schedule dag` の run は必ず limitation `schedule_dag` を記録し、その detail にこの制約を書く。
+
+**`--max-parallel` の既定を dag だけ下げることはしない。** `max_parallel` は plan に載って
+**承認された値**であり、dispatch がそれを黙って下げるのは「承認した plan と違う run」を作ることに
+なる（無言の劣化を禁じる第2.7節と同じ規律）。下げるべきだと判断した operator は plan を作り直せばよく、
+runner が代わりに決めることではない。
+
+### 失敗の伝播 —— 下流だけを止める（`--unattended` は全停止）
+
+| 状況 | 何が起きるか | code |
+|---|---|---|
+| ある Issue が green にならなかった（failed / timeout / prompt / 裁定 fail / exit 99 / runner が起動を拒否） | **その下流だけ**を止める。独立系列は走り続ける | 下流ごとに blocking `blocked_by_upstream_failure` |
+| 同上 + `--unattended` | **その時点で新規投入をやめる**（従来の barrier と同じ「全停止」）。既に走っている worker は最後まで見届ける | 本当に下流のものは `blocked_by_upstream_failure`、**依存は満たしていたのに投入しなかった**ものは `schedule_halted_unattended` |
+
+2つの code を使い分けているのは、**対処が違う**からである。`blocked_by_upstream_failure` は
+「上流を直してから `--resume`」であり、`schedule_halted_unattended` は「**この Issue には何も問題が無い**。
+止めたのは方針なので、失敗の原因が分かったら `--resume` すればそのまま走る」である。後者を前者に
+丸めると、operator を「何も悪くない Issue のデバッグ」に送り出すことになる。
+
+止まった Issue の `worker_state` は **`not_dispatched`**（新しい値は足していない）で、
+`verification.outcome` は `not_run` である。`stop_reason` は**原因**の側に付ける ——
+停止順位（第3.1節）の `not_dispatched` の段は「runner が起動を拒否した Issue」のためのもので、
+上流失敗で止めた Issue をそこに載せると **結果**が `stop_reason` になってしまう。
+
+### 合流後の統合ブランチ検証（#175）を、どの合流状態に対して回すか
+
+**裁定: run の末尾に1回。dispatch は merge を1回も呼ばない（phase 分割は変えない）。**
+根拠は3つである。
+
+1. **wave 方式の「wave ごとの合流後検証」は、operator が wave 境界で手を止めて merge を回す運用**
+   でしか成立していない（[merge-contract.md](./merge-contract.md) 第5.4節「次 wave の dispatch が
+   読むのは `merge-report.json` の `integration_verify.outcome`」）。dag にはその停止点が
+   **構造的に存在しない**。
+2. **dispatch から merge を呼ぶのは phase 分割（1 invocation = 1 mutating phase）を壊す。**
+   merge は `--approve` と PR 作成 / merge という別の権限を持ち、`--integration-verify` は base を
+   fetch する。dispatch の内側で回すと、承認境界が dispatch の flag 1つに畳まれる。
+   本 Issue は **`merge.mjs` を1行も変えていない**（#175 の実装をそのまま、別 invocation として呼ぶ）。
+3. **「N 件ごと」は境界の意味が run ごとに変わる。** wave 境界には「そこまでの依存が閉じている」
+   という意味があったが、任意の N にはそれが無い。
+
+したがって `--schedule dag` の run のあとは、次を **1回**回すこと。
+
+```bash
+node scripts/merge.mjs --dispatch <out>/dispatch-report.json --merge-prs --approve --integration-verify
+```
+
+report の summary（`## スケジューリング（dag）`）にもこの1行の指示が入る。
+**dag が失うのは「合流後の赤を早く見つけること」であって、「合流後を見ること」ではない。**
+依存を宣言している下流は上流の verification pass を待つので、壊れた前段の上に積むことは起きない。
+残るのは #175 が見つけたクラス —— **file が重ならないのに合流後だけ赤くなる** —— であり、これは
+wave 境界でも dag でも **merge の時にしか測れない**。
+
+### 変えていないもの
+
+- `dispatch_schema_version` は **1 のまま**。`stop_reason` にも `worker_state` にも
+  `completion_check[].id` にも **値を1つも足していない**。
+- 足したのは **optional な field `schedule` 1つだけ**で、それも `--schedule dag` を渡した run に
+  しか現れない。渡さない run の report は **key 集合も bytes も #183 以前と同一**である。
+- `--unattended` が含意するものは1つも変えていない（第3.0.3節）。dag はそこに何も足さず、
+  「失敗したら全停止」という**既存の**安全側の挙動をそのまま引き継ぐだけである。
+- `orchestrate.mjs`（planner）は1行も変えていない。wave は今までどおり計算され、plan に載る。
+
 ## 4. security（path escape / redaction）
 
 - worktree target は、絶対 path（先頭 `/`、Windows drive）・backslash・制御文字・
@@ -1009,6 +1130,8 @@ pre-flight（第3.0節）で停止した failure は artifact を書かないの
 | `dispatch_error` | `resume_invalid` | `--resume` 先の report が `dispatch-report.v1` として読めない（JSON 破損・schema version 不一致・必要 field 欠落）。第8節 |
 | `dispatch_error` | `not_dispatched` | runner が起動を拒否した（scope 未宣言・unsafe worktree target 等） |
 | `dispatch_error` | `wave_not_advanced` | 上のどれでもない理由で Wave が advance しなかった（防御的な既定） |
+| （原因側の停止に従う） | `blocked_by_upstream_failure` | **`--schedule dag` のとき**、依存が `completed` かつ `verification pass` に到達しなかったので**その下流だけ**を投入しなかった（第3.2節）。Issue ごとに1件。**`stop_reason` はこれにはならない** —— 停止理由は原因側（`worker_failed` / `verification_failed` / …）に付く。対処は上流を直して `--resume` |
+| （原因側の停止に従う） | `schedule_halted_unattended` | **`--schedule dag` + `--unattended` のとき**、依存は満たしていたのに、先に green にならなかった Issue があったので新規投入をやめた（第3.2節）。Issue ごとに1件。**この Issue 自体には何も問題が無い**（対処は失敗の原因を直してから `--resume`） |
 | `dispatch_error` | `open_questions` / `contract_scope_unknown` | **`--unattended` のとき**、pre-flight で plan 全体を検査して停止した（第3.0.3節）。`--out` は未作成、`human_required: true`（Issue 本文の編集と re-plan でしか解けない）。`--unattended` 無しの run では前者は従来どおり `--out` を作って停止し、後者は **limitation** のまま wave の中で当該 Issue だけを拒否する |
 | `dispatch_error` | `unattended_locked` | **`--unattended` のとき**、同じ worktree を別の dispatch run が動かしている（第3.0.3節）。`--out` は未作成、**`human_required: false`**（先行 run の終了を待てば同じコマンドで解ける） |
 | `timeout` | `wall_clock_budget_exhausted` | `--wall-clock-budget` に到達して打ち切った（第3.0.4節）。status は `partial`。**`stop_reason` の enum に値を足していない** |
@@ -1036,8 +1159,8 @@ report は6つの check を自己申告する（0.15.x 以前は `verification_r
 |---|---|
 | `plan_approved` | 承認済み plan を読み・検証した |
 | `drift_reconfirmed` | mutation 前に drift を再確認した。`--resume` で再実行対象が 0 件だった run では **mutation 自体が無い**ので、その事実を `detail` に書いたうえで true（守るべき mutation が無いことは、check を飛ばしたことではない） |
-| `parallelism_bounded` | どの Wave も max_parallel を超えて dispatch していない |
-| `barrier_enforced` | 次 Wave は「全完了 かつ verification pass」でのみ dispatch した |
+| `parallelism_bounded` | どの Wave も max_parallel を超えて dispatch していない（`--schedule dag` では投入ラウンドが空き枠しか埋めないので、同じ上限がそのまま同時実行数の上限として効く） |
+| `barrier_enforced` | 次 Wave は「全完了 かつ verification pass」でのみ dispatch した。**`--schedule dag` では id も意味も変えず、成立した単位だけが変わる**: 各 Issue は「**自分の**全実効依存が完了かつ pass」でのみ dispatch した（detail がそう書く。第3.2節） |
 | `no_auto_prompt_response` | prompt を自動応答していない（`--auto-yes` 未使用） |
 | `verification_recorded` | `completed` の worker はすべて、自分を判定した verdict を保持している（第2.1.1節） |
 

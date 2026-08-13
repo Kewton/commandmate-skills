@@ -34,6 +34,10 @@
 //     by the wave width (already <= max_parallel);
 //   - it enforces a wave barrier: the next wave dispatches only when every worker
 //     of the previous wave completed (committed) AND its verification passed.
+//     `--schedule dag` (opt-in, Issue #183) replaces that barrier with a
+//     per-dependency one: an issue is admitted as soon as ITS OWN dependencies are
+//     completed + verified, so an issue that only shares a wave with the slowest
+//     worker no longer waits for it. The default is unchanged and byte-identical.
 //     Under a contract the verdict is `commandmate wait --verify`'s EXIT CODE
 //     (0 pass / 20 judged-and-failed / 21 no work evidence / 99 NO VERDICT AT ALL);
 //     without one it falls back to re-running the profile baseline inside the
@@ -123,6 +127,32 @@ const FAILED_GATE_STATUSES = new Set(['failed', 'timeout', 'error']);
 //   off     do not probe; use the legacy profile-baseline verification
 const CONTRACT_MODES = ['auto', 'require', 'off'];
 const DEFAULT_CONTRACT_MODE = 'auto';
+
+// =============================================================================
+// Scheduling — how the runner decides WHEN an issue may be dispatched
+// (Issue #183 / references/dispatch-contract.md section 3.2)
+// =============================================================================
+//
+//   wave  the plan's waves, with a barrier between them: the next wave starts
+//         only once EVERY worker of the previous one completed and passed. The
+//         default, and unchanged down to the bytes of the report.
+//   dag   dependency-satisfaction scheduling: an issue is admitted the moment
+//         its own effective dependencies are completed + verified and a slot is
+//         free. `plan.waves` is then reference information only.
+//
+// The measurement that produced this (Issue #183, Kewton/BorderFreeKidsMap): a
+// worker turn ranges from a few minutes to ~40, so a wave's wall clock is its
+// SLOWEST worker and the run's is the sum of those. An issue that depends on
+// nothing in its wave pays that difference for nothing. Under `dag` the lower
+// bound becomes the critical path instead of "wave depth × slowest".
+//
+// It is opt-in, and it stays opt-in until the resource contention the barrier
+// was incidentally suppressing is solved upstream (Kewton/CommandMate#1771 —
+// still OPEN: verification gates that bind a port, or read one shared env, false-
+// fail when two of them run at once). Nothing here fixes that; what this runner
+// owes an operator is to say so, which `schedule_dag` does in every report.
+const SCHEDULE_MODES = ['wave', 'dag'];
+const DEFAULT_SCHEDULE = 'wave';
 
 // Where the contract is placed inside the worktree. CommandMate resolves
 // `--contract` relative to the worktree root, and `.commandmate/tasks/**` is
@@ -412,6 +442,21 @@ Options:
                          none of their own). Reaching it is a partial run with
                          stop_reason "timeout" — never a success. OFF by default;
                          required with --unattended.
+  --schedule <mode>      wave (default) | dag. wave keeps the plan's waves and
+                         the barrier between them: the next wave starts only once
+                         EVERY worker of the previous one completed and passed.
+                         dag admits each issue as soon as ITS OWN dependencies are
+                         completed + verified and a slot is free, so an issue that
+                         merely shares a wave with the slowest worker does not
+                         wait for it; plan.waves becomes reference information and
+                         --max-parallel is read as the concurrency cap it already
+                         was. dag RAISES the achieved parallelism, so on a
+                         repository whose verification gates share a resource (a
+                         port, one shared env) it can turn contention into false
+                         reds until Kewton/CommandMate#1771 lands — keep
+                         --max-parallel conservative there. A failure then stops
+                         only its DOWNSTREAM (blocked_by_upstream_failure);
+                         --unattended keeps the safe side and stops the whole run.
   --contract-mode <m>    auto (default) | require | off. auto dispatches under an
                          execution contract when the CLI supports one and falls
                          back to the profile baseline with an explicit limitation
@@ -462,6 +507,7 @@ function parseCli(argv) {
         'prepare-worktrees': { type: 'boolean' },
         'worktree-setup': { type: 'string' },
         'worker-method': { type: 'string' },
+        schedule: { type: 'string' },
         'contract-mode': { type: 'string' },
         'verify-gates': { type: 'string' },
         'expect-branch': { type: 'string' },
@@ -491,6 +537,17 @@ function resolveContractMode(raw) {
   if (raw === undefined) return DEFAULT_CONTRACT_MODE;
   if (!CONTRACT_MODES.includes(raw)) {
     throw new SkillError('invalid_input', `--contract-mode must be one of ${CONTRACT_MODES.join(', ')}`, 3);
+  }
+  return raw;
+}
+
+// `--schedule` is validated here rather than defaulted silently, for the same
+// reason `--contract-mode` is: a typo'd mode that fell back to `wave` would look
+// like the operator chose the barrier.
+function resolveSchedule(raw) {
+  if (raw === undefined) return DEFAULT_SCHEDULE;
+  if (!SCHEDULE_MODES.includes(raw)) {
+    throw new SkillError('invalid_input', `--schedule must be one of ${SCHEDULE_MODES.join(', ')}`, 3);
   }
   return raw;
 }
@@ -654,6 +711,23 @@ function resolveInputs(parsed) {
       '--resume and --reverify cannot both hold: a resume RE-DISPATCHES what did not finish, a reverify RE-JUDGES what is '
         + 'already in the worktree and sends nothing. Choose the one that matches why the prior attempt stopped', 3);
   }
+  const schedule = resolveSchedule(values.schedule);
+  // `--schedule dag` and `--reverify` are refused together (Issue #183), and the
+  // refusal is not caution — it is the one combination where the scheduler would
+  // suppress the very work the flag exists to do. A reverify SENDS NOTHING: it
+  // re-judges worktrees that already hold work, which is how an issue whose
+  // worker finished after its report was frozen rejoins the delivery path. The
+  // DAG ready gate would refuse to re-judge every issue downstream of one that is
+  // not green — and "an upstream is not green" is precisely the state a reverify
+  // is run to repair. Scheduling also buys nothing here: nothing is dispatched,
+  // so there is no wall clock to shorten. Refused rather than ignored, because a
+  // flag that is accepted and has no effect is a run nobody can reconstruct.
+  if (schedule === 'dag' && values.reverify !== undefined) {
+    throw new SkillError('invalid_input',
+      '--schedule dag and --reverify cannot both hold: a reverify sends nothing, so there is no dispatch order to improve, and the DAG '
+        + 'ready gate ("every dependency completed AND verified") would refuse to re-judge exactly the issues downstream of the failure the '
+        + 'reverify is being run to clear. Re-judge with --reverify alone, then dispatch what is left with --schedule dag', 3);
+  }
   const unattended = resolveUnattended(values);
   // The three-state reading of every flag a profile may also declare (Issue
   // #180). `stated` is the answer to "did the operator type this?", which is a
@@ -683,6 +757,7 @@ function resolveInputs(parsed) {
     prepareWorktrees,
     worktreeSetupArgv: resolveSetupLauncher(values['worktree-setup'], prepareWorktrees),
     workerMethod: resolveWorkerMethod(values['worker-method']),
+    schedule,
     contractMode: unattended.contractMode,
     verifyGates: resolveVerifyGates(values['verify-gates']),
     expectBranch: values['expect-branch'] ?? null,
@@ -4811,6 +4886,86 @@ function formatOpenQuestions(entries) {
 }
 
 // =============================================================================
+// DAG scheduling — the effective graph the ready gate reads (Issue #183)
+// =============================================================================
+
+// The edges an issue is actually gated on. Two filters, and both are the point:
+//
+//   1. `basis: lexical` is DROPPED. Issue #182 decided that an inference from
+//      shared vocabulary alone is not an edge — the planner raises
+//      `unconfirmed_lexical_dependency` on the consumer instead and emits no
+//      edge — so `plan.dependencies` should never carry one. It is filtered here
+//      anyway, and out loud, because the DAG gate is the one consumer that would
+//      turn a phantom edge back into real waiting: a plan hand-edited (or written
+//      by a runner from before the distinction) must not quietly re-serialise the
+//      run that #182 un-serialised. An edge with NO basis at all is kept — absent
+//      means "written before the distinction existed", never "ungrounded"
+//      (execution-plan.v2 §dependency).
+//   2. An edge naming an issue this plan does not contain is dropped: waiting for
+//      a node that will never be scheduled is a deadlock, not a dependency.
+//
+// Returns the adjacency (issue -> Set of issues it waits for) and the dropped
+// lexical edges, so the caller can record what it ignored.
+function effectiveDependencies(plan) {
+  const known = new Set((plan.issues ?? []).map((issue) => issue.number));
+  const edges = new Map([...known].map((number) => [number, new Set()]));
+  const lexical = [];
+  for (const edge of plan.dependencies ?? []) {
+    if (!known.has(edge.issue) || !known.has(edge.depends_on)) continue;
+    if (edge.basis === 'lexical') {
+      lexical.push(edge);
+      continue;
+    }
+    edges.get(edge.issue).add(edge.depends_on);
+  }
+  return { edges, lexical };
+}
+
+// The scope each issue declares, as a set, for the mutual-exclusion rule below.
+function declaredFilesByIssue(plan) {
+  return new Map((plan.issues ?? []).map((issue) => [issue.number, new Set(issue.suspected_files ?? [])]));
+}
+
+// Two issues that name a file in common are never run AT THE SAME TIME, in either
+// scheduling mode. In `wave` the planner enforces it by packing (rule 2 of
+// planWaves: no shared-file pair in one wave) and the runner inherits it; in
+// `dag` there are no waves to inherit it from, so the scheduler enforces it
+// itself. This is NOT a dependency — it has no direction, it does not order the
+// two issues, and a failure on one side does not block the other. It is only a
+// statement that two workers must not write the same file concurrently, which is
+// the one guarantee wave packing was providing that `plan.dependencies` does not.
+function sharesDeclaredFile(files, a, b) {
+  const left = files.get(a);
+  const right = files.get(b);
+  if (!left || !right) return false;
+  for (const path of left) {
+    if (right.has(path)) return true;
+  }
+  return false;
+}
+
+// The run-wide declaration `--schedule dag` writes, before anything is dispatched
+// (the shape `unattended_mode` uses): every other line of the report is read
+// against it. Absent — and therefore invisible — on a default run, which is what
+// keeps such a run byte-for-byte the one it was before this flag existed.
+function scheduleDagLimitation(plan) {
+  return {
+    code: 'schedule_dag',
+    detail: `--schedule dag: issues are admitted by DEPENDENCY SATISFACTION, not by wave. An issue is dispatched as soon as every effective `
+      + 'dependency of it (plan.dependencies minus the lexical-only edges Issue #182 refuses) is `completed` AND `verification.outcome: pass`, '
+      + `and a slot is free — so an issue that only shared a wave with the slowest worker no longer waits for it. Three consequences a reader `
+      + `of this report needs: (1) --max-parallel is a CONCURRENCY CAP (${plan.max_parallel} workers at once), never a wave width — `
+      + 'the waves[] entries below are ADMISSION ROUNDS and their `barrier` is descriptive, not a gate; (2) plan.waves is reference information '
+      + 'in this mode (it still records what the planner computed, and merge_order still comes from it), so a run whose waves look wrong is not '
+      + 'thereby a run that dispatched wrong; (3) the post-merge integration verification (#175) has no wave boundary left to sit on — run '
+      + '`merge.mjs --merge-prs --integration-verify` ONCE after this run, over everything it merged. '
+      + 'This mode RAISES the achieved parallelism: the barrier was incidentally capping it at the width of each wave. On a repository whose '
+      + 'verification gates share a resource (a port, one shared env) that can turn contention into false reds — Kewton/CommandMate#1771 (gate '
+      + 'resource serialisation / per-worktree env injection) is still OPEN, so keep --max-parallel conservative until it lands',
+  };
+}
+
+// =============================================================================
 // The supervision loop
 // =============================================================================
 
@@ -4830,6 +4985,12 @@ function emptyReport(inputs, plan, outDir) {
     out_dir: outDir,
     auto_yes: inputs.autoYes,
     max_parallel: plan.max_parallel,
+    // Which reading `max_parallel` and `waves[]` below take (Issue #183). Written
+    // ONLY on a `--schedule dag` run: an absent field is the default barrier, and
+    // its absence is what keeps a run without the flag byte-for-byte the run it
+    // was before the flag existed. Placed beside `max_parallel` because that is
+    // the value whose MEANING it changes.
+    ...(inputs.schedule === 'dag' ? { schedule: 'dag' } : {}),
     profile: {
       id: String(plan.profile.id ?? 'unknown'),
       repository: plan.profile.repository,
@@ -4876,6 +5037,13 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   // against it (Issue #122 / ADR section 7.2). Nothing is pushed when the flag
   // was not passed, which is what keeps a run without it byte-identical to a run
   // from before the flag existed.
+  // The scheduling mode, stated before the unattended declaration for the same
+  // reason that one is stated before everything else (Issue #183): it decides how
+  // `max_parallel`, `waves[]` and every `barrier` below are to be read, and a
+  // reader who does not know which mode ran cannot reconstruct the run from them.
+  // Nothing is pushed on the default, which is what keeps a run without the flag
+  // byte-identical to a run from before it existed.
+  if (inputs.schedule === 'dag') report.limitations.push(scheduleDagLimitation(plan));
   if (inputs.unattended) report.limitations.push(unattendedModeLimitation(inputs, lockKeys));
   // Stated before anything else the run says: which attempt this is, what it
   // carried, and what it re-dispatched. Every other line of the report is read
@@ -5019,7 +5187,440 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   // STOP on it rather than carry an unattributed pass into the next wave.
   const unattributedPasses = new Set();
 
-  for (let waveIndex = 0; waveIndex < plan.waves.length && !stopped; waveIndex += 1) {
+  // ---- state the two schedulers share ---------------------------------------
+  //
+  // Hoisted out of the wave loop by Issue #183 so that `wave` and `dag` drive the
+  // SAME preparation, the SAME supervision and the SAME recording — a second copy
+  // of any of it is one that only gets fixed in one mode. Every map is keyed by
+  // issue number, which is unique across the plan, so the wave loop reads exactly
+  // what it read when these were per-wave locals.
+  //
+  // `worktreePaths` remembers the git path per issue so the verification gate
+  // reuses the exact same worktree the supervisor drove (Issue #1473).
+  const worktreePaths = new Map();
+  const contractVerdicts = new Map();
+  const reverifyVerdicts = new Map();
+  // The fallback (profile-baseline) verdicts, which are an ACTION rather than a
+  // stored exit code. In `wave` they are run inside the recording pass, exactly as
+  // before. In `dag` the action has to happen the moment a worker finishes —
+  // nothing downstream of it can be admitted until its verdict is known — so it is
+  // run there and only RECORDED later, in plan order. Splitting the action from
+  // the recording is what keeps the report's order independent of the order
+  // workers happen to finish in.
+  const fallbackVerdicts = new Map();
+  // Workers whose scope re-instruction loop was cut short (Issue #148), collected
+  // here and written to `blocking_reasons` once supervision has joined, in worker
+  // order: this map is filled CONCURRENTLY, so pushing from inside it would order
+  // the report by whichever worker happened to finish first and two runs of the
+  // same plan could differ.
+  const scopeUnsatisfiable = new Map();
+
+  // Step 3a for ONE issue: build its worker record, take its already-resolved
+  // worktree id/path, write its prompt artifact and place its contract. Workers
+  // that cannot be dispatched (unsafe target / unresolved worktree / no declared
+  // scope / an unreadable acceptance-gate block) are recorded terminal here and
+  // never supervised. `sink` collects what the caller has to keep: the wave (or
+  // admission round) this issue belongs to.
+  const prepareIssue = async (res, sink) => {
+    const number = res.number;
+    const worker = {
+      issue: number,
+      // The worker is tracked by its worktree id (there is no task id in the
+      // public CLI); this field carries that id, or null when it did not run.
+      task_id: null,
+      worker_state: 'not_dispatched',
+      verification: { ran: false, report_schema_version: null, outcome: 'not_run', gates: [], checks: [] },
+      prompt: { detected: false, excerpt: null },
+      note: '',
+    };
+    if (res.templatePath === null) {
+      worker.note = redact(`refused unsafe worktree target for #${number}`);
+      report.limitations.push({ code: 'unsafe_worktree_target', detail: `#${number}: worktree target rejected by path-escape guard` });
+      sink.workers.push(worker);
+      return;
+    }
+    if (res.resolved.id === null) {
+      worker.worker_state = 'failed';
+      worker.note = redact(`worktree unresolved: ${res.resolved.note}`);
+      sink.unresolvedWorktrees.push(res);
+      sink.workers.push(worker);
+      return;
+    }
+
+    // The reverify branch (Issue #121). Everything below this point exists in
+    // order to SEND: it resolves the issue's acceptance gates so a contract can
+    // carry them, refuses the issue when that contract could not be written,
+    // places the contract in the worktree, and writes the prompt artifact the
+    // worker is about to read. A reverify writes no contract and sends no
+    // message, so none of it applies — and running those dispatch-time
+    // refusals here would report "#N was not dispatched" inside an attempt that
+    // dispatches nobody by definition. What replaces them is the work-evidence
+    // measurement and the same verification gate, both in step 3b.
+    if (reverifying) {
+      // The prior record is the STARTING POINT, not a blank one: an issue this
+      // attempt turns out not to be able to re-judge must keep saying what the
+      // attempt that dispatched it found.
+      const prior = resume.priorRecords.get(number);
+      if (prior !== undefined) {
+        worker.worker_state = WORKER_STATE_VALUES.includes(prior.worker_state)
+          ? prior.worker_state
+          // A string the conformance check accepted but this runner cannot
+          // read is not a state it may repeat. `failed` is the only value that
+          // neither claims a deliverable (`completed`) nor claims that nothing
+          // ever ran (`not_dispatched`).
+          : 'failed';
+        worker.task_id = typeof prior.task_id === 'string' && prior.task_id.length > 0 ? redact(prior.task_id) : null;
+        worker.verification = transcribedVerification(prior.verification);
+        worker.prompt = transcribedPrompt(prior.prompt);
+        worker.note = redact(typeof prior.note === 'string' ? prior.note : '');
+      }
+      worktreePaths.set(number, res.worktreePath);
+      // The issue's `require:` ids, for gate PROVENANCE only (#97). A
+      // malformed block cannot refuse a dispatch that is not happening, so it
+      // degrades to "no issue-declared gate" instead of stopping the issue.
+      const declaredGates = issueRequiredGates(res.issue);
+      sink.reverifiable.push({
+        worker,
+        worktreeId: res.resolved.id,
+        worktreePath: res.worktreePath,
+        requiredGates: declaredGates.error === null ? declaredGates.ids : [],
+      });
+      sink.workers.push(worker);
+      return;
+    }
+
+    // Without a contract the worktree id is the only handle the public CLI
+    // gives a worker, so it is what `task_id` carries. With one, the field
+    // holds the REAL task id `send --contract` returns — recorded below, once
+    // the send actually happened, so a failed dispatch reports no task rather
+    // than a plausible-looking wrong one.
+    worker.task_id = contractMode ? null : res.resolved.id;
+    worktreePaths.set(number, res.worktreePath);
+
+    // The issue's own acceptance gates, resolved against THIS worktree's
+    // verify.yaml before anything is sent. `send --contract` would exit 2 on an
+    // id that does not exist, but that reports "the contract was invalid" about
+    // a worker that never ran; naming what is missing is what a human can act
+    // on — the same reading `contract_scope_unknown` takes (ADR §3.4).
+    const declared = issueRequiredGates(res.issue);
+    const requiredGates = declared.ids;
+    if (declared.error !== null) {
+      worker.note = redact(`#${number} was not dispatched: ${declared.error}`);
+      report.limitations.push({
+        code: 'acceptance_gate_block_invalid',
+        detail: `#${number}: the plan's acceptance_gates could not be read (${declared.error}). The planner writes this field only from a syntactically valid \`acceptance-gates\` block, so a plan that reaches dispatch with a malformed one was edited by hand; re-run the planner rather than dispatching against a requirement nobody can enforce`,
+      });
+      sink.workers.push(worker);
+      return;
+    }
+    if (requiredGates.length > 0) {
+      if (!contractMode) {
+        // Without an execution contract there is no `verify.gates` and no
+        // `wait --verify`: the judge is the profile baseline re-run in the
+        // worktree, which cannot be told about a gate id. Dispatching anyway
+        // would produce exactly the run this whole feature exists to prevent —
+        // a green verdict that never measured the condition the issue wrote.
+        worker.note = redact(`#${number} was not dispatched: it declares acceptance gates, and this run has no execution contract to carry them`);
+        report.limitations.push({
+          code: 'acceptance_gates_not_enforceable',
+          detail: `#${number}: the issue requires gate(s) ${requiredGates.join(', ')}, but this dispatch runs without an execution contract (--contract-mode off, or the CLI has no \`send --contract\`), so nothing can carry the requirement into the verdict. The fallback judge is the profile baseline, which has no gate ids. Use a CommandMate with contract support, or remove the \`acceptance-gates\` block and state the condition for UAT`,
+        });
+        sink.workers.push(worker);
+        return;
+      }
+      const config = readWorktreeGateIds(res.worktreePath);
+      if (!config.ok) {
+        worker.note = redact(`#${number} was not dispatched: ${config.reason}`);
+        report.limitations.push({
+          code: 'acceptance_gate_id_unknown',
+          detail: `#${number}: the issue requires gate(s) ${requiredGates.join(', ')}, but ${config.reason}. The ids are resolved against the worktree's own ${VERIFY_CONFIG_RELATIVE} because that is the one file BOTH judges read (\`commandmate verify\` and cmate-verify); declare the gates there, or drop the requirement from the issue`,
+        });
+        sink.workers.push(worker);
+        return;
+      }
+      const known = new Set([...CONTRACT_BUILT_IN_GATE_IDS, ...config.ids]);
+      const missing = requiredGates.filter((id) => !known.has(id));
+      if (missing.length > 0) {
+        worker.note = redact(`#${number} was not dispatched: required gate id(s) ${missing.join(', ')} are not declared in the worktree`);
+        report.limitations.push({
+          code: 'acceptance_gate_id_unknown',
+          detail: `#${number}: the issue requires gate id(s) ${missing.join(', ')}, which ${VERIFY_CONFIG_RELATIVE} does not declare. Available there: ${[...known].sort().join(', ')}. The issue is NOT dispatched — a contract naming an unknown id exits 2 at \`send\`, which reports a bad contract instead of a missing gate`,
+        });
+        sink.workers.push(worker);
+        return;
+      }
+      if (contractVerifyGates(inputs.verifyGates, requiredGates).length > MAX_GATE_IDS) {
+        worker.note = redact(`#${number} was not dispatched: the operator's --verify-gates and the issue's require: exceed the contract's ${MAX_GATE_IDS}-id bound`);
+        report.limitations.push({
+          code: 'acceptance_gate_block_invalid',
+          detail: `#${number}: the union of --verify-gates and the issue's \`require:\` names more than ${MAX_GATE_IDS} gate ids, which CommandMate's contract parser rejects. Narrowing the union is not an option — it would drop a requirement one side declared — so the issue is not dispatched. Reduce one of the two lists`,
+        });
+        sink.workers.push(worker);
+        return;
+      }
+    }
+
+    // The issue body's prohibitions (Issue #176), read once per issue and used by
+    // BOTH task-text generators below, so the contract and the `<out>/prompts/`
+    // artifact can never disagree about what the worker was told.
+    //
+    // Lazy, and called only from the two generators, because the limitation it
+    // records claims the text reached a worker: an issue refused below (an empty
+    // scope, an unplaceable contract) has no task text for a prohibition to be in,
+    // and a run that says otherwise about an issue it never dispatched is the same
+    // class of wrong statement this Issue is about.
+    let constraints = null;
+    const constraintsFor = () => {
+      if (constraints !== null) return constraints;
+      constraints = issueBodyConstraints(inputs, plan, res.issue);
+      const note = constraintLimitation(number, constraints);
+      if (note !== null) report.limitations.push(note);
+      return constraints;
+    };
+
+    let contractPath = null;
+    if (contractMode) {
+      const scope = contractScopeReview(res.issue);
+      const allow = scope.allow;
+      // Issue #161 / #162, the human-present half. The unattended pre-flight
+      // refuses on this before `--out` exists; here the wave is already
+      // running, so the run continues with the narrowed scope — but it says
+      // so. A silent truncation reads as "everything the issue declared is in
+      // the contract", which is the one thing that is not true, and the plan
+      // side already holds itself to the opposite rule (plan-contract.md
+      // §5.1: what was added is always visible, and so is what was removed).
+      // Recorded BEFORE the empty-scope limitation below, because when the
+      // drop is what emptied the scope it is the explanation of it.
+      if (scope.dropped.length > 0) {
+        report.limitations.push({
+          code: 'contract_scope_dropped',
+          detail: `${contractScopeDroppedDetail(number, (res.issue.suspected_files ?? []).length, scope.dropped)}. `
+            + (allow.length === 0
+              ? 'Nothing was left to declare, so the issue is not dispatched (see contract_scope_unknown below)'
+              : `The issue IS dispatched, under the ${allow.length} pattern(s) that survived — under --unattended the same finding stops the run in pre-flight instead`),
+        });
+      }
+      if (allow.length === 0) {
+        // Issue #50: an empty scope used to be dispatched with
+        // `requireScopeClean: false`, which disabled the scope gate entirely —
+        // so the issue whose files the planner could NOT name was the one
+        // whose worker could write anything. Refusing here is the only reading
+        // that is not a widening: the boundary was never declared, so nothing
+        // is dispatched against it. Name the issue's 対象ファイル and re-plan.
+        worker.note = redact(`#${number} was not dispatched: the plan declares no scope for it`);
+        report.limitations.push({
+          code: 'contract_scope_unknown',
+          detail: `#${number}: the plan names no suspected file, so the contract would declare no scope; the issue is NOT dispatched (a scope-less contract would either disable the scope gate or reject every change). State the issue's target files and re-run the planner`,
+        });
+        sink.workers.push(worker);
+        return;
+      }
+      try {
+        contractPath = placeContract(res.worktreePath, number, buildTaskContract(plan, res.issue, inputs, requiredGates, inputs.workerMethod, constraintsFor()), contractsDir);
+      } catch (error) {
+        worker.worker_state = 'failed';
+        worker.note = redact(`could not place the execution contract in the worktree: ${error.message}`);
+        sink.workers.push(worker);
+        return;
+      }
+    }
+
+    const promptFile = join(promptsDir, `issue-${number}.md`);
+    // In contract mode the artifact is the goal — the body CommandMate sends
+    // after its own preamble — so the file still shows what the worker read.
+    const prompt = contractMode
+      ? buildContractGoal(plan, res.issue, requiredGates, inputs.workerMethod, constraintsFor())
+      : buildWorkerPrompt(plan, res.issue, inputs.workerMethod, constraintsFor());
+    writeFileSync(promptFile, `${prompt}\n`, 'utf8');
+
+    // The per-issue half of the evidence (ADR section 9): the Skill was found
+    // in THIS worktree and the reference really went into the text this worker
+    // is about to be sent. Recorded here rather than up front because up front
+    // it would only repeat the declaration — this entry exists to say the
+    // writing happened, for the issues where it happened.
+    if (inputs.workerMethod !== null) {
+      const probe = probeWorkerMethod(res.worktreePath, inputs.workerMethod);
+      report.limitations.push({
+        code: 'worker_method_applied',
+        detail: redact(`#${number}: ${inputs.workerMethod} was found in this worktree (${probe.found.join(', ')}), and a \`## Method\` section naming it was written into ${contractMode ? "the execution contract's goal" : 'the worker prompt'}. `
+          + '適用されたことは、守られたことではない — dispatch can see that the reference was written, not that the worker followed it; that evidence is the worker\'s own deliverable'),
+      });
+    }
+
+    // The undo baseline (Issue #122 / ADR section 7.2), read HERE: after the
+    // runner has decided to dispatch this issue and before the first message
+    // reaches its worker, so the SHA really is the state the worker started
+    // from. Only under `--unattended` — a run with a human present has a
+    // person who can read `git reflog`, and this costs one `git rev-parse` per
+    // issue that a run without the flag must not pay.
+    if (inputs.unattended) {
+      report.limitations.push(unattendedBaselineLimitation(res.issue, await worktreeHeadSha(inputs, res.worktreePath)));
+    }
+
+    sink.workers.push(worker);
+    sink.supervisable.push({ worker, worktreeId: res.resolved.id, worktreePath: res.worktreePath, prompt, contractPath, requiredGates });
+  };
+
+  // One worker's supervision, and the state updates that belong to it. Awaited as
+  // a group by the wave loop and raced one at a time by the DAG scheduler; the
+  // body is identical either way, which is the point of it being one function.
+  const superviseOne = async ({ worker, worktreeId, worktreePath, prompt, contractPath, requiredGates }) => {
+    const supervised = contractMode
+      ? await superviseWithContract(inputs, worktreeId, worktreePath, contractPath, requiredGates)
+      : await superviseUntilCommit(inputs, worktreeId, worktreePath, prompt);
+    worker.worker_state = supervised.state;
+    worker.note = redact(supervised.note);
+    if (supervised.taskId) worker.task_id = supervised.taskId;
+    if (supervised.verdict) contractVerdicts.set(worker.issue, supervised.verdict);
+    if (supervised.notJudged) notJudged.add(worker.issue);
+    // Only the workers whose wait really timed out carry this (Issue #179).
+    // Its ABSENCE is a fact too — "no probe was made" — so it is never written
+    // as an empty or null-filled object.
+    if (supervised.liveness) worker.worker_liveness = supervised.liveness;
+    if (supervised.autoResponded) autoResponded = true;
+    if (supervised.scopeUnsatisfiable) scopeUnsatisfiable.set(worker.issue, supervised.scopeUnsatisfiable);
+    if (supervised.state === 'prompt') {
+      worker.prompt = { detected: true, excerpt: supervised.promptExcerpt };
+    }
+  };
+
+  // The fallback judge, as an ACTION: the profile baseline re-run INSIDE the same
+  // worktree the supervisor drove (Issue #1473). Split out of the recording below
+  // so the DAG scheduler can run it the moment a worker finishes.
+  const runFallbackVerification = (worker) => {
+    const worktreePath = worktreePaths.get(worker.issue) ?? safeWorktreeTarget(issueOf(plan, worker.issue).worktree ?? '');
+    return verifyWorker(inputs, worktreePath, plan.profile.baseline);
+  };
+
+  // Step 5 for ONE worker: write down the verdict that judged it, through the one
+  // function that also writes the sentence a human reads (Issue #83).
+  //
+  // Issue #83: this used to be wrapped in `if (allCompleted)`, which conflated the
+  // GATE with the RECORDING. A wave where any one worker failed, timed out, raised
+  // a prompt or was refused a dispatch skipped the body entirely, so every OTHER
+  // worker of that wave kept the initialiser `{ran: false, outcome: 'not_run', …}`
+  // — including workers whose `wait --verify` had already returned exit 0 and
+  // whose note said so. merge/uat read exactly `worker_state === 'completed' &&
+  // verification.outcome === 'pass'`, so verified deliverables silently left the
+  // delivery path with the PR, CI, guarded-merge and UAT gates all bypassed rather
+  // than failed. The verdict is now recorded for every worker that has one; no
+  // barrier is decided here.
+  //
+  // `precomputed` is the fallback verification the DAG scheduler already ran (see
+  // `fallbackVerdicts`), or null to run it here — which is what the wave loop
+  // does, unchanged.
+  const recordWorkerVerdict = (worker, precomputed = null) => {
+    if (reverifying) {
+      // The verdict already exists too, for the same reason: step 3b' ran the
+      // gate. Recorded through the SAME function as every other verdict, so
+      // the note a human reads is derived from the field merge reads — the #83
+      // invariant holds on this path by construction. An issue step 3b' did
+      // not re-judge has no entry here, and its transcribed record stands.
+      const judged = reverifyVerdicts.get(worker.issue);
+      if (judged) recordVerification(report, worker, judged.verdict, judged.source, inputs.unattended, unattributedPasses);
+    } else if (contractMode) {
+      // The verdict already exists: it is the exit code CommandMate returned
+      // while the worker was supervised. Re-running anything here would be a
+      // second opinion from a weaker judge.
+      const verdict = contractVerdicts.get(worker.issue);
+      if (verdict) {
+        recordVerification(report, worker, {
+          ran: verdict.ran,
+          report_schema_version: null,
+          outcome: verdict.outcome,
+          gates: verdict.gates ?? [],
+          checks: verdict.checks,
+        }, 'contract', inputs.unattended, unattributedPasses);
+      }
+    } else if (worker.worker_state === 'completed') {
+      // The fallback judge is an ACTION, not a stored verdict, so it runs for
+      // the workers it can judge: the ones that completed. A failed or never
+      // dispatched worker has no deliverable to re-run a baseline against.
+      const verification = precomputed ?? runFallbackVerification(worker);
+      recordVerification(report, worker, {
+        ran: verification.ran,
+        report_schema_version: null,
+        outcome: verification.outcome,
+        // The fallback judge is the baseline re-run: it has no contract
+        // gates, and the commands it ran are already named in checks.
+        gates: [],
+        checks: verification.checks,
+      }, 'baseline');
+      if (verification.note) worker.note = worker.note ? `${worker.note}; ${verification.note}` : verification.note;
+    }
+    // A completed worker whose verdict was never recorded is the #83 defect
+    // itself. It is reported rather than passed over in silence: the note says
+    // so, a limitation names it, and the completion check below fails.
+    if (worker.worker_state === 'completed' && !worker.verification.ran) {
+      verificationUnrecorded.add(worker.issue);
+      report.limitations.push({
+        code: 'verification_unrecorded',
+        detail: `#${worker.issue} completed but no verification verdict was recorded for it, so its verification.outcome stays not_run and merge/uat will not treat it as eligible; this is a runner defect, not a worker one`,
+      });
+      worker.note = appendNote(worker.note, 'verification was NEVER RECORDED for this completed worker (outcome not_run)');
+    }
+  };
+
+  // The L4 finding, named in the report (ADR sections 6 and 9 / Issue #148).
+  // The VIOLATING PATHS are carried verbatim, because they are the whole
+  // actionable content: they are what has to be added to the Issue's 対象ファイル
+  // (or declared as a repo convention) before this plan can succeed, and an
+  // operator who only reads the report has nowhere else to get them.
+  //
+  // Verbatim, but bounded: a repo-wide accident can name hundreds of paths, and
+  // a detail that long stops being read. The list is cut to the same display
+  // bound the re-instruction uses and the cut is stated with its count and with
+  // how many the guard actually compared (Issue #164) — merge.mjs's
+  // `capped()` / `droppedNote()` rule, so a shortened list never passes for a
+  // complete one.
+  const recordScopeAndLivenessReasons = (workers) => {
+    for (const worker of workers) {
+      const cut = scopeUnsatisfiable.get(worker.issue);
+      if (!cut) continue;
+      const shownPaths = cut.violations.slice(0, MAX_SCOPE_VIOLATION_LINES);
+      const droppedPaths = cut.violations.length - shownPaths.length;
+      report.blocking_reasons.push({
+        code: 'scope_unsatisfiable',
+        detail: redact(`#${worker.issue}: the scope gate named the SAME violating path(s) on two consecutive turns, so the re-instruction loop was not converging and supervision `
+          + `stopped after ${cut.turns} turn(s) rather than spending the rest of --max-turns ${inputs.maxTurns} on the same answer. `
+          + 'The contract\'s `scope.allow` is a snapshot of the Issue\'s 対象ファイル taken when the contract was sent, so a worker cannot widen it from inside the worktree — '
+          + 'when the violating change is unavoidable, the fix is in the Issue, not in the worktree. '
+          + `Violating path(s), transcribed from the scope gate: ${shownPaths.join(' | ')}`
+          + (droppedPaths > 0
+            ? ` (+${droppedPaths} more line(s) not listed here; this detail is cut to ${MAX_SCOPE_VIOLATION_LINES} line(s) — the loop guard compared all ${cut.violations.length}, and \`commandmate verify <worktree-id>\` prints the rest)`
+            : '')
+          + '. '
+          + 'The verdict is untouched: verification really did fail, and that is CommandMate\'s exit code to give — what this stops is the run going further'),
+      });
+    }
+
+    // The liveness of every worker whose `commandmate wait` timed out (Issue
+    // #179), read out of the record the supervision wrote. In `workers` order
+    // and outside the concurrent loop, for the reason above: an entry pushed
+    // from inside the supervision would order the report by whichever worker
+    // finished first, and two runs of the same plan could differ. Under
+    // `--schedule dag` that hazard is larger, not smaller — workers no longer
+    // even finish within one group — which is why this pass runs over the whole
+    // run's workers, in plan order, once supervision has joined.
+    //
+    // Recorded as its own blocking reason BESIDE the existing `worker_timeout`
+    // rather than in place of it. `worker_timeout` answers "why did the run
+    // stop" and has not changed meaning; this answers "what kind of timeout was
+    // it", which is the question an operator could not answer from the report at
+    // all. Whether the halt ladder below even reaches `worker_timeout` (a prompt
+    // or an exit 99 elsewhere outranks it) does not change the fact this
+    // measured, so it is written here and not there.
+    for (const worker of workers) {
+      const liveness = worker.worker_liveness;
+      if (!liveness) continue;
+      report.blocking_reasons.push({
+        code: liveness.code,
+        detail: redact(`#${worker.issue}: ${liveness.detail}`),
+      });
+    }
+  };
+
+  for (let waveIndex = 0; inputs.schedule !== 'dag' && waveIndex < plan.waves.length && !stopped; waveIndex += 1) {
     // The budget, checked before a wave is STARTED as well as between turns
     // (Issue #122 / ADR section 14.2): a wave is the largest mutating unit this
     // runner has, and starting one it cannot finish inside the budget is how a
@@ -5133,7 +5734,6 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     // Seeded with this wave's carried records (empty on an ordinary run), so the
     // barrier and the verification loop below see one wave, not two halves.
     const workers = [...carriedWorkers];
-    const worktreePaths = new Map();
     const supervisable = [];
     // The reverify counterpart of `supervisable` (Issue #121): the not-carried
     // issues of this wave whose worktree resolved. Whether each of them is
@@ -5147,244 +5747,9 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     // apart from the other failures because the cause and the fix are different
     // (create the worktree — the worker never started), Issue #90.
     const unresolvedWorktrees = [];
+    const sink = { workers, supervisable, reverifiable, unresolvedWorktrees };
     for (const number of toDispatch) {
-      const res = resolutions.find((r) => r.number === number);
-      const worker = {
-        issue: number,
-        // The worker is tracked by its worktree id (there is no task id in the
-        // public CLI); this field carries that id, or null when it did not run.
-        task_id: null,
-        worker_state: 'not_dispatched',
-        verification: { ran: false, report_schema_version: null, outcome: 'not_run', gates: [], checks: [] },
-        prompt: { detected: false, excerpt: null },
-        note: '',
-      };
-      if (res.templatePath === null) {
-        worker.note = redact(`refused unsafe worktree target for #${number}`);
-        report.limitations.push({ code: 'unsafe_worktree_target', detail: `#${number}: worktree target rejected by path-escape guard` });
-        workers.push(worker);
-        continue;
-      }
-      if (res.resolved.id === null) {
-        worker.worker_state = 'failed';
-        worker.note = redact(`worktree unresolved: ${res.resolved.note}`);
-        unresolvedWorktrees.push(res);
-        workers.push(worker);
-        continue;
-      }
-
-      // The reverify branch (Issue #121). Everything below this point exists in
-      // order to SEND: it resolves the issue's acceptance gates so a contract can
-      // carry them, refuses the issue when that contract could not be written,
-      // places the contract in the worktree, and writes the prompt artifact the
-      // worker is about to read. A reverify writes no contract and sends no
-      // message, so none of it applies — and running those dispatch-time
-      // refusals here would report "#N was not dispatched" inside an attempt that
-      // dispatches nobody by definition. What replaces them is the work-evidence
-      // measurement and the same verification gate, both in step 3b.
-      if (reverifying) {
-        // The prior record is the STARTING POINT, not a blank one: an issue this
-        // attempt turns out not to be able to re-judge must keep saying what the
-        // attempt that dispatched it found.
-        const prior = resume.priorRecords.get(number);
-        if (prior !== undefined) {
-          worker.worker_state = WORKER_STATE_VALUES.includes(prior.worker_state)
-            ? prior.worker_state
-            // A string the conformance check accepted but this runner cannot
-            // read is not a state it may repeat. `failed` is the only value that
-            // neither claims a deliverable (`completed`) nor claims that nothing
-            // ever ran (`not_dispatched`).
-            : 'failed';
-          worker.task_id = typeof prior.task_id === 'string' && prior.task_id.length > 0 ? redact(prior.task_id) : null;
-          worker.verification = transcribedVerification(prior.verification);
-          worker.prompt = transcribedPrompt(prior.prompt);
-          worker.note = redact(typeof prior.note === 'string' ? prior.note : '');
-        }
-        worktreePaths.set(number, res.worktreePath);
-        // The issue's `require:` ids, for gate PROVENANCE only (#97). A
-        // malformed block cannot refuse a dispatch that is not happening, so it
-        // degrades to "no issue-declared gate" instead of stopping the issue.
-        const declaredGates = issueRequiredGates(res.issue);
-        reverifiable.push({
-          worker,
-          worktreeId: res.resolved.id,
-          worktreePath: res.worktreePath,
-          requiredGates: declaredGates.error === null ? declaredGates.ids : [],
-        });
-        workers.push(worker);
-        continue;
-      }
-
-      // Without a contract the worktree id is the only handle the public CLI
-      // gives a worker, so it is what `task_id` carries. With one, the field
-      // holds the REAL task id `send --contract` returns — recorded below, once
-      // the send actually happened, so a failed dispatch reports no task rather
-      // than a plausible-looking wrong one.
-      worker.task_id = contractMode ? null : res.resolved.id;
-      worktreePaths.set(number, res.worktreePath);
-
-      // The issue's own acceptance gates, resolved against THIS worktree's
-      // verify.yaml before anything is sent. `send --contract` would exit 2 on an
-      // id that does not exist, but that reports "the contract was invalid" about
-      // a worker that never ran; naming what is missing is what a human can act
-      // on — the same reading `contract_scope_unknown` takes (ADR §3.4).
-      const declared = issueRequiredGates(res.issue);
-      const requiredGates = declared.ids;
-      if (declared.error !== null) {
-        worker.note = redact(`#${number} was not dispatched: ${declared.error}`);
-        report.limitations.push({
-          code: 'acceptance_gate_block_invalid',
-          detail: `#${number}: the plan's acceptance_gates could not be read (${declared.error}). The planner writes this field only from a syntactically valid \`acceptance-gates\` block, so a plan that reaches dispatch with a malformed one was edited by hand; re-run the planner rather than dispatching against a requirement nobody can enforce`,
-        });
-        workers.push(worker);
-        continue;
-      }
-      if (requiredGates.length > 0) {
-        if (!contractMode) {
-          // Without an execution contract there is no `verify.gates` and no
-          // `wait --verify`: the judge is the profile baseline re-run in the
-          // worktree, which cannot be told about a gate id. Dispatching anyway
-          // would produce exactly the run this whole feature exists to prevent —
-          // a green verdict that never measured the condition the issue wrote.
-          worker.note = redact(`#${number} was not dispatched: it declares acceptance gates, and this run has no execution contract to carry them`);
-          report.limitations.push({
-            code: 'acceptance_gates_not_enforceable',
-            detail: `#${number}: the issue requires gate(s) ${requiredGates.join(', ')}, but this dispatch runs without an execution contract (--contract-mode off, or the CLI has no \`send --contract\`), so nothing can carry the requirement into the verdict. The fallback judge is the profile baseline, which has no gate ids. Use a CommandMate with contract support, or remove the \`acceptance-gates\` block and state the condition for UAT`,
-          });
-          workers.push(worker);
-          continue;
-        }
-        const config = readWorktreeGateIds(res.worktreePath);
-        if (!config.ok) {
-          worker.note = redact(`#${number} was not dispatched: ${config.reason}`);
-          report.limitations.push({
-            code: 'acceptance_gate_id_unknown',
-            detail: `#${number}: the issue requires gate(s) ${requiredGates.join(', ')}, but ${config.reason}. The ids are resolved against the worktree's own ${VERIFY_CONFIG_RELATIVE} because that is the one file BOTH judges read (\`commandmate verify\` and cmate-verify); declare the gates there, or drop the requirement from the issue`,
-          });
-          workers.push(worker);
-          continue;
-        }
-        const known = new Set([...CONTRACT_BUILT_IN_GATE_IDS, ...config.ids]);
-        const missing = requiredGates.filter((id) => !known.has(id));
-        if (missing.length > 0) {
-          worker.note = redact(`#${number} was not dispatched: required gate id(s) ${missing.join(', ')} are not declared in the worktree`);
-          report.limitations.push({
-            code: 'acceptance_gate_id_unknown',
-            detail: `#${number}: the issue requires gate id(s) ${missing.join(', ')}, which ${VERIFY_CONFIG_RELATIVE} does not declare. Available there: ${[...known].sort().join(', ')}. The issue is NOT dispatched — a contract naming an unknown id exits 2 at \`send\`, which reports a bad contract instead of a missing gate`,
-          });
-          workers.push(worker);
-          continue;
-        }
-        if (contractVerifyGates(inputs.verifyGates, requiredGates).length > MAX_GATE_IDS) {
-          worker.note = redact(`#${number} was not dispatched: the operator's --verify-gates and the issue's require: exceed the contract's ${MAX_GATE_IDS}-id bound`);
-          report.limitations.push({
-            code: 'acceptance_gate_block_invalid',
-            detail: `#${number}: the union of --verify-gates and the issue's \`require:\` names more than ${MAX_GATE_IDS} gate ids, which CommandMate's contract parser rejects. Narrowing the union is not an option — it would drop a requirement one side declared — so the issue is not dispatched. Reduce one of the two lists`,
-          });
-          workers.push(worker);
-          continue;
-        }
-      }
-
-      // The issue body's prohibitions (Issue #176), read once per issue and used by
-      // BOTH task-text generators below, so the contract and the `<out>/prompts/`
-      // artifact can never disagree about what the worker was told.
-      //
-      // Lazy, and called only from the two generators, because the limitation it
-      // records claims the text reached a worker: an issue refused below (an empty
-      // scope, an unplaceable contract) has no task text for a prohibition to be in,
-      // and a run that says otherwise about an issue it never dispatched is the same
-      // class of wrong statement this Issue is about.
-      let constraints = null;
-      const constraintsFor = () => {
-        if (constraints !== null) return constraints;
-        constraints = issueBodyConstraints(inputs, plan, res.issue);
-        const note = constraintLimitation(number, constraints);
-        if (note !== null) report.limitations.push(note);
-        return constraints;
-      };
-
-      let contractPath = null;
-      if (contractMode) {
-        const scope = contractScopeReview(res.issue);
-        const allow = scope.allow;
-        // Issue #161 / #162, the human-present half. The unattended pre-flight
-        // refuses on this before `--out` exists; here the wave is already
-        // running, so the run continues with the narrowed scope — but it says
-        // so. A silent truncation reads as "everything the issue declared is in
-        // the contract", which is the one thing that is not true, and the plan
-        // side already holds itself to the opposite rule (plan-contract.md
-        // §5.1: what was added is always visible, and so is what was removed).
-        // Recorded BEFORE the empty-scope limitation below, because when the
-        // drop is what emptied the scope it is the explanation of it.
-        if (scope.dropped.length > 0) {
-          report.limitations.push({
-            code: 'contract_scope_dropped',
-            detail: `${contractScopeDroppedDetail(number, (res.issue.suspected_files ?? []).length, scope.dropped)}. `
-              + (allow.length === 0
-                ? 'Nothing was left to declare, so the issue is not dispatched (see contract_scope_unknown below)'
-                : `The issue IS dispatched, under the ${allow.length} pattern(s) that survived — under --unattended the same finding stops the run in pre-flight instead`),
-          });
-        }
-        if (allow.length === 0) {
-          // Issue #50: an empty scope used to be dispatched with
-          // `requireScopeClean: false`, which disabled the scope gate entirely —
-          // so the issue whose files the planner could NOT name was the one
-          // whose worker could write anything. Refusing here is the only reading
-          // that is not a widening: the boundary was never declared, so nothing
-          // is dispatched against it. Name the issue's 対象ファイル and re-plan.
-          worker.note = redact(`#${number} was not dispatched: the plan declares no scope for it`);
-          report.limitations.push({
-            code: 'contract_scope_unknown',
-            detail: `#${number}: the plan names no suspected file, so the contract would declare no scope; the issue is NOT dispatched (a scope-less contract would either disable the scope gate or reject every change). State the issue's target files and re-run the planner`,
-          });
-          workers.push(worker);
-          continue;
-        }
-        try {
-          contractPath = placeContract(res.worktreePath, number, buildTaskContract(plan, res.issue, inputs, requiredGates, inputs.workerMethod, constraintsFor()), contractsDir);
-        } catch (error) {
-          worker.worker_state = 'failed';
-          worker.note = redact(`could not place the execution contract in the worktree: ${error.message}`);
-          workers.push(worker);
-          continue;
-        }
-      }
-
-      const promptFile = join(promptsDir, `issue-${number}.md`);
-      // In contract mode the artifact is the goal — the body CommandMate sends
-      // after its own preamble — so the file still shows what the worker read.
-      const prompt = contractMode
-        ? buildContractGoal(plan, res.issue, requiredGates, inputs.workerMethod, constraintsFor())
-        : buildWorkerPrompt(plan, res.issue, inputs.workerMethod, constraintsFor());
-      writeFileSync(promptFile, `${prompt}\n`, 'utf8');
-
-      // The per-issue half of the evidence (ADR section 9): the Skill was found
-      // in THIS worktree and the reference really went into the text this worker
-      // is about to be sent. Recorded here rather than up front because up front
-      // it would only repeat the declaration — this entry exists to say the
-      // writing happened, for the issues where it happened.
-      if (inputs.workerMethod !== null) {
-        const probe = probeWorkerMethod(res.worktreePath, inputs.workerMethod);
-        report.limitations.push({
-          code: 'worker_method_applied',
-          detail: redact(`#${number}: ${inputs.workerMethod} was found in this worktree (${probe.found.join(', ')}), and a \`## Method\` section naming it was written into ${contractMode ? "the execution contract's goal" : 'the worker prompt'}. `
-            + '適用されたことは、守られたことではない — dispatch can see that the reference was written, not that the worker followed it; that evidence is the worker\'s own deliverable'),
-        });
-      }
-
-      // The undo baseline (Issue #122 / ADR section 7.2), read HERE: after the
-      // runner has decided to dispatch this issue and before the first message
-      // reaches its worker, so the SHA really is the state the worker started
-      // from. Only under `--unattended` — a run with a human present has a
-      // person who can read `git reflog`, and this costs one `git rev-parse` per
-      // issue that a run without the flag must not pay.
-      if (inputs.unattended) {
-        report.limitations.push(unattendedBaselineLimitation(res.issue, await worktreeHeadSha(inputs, res.worktreePath)));
-      }
-
-      workers.push(worker);
-      supervisable.push({ worker, worktreeId: res.resolved.id, worktreePath: res.worktreePath, prompt, contractPath, requiredGates });
+      await prepareIssue(resolutions.find((r) => r.number === number), sink);
     }
 
     // 3b. Supervise the wave's workers CONCURRENTLY (Issue #1474). Each worker
@@ -5395,86 +5760,9 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     //     single worker instead of the sum. Each worker's commit detection,
     //     --max-turns, prompt handling and auto-yes respond stay strictly
     //     independent; the wave barrier below is unchanged.
-    const contractVerdicts = new Map();
-    // The workers whose scope re-instruction loop was cut short (Issue #148),
-    // collected here and written to `blocking_reasons` once supervision has
-    // joined, in `workers` order: this map is filled CONCURRENTLY, so pushing
-    // from inside it would order the report by whichever worker happened to
-    // finish first and two runs of the same plan could differ.
-    const scopeUnsatisfiable = new Map();
-    await Promise.all(supervisable.map(async ({ worker, worktreeId, worktreePath, prompt, contractPath, requiredGates }) => {
-      const supervised = contractMode
-        ? await superviseWithContract(inputs, worktreeId, worktreePath, contractPath, requiredGates)
-        : await superviseUntilCommit(inputs, worktreeId, worktreePath, prompt);
-      worker.worker_state = supervised.state;
-      worker.note = redact(supervised.note);
-      if (supervised.taskId) worker.task_id = supervised.taskId;
-      if (supervised.verdict) contractVerdicts.set(worker.issue, supervised.verdict);
-      if (supervised.notJudged) notJudged.add(worker.issue);
-      // Only the workers whose wait really timed out carry this (Issue #179).
-      // Its ABSENCE is a fact too — "no probe was made" — so it is never written
-      // as an empty or null-filled object.
-      if (supervised.liveness) worker.worker_liveness = supervised.liveness;
-      if (supervised.autoResponded) autoResponded = true;
-      if (supervised.scopeUnsatisfiable) scopeUnsatisfiable.set(worker.issue, supervised.scopeUnsatisfiable);
-      if (supervised.state === 'prompt') {
-        worker.prompt = { detected: true, excerpt: supervised.promptExcerpt };
-      }
-    }));
+    await Promise.all(supervisable.map((entry) => superviseOne(entry)));
 
-    // The L4 finding, named in the report (ADR sections 6 and 9 / Issue #148).
-    // The VIOLATING PATHS are carried verbatim, because they are the whole
-    // actionable content: they are what has to be added to the Issue's 対象ファイル
-    // (or declared as a repo convention) before this plan can succeed, and an
-    // operator who only reads the report has nowhere else to get them.
-    //
-    // Verbatim, but bounded: a repo-wide accident can name hundreds of paths, and
-    // a detail that long stops being read. The list is cut to the same display
-    // bound the re-instruction uses and the cut is stated with its count and with
-    // how many the guard actually compared (Issue #164) — merge.mjs's
-    // `capped()` / `droppedNote()` rule, so a shortened list never passes for a
-    // complete one.
-    for (const worker of workers) {
-      const cut = scopeUnsatisfiable.get(worker.issue);
-      if (!cut) continue;
-      const shownPaths = cut.violations.slice(0, MAX_SCOPE_VIOLATION_LINES);
-      const droppedPaths = cut.violations.length - shownPaths.length;
-      report.blocking_reasons.push({
-        code: 'scope_unsatisfiable',
-        detail: redact(`#${worker.issue}: the scope gate named the SAME violating path(s) on two consecutive turns, so the re-instruction loop was not converging and supervision `
-          + `stopped after ${cut.turns} turn(s) rather than spending the rest of --max-turns ${inputs.maxTurns} on the same answer. `
-          + 'The contract\'s `scope.allow` is a snapshot of the Issue\'s 対象ファイル taken when the contract was sent, so a worker cannot widen it from inside the worktree — '
-          + 'when the violating change is unavoidable, the fix is in the Issue, not in the worktree. '
-          + `Violating path(s), transcribed from the scope gate: ${shownPaths.join(' | ')}`
-          + (droppedPaths > 0
-            ? ` (+${droppedPaths} more line(s) not listed here; this detail is cut to ${MAX_SCOPE_VIOLATION_LINES} line(s) — the loop guard compared all ${cut.violations.length}, and \`commandmate verify <worktree-id>\` prints the rest)`
-            : '')
-          + '. '
-          + 'The verdict is untouched: verification really did fail, and that is CommandMate\'s exit code to give — what this stops is the run going further'),
-      });
-    }
-
-    // The liveness of every worker whose `commandmate wait` timed out (Issue
-    // #179), read out of the record the supervision wrote. In `workers` order
-    // and outside the concurrent loop, for the reason above: an entry pushed
-    // from inside the supervision would order the report by whichever worker
-    // finished first, and two runs of the same plan could differ.
-    //
-    // Recorded as its own blocking reason BESIDE the existing `worker_timeout`
-    // rather than in place of it. `worker_timeout` answers "why did the run
-    // stop" and has not changed meaning; this answers "what kind of timeout was
-    // it", which is the question an operator could not answer from the report at
-    // all. Whether the halt ladder below even reaches `worker_timeout` (a prompt
-    // or an exit 99 elsewhere in the wave outranks it) does not change the fact
-    // this measured, so it is written here and not there.
-    for (const worker of workers) {
-      const liveness = worker.worker_liveness;
-      if (!liveness) continue;
-      report.blocking_reasons.push({
-        code: liveness.code,
-        detail: redact(`#${worker.issue}: ${liveness.detail}`),
-      });
-    }
+    recordScopeAndLivenessReasons(workers);
 
     // 3b'. The reverify pass (Issue #121), in the place of the supervision loop
     //      and never beside it: `reverifiable` is empty on every other run, and
@@ -5493,7 +5781,6 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     //      Concurrent for the same reason the supervision loop is: a gate run is
     //      the slow part, the wave width is already <= max_parallel, and one
     //      issue's gates must not wait behind another's.
-    const reverifyVerdicts = new Map();
     await Promise.all(reverifiable.map(async ({ worker, worktreeId, worktreePath, requiredGates }) => {
       // A pending prompt is a worker still mid-turn, waiting for a human. The
       // tree under it is being changed by somebody who has not finished, so a
@@ -5601,56 +5888,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
         if (worker.verification.outcome !== 'pass') allVerified = false;
         continue;
       }
-      if (reverifying) {
-        // The verdict already exists too, for the same reason: step 3b' ran the
-        // gate. Recorded through the SAME function as every other verdict, so
-        // the note a human reads is derived from the field merge reads — the #83
-        // invariant holds on this path by construction. An issue step 3b' did
-        // not re-judge has no entry here, and its transcribed record stands.
-        const judged = reverifyVerdicts.get(worker.issue);
-        if (judged) recordVerification(report, worker, judged.verdict, judged.source, inputs.unattended, unattributedPasses);
-      } else if (contractMode) {
-        // The verdict already exists: it is the exit code CommandMate returned
-        // while the worker was supervised. Re-running anything here would be a
-        // second opinion from a weaker judge.
-        const verdict = contractVerdicts.get(worker.issue);
-        if (verdict) {
-          recordVerification(report, worker, {
-            ran: verdict.ran,
-            report_schema_version: null,
-            outcome: verdict.outcome,
-            gates: verdict.gates ?? [],
-            checks: verdict.checks,
-          }, 'contract', inputs.unattended, unattributedPasses);
-        }
-      } else if (worker.worker_state === 'completed') {
-        // The fallback judge is an ACTION, not a stored verdict, so it runs for
-        // the workers it can judge: the ones that completed. A failed or never
-        // dispatched worker has no deliverable to re-run a baseline against.
-        const worktreePath = worktreePaths.get(worker.issue) ?? safeWorktreeTarget(issueOf(plan, worker.issue).worktree ?? '');
-        const verification = verifyWorker(inputs, worktreePath, plan.profile.baseline);
-        recordVerification(report, worker, {
-          ran: verification.ran,
-          report_schema_version: null,
-          outcome: verification.outcome,
-          // The fallback judge is the baseline re-run: it has no contract
-          // gates, and the commands it ran are already named in checks.
-          gates: [],
-          checks: verification.checks,
-        }, 'baseline');
-        if (verification.note) worker.note = worker.note ? `${worker.note}; ${verification.note}` : verification.note;
-      }
-      // A completed worker whose verdict was never recorded is the #83 defect
-      // itself. It is reported rather than passed over in silence: the note says
-      // so, a limitation names it, and the completion check below fails.
-      if (worker.worker_state === 'completed' && !worker.verification.ran) {
-        verificationUnrecorded.add(worker.issue);
-        report.limitations.push({
-          code: 'verification_unrecorded',
-          detail: `#${worker.issue} completed but no verification verdict was recorded for it, so its verification.outcome stays not_run and merge/uat will not treat it as eligible; this is a runner defect, not a worker one`,
-        });
-        worker.note = appendNote(worker.note, 'verification was NEVER RECORDED for this completed worker (outcome not_run)');
-      }
+      recordWorkerVerdict(worker);
       if (worker.verification.outcome !== 'pass') allVerified = false;
     }
 
@@ -5745,6 +5983,374 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     }
   }
 
+  // ===========================================================================
+  // The DAG scheduler (`--schedule dag`, Issue #183)
+  // ===========================================================================
+  //
+  // The same steps the wave loop runs, in the same order, over a different unit:
+  // an ADMISSION ROUND instead of a wave. A round is "every issue that became
+  // ready since the last decision, up to the free slots", and rounds overlap in
+  // time — the loop admits, then waits for the FIRST worker to finish rather than
+  // for all of them, which is the whole of the change.
+  //
+  // Determinism is not a side effect here, it is a design constraint: workers
+  // finish in whatever order the world produces, so nothing that lands in the
+  // report may be written from inside a completion. Everything ordered — the
+  // scope/liveness reasons, the verdict recording, the blocked-issue reasons —
+  // runs once at the end, in plan order. What DOES have to happen at completion
+  // time is the fallback verification, because nothing downstream can be admitted
+  // until its verdict exists; that action is run there and recorded here.
+  if (inputs.schedule === 'dag' && !stopped && !nothingToDispatch) {
+    const { edges: dagEdges, lexical } = effectiveDependencies(plan);
+    if (lexical.length > 0) {
+      report.limitations.push({
+        code: 'schedule_dag_lexical_edge_ignored',
+        detail: `${lexical.length} dependency edge(s) in this plan carry \`basis: lexical\` (${lexical.map((edge) => `#${edge.issue}→#${edge.depends_on}`).join(', ')}) and were NOT used as ready gates. `
+          + 'Issue #182 decided that an inference from shared vocabulary alone is not an edge — the planner raises `unconfirmed_lexical_dependency` on the consumer and '
+          + 'emits no edge — so a plan that carries one was written by an older runner or edited by hand. Honouring it here would re-serialise exactly the run #182 '
+          + 'un-serialised; the ordering it asked for was never grounded in a file or in a statement. Re-run the planner if the ordering is real, and state it in the issue body',
+      });
+    }
+    const declaredFiles = declaredFilesByIssue(plan);
+    // The plan's own wave flattening — which is `merge_order` — is the admission
+    // order. It is a topological order of the full edge set (planWaves only puts
+    // an issue in a wave once every dependency is in an earlier one), so it is a
+    // topological order of the effective subset too, and it is what makes "the
+    // first ready issue" mean the same thing on every run of the same plan.
+    const order = plan.waves.flat();
+    // Issues whose record says "completed AND verification pass". A carried issue
+    // (`--resume`) joins as satisfied: a prior attempt already established it.
+    const satisfied = new Set();
+    // Issues that reached a terminal state that is NOT green, plus the ones that
+    // were never started because of one. Downstream of these nothing is admitted.
+    const unsatisfiable = new Set();
+    const blockedBy = new Map();
+    const pending = new Set(order);
+    const workerOf = new Map();
+    const dispatchedIssues = new Set();
+    const groupEntries = [];
+    const running = new Map();
+    // Issues whose worktree the CLI could not resolve at dispatch time (Issue
+    // #90), run-wide rather than per-group: a round is not a unit an operator
+    // acts on, and the fix — create the worktree — is the same whenever it was
+    // found.
+    const dagUnresolved = [];
+    let haltAdmission = false;
+
+    if (resume !== null) {
+      const carried = order.filter((number) => resume.carried.has(number));
+      for (const number of carried) {
+        satisfied.add(number);
+        pending.delete(number);
+      }
+      if (carried.length > 0) {
+        // Nothing was sent and nothing mutated, which is also why no drift
+        // re-check ran for it: there was no mutation for a drift check to guard.
+        report.waves.push({
+          index: report.waves.length,
+          dispatched: [],
+          workers: carried.map((number) => resume.carried.get(number)),
+          barrier: { all_workers_completed: true, all_verifications_passed: true, advanced: true },
+        });
+      }
+    }
+
+    const ready = (number) => [...(dagEdges.get(number) ?? [])].every((dep) => satisfied.has(dep));
+    const overlapsAny = (number, others) => others.some((other) => sharesDeclaredFile(declaredFiles, number, other));
+    // A finished worker is GREEN when both halves of the old barrier hold for it
+    // alone: it committed, and its verdict is a pass. Read here rather than from
+    // `worker.verification`, because the recording happens at the end of the run.
+    const isGreen = (worker) => {
+      if (worker.worker_state !== 'completed') return false;
+      if (notJudged.has(worker.issue)) return false;
+      const verdict = contractMode ? contractVerdicts.get(worker.issue) : fallbackVerdicts.get(worker.issue);
+      return verdict !== undefined && verdict.outcome === 'pass';
+    };
+
+    // One admission round: the wave loop's steps 1-3a for the issues admitted now.
+    // Returns false when it halted the run.
+    const admitRound = async (roundIndex, numbers) => {
+      // The pre-flight already resolved and drift-checked the first group this
+      // run dispatches (Issue #90), and round 0 admits exactly the set it probed
+      // — the admission rule below is the planner's wave-packing rule, so the
+      // first round IS `plan.waves[0]` (or, on a resume, the first wave with work
+      // left). Reused rather than probed twice; if the two disagree the world is
+      // probed again rather than assumed.
+      const preflighted = roundIndex === 0 && preflight !== null
+        && preflight.resolutions.length === numbers.length
+        && preflight.resolutions.every((entry) => numbers.includes(entry.number));
+      const resolutions = preflighted ? preflight.resolutions : resolveWave(inputs, plan, numbers);
+
+      const drift = preflighted ? preflight : driftChecks(inputs, plan, roundIndex, resolutions);
+      if (!preflighted) report.drift_checks.push(...drift.checks);
+      for (const check of drift.checks) {
+        if (!check.ok && !check.blocking) {
+          report.limitations.push({ code: `drift_${check.code}`, detail: check.detail });
+        }
+      }
+      const blockingDrift = drift.checks.find((check) => check.blocking && !check.ok);
+      if (blockingDrift) {
+        report.waves.push({
+          index: report.waves.length,
+          dispatched: [],
+          workers: [],
+          barrier: { all_workers_completed: false, all_verifications_passed: false, advanced: false },
+        });
+        const reasons = blockingDrift.code === 'worktrees_present' && drift.unresolved.length > 0
+          ? worktreeUnresolvedReasons(drift.unresolved)
+          : [{ code: `drift_${blockingDrift.code}`, detail: blockingDrift.detail }];
+        haltWith(roundIndex === 0 ? 'failure' : 'partial', 'drift', reasons);
+        return false;
+      }
+
+      const methodMissing = preflighted ? [] : workerMethodUnavailable(inputs, resolutions);
+      if (methodMissing.length > 0) {
+        report.waves.push({
+          index: report.waves.length,
+          dispatched: [],
+          workers: [],
+          barrier: { all_workers_completed: false, all_verifications_passed: false, advanced: false },
+        });
+        haltWith(roundIndex === 0 ? 'failure' : 'partial', 'dispatch_error',
+          workerMethodUnavailableReasons(methodMissing, inputs.workerMethod));
+        return false;
+      }
+
+      const groupWorkers = [];
+      const sink = { workers: groupWorkers, supervisable: [], reverifiable: [], unresolvedWorktrees: dagUnresolved };
+      for (const number of numbers) {
+        await prepareIssue(resolutions.find((entry) => entry.number === number), sink);
+      }
+      const entry = {
+        index: report.waves.length,
+        dispatched: numbers.slice(),
+        workers: groupWorkers,
+        // Recomputed once every worker of this round is terminal. In this mode it
+        // gates nothing — what released each downstream issue is its own
+        // dependency's record — but the two facts are still true of this group and
+        // are still what merge/uat and status read a group by.
+        barrier: { all_workers_completed: false, all_verifications_passed: false, advanced: false },
+      };
+      report.waves.push(entry);
+      groupEntries.push(entry);
+
+      const started = new Set(sink.supervisable.map((item) => item.worker.issue));
+      for (const worker of groupWorkers) {
+        workerOf.set(worker.issue, worker);
+        dispatchedIssues.add(worker.issue);
+        pending.delete(worker.issue);
+        // A worker the preparation REFUSED never runs, so it is terminal now —
+        // and it is not green, so nothing downstream of it may be admitted.
+        if (!started.has(worker.issue)) unsatisfiable.add(worker.issue);
+      }
+      for (const item of sink.supervisable) {
+        const issue = item.worker.issue;
+        running.set(issue, superviseOne(item).then(() => issue, () => issue));
+      }
+      return true;
+    };
+
+    // What a settled worker changes: whether its downstream may go, and — under
+    // `--unattended` — whether anything may go at all.
+    const harvest = (issue) => {
+      const worker = workerOf.get(issue);
+      if (!worker) return;
+      if (!contractMode && !reverifying && worker.worker_state === 'completed') {
+        fallbackVerdicts.set(issue, runFallbackVerification(worker));
+      }
+      if (isGreen(worker)) {
+        satisfied.add(issue);
+      } else {
+        unsatisfiable.add(issue);
+        // The safe side, and the one the Issue asked for explicitly: with a human
+        // present a failure stops only its DOWNSTREAM, because the independent
+        // series are unaffected facts and stopping them wastes the run. With
+        // nobody present the run stops admitting entirely — the same thing the
+        // wave barrier did, kept for the same reason `--unattended` keeps every
+        // other tightening: nobody is here to read a report and decide that the
+        // other half is worth continuing.
+        if (inputs.unattended) haltAdmission = true;
+      }
+      // The stage-C stop (Issue #142), read at the moment it becomes true rather
+      // than after the whole run: an unattributed pass under `--unattended` is a
+      // pass nobody can name the gates of, and admitting more work on top of it is
+      // exactly what the wave loop refuses to do. The verdict itself is untouched
+      // (it is an exit code and it stands); `recordVerification` writes the
+      // blocking reason during the recording pass below.
+      if (inputs.unattended && contractMode) {
+        const verdict = contractVerdicts.get(issue);
+        if (verdict && verdict.outcome === 'pass' && (verdict.gates ?? []).length === 0) haltAdmission = true;
+      }
+    };
+
+    let roundIndex = 0;
+    for (;;) {
+      // 1. Propagate unsatisfiability down the graph, in topological order, so one
+      //    pass reaches every transitively blocked issue.
+      for (const number of order) {
+        if (!pending.has(number)) continue;
+        const upstream = [...(dagEdges.get(number) ?? [])].filter((dep) => unsatisfiable.has(dep)).sort((a, b) => a - b);
+        if (upstream.length === 0) continue;
+        pending.delete(number);
+        unsatisfiable.add(number);
+        blockedBy.set(number, upstream);
+      }
+
+      // 2. Fill the free slots, in plan order. `--max-parallel` is read as what it
+      //    already meant — the number of workers this run may drive at once — and
+      //    the file-overlap rule the planner enforced by packing is enforced here
+      //    against BOTH the running set and the rest of this admission.
+      const admitted = [];
+      if (!stopped && !haltAdmission) {
+        const free = plan.max_parallel - running.size;
+        for (const number of order) {
+          if (admitted.length >= free) break;
+          if (!pending.has(number)) continue;
+          if (!ready(number)) continue;
+          if (overlapsAny(number, [...running.keys()])) continue;
+          if (overlapsAny(number, admitted)) continue;
+          admitted.push(number);
+        }
+      }
+
+      if (admitted.length > 0) {
+        // The budget, checked before a group is STARTED as well as between turns
+        // (Issue #122 / ADR section 14.2): starting work this run cannot finish
+        // inside the budget is how a run ends with workers nobody came back for.
+        if (wallClockExhausted()) {
+          halt('partial', 'timeout', 'wall_clock_budget_exhausted',
+            `--wall-clock-budget ${inputs.wallClockBudget}s was exhausted before admission round ${roundIndex + 1} was dispatched; `
+              + `the remaining issue(s) were not started. This is a stop, not a success: re-run with --resume once the cause of the slowness is understood`);
+        } else if (await admitRound(roundIndex, admitted)) {
+          roundIndex += 1;
+        }
+      }
+
+      // 3. Nothing running means nothing left to wait for; whatever is still
+      //    pending is either blocked, halted, or cut short by the budget, and the
+      //    pass after the loop says which.
+      if (running.size === 0) break;
+      // Wait for the FIRST worker to finish — the one line the wave barrier does
+      // not have. Every promise resolves with its own issue number, so the settled
+      // one can be taken out of the running set without polling.
+      // eslint-disable-next-line no-await-in-loop
+      const settled = await Promise.race([...running.values()]);
+      running.delete(settled);
+      harvest(settled);
+    }
+
+    // ---- everything ordered, once, at the end, in plan order ----------------
+    const dispatchedWorkers = order.map((number) => workerOf.get(number)).filter(Boolean);
+    recordScopeAndLivenessReasons(dispatchedWorkers);
+    for (const worker of dispatchedWorkers) recordWorkerVerdict(worker, fallbackVerdicts.get(worker.issue) ?? null);
+
+    for (const entry of groupEntries) {
+      const allCompleted = entry.workers.length > 0 && entry.workers.every((worker) => worker.worker_state === 'completed');
+      const allVerified = allCompleted && entry.workers.every((worker) => worker.verification.outcome === 'pass');
+      entry.barrier = { all_workers_completed: allCompleted, all_verifications_passed: allVerified, advanced: allCompleted && allVerified };
+    }
+
+    // The issues that never reached a worker, and WHY — the named codes this
+    // Issue asked for. Two different findings, kept apart because the fix is
+    // different: `blocked_by_upstream_failure` is about a dependency that really
+    // is not green (fix that issue, then `--resume`), while
+    // `schedule_halted_unattended` is about an issue whose every dependency
+    // passed and that was stopped by the mode (re-run it; nothing is wrong with
+    // it). Rounding the second into the first would send an operator to debug an
+    // issue that has nothing wrong with it.
+    const haltedIssues = haltAdmission ? order.filter((number) => pending.has(number)) : [];
+    const notStarted = order.filter((number) => blockedBy.has(number) || haltedIssues.includes(number));
+    if (notStarted.length > 0) {
+      const blockedWorkers = [];
+      for (const number of notStarted) {
+        const upstream = blockedBy.get(number) ?? [];
+        const worker = {
+          issue: number,
+          task_id: null,
+          worker_state: 'not_dispatched',
+          verification: { ran: false, report_schema_version: null, outcome: 'not_run', gates: [], checks: [] },
+          prompt: { detected: false, excerpt: null },
+          note: '',
+        };
+        if (upstream.length > 0) {
+          worker.note = redact(`blocked_by_upstream_failure: not dispatched because ${upstream.map((n) => `#${n}`).join(', ')} did not reach completed + verification pass`);
+          report.blocking_reasons.push({
+            code: 'blocked_by_upstream_failure',
+            detail: `#${number} was not dispatched: its dependency ${upstream.map((n) => `#${n}`).join(', ')} did not reach \`completed\` AND \`verification.outcome: pass\`, `
+              + 'so the work it would build on is not there. Only the DOWNSTREAM of the failure was stopped — independent chains kept running, which is what '
+              + '--schedule dag changes about a failure. Fix the upstream issue, then re-run with --resume: this issue is untouched and its worktree was never driven',
+          });
+        } else {
+          worker.note = redact('schedule_halted_unattended: not dispatched because --unattended stopped admission after an earlier issue did not reach completed + verification pass');
+          report.blocking_reasons.push({
+            code: 'schedule_halted_unattended',
+            detail: `#${number} was not dispatched, and NOT because of its own dependencies — every dependency of it passed. --unattended stops the whole run at the first `
+              + 'issue that does not reach `completed` AND `verification.outcome: pass`, rather than stopping only that issue\'s downstream, because nobody is here to read '
+              + 'the report and decide that the independent half is worth continuing. Nothing is wrong with this issue: re-run with --resume once the failure is understood',
+          });
+        }
+        workerOf.set(number, worker);
+        blockedWorkers.push(worker);
+      }
+      report.waves.push({
+        index: report.waves.length,
+        dispatched: [],
+        workers: blockedWorkers,
+        barrier: { all_workers_completed: false, all_verifications_passed: false, advanced: false },
+      });
+    }
+
+    // The halt ladder, over the whole run rather than over one wave, and in the
+    // same order of precedence (dispatch-contract §3.1). Two differences, both
+    // forced by there being no wave: the wording never says "the next wave was
+    // not dispatched" (in this mode independent work kept going), and the
+    // `not_dispatched` rung skips the issues that were blocked or halted. Those
+    // have a blocking reason of their own, and ranking them here would make the
+    // stop_reason name the CONSEQUENCE (an issue nobody started) instead of the
+    // CAUSE (the upstream that failed).
+    const everyone = order.map((number) => workerOf.get(number)).filter(Boolean);
+    const runGreen = notStarted.length === 0
+      && everyone.every((worker) => worker.worker_state === 'completed' && worker.verification.outcome === 'pass');
+    if (!stopped && !runGreen) {
+      const prompted = everyone.find((worker) => worker.prompt.detected && worker.worker_state === 'prompt');
+      const unjudged = everyone.find((worker) => notJudged.has(worker.issue));
+      const refused = everyone.find((worker) => worker.worker_state === 'not_dispatched'
+        && !blockedBy.has(worker.issue) && !haltedIssues.includes(worker.issue));
+      if (prompted) {
+        report.human_required = true;
+        halt('partial', 'human_required', 'human_input_required', `#${prompted.issue} raised a prompt; halted for a human (no auto-response)`);
+      } else if (unjudged) {
+        report.human_required = true;
+        halt('partial', 'dispatch_error', 'verification_not_judged',
+          `#${unjudged.issue}: verification exited ${VERIFY_EXIT_NO_VERDICT} — the run ended error/cancelled, so no gate judged the work. Halted for a human; not re-instructed as a verification failure (exit ${VERIFY_EXIT_FAILED}) and not rounded to a pass`);
+      } else if (wallClockExhausted()) {
+        halt('partial', 'timeout', 'wall_clock_budget_exhausted',
+          `--wall-clock-budget ${inputs.wallClockBudget}s was exhausted; the workers still running were left mid-supervision and no further issue was admitted. `
+            + 'The worktree branches are where their workers left them (the unattended_baseline limitation records where each one started)');
+      } else if (dagUnresolved.length > 0) {
+        haltWith('partial', 'drift', worktreeUnresolvedReasons(dagUnresolved));
+      } else if (everyone.some((worker) => worker.worker_state === 'failed')) {
+        const failed = everyone.find((worker) => worker.worker_state === 'failed');
+        halt('partial', 'worker_failed', 'worker_failed', `#${failed.issue} did not complete; its downstream was not dispatched`);
+      } else if (everyone.some((worker) => worker.worker_state === 'timeout')) {
+        const timed = everyone.find((worker) => worker.worker_state === 'timeout');
+        halt('partial', 'timeout', 'worker_timeout', `#${timed.issue} timed out; its downstream was not dispatched`);
+      } else if (refused) {
+        halt('partial', 'dispatch_error', 'not_dispatched', `#${refused.issue} was never dispatched: ${refused.note || 'the runner refused to start it'}`);
+      } else if (everyone.some((worker) => worker.verification.outcome !== 'pass' && worker.worker_state === 'completed')) {
+        const failedVerify = everyone.find((worker) => worker.verification.outcome !== 'pass' && worker.worker_state === 'completed');
+        halt('partial', 'verification_failed', 'verification_failed', `#${failedVerify.issue} completed but its verification did not pass; its downstream was not dispatched`);
+      } else {
+        halt('partial', 'dispatch_error', 'not_dispatched',
+          `${notStarted.length} issue(s) were never dispatched: ${notStarted.map((n) => `#${n}`).join(', ')}`);
+      }
+    } else if (!stopped && unattributedPasses.size > 0) {
+      report.status = 'partial';
+      report.stop_reason = 'dispatch_error';
+      stopped = true;
+    }
+  }
+
   // Auto-yes is an explicit deviation from the safe default; surface it, but do
   // not treat an authorized auto-response as a broken invariant.
   if (autoResponded) {
@@ -5771,6 +6377,15 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
       : null,
     parallelismBounded,
     barrierEnforced,
+    // The invariant `barrier_enforced` states is mode-dependent, so the sentence
+    // it states it in has to be too (Issue #183). The id is unchanged — it is a
+    // schema-versioned closed set — and so is what it MEANS: nothing was
+    // dispatched on top of work that had not both completed and passed. What
+    // differs is the unit that held: a wave in one mode, an issue's own
+    // dependencies in the other.
+    barrierDetail: inputs.schedule === 'dag'
+      ? 'each issue was dispatched only after EVERY effective dependency of it completed AND passed verification (no wave barrier: --schedule dag)'
+      : null,
     noAutoPromptResponse: !autoResponded || inputs.autoYes,
     verificationRecorded: [...verificationUnrecorded],
     reportStatus: report.status,
@@ -5785,12 +6400,12 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   return report;
 }
 
-function buildCompletionCheck({ planApproved, driftReconfirmed, driftDetail = null, parallelismBounded, barrierEnforced, noAutoPromptResponse, verificationRecorded = [], reportStatus }) {
+function buildCompletionCheck({ planApproved, driftReconfirmed, driftDetail = null, parallelismBounded, barrierEnforced, barrierDetail = null, noAutoPromptResponse, verificationRecorded = [], reportStatus }) {
   const checks = [
     { id: 'plan_approved', passed: planApproved, detail: planApproved ? 'an approved plan was loaded and validated' : 'no valid plan was loaded' },
     { id: 'drift_reconfirmed', passed: driftReconfirmed, detail: driftDetail ?? (driftReconfirmed ? 'drift was re-checked before dispatch' : 'no drift check ran') },
     { id: 'parallelism_bounded', passed: parallelismBounded, detail: parallelismBounded ? 'no wave dispatched more than max_parallel workers' : 'a wave exceeded max_parallel and was truncated' },
-    { id: 'barrier_enforced', passed: barrierEnforced, detail: barrierEnforced ? 'the next wave dispatched only after completion AND verification' : 'the wave barrier was not enforced' },
+    { id: 'barrier_enforced', passed: barrierEnforced, detail: barrierDetail ?? (barrierEnforced ? 'the next wave dispatched only after completion AND verification' : 'the wave barrier was not enforced') },
     { id: 'no_auto_prompt_response', passed: noAutoPromptResponse, detail: noAutoPromptResponse ? 'no prompt was answered without explicit --auto-yes' : 'a worker prompt was answered without authorization' },
     // Issue #83. `completed` with no verdict recorded is not a verification
     // failure and not a worker failure — it is the RUNNER failing to write down
@@ -5957,13 +6572,45 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
     lines.push('');
   }
 
-  lines.push('## Wave');
-  if (report.waves.length === 0) {
-    lines.push('- dispatch 前に停止（wave なし）。');
+  // The scheduling section (Issue #183). `dag` gets its own heading and its own
+  // vocabulary because the word "Wave" would be a lie there: the entries are
+  // admission rounds, `advanced` gates nothing, and the two facts an operator has
+  // to leave with — what stopped where, and that the post-merge integration
+  // verification now has to be run once at the end — have no place in the wave
+  // table. A run without the flag renders exactly what it always did.
+  if (report.schedule === 'dag') {
+    lines.push('## スケジューリング（dag）');
+    lines.push('- 依存充足ベースの逐次投入。Issue は **自分の依存が completed かつ verification pass になった時点**で空き枠へ入る（wave barrier は無い）。`plan.waves` は参考情報である。');
+    lines.push(`- \`--max-parallel\` は**同時実行数の上限**（${report.max_parallel}）。下の各行は wave ではなく**投入ラウンド**で、\`次へ=\` は「そのラウンドが揃って green か」を述べているだけで、何かを止めてはいない。`);
+    if (report.waves.length === 0) {
+      lines.push('- dispatch 前に停止（ラウンドなし）。');
+    } else {
+      for (const wave of report.waves) {
+        const dispatched = wave.dispatched.map((n) => `#${n}`).join(', ') || 'なし';
+        lines.push(`- Round ${wave.index + 1}: dispatch=${dispatched} / worker完了=${wave.barrier.all_workers_completed} / verify pass=${wave.barrier.all_verifications_passed} / 揃って green=${wave.barrier.advanced}`);
+      }
+    }
+    const blocked = report.blocking_reasons.filter((entry) => entry.code === 'blocked_by_upstream_failure');
+    const halted = report.blocking_reasons.filter((entry) => entry.code === 'schedule_halted_unattended');
+    if (blocked.length > 0) {
+      lines.push(`- 上流が green にならなかったため止めた Issue: ${blocked.length} 件（\`blocked_by_upstream_failure\`）。**独立系列は止めていない。**`);
+      for (const entry of blocked) lines.push(`  - ${entry.detail}`);
+    }
+    if (halted.length > 0) {
+      lines.push(`- **無人なので全停止した**（\`--unattended\`。下流だけを止める側に倒していない）。依存は満たしていたが投入しなかった Issue: ${halted.length} 件（\`schedule_halted_unattended\`）。`);
+      for (const entry of halted) lines.push(`  - ${entry.detail}`);
+    }
+    lines.push('- **合流後の統合ブランチ検証（#175）は wave 境界を失っている。** この run のあと `merge.mjs --merge-prs --integration-verify` を **1回**回して、この run が merge した集合に対して判定すること。');
+    lines.push('- 並列度はこのモードで上がる。検証ゲートが資源（ポート等）を共有するリポジトリでは偽赤が増えうるので、Kewton/CommandMate#1771 が着地するまでは `--max-parallel` を保守的に置くこと。');
   } else {
-    for (const wave of report.waves) {
-      const dispatched = wave.dispatched.map((n) => `#${n}`).join(', ') || 'なし';
-      lines.push(`- Wave ${wave.index + 1}: dispatch=${dispatched} / worker完了=${wave.barrier.all_workers_completed} / verify pass=${wave.barrier.all_verifications_passed} / 次waveへ=${wave.barrier.advanced}`);
+    lines.push('## Wave');
+    if (report.waves.length === 0) {
+      lines.push('- dispatch 前に停止（wave なし）。');
+    } else {
+      for (const wave of report.waves) {
+        const dispatched = wave.dispatched.map((n) => `#${n}`).join(', ') || 'なし';
+        lines.push(`- Wave ${wave.index + 1}: dispatch=${dispatched} / worker完了=${wave.barrier.all_workers_completed} / verify pass=${wave.barrier.all_verifications_passed} / 次waveへ=${wave.barrier.advanced}`);
+      }
     }
   }
   lines.push('');

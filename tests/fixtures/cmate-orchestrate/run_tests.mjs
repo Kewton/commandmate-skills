@@ -1104,6 +1104,15 @@ function runDispatchCase(caseId) {
   if (expect.max_dispatched_per_wave !== undefined) {
     check(report.waves.every((wave) => wave.dispatched.length <= expect.max_dispatched_per_wave), `a wave dispatched more than ${expect.max_dispatched_per_wave}`);
   }
+  // WHICH issues each group sent, not just how many (Issue #183). Under
+  // `--schedule dag` a `waves[]` entry is an ADMISSION ROUND, so the composition
+  // of each round is the scheduling decision itself: "three ready issues, a cap of
+  // two, so the third waits for a free slot" is unreadable from a count alone, and
+  // a scheduler that admitted the wrong issue would still satisfy the bound above.
+  if (expect.waves_dispatched) {
+    check(deepEqual(report.waves.map((wave) => wave.dispatched), expect.waves_dispatched),
+      `waves[].dispatched ${JSON.stringify(report.waves.map((wave) => wave.dispatched))} !== ${JSON.stringify(expect.waves_dispatched)}`);
+  }
 
   const cliLog = readCliLog(logPath);
   const sent = sentIssuesFromLog(cliLog);
@@ -1309,6 +1318,29 @@ function runDispatchCase(caseId) {
     }
   }
 
+  // The exact opposite measurement, and the one the wave barrier is (Issue #183):
+  // EVERY send to `first` precedes EVERY send to `then`. It is what
+  // `parallel_send_crossover` cannot express — a crossover assertion passes as
+  // soon as one send interleaves, while a barrier claims that none does — and the
+  // two are used as a pair: the same world, the same plan, `--schedule dag` on one
+  // side and the default on the other, so the wall-clock cost the flag removes is
+  // measured rather than asserted.
+  if (expect.barrier_send_order) {
+    const { first, then } = expect.barrier_send_order;
+    const sendIndicesFor = (n) => cliLog
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => entry.sub === 'send' && /issue-(\d+)/.exec(entry.args[0] ?? '')?.[1] === String(n))
+      .map(({ index }) => index);
+    const firstIdx = sendIndicesFor(first);
+    const thenIdx = sendIndicesFor(then);
+    if (check(firstIdx.length > 0 && thenIdx.length > 0, `barrier send order: missing sends for #${first}/#${then}`)) {
+      check(
+        Math.max(...firstIdx) < Math.min(...thenIdx),
+        `barrier send order: #${first} last send (idx ${Math.max(...firstIdx)}) should precede #${then} first send (idx ${Math.min(...thenIdx)}) — the barrier did not hold`,
+      );
+    }
+  }
+
   // Drift limitations that must NOT be recorded (#1473): a worktree registered at
   // a non-template path but resolvable by branch via `commandmate ls` must not be
   // reported as a missing worktree.
@@ -1471,6 +1503,22 @@ function runDispatchCase(caseId) {
   if (expect.summary_excludes) {
     for (const needle of expect.summary_excludes) {
       check(!report.summary_markdown.includes(needle), `dispatch summary should not contain "${needle}"`);
+    }
+  }
+
+  // The byte-level non-regression golden (Issue #183 受入条件1), the same shape
+  // merge-case `m22` uses for #175: `out_dir` is the run's absolute temp path —
+  // the one value that cannot be checked in — so it is replaced in place, keeping
+  // the key order the comparison is about. The golden was produced by the runner
+  // as it stood BEFORE `--schedule` existed, so a match means the default path
+  // emits the same bytes it always did. A case-by-case expectation cannot make
+  // that claim: it only pins the fields somebody thought to list.
+  if (expect.golden_report) {
+    const goldenPath = join(caseDir, expect.golden_report);
+    if (check(existsSync(goldenPath), `golden ${expect.golden_report} is missing`)) {
+      const normalized = `${JSON.stringify({ ...report, out_dir: '<out>' }, null, 2)}\n`;
+      const golden = readFileSync(goldenPath, 'utf8');
+      check(normalized === golden, `dispatch report is not byte-identical to ${expect.golden_report} (pre-#183 output)`);
     }
   }
 
@@ -3147,6 +3195,15 @@ function reverifyInputTest() {
     // directory that holds no prior run cannot be re-judged, and saying so with
     // load_error (exit 6) is what --resume already does.
     ['--reverify on a directory that does not exist', { reverifyDir: join(runsDir, 'nope') }, [], 6, 'does not exist'],
+    // Issue #183. Refused rather than accepted-and-ignored: a reverify sends
+    // nothing, so there is no dispatch order for the DAG scheduler to improve,
+    // and its ready gate ("every dependency completed AND verified") would
+    // suppress the re-judgement of exactly the issues downstream of the failure
+    // the reverify exists to clear. Checked here rather than as a dispatch case
+    // for the same reason the rows above are: what is asserted is that the
+    // invocation is refused BEFORE it reaches a world.
+    ['--schedule dag with --reverify', { reverifyDir: runsDir }, ['--schedule', 'dag'], 3, 'cannot both hold'],
+    ['an unknown --schedule mode', {}, ['--schedule', 'sequential'], 3, '--schedule must be one of wave, dag'],
   ];
   for (const [label, opts, args, exitCode, needle] of refusals) {
     const work = mkdtempSync(join(tmpdir(), 'cmate-reverify-'));

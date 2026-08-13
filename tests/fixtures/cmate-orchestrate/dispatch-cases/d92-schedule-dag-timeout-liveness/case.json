@@ -1,0 +1,29 @@
+{
+  "description": "[#183 × #179] **DAG では worker の待ち方が変わるので、timeout の生死の見分けが壊れていないことをここで測る。** 依存ゼロの3件を `--schedule dag` で回し、#400 は timeout 時に `capture` が稼働を示す（`wait_window_exhausted` — 待って `--reverify`）、#401 は稼働の証拠を返さない（`worker_stalled` — worker ログを読んで `--resume`）、#402 は timeout しないので `worker_liveness` を**持たない**。DAG では worker の終了順が投入順と一致しないので、生死の blocking reason を完了順に push した実装は run ごとに並びが変わる —— `blocking_order` はそれを落とすために、plan 順（#400 → #401）を固定している。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-dag-parallel.json",
+    "orchestrate_args": ["400", "401", "402", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--schedule", "dag"],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "timeout",
+    "human_required": false,
+    "waves_count": 1,
+    "waves_dispatched": [[400, 401, 402]],
+    "no_respond": true,
+    "sent": [400, 401, 402],
+    "worker_states": { "400": "timeout", "401": "timeout", "402": "completed" },
+    "worker_liveness": {
+      "400": { "code": "wait_window_exhausted", "is_running": true, "is_generating": true, "is_prompt_waiting": false, "session_status": "working" },
+      "401": { "code": "worker_stalled", "is_running": false, "is_generating": false, "is_prompt_waiting": false, "session_status": "idle" },
+      "402": null
+    },
+    "limitation_codes": ["schedule_dag"],
+    "blocking_codes": ["wait_window_exhausted", "worker_stalled", "worker_timeout"],
+    "absent_blocking_codes": ["worker_liveness_unreadable"],
+    "blocking_order": ["wait_window_exhausted:#400", "worker_stalled:#401"]
+  }
+}

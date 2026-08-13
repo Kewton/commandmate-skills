@@ -171,6 +171,7 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 | `--prepare-worktrees` | **off** | pre-flight で未解決だった worktree を `cmate-worktree-setup` に作らせてから続行する。既定 off＝従来どおり停止 |
 | `--worktree-setup <launcher>` | — | 上記 provider の呼び出し口（`--cli` と同じ argv 規約）。`--prepare-worktrees` 無しに渡すと `invalid_input` |
 | `--worker-method <skill-id>` | **off** | worker が従うべき開発スキル（例 `cmate-worker-development`）を名指しする。**install を実測してから** dispatch し、無ければ停止する。契約 goal と worker prompt の**両方**に `## Method` 節が入る。**渡さない run は 1 bit も変わらない** |
+| `--schedule <mode>` | **`wave`** | `wave` / `dag`。`dag` は wave barrier をやめ、**その Issue 自身の依存**が pass した時点で空き枠へ投入する（第3.2節）。**渡さない run は report が byte 単位で従来どおり。** `--reverify` との併用は `invalid_input` |
 | `--contract-mode <m>` | `auto` | `auto` / `require`（フォールバック拒否）/ `off`（probe せず baseline 裁定） |
 | `--verify-gates <ids>` | 省略＝全ゲート | 契約の `verify.gates` に載せる gate id。**存在しない id を発明しない**。run 全体に1つ。Issue 側の `require:` とは**和集合**を取る（絞り込みが Issue の要求を落とすことは許さない） |
 | `--expect-branch <name>` | — | plan 承認時の統合 branch。不一致なら drift |
@@ -233,6 +234,10 @@ profile 由来かを問わず**解決後の値**に対して効く。
   `issue_constraints_untranscribed` を記録する。**転記が完走しても、worker 側は本文を自分で読む**
   （[cmate-worker-development](../cmate-worker-development/) A 段）。契約の正本は
   [dispatch-contract.md](./references/dispatch-contract.md) 第2.4.1節。
+- **`--schedule dag` は並列度を上げるため、検証ゲートが資源（ポート等）を共有するリポジトリでは
+  偽赤が増えうる。[Kewton/CommandMate#1771](https://github.com/Kewton/CommandMate/issues/1771)
+  が着地するまでは `--max-parallel` を保守的に設定すること。** 失敗の伝播・合流後検証を回す位置・
+  `--max-parallel` を runner が下げない理由は第3.2節。
 - **`--unattended` が含意するのは締め付けだけである。** ゲートを1つも無効化せず、`--approve` を
   含意せず、緩和フラグとの併用は `invalid_input` で拒否する。**無人運転の driver は CI の job 定義
   （または cron script）であって runner ではない。**
@@ -573,6 +578,7 @@ report/artifact に残さない（redaction）。
 | dispatch `open_questions` + `human_required` | blocking reason に出ている質問の答えを Issue 本文に書いて re-plan する |
 | dispatch `drift` | drift の内容を確認し、必要なら re-plan する。**drift の上に dispatch しない** |
 | dispatch `worktree_unresolved` | **`cmate-worktree-setup` で worktree を作り、同じコマンドを再実行する。** plan と同じ profile を使う。**re-plan は不要** |
+| dispatch `blocked_by_upstream_failure` / `schedule_halted_unattended`（`--schedule dag`） | 上流が green にならず、**下流だけ**（`--unattended` では全部）投入しなかった。**上流を直して `--resume`** |
 | dispatch `worktree_setup_unavailable` / `worktree_setup_failed` / `worktree_profile_mismatch` | provider を install する / `--worktree-setup <launcher>` で呼び出し口を渡す / plan と**同じ profile** を渡す。**作成済みの worktree は消していない** |
 | dispatch `worker_method_unavailable` | **`commandmate skill install <skill-id>` で対象 worktree に入れ、同じコマンドを再実行する。** **re-plan は不要** |
 | dispatch exit 10（prompt 検出） | `capture` の内容が report に出ている。**自分で判断して答える。** runner は自動応答しない |

@@ -1,0 +1,32 @@
+{
+  "description": "[#183 設計論点1] **失敗の伝播は下流だけ。** #310 は1ターンで `failed`（`wait --verify` が exit 1 を返すインフラ失敗）、#311 は3ターンかけて completed + pass になる。DAG では #310 の下流 #312 だけが `blocked_by_upstream_failure` で止まり、独立系列の #313 は #311 が green になった時点で投入されて完走する —— wave barrier ならここで **#312 も #313 も1件も dispatch されない**（wave 1 ごと止まる）。停止理由の順位も測る: `not_dispatched` の rung は「runner が拒否した Issue」のためのもので、上流失敗で止めた Issue をそこに載せると**原因ではなく結果**が stop_reason になるので、headline は #310 の `worker_failed` である。d90 の双子。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-dag-failure.json",
+    "orchestrate_args": ["310", "311", "312", "313", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--schedule", "dag", "--max-turns", "4"],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 3,
+    "waves_dispatched": [[310, 311], [313], []],
+    "no_respond": true,
+    "sent": [310, 311, 313],
+    "never_sent": [312],
+    "worker_states": { "310": "failed", "311": "completed", "312": "not_dispatched", "313": "completed" },
+    "verification_outcomes": { "311": "pass", "312": "not_run", "313": "pass" },
+    "worker_notes_include": {
+      "312": ["blocked_by_upstream_failure", "#310"]
+    },
+    "limitation_codes": ["schedule_dag"],
+    "blocking_codes": ["blocked_by_upstream_failure", "worker_failed"],
+    "absent_blocking_codes": ["schedule_halted_unattended"],
+    "blocking_details_include": [
+      ["#312 was not dispatched", "#310", "independent chains kept running"]
+    ],
+    "summary_includes": ["## スケジューリング（dag）", "上流が green にならなかったため止めた Issue"]
+  }
+}

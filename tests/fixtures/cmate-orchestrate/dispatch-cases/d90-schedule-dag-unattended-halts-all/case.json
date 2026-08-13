@@ -1,0 +1,29 @@
+{
+  "description": "[#183 設計論点1 の安全側] **d89 の双子（二点測定）。** plan も world も scenario も同一で、違いは `--unattended`（とそれが必須にする `--wall-clock-budget`）だけである。無人では「下流だけ止めて独立系列は続ける」に倒さず**従来どおり全停止**する: #310 が failed になった時点で新規投入をやめるので、上流 #311 が green になっても **#313 は1度も send されない**（d89 では send される）。止めた理由は Issue ごとに正確に名乗り分ける —— #312 は本当に上流が壊れているので `blocked_by_upstream_failure`、#313 の上流 #311 は pass しているので原因は依存ではなく方針であり `schedule_halted_unattended` である。`--unattended` は緩めないという既存の裁定どおり、prompt も gate も1つも無効化していない。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-dag-failure.json",
+    "orchestrate_args": ["310", "311", "312", "313", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--schedule", "dag", "--max-turns", "4", "--unattended", "--wall-clock-budget", "600"],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 2,
+    "waves_dispatched": [[310, 311], []],
+    "no_respond": true,
+    "sent": [310, 311],
+    "never_sent": [312, 313],
+    "worker_states": { "310": "failed", "311": "completed", "312": "not_dispatched", "313": "not_dispatched" },
+    "verification_outcomes": { "311": "pass", "312": "not_run", "313": "not_run" },
+    "limitation_codes": ["schedule_dag", "unattended_mode"],
+    "blocking_codes": ["blocked_by_upstream_failure", "schedule_halted_unattended", "worker_failed"],
+    "blocking_details_include": [
+      ["#312 was not dispatched", "#310"],
+      ["#313", "--unattended", "every dependency of it passed"]
+    ],
+    "summary_includes": ["## 無人運転（unattended）", "無人なので全停止"]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "issues": [
+    {
+      "number": 400,
+      "title": "feat: add the timezone table",
+      "body": "Add the timezone table in `src/timezone.ts`.\n\n## Acceptance criteria\n- [ ] `src/timezone.ts` lists every zone\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 401,
+      "title": "feat: add the currency table",
+      "body": "Add the currency table in `src/currency.ts`.\n\n## Acceptance criteria\n- [ ] `src/currency.ts` lists every unit\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 402,
+      "title": "feat: add the keyboard shortcut map",
+      "body": "Add the keyboard shortcut map in `src/shortcut.ts`.\n\n## Acceptance criteria\n- [ ] `src/shortcut.ts` binds every action\n",
+      "labels": ["feature"]
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "issues": [
+    {
+      "number": 310,
+      "title": "feat: add the quota meter",
+      "body": "Add the quota meter in `src/quota.ts`.\n\n## Acceptance criteria\n- [ ] `src/quota.ts` counts one unit per call\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 311,
+      "title": "feat: add the invoice formatter",
+      "body": "Add the invoice formatter in `src/invoice.ts`.\n\n## Acceptance criteria\n- [ ] `src/invoice.ts` formats a total\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 312,
+      "title": "feat: add the quota banner",
+      "body": "Add the quota banner in `src/banner.ts`.\n\n## Acceptance criteria\n- [ ] `src/banner.ts` shows the remaining quota\n\n## Dependencies\n- Depends on #310\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 313,
+      "title": "feat: add the invoice mailer",
+      "body": "Add the invoice mailer in `src/mailer.ts`.\n\n## Acceptance criteria\n- [ ] `src/mailer.ts` sends one mail per invoice\n\n## Dependencies\n- Depends on #311\n",
+      "labels": ["feature"]
+    }
+  ]
+}

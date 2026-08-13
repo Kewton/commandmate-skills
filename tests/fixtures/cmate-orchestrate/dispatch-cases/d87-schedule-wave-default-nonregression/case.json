@@ -1,0 +1,26 @@
+{
+  "description": "[#183 受入条件1] **opt-in が opt-in であることの byte 単位の証明。** `--schedule` を渡さない run の report が **#183 実装前の runner が書いた golden と byte 一致**するか（`out_dir` だけ `<out>` に置換。m22 が #175 に対して張っているのと同じ形の非回帰）。世界は d88 と完全に同一で、違いは `dispatch_args` に `--schedule dag` があるかどうかだけである。同時に wave barrier そのものも固定する: #303 は #300 にしか依存していないのに、**同じ wave に居合わせただけの最遅 worker #302（6ターン）の最後の send より後**でなければ1度も送られない —— これが #183 が消しに来た待ち時間であり、既定経路ではそれが1 byte も変わっていないことをここで測る。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-dag-chain.json",
+    "orchestrate_args": ["300", "301", "302", "303", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "no_respond": true,
+    "sent": [300, 301, 302, 303],
+    "send_counts": { "300": 1, "301": 1, "302": 6, "303": 1 },
+    "worker_states": { "300": "completed", "301": "completed", "302": "completed", "303": "completed" },
+    "verification_outcomes": { "300": "pass", "301": "pass", "302": "pass", "303": "pass" },
+    "barrier_send_order": { "first": 302, "then": 303 },
+    "absent_limitation_codes": ["schedule_dag"],
+    "summary_excludes": ["## スケジューリング"],
+    "golden_report": "expected-dispatch-report.json"
+  }
+}

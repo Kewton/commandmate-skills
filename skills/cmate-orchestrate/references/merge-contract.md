@@ -290,6 +290,33 @@ develop に入った直後から `npm run test:unit` が赤で、**発覚は dev
 [#183](https://github.com/Kewton/commandmate-skills/issues/183) が拾う。ここで決めてあるのは
 **report 側の field 設計**であり、dispatch はそれを読むだけでよい。
 
+#### #183（DAG スケジューリング）から見たこの検証の位置
+
+[#183](https://github.com/Kewton/commandmate-skills/issues/183) が `dispatch --schedule dag` を
+足したことで、**上の「次 wave」という言い方が成り立たない run が存在する**ようになった。dag では
+wave 境界が無いので、「wave ごとに merge して合流後を測ってから次へ」という運用上の停止点が
+構造的に消える。#183 の裁定は次のとおりである（詳細と根拠は
+[dispatch-contract.md 第3.2節](./dispatch-contract.md)）。
+
+**`--schedule dag` の run では、合流後の統合ブランチ検証は run の末尾に1回回す。**
+
+```bash
+node scripts/merge.mjs --dispatch <out>/dispatch-report.json --merge-prs --approve --integration-verify
+```
+
+- **`merge.mjs` は1行も変わっていない。** #183 が足したのは dispatch 側の scheduler だけで、
+  この検証は**この節の実装をそのまま**、別 invocation として呼ぶ（1 invocation = 1 mutating phase の
+  規律は第1節のままである）。dispatch が内側で merge を呼ぶ形は採らなかった —— merge は `--approve`
+  と PR 作成 / merge という別の権限を持ち、`--integration-verify` は base を fetch するので、
+  承認境界が dispatch の flag 1つに畳まれてしまう。
+- 「merge のたび」「N 件ごと」は採らなかった。wave 境界には「そこまでの依存が閉じている」という
+  意味があったが、任意の N にはそれが無く、境界の意味が run ごとに変わる。
+- **dag が失うのは「合流後の赤を早く見つけること」であって、「合流後を見ること」ではない。**
+  依存を宣言している下流は上流の `verification pass` を待つので、壊れた前段の上に積むことは起きない。
+  残るのはこの節が見つけたクラス（**file が重ならないのに合流後だけ赤くなる**）で、これは wave 境界でも
+  dag でも **merge の時にしか測れない**。dispatch の report と summary はこの1行の指示を必ず書く
+  （limitation `schedule_dag`）。
+
 ### 変えていないもの
 
 - `merge_schema_version` は **1 のまま**。`stop_reason` にも target `outcome` にも

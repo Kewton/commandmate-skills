@@ -18,6 +18,13 @@ dispatch-cases/issues-negative-constraints.json  否定的制約（禁止の表�
                                 fixture（#176 の転記 case 用）
 dispatch-cases/issues-acceptance-gates*.json  受入ゲート case の Issue fixture（ブロック有り / 無し / 未知 id）
 dispatch-cases/issues-open-questions-block.json  著者が宣言した未決の問いを持つ Issue fixture（#178 の case 用）
+dispatch-cases/issues-dag-*.json  スケジューリングの case 用 Issue fixture（#183）。`-chain` は
+                                「3件独立 + 1件だけが片方に依存」（wave では最遅 worker を全員が待つ形）、
+                                `-failure` は「独立2系列がそれぞれ1件を従える」（上流失敗の伝播を
+                                下流だけに閉じ込められるかを見る形）、`-parallel` は依存ゼロ3件
+dispatch-cases/<id>/expected-dispatch-report.json  （任意）golden な dispatch report。`out_dir` だけ
+                                `<out>` に置換して byte 一致で照合（#183 の非回帰 case。merge-case の
+                                `expected-merge-report.json` と同じ規約）
 resume-cases/<id>/case.json     複数 attempt を1つの run directory に append する case。
                                 `--resume`（再 dispatch）と `--reverify`（送らずに再裁定）の両方が
                                 ここに入る: attempt の配置規約・append-only 不変条件・台帳・
@@ -209,6 +216,12 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 | `d84-dispatch-defaults-unattended-refused` | **既存の排他が解決後の値に効くか（受入条件3）。** flag を1つも渡していないのに profile 由来の auto-yes と `--unattended` の併用を `invalid_input`（exit 3）で拒否し、**`--out` を作らず CLI を1回も呼ばない**か。`accepted_with_args` で `--no-auto-yes` を足せば完走することも測るので、「`--unattended` を常に拒否する」実装では緑にならない |
 | `d85-dispatch-defaults-no-infer-mismatch` | **dispatch が消費できない宣言を黙って無視しないか。** `no_infer` は planner の flag なので、承認済み plan を dispatch が un-infer することはできない。profile が宣言しているのに plan は `inputs.infer: true` で作られている（付け忘れが残る形そのもの）とき、止まりはしないが limitation で名指しし `--no-infer` で取り直せと言うか |
 | `d86-dispatch-defaults-no-infer-honored` | **d83 の相方。** 世界も plan patch も同一で、planner を `--no-infer` で回した側。依存が explicit なので wave 構成は d83 と同じで、差分は **limitation が1件も出ないこと**だけ。合致まで報告する実装は、読む価値のある行を noise で埋める |
+| `d87-schedule-wave-default-nonregression` | **既定（wave）の byte 非回帰（#183 受入条件1）。** `--schedule` を渡さない run の report が **#183 実装前の runner が書いた golden**（`expected-dispatch-report.json`。`out_dir` だけ `<out>` に置換）と byte 一致するか。同時に barrier そのものも固定する: #300 にしか依存していない #303 が、**同じ wave に居合わせただけの最遅 worker #302（6ターン）の最後の send より後**でなければ1度も送られない（`barrier_send_order`）。d88 の双子で、違うのは `dispatch_args` だけである |
+| `d88-schedule-dag-independent-not-blocked` | **d87 の相方（#183 受入条件2）。** 同じ plan・同じ world を `--schedule dag` で回すと、#300 が green になった時点で #303 が空き枠へ入り、#302 の**最後の** send より前に送られる（`parallel_send_crossover`。wave barrier では構造的に不可能な crossover）。`waves[]` は投入ラウンドで `[[300,301,302],[303]]` になり、limitation `schedule_dag` が3点（`--max-parallel` は同時実行数の上限／`plan.waves` は参考情報／CommandMate#1771）を名乗る |
+| `d89-schedule-dag-upstream-failure-downstream-only` | **失敗の伝播は下流だけ（#183 設計論点1）。** #310 が1ターンで failed、#311 は3ターンで green。#310 の下流 #312 だけが `blocked_by_upstream_failure` で止まり、**独立系列の #313 は #311 が green になった時点で投入されて完走する**（wave barrier なら #312 も #313 も1件も dispatch されない）。stop_reason が結果（`not_dispatched`）ではなく原因（`worker_failed`）になることも固定する |
+| `d90-schedule-dag-unattended-halts-all` | **d89 の双子（安全側）。** 世界も plan も scenario も同一で、違いは `--unattended`（と必須の `--wall-clock-budget`）だけ。無人では**従来どおり全停止**し、上流 #311 が green になっても #313 は1度も send されない。止めた理由は Issue ごとに正確に分ける —— #312 は本当に上流が壊れているので `blocked_by_upstream_failure`、#313 は依存が pass しているので `schedule_halted_unattended`（対処が違うので丸めない） |
+| `d91-schedule-dag-max-parallel-bound` | **`--max-parallel` は同時実行数の上限のまま（#183 受入条件3）。** 依存ゼロ3件を `--max-parallel 2` の DAG で回すと、3件とも ready なのに round 0 は2件だけで、3件目は枠が空いてから入る（`waves_dispatched: [[400,401],[402]]`）。ready を全部投入する実装は `dispatched.length 3 > max_parallel 2` を書き、全 dispatch case にかかる上限 assert で落ちる |
+| `d92-schedule-dag-timeout-liveness` | **#183 × #179。** DAG では worker の終了順が投入順と一致しないので、timeout の生死の見分け（`wait_window_exhausted` / `worker_stalled`）が壊れていないことをここで測る。#402 は timeout しないので `worker_liveness` を**持たない**。生死の blocking reason を完了順に push した実装は run ごとに並びが変わるので、`blocking_order` が plan 順（#400 → #401）を固定している |
 
 ## merge case 一覧
 

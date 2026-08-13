@@ -1,0 +1,10 @@
+{
+  "cli_available": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "400": { "state": "completed", "commit_on": 2, "verify": "pass" },
+    "401": { "state": "completed", "commit_on": 2, "verify": "pass" },
+    "402": { "state": "completed", "commit_on": 2, "verify": "pass" }
+  }
+}

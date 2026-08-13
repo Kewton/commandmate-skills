@@ -1,0 +1,12 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "310": { "state": "completed", "verify_exits": [1] },
+    "311": { "state": "completed", "commit_on": 3, "verify_exits": [0] },
+    "312": { "state": "completed", "verify_exits": [0] },
+    "313": { "state": "completed", "verify_exits": [0] }
+  }
+}
