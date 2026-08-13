@@ -1,0 +1,20 @@
+{
+  "issues": [
+    {
+      "number": 430,
+      "title": "feat: 施設の座標系を切り替える",
+      "body": "施設の座標を新しい座標系へ移す。\n\n## 対象ファイル\n- `src/geo.ts`\n\n## 受入条件\n- [ ] 施設の座標が新しい座標系で描画される\n\n```open-questions\n# 記法のコメント形: 行頭 `#` の1行だけ\nversion: 1\nquestions:\n  - 旧実装の `src/legacy/topo.ts` を残すか、この Issue で消すか\n  - 座標変換を保存時に行うか、描画時に行うか\n```\n\n## 検証\n\n```bash\npython3 scripts/validate.py\nnode tests/fixtures/cmate-orchestrate/run_tests.mjs\n```\n\n押す前に `pytest -q` も走らせる。\n",
+      "labels": [
+        "feature"
+      ]
+    },
+    {
+      "number": 431,
+      "title": "feat: 施設の座標系を切り替える",
+      "body": "施設の座標を新しい座標系へ移す。\n\n## 対象ファイル\n- `src/geo.ts`\n\n## 受入条件\n- [ ] 施設の座標が新しい座標系で描画される\n\n## 検証\n\n```bash\npython3 scripts/validate.py\nnode tests/fixtures/cmate-orchestrate/run_tests.mjs\n```\n\n押す前に `pytest -q` も走らせる。\n",
+      "labels": [
+        "feature"
+      ]
+    }
+  ]
+}

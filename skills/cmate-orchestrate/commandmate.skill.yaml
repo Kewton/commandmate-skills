@@ -107,14 +107,14 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: c8b95fa08393b8663e834b7c1dc7244ffecc1f906ffe9ed45673092e196d946c
-    size: 57096
+    sha256: 9c61f89edd5789a77892faa8acd60acb1083bd510ec9a48ca0047e8730a3e0b8
+    size: 58993
     kind: skill_md
     executable: false
     script: false
   - path: references/acceptance-gates-notation.md
-    sha256: e155ac29b3ec1e8648dd137c87d3530aba8018b19b137a416134a232e021ee52
-    size: 13328
+    sha256: 47d8c2b39699809debdcebba46da4e437f5df9937eae8d05f01a6dd53f7c2057
+    size: 13925
     kind: instruction
     executable: false
     script: false
@@ -155,8 +155,8 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: 82fa684c40fa84e7891530e27614e32c127458ed06e34723ae67cdef1a6d376b
-    size: 46368
+    sha256: ba349be970f001234e4b69acd4109f432d1531eb009fc68fb0b74e4133c87e95
+    size: 50510
     kind: instruction
     executable: false
     script: false
@@ -172,9 +172,15 @@ files:
     kind: instruction
     executable: false
     script: false
+  - path: references/open-questions-notation.md
+    sha256: 74588f8e41c92f85d938b6ebf0ef1baed57d9df2cbb41e0c1628c20bb7b6be59
+    size: 8220
+    kind: instruction
+    executable: false
+    script: false
   - path: references/plan-contract.md
-    sha256: 034d23a463ec49faeb9f9f614bcad0c7433ae8af3a66ffb7deb3f84b9809b5a2
-    size: 42356
+    sha256: c3ebc40195dbe17284d1b1d840f570b4671ff8cc34e4d863231bf84e48b64765
+    size: 46141
     kind: instruction
     executable: false
     script: false
@@ -215,8 +221,8 @@ files:
     executable: false
     script: false
   - path: schemas/execution-plan.v2.json
-    sha256: ecfb1aea4c59e35d3d48e96c143c1be08cf4a421945cb0608e95774e681f2a59
-    size: 17012
+    sha256: 0f730ecd94444e3c47bc7e651d5dd7533f44c47a63cbb3dd954b42beaf998050
+    size: 18152
     kind: asset
     executable: false
     script: false
@@ -257,8 +263,8 @@ files:
     executable: true
     script: true
   - path: scripts/orchestrate.mjs
-    sha256: c94eab93a09a26833a38aef69d25995014573ddd0ac7431f073f750c36f86bf7
-    size: 144995
+    sha256: f22778781612c8e0539c9caf91ccd8be13cab44c4380b3c6b3c16fcbc56e9979
+    size: 156560
     kind: script
     executable: true
     script: true

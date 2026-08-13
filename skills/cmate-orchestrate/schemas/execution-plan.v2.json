@@ -487,7 +487,8 @@
           "items": {
             "type": "string",
             "minLength": 1
-          }
+          },
+          "description": "Blocking questions for this issue. The dispatch runner refuses an issue carrying any of them unless --allow-questions is passed, so this array — not plan.status — is what stops a run. Each entry also appears in plan.warnings under the private code that produced it: open_question_declared (the issue body's ```open-questions block says the AUTHOR has not decided this; the sentence is transcribed verbatim, in the author's order — references/open-questions-notation.md), open_question_block_invalid (that block could not be read and is NOT treated as absent), acceptance_gate_block_invalid / acceptance_gate_block_unsupported (the ```acceptance-gates block, likewise), no_acceptance_criteria, no_suspected_files, ambiguous_file_candidate, acceptance_requires_tests_but_scope_has_none, unconfirmed_lexical_dependency. Every code but the first is the planner reporting something it could not READ; the first is the author reporting something they have not DECIDED, and it is raised before the others for that reason. See references/plan-contract.md sections 5.4 and 5.5 and references/codes-and-recovery.md."
         },
         "classification": {
           "enum": [

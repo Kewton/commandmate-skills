@@ -17,6 +17,7 @@ dispatch-cases/issues-multifile.json  複数 file を保有する Issue fixture�
 dispatch-cases/issues-negative-constraints.json  否定的制約（禁止の表・非対象節）を持つ Issue
                                 fixture（#176 の転記 case 用）
 dispatch-cases/issues-acceptance-gates*.json  受入ゲート case の Issue fixture（ブロック有り / 無し / 未知 id）
+dispatch-cases/issues-open-questions-block.json  著者が宣言した未決の問いを持つ Issue fixture（#178 の case 用）
 resume-cases/<id>/case.json     複数 attempt を1つの run directory に append する case。
                                 `--resume`（再 dispatch）と `--reverify`（送らずに再裁定）の両方が
                                 ここに入る: attempt の配置規約・append-only 不変条件・台帳・
@@ -97,6 +98,9 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 | `56-context-heading-issue-number` | `## 根拠` 配下で**否定するために**書いた `depends on #N` が phantom 依存にならず、かつ CONTEXT の外に書いた依存は残るか（#182） |
 | `57-shadowed-path-is-a-question` | 宣言した短い path が、説明文の長い path に shadow されて scope から落ちないか（両方 scope に入り question になるか。#182） |
 | `58-shadowed-path-cited-as-context` | 逆向き: 長い方を `## 根拠` で引用しただけなら**訊かない**か（著者が既に区別を書いている。かつ、旧規則ではこの形が scope 空になっていた。#182） |
+| `59-open-questions-declared` | 著者が ```open-questions ブロックで宣言した未決の問いが、1件につき1件の blocking question になるか。**ブロックを消した双子の Issue** と `test_expectations` / `suspected_files` / `scope_defaults` が byte 一致するか（#178。strip しないと終了 fence が後続 ```bash の開始として拾われ 3件が1件に落ち、問いの中に書いた path が scope に入る） |
+| `60-open-questions-block-invalid` | 2個・未知 version・未知 key・空ブロックを `open_question_block_invalid` として open question にし、**「ブロックが無かった」に丸めない**か（#178。acceptance-gates 記法 第7節をそのまま適用） |
+| `61-open-questions-heading-not-read` | 見出し（未決 / undecided / open questions）**だけ**の本文では question が1件も立たないか。golden は**この機能の実装前の runner が生成した**もので、ブロックの無い本文の plan が byte 単位で従来どおりであることの測定である（#178） |
 
 ## dispatch case 一覧
 
@@ -197,12 +201,14 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 | `d76-timeout-worker-alive` | **timeout の生死（#179）の「生きている」側。** wait が timeout した時点で `capture` を**1回だけ**叩き、稼働中なら `wait_window_exhausted` と `worker_liveness` を記録し、next action が「待って `--reverify`」（**再 dispatch ではない**）になるか。timeout していない相方の worker には `worker_liveness` が**付かない** |
 | `d77-timeout-worker-stalled` | **同じ timeout の「稼働の証拠なし」側**（d76 の対）。`capture: "idle"` を注入して `worker_stalled` になり、next action が `--resume` 側に変わるか。**契約非対応 CLI（フォールバック経路）で回す**ので、契約経路にだけ生死判定を入れた実装はここで赤くなる |
 | `d78-timeout-liveness-unreadable` | **読めなかった側（受入条件4）。** `capture` が失敗する worker と、exit 0 のまま想定外の出力を返す worker の2件で、どちらも `worker_liveness_unreadable` になり detail がどちらの壊れ方かを名指しするか。**「読めなかった」を「止まっている」に丸めない。** blocking reason が `workers` の順に並ぶ（並行監督の完了順で report が変わらない）ことも固定する |
-| `d79-dispatch-defaults-from-profile` | **profile が宣言した運転既定（#180）。** flag を1つも渡さない run で `dispatch_defaults` の3値が効くか。効いた証拠は report の self-report ではなく **fake CLI が受け取った argv**（`wait --timeout 600` / `send --auto-yes --duration 3h`）に取る。3h は `max_turns × wait_timeout` から導かれる窓なので、宣言を読んだだけで使っていない実装はここで 1h を送る |
-| `d80-dispatch-defaults-cli-overrides` | **d79 の相方（二点測定）。** 世界も plan patch も同一で `dispatch_args` だけが違う。`--wait-timeout` / `--max-turns` が profile を上書きし、600 を運ぶ `wait` が1つも無く、auto-yes の窓が**解決後の値から導き直されて** 1h になるか |
-| `d81-dispatch-defaults-explicit-false` | **明示した off が profile の true を上書きするか（受入条件2）。** profile が `auto_yes: true`、run は `--no-auto-yes` だけ。三値で読んでいない実装は profile の true を残して prompt を自動応答し、**exit 0 の success** を返す —— 断れなかったことが status の違いとして出る |
-| `d82-dispatch-defaults-unattended-refused` | **既存の排他が解決後の値に効くか（受入条件3）。** flag を1つも渡していないのに profile 由来の auto-yes と `--unattended` の併用を `invalid_input`（exit 3）で拒否し、**`--out` を作らず CLI を1回も呼ばない**か。`accepted_with_args` で `--no-auto-yes` を足せば完走することも測るので、「`--unattended` を常に拒否する」実装では緑にならない |
-| `d83-dispatch-defaults-no-infer-mismatch` | **dispatch が消費できない宣言を黙って無視しないか。** `no_infer` は planner の flag なので、承認済み plan を dispatch が un-infer することはできない。profile が宣言しているのに plan は `inputs.infer: true` で作られている（付け忘れが残る形そのもの）とき、止まりはしないが limitation で名指しし `--no-infer` で取り直せと言うか |
-| `d84-dispatch-defaults-no-infer-honored` | **d83 の相方。** 世界も plan patch も同一で、planner を `--no-infer` で回した側。依存が explicit なので wave 構成は d83 と同じで、差分は **limitation が1件も出ないこと**だけ。合致まで報告する実装は、読む価値のある行を noise で埋める |
+| `d79-open-questions-block-refused` | 著者が宣言した未決の問いが**既存の** open question ゲートで止めるか。`send` は 0 回で、blocking reason が著者の原文を引用するか（#178） |
+| `d80-open-questions-block-accepted` | 同じ plan が `--allow-questions` では通り、しかし question は消えず `open_questions_accepted` と summary に残るか（#178。新しい緩和フラグを足していないことの確認） |
+| `d81-dispatch-defaults-from-profile` | **profile が宣言した運転既定（#180）。** flag を1つも渡さない run で `dispatch_defaults` の3値が効くか。効いた証拠は report の self-report ではなく **fake CLI が受け取った argv**（`wait --timeout 600` / `send --auto-yes --duration 3h`）に取る。3h は `max_turns × wait_timeout` から導かれる窓なので、宣言を読んだだけで使っていない実装はここで 1h を送る |
+| `d82-dispatch-defaults-cli-overrides` | **d79 の相方（二点測定）。** 世界も plan patch も同一で `dispatch_args` だけが違う。`--wait-timeout` / `--max-turns` が profile を上書きし、600 を運ぶ `wait` が1つも無く、auto-yes の窓が**解決後の値から導き直されて** 1h になるか |
+| `d83-dispatch-defaults-explicit-false` | **明示した off が profile の true を上書きするか（受入条件2）。** profile が `auto_yes: true`、run は `--no-auto-yes` だけ。三値で読んでいない実装は profile の true を残して prompt を自動応答し、**exit 0 の success** を返す —— 断れなかったことが status の違いとして出る |
+| `d84-dispatch-defaults-unattended-refused` | **既存の排他が解決後の値に効くか（受入条件3）。** flag を1つも渡していないのに profile 由来の auto-yes と `--unattended` の併用を `invalid_input`（exit 3）で拒否し、**`--out` を作らず CLI を1回も呼ばない**か。`accepted_with_args` で `--no-auto-yes` を足せば完走することも測るので、「`--unattended` を常に拒否する」実装では緑にならない |
+| `d85-dispatch-defaults-no-infer-mismatch` | **dispatch が消費できない宣言を黙って無視しないか。** `no_infer` は planner の flag なので、承認済み plan を dispatch が un-infer することはできない。profile が宣言しているのに plan は `inputs.infer: true` で作られている（付け忘れが残る形そのもの）とき、止まりはしないが limitation で名指しし `--no-infer` で取り直せと言うか |
+| `d86-dispatch-defaults-no-infer-honored` | **d83 の相方。** 世界も plan patch も同一で、planner を `--no-infer` で回した側。依存が explicit なので wave 構成は d83 と同じで、差分は **limitation が1件も出ないこと**だけ。合致まで報告する実装は、読む価値のある行を noise で埋める |
 
 ## merge case 一覧
 

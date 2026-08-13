@@ -1,0 +1,28 @@
+{
+  "issues": [
+    {
+      "number": 440,
+      "title": "fix: two blocks",
+      "body": "Two blocks in one body.\n\n## 対象ファイル\n- `src/geo.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```open-questions\nversion: 1\nquestions:\n  - which coordinate system wins\n```\n\nLater in the same body, a second one:\n\n```open-questions\nversion: 1\nquestions:\n  - when is the conversion applied\n```\n",
+      "labels": []
+    },
+    {
+      "number": 441,
+      "title": "fix: unknown version",
+      "body": "A version this runner does not implement.\n\n## 対象ファイル\n- `src/geo.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```open-questions\nversion: 2\nquestions:\n  - which coordinate system wins\n```\n",
+      "labels": []
+    },
+    {
+      "number": 442,
+      "title": "fix: unknown key",
+      "body": "A key the v1 block does not define.\n\n## 対象ファイル\n- `src/geo.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```open-questions\nversion: 1\nanswers:\n  - which coordinate system wins\n```\n",
+      "labels": []
+    },
+    {
+      "number": 443,
+      "title": "fix: empty block",
+      "body": "A block that asks nothing.\n\n## 対象ファイル\n- `src/geo.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```open-questions\nversion: 1\nquestions:\n```\n",
+      "labels": []
+    }
+  ]
+}
