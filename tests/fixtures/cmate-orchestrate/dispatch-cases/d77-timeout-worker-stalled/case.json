@@ -1,0 +1,82 @@
+{
+  "description": "[#179] 同じ timeout でも **稼働の証拠が無い**世界（d76 の対）。`capture` は答えるが isRunning / isGenerating / isPromptWaiting がすべて false なので、runner は `worker_stalled` と名指しし、d76 とは**別の**次アクション（worker ログと worktree を読んでから `--resume`）を出す。**この case は契約非対応 CLI（フォールバック経路）で回す** —— 生死の見分けは契約経路だけの機能ではなく、`superviseUntilCommit` 側の timeout でも同じ1回の `capture` が要るからである（契約経路だけに入れた実装はここで赤くなる）。稼働を示さない `capture` は送信確定の信号も返さないので、送信は 2 回（初回 + 未確定の再送）になる —— 同じ世界を一貫して語らせている。**「動いていない」を「作業が無い」と読み替えない**ことが detail の要点で、未 commit の作業を潰す再 dispatch はこの1行が止める。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "102",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "timeout",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      102
+    ],
+    "send_counts": {
+      "102": 2
+    },
+    "cli_subcommand_counts": {
+      "capture": 2
+    },
+    "worker_states": {
+      "102": "timeout"
+    },
+    "verification_outcomes": {
+      "102": "not_run"
+    },
+    "worker_liveness": {
+      "102": {
+        "code": "worker_stalled",
+        "is_running": false,
+        "is_generating": false,
+        "is_prompt_waiting": false,
+        "session_status": "idle"
+      }
+    },
+    "worker_notes_include": {
+      "102": [
+        "wait timed out after",
+        "worker_stalled"
+      ]
+    },
+    "limitation_codes": [
+      "contract_unsupported"
+    ],
+    "blocking_codes": [
+      "worker_stalled",
+      "worker_timeout"
+    ],
+    "absent_blocking_codes": [
+      "wait_window_exhausted",
+      "worker_liveness_unreadable"
+    ],
+    "blocking_details_include": [
+      "#102: `commandmate wait` returned exit 124",
+      "capture reports isRunning=false / isGenerating=false / isPromptWaiting=false / sessionStatus=idle",
+      "NO EVIDENCE of a running worker",
+      "\"not running\" is not \"nothing was done\""
+    ],
+    "summary_includes": [
+      "稼働の証拠が無かった",
+      "--resume"
+    ]
+  }
+}

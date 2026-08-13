@@ -194,6 +194,9 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | dispatch `verification_not_judged`（exit 99） | run が error / cancelled で**誰も判定していない** | **再 dispatch では解けない。** CommandMate 側のログを見る。判定していないものを worker に直させない |
 | dispatch `worker_failed`（`--max-turns` 到達で未 commit） | worker が起動したが commit まで到達しなかった（worktree 未解決はこの code に落ちない。上の行） | prompt / worker ログを読む。指示が過大なら Issue を分割して re-plan する |
 | dispatch `scope_unsatisfiable`（`stop_reason` は `verification_failed` か `worker_failed`。`partial`） | scope ゲートの**違反 path が2ターン連続で同一**だった。worker は同じ結論に到達しており、再送しても答えは変わらないので `--max-turns` を待たずに打ち切った（[dispatch-contract.md](./dispatch-contract.md) 第2.3.1節）。契約の `scope.allow` は **send 時 snapshot** なので、**worker 側には回復手段が無い** | **detail に違反 path がそのまま入っている。それを Issue の対象ファイルに足して re-plan する**（owner: human）。repo の規約（テスト配置・生成物・lockfile 等）なら profile 側に宣言する。**違反が 20 行を超えると detail は 20 行で切られ、`(+N more line(s) not listed here …)` が残りの件数を名乗る**（判定はいつでも全行で行っている。#164）—— 全件は `commandmate verify <worktree-id>` で読む。**同じ plan のまま `--resume` しても同じ所で止まる。** 裁定（`verification.outcome`）は fail のままで、これは書き換えていない —— 変わったのは run が先へ進まないことだけである |
+| dispatch `wait_window_exhausted`（`stop_reason: timeout` / `partial`。`worker_timeout` の隣に出る） | `--wait-timeout` は **`commandmate wait` の1回あたりの上限**であって worker の1ターンの上限ではない。timeout の時点で `capture` を1回叩いたところ、**worker はまだ稼働していた**（`worker_liveness` に `isRunning` / `sessionStatus` / 経過秒が入っている）。すなわち止まったのは**見ていた側**であって worker ではない（実測: Kewton/BorderFreeKidsMap #62。1ターン約40分に対して `--wait-timeout 1800`、worker はそのまま完走して commit を載せた） | **ここで再 dispatch しない。** 完成しかけの作業の上に2人目の worker を重ねることになる。worker が idle 化するのを待ってから **`dispatch.mjs --plan <plan.json> --reverify <その run の dispatch ディレクトリ>`** で送らずに裁定だけ取り直す（[SKILL.md](../SKILL.md) 第3.2節）。1ターンの実測に対して窓が恒常的に短いなら **`--wait-timeout` をその実測に合わせて上げる**。**timeout を「worker が死んだ」と読み替えない** |
+| dispatch `worker_stalled`（同上） | 同じ timeout だが、`capture` は答えたうえで**稼働の証拠を1つも示さなかった**（`isRunning` / `isGenerating` / `isPromptWaiting` がすべて false） | worker のログと worktree を読む。**作業証跡（commit / 未 commit の変更）を確かめてから** `--resume` で再 dispatch する。**「動いていない」は「作業が無い」ではない** —— 未 commit の作業が在るなら、それを潰さないことが先である |
+| dispatch `worker_liveness_unreadable`（同上） | 同じ timeout で、**`capture` 自体が読めなかった**（呼び出しが失敗した / 出力が想定外だった / boolean が1つも入っていなかった）。**生死はどちらも測れていない** | **読めなかったことを「動いている」とも「止まっている」とも読み替えない**（merge `change_evidence_unavailable` と同型の規則）。`commandmate capture <worktree-id> --json` を手で叩いて確かめ、動いていれば idle 化を待って `--reverify`、止まっていれば worktree を確かめてから `--resume` |
 | dispatch `verification_failed` / `worker_failed` / `timeout` で **一部の Issue だけ**落ちた | pass 済みの Issue と落ちた Issue が同じ run に混ざっている | 落ちた分を直したうえで **`dispatch.mjs --plan <plan.json> --resume <その run の dispatch ディレクトリ>`**。pass 済みは再 dispatch されず記録だけ引き継がれる（[SKILL.md](../SKILL.md) 第3.2節）。**re-plan は不要** |
 | dispatch `resume_plan_mismatch`（`stop_reason: dispatch_error`） | `--resume` 先の report が**別 plan**のものだった（`run_id` / repository / base 不一致） | その plan 自身の dispatch ディレクトリを `--resume` に渡す。新規に走らせるなら `--out` で始める。**何も dispatch していないので、直して同じコマンドを再実行してよい** |
 | dispatch `resume_invalid`（同上） | `--resume` 先の report が `dispatch-report.v1` として読めない（schema version 違い / JSON 破損） | detail が「何がどう合わないか」を名指ししている。報告どおりの report を指すか、`--out` で新規 run にする。**壊れた report を半分だけ信じて引き継がない** |
@@ -249,20 +252,25 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 `resume_attempt` / `resume_no_work` / `resume_invalid` / `resume_plan_mismatch`、
 そして `scope_unsatisfiable` / `contract_scope_dropped` / `harness_path_in_scope` /
 `ambiguous_file_candidate` / `unconfirmed_lexical_dependency` /
-`integration_verify_failed` / `integration_verify_unavailable` は、
+`integration_verify_failed` / `integration_verify_unavailable` /
+`wait_window_exhausted` / `worker_stalled` / `worker_liveness_unreadable` は、
 この表には在るが **status runner の hint map にはまだ無い**（`status.mjs` は別 Issue で追随する。
 `contract_scope_dropped` については `status.mjs` が #161 / #162 の宣言 scope の外だった。
 `harness_path_in_scope` も同じく [#177](https://github.com/Kewton/commandmate-skills/issues/177)
 の宣言 scope の外であり、`ambiguous_file_candidate` / `unconfirmed_lexical_dependency` は
 [#182](https://github.com/Kewton/commandmate-skills/issues/182) の、`integration_verify_*` は
-[#175](https://github.com/Kewton/commandmate-skills/issues/175) の宣言 scope の外である。
+[#175](https://github.com/Kewton/commandmate-skills/issues/175) の、timeout の生死3 code は
+[#179](https://github.com/Kewton/commandmate-skills/issues/179) の宣言 scope の外である。
 #182 は `status.mjs` に在る `shadowed_file_candidate` の hint —— 「候補から落ちた」と述べる
 1行 —— を**古くしている**: planner はもう落とさないし、その code も出さない。文面としては
 「Issue 本文で path を完全形で書き直す」が今も対処として正しいので、実害は
 「落ちた」の一語だけである。
 なお #175 の停止は `stop_reason` としては既存の `merge_failed` / `preflight_failed` に載るので、
 status runner はそちらの hint（conflict の解消 / gh・base の復旧）を引く —— **その1行では
-足りない停止**なので、`blocking_reasons` の code と `summary_markdown` の「統合検証」節を読むこと）。
+足りない停止**なので、`blocking_reasons` の code と `summary_markdown` の「統合検証」節を読むこと。
+#179 も同様に `status.mjs` は既存の `worker_timeout` の hint を引き続き出すので、**timeout で
+あることは読めるが「どちらの timeout か」は dispatch report の blocking detail と
+`worker_liveness` を読む**）。
 それまで `status.mjs --run` はこれらを「detail と `summary_markdown` を読む」に落として表示する。
 **推測で別の対処を出さない**のが status runner の約束なので、これは劣化ではなく既定の振る舞いである。
 dispatch report の `summary_markdown` には上表と同じ next action が出ている。

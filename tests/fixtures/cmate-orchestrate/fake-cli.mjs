@@ -1430,9 +1430,29 @@ function main() {
     // worker shows a pending prompt until it is answered; otherwise the worker is
     // "generating" only once it has received `confirm_after` sends (default 1), so
     // a scenario can withhold that signal to exercise the send-confirm/re-send path.
+    //
+    // Liveness at a wait timeout (Issue #179). `--wait-timeout` bounds ONE
+    // `commandmate wait`, not the worker, so a timeout is either "the runner
+    // stopped watching" or "the worker stopped" — and `capture` is the only thing
+    // that can tell them apart. `workers.<n>.capture` injects that answer:
+    //
+    //   (absent)      the default above: running once `confirm_after` sends landed
+    //   "idle"        a session that answers, with no sign of work in flight
+    //   "fail"        the call itself fails (exit 1) — NOTHING was measured
+    //   "unparseable" exit 0 with output that is not the documented JSON
+    //
+    // The last two are the world acceptance condition 4 is about: a runner that
+    // reads them as either verdict is worse than one that says it could not look.
+    // `idle`/`fail` also hold back the send-confirmation signal, so a worker in
+    // those worlds is re-sent once — the same world, told consistently.
     const worktreeId = argv[1];
     const issue = issueFromId(worktreeId);
     const worker = workerSpec(spec, issue);
+    if (worker.capture === 'fail') fail('capture: could not read the session for this worktree', 1);
+    if (worker.capture === 'unparseable') {
+      process.stdout.write('Session: <no output captured>\n');
+      process.exit(0);
+    }
     const marker = respondedMarkerPath(issue);
     const responded = Boolean(marker && existsSync(marker));
     if (worker.state === 'prompt' && !responded) {
@@ -1447,7 +1467,7 @@ function main() {
       });
     }
     const confirmAfter = typeof worker.confirm_after === 'number' ? worker.confirm_after : 1;
-    const started = readSends(issue) >= confirmAfter;
+    const started = worker.capture === 'idle' ? false : readSends(issue) >= confirmAfter;
     emit({
       isRunning: started,
       isGenerating: started,

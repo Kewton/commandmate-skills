@@ -124,6 +124,13 @@ plan の隣へ書き、dispatch 実行時にそれを `scenario.gh.issues` と�
 
 **受入ゲート（#114）**: `verify_exits` は「fake がこう答えろと言われた」でしかないので、
 **受入ゲートが何かを測っている証拠にはならない** — 成果物が壊れていようがいまいが 20 を返す。
+**timeout 時の生死（#179）**: `--wait-timeout` は `commandmate wait` の1回あたりの上限であって
+worker の1ターンの上限ではないので、timeout は「runner が見るのをやめた」か「worker が止まった」の
+どちらでもありうる。runner はその時点で `capture --json` を1回だけ叩いて見分けるので、fake 側の
+`workers.<n>.capture` がその答えを注入する: `"idle"`（答えるが稼働の証拠なし）・`"fail"`（呼び出し
+自体が exit 1）・`"unparseable"`（exit 0 のまま JSON でない出力）。既定（キー無し）は従来どおり
+「送信が登録されていれば稼働中」である。`idle` / `fail` は**送信確定の信号も返さない**ので、その
+worker は1回再送される —— 同じ世界を一貫して語らせるためで、case 側の `send_counts` はその 2 を固定する。
 **時間（#122）**: scenario の `delay_ms`（`{"wait": 900, "send": 300}`。subcommand ごとの
 ミリ秒）は、その subcommand を**実時間だけ遅らせる**。実 CLI では `wait` は worker の1ターン、
 baseline はリポジトリのテスト一式だが、ローカルの fake ではどちらも 0 秒に潰れるので、
@@ -184,6 +191,9 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 | `d73-constraints-transcribed-verbatim` | **否定的制約の原文転記（#176）。** 否定語を含まない見出しの下に在る「送ってはいけない」表と `## 非対象` 節が、要約されず**全行原文で** goal に載るか。転記が完走したので切り捨ての1行は入らない |
 | `d74-constraints-untranscribed` | 転記が上限に収まらなかったとき、**ブロックを途中で切らず**に打ち切り、落とした節を名指しして `本文に他節がある。gh issue view <n> で全文を読め` を入れ、`issue_constraints_untranscribed` を記録するか（#176） |
 | `d75-issue-body-unreadable` | `gh issue view` が落ちる世界で dispatch は止まらないが、goal が「読めなかったこと」と `gh issue view <n>` を名指しし、`issue_body_unreadable` を記録するか。**「制約なし」の goal を黙って送らない**（#176） |
+| `d76-timeout-worker-alive` | **timeout の生死（#179）の「生きている」側。** wait が timeout した時点で `capture` を**1回だけ**叩き、稼働中なら `wait_window_exhausted` と `worker_liveness` を記録し、next action が「待って `--reverify`」（**再 dispatch ではない**）になるか。timeout していない相方の worker には `worker_liveness` が**付かない** |
+| `d77-timeout-worker-stalled` | **同じ timeout の「稼働の証拠なし」側**（d76 の対）。`capture: "idle"` を注入して `worker_stalled` になり、next action が `--resume` 側に変わるか。**契約非対応 CLI（フォールバック経路）で回す**ので、契約経路にだけ生死判定を入れた実装はここで赤くなる |
+| `d78-timeout-liveness-unreadable` | **読めなかった側（受入条件4）。** `capture` が失敗する worker と、exit 0 のまま想定外の出力を返す worker の2件で、どちらも `worker_liveness_unreadable` になり detail がどちらの壊れ方かを名指しするか。**「読めなかった」を「止まっている」に丸めない。** blocking reason が `workers` の順に並ぶ（並行監督の完了順で report が変わらない）ことも固定する |
 
 ## merge case 一覧
 

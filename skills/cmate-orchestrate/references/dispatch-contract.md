@@ -529,6 +529,47 @@ lint も test も走らない契約になる。**受入条件を足したつも�
 > **`enabled: true` だけを見て「効いている」と判断しないこと。** 契約が型を許していなければ、
 > トグルが on でも1つも応答されない。判定しているのは契約のポリシーである。
 
+### 2.11 timeout は「runner が見るのをやめた」か「worker が止まった」か（[#179](https://github.com/Kewton/commandmate-skills/issues/179)）
+
+**`--wait-timeout` は `commandmate wait` の1回あたりの上限であって、worker の1ターンの上限ではない。**
+ターンが窓より長ければ runner は timeout（`worker_state: timeout` / `stop_reason: timeout`）を報告するが、
+**worker はそのまま走り続け、完走して commit まで載せることがある**。
+
+> **実測**（2026-08-10、利用リポジトリ Kewton/BorderFreeKidsMap #62）: `--wait-timeout 1800` で timeout 報告。
+> worker は外部データ取得 + glyph 生成で**1ターン約40分**かかっており、そのまま完走して commit を載せた。
+> 人間が `capture` で `isRunning` を確認 → 待つ → `--reverify` で10ゲート全 pass → PR → merge。
+> **この見分けが report からできなかった。** ここで再 dispatch すれば、完成済みの作業の上に別 worker を重ねる。
+
+そこで runner は、**wait が timeout した時点で `capture <worktree-id> --json` を1回だけ叩き**、
+その答えを当該 worker の `worker_liveness` に転記し、同じ code の blocking reason を1件出す。
+
+| code | 何を見たか | 推奨 next action |
+|---|---|---|
+| `wait_window_exhausted` | `isRunning` / `isGenerating` / `isPromptWaiting` のいずれかが true。**稼働中である** | **再 dispatch しない。** idle 化を待って `--reverify` で送らずに裁定だけ取り直す。窓が恒常的に短いなら `--wait-timeout` を実測に合わせて上げる |
+| `worker_stalled` | `capture` は答えたが、稼働の証拠が1つも無い | worker ログと worktree の作業証跡（commit / 未 commit の変更）を読んでから `--resume`。**「動いていない」は「作業が無い」ではない** |
+| `worker_liveness_unreadable` | `capture` 自体が失敗した / 出力が読めなかった | **どちらとも読み替えない。** `commandmate capture <worktree-id> --json` を手で叩いて確かめてから上の2つのどちらかへ進む |
+
+規範は4つある。
+
+1. **1回だけ叩く。** これは「run が見るのをやめた瞬間の事実」であり、polling ではない
+   （生成中である限り wait を自動延長する `--wait-while-generating` は**実装していない**。
+   別の時計を持つ別機能であり、壁時計の上限は `--wall-clock-budget` が持つ）。
+2. **既存の意味を変えない。** `worker_state` は `timeout` のまま、`stop_reason` も `timeout` のまま、
+   blocking `worker_timeout` もそのまま出る（「なぜ run が止まったか」の答えは変わっていない）。
+   liveness の code は**その隣に**足す（「その timeout はどちらだったか」の答え）。
+   `dispatch_schema_version` は 1 のままで、`worker_liveness` は**任意 field** である。
+3. **読めなかったことは、必ず読めなかったと言う。** merge の `change_evidence_unavailable` と
+   同型の規則である（第5節・[codes-and-recovery.md](./codes-and-recovery.md) 第4節）——
+   「見られなかった」を「何も無かった」と記録しない。boolean が1つも読めない JSON も
+   `worker_liveness_unreadable` であって `worker_stalled` ではない。
+4. **`worker_liveness` が無いことにも意味がある。** timeout していない worker には付かないし、
+   前 attempt から転記された record にも付かない（**この attempt が測った**ものだけを載せる）。
+   したがって**不在を「稼働していなかった」と読んではならない** —— gate の `origin` 不在を
+   `repo` と読まないのと同じ規則である。
+
+契約経路（`superviseWithContract`）とフォールバック経路（`superviseUntilCommit`）の**両方**で行う。
+どちらの経路に乗ったかは CLI の版が決めることで、operator が選んだことではない（#136 と同じ理屈）。
+
 ## 3. 監督ループと gate
 
 ### 3.0 blocking pre-flight（`--out` を消費する前）
@@ -849,7 +890,9 @@ acceptance コマンドは `execFileSync` に `timeout` を渡さずに実行さ
    3. `wait` で待つ。契約経路は `--on-prompt agent --verify` 付き、フォールバックは従来どおり。
       - **exit 10（prompt）** → `capture` で内容を取得して human へ提示し停止する。**自動応答しない**
         （`--auto-yes` 明示時のみ `respond yes` して同ターンを続行）。
-      - **exit 124（timeout）** → `timeout`。**exit 1/2 その他非0** → `failed`。
+      - **exit 124（timeout）** → `timeout`。**その場で `capture --json` を1回だけ叩いて worker の生死を
+        測り**、`worker_liveness` と blocking（`wait_window_exhausted` / `worker_stalled` /
+        `worker_liveness_unreadable`）に転記する（第2.11節）。**exit 1/2 その他非0** → `failed`。
       - **exit 99** → 第2.6節。再指示せず `human_required` で停止する。
       - **exit 0** → 裁定 pass。第2.2節の commit 判定。新規 commit あり → `completed`。
         commit が無ければ commit を要求し、**以降 `--verify` を付けずに** wait する（第2.5節）。
@@ -929,8 +972,16 @@ pre-flight（第3.0節）で停止した failure は artifact を書かないの
 | `human_required` | `human_input_required` | worker が prompt を出した（自動応答していない） |
 | `worker_failed` | `worker_failed` | worker が起動したが `--max-turns` までに commit しなかった |
 | `timeout` | `worker_timeout` | `commandmate wait` が timeout した |
+| `timeout` | `wait_window_exhausted` | その timeout の時点で `capture` が**稼働中**を示した（第2.11節）。`worker_timeout` の**隣に**出る Issue ごとの1件で、「なぜ止まったか」ではなく「その timeout はどちらだったか」を言う。**`stop_reason` の enum に値を足していない**。next action は「待って `--reverify`」であり、再 dispatch ではない |
+| `timeout` | `worker_stalled` | 同じ時点で `capture` が答えたが、**稼働の証拠が無かった**（第2.11節）。Issue ごとに1件 |
+| `timeout` | `worker_liveness_unreadable` | 同じ時点で `capture` **自体が読めなかった**（第2.11節）。Issue ごとに1件。**どちらとも読み替えない**（merge の `change_evidence_unavailable` と同型） |
 | `verification_failed` | `verification_failed` | completed した worker の裁定が pass でない |
 | `verification_failed` / `worker_failed` | `scope_unsatisfiable` | scope ゲートの違反 path が2ターン連続で同一だったため、再指示ループを収束しないと判定して打ち切った（第2.3.1節）。**`stop_reason` の enum に値を足していない**（commit があれば `verification_failed`、無ければ `worker_failed`）。detail に違反 path が入る。対処は Issue の対象ファイルへの追加と re-plan（owner: human） |
+
+timeout の生死3 code（`wait_window_exhausted` / `worker_stalled` / `worker_liveness_unreadable`）は
+**停止理由ではなく所見**である。したがって同じ wave に prompt や exit 99 が在って `stop_reason` が
+そちらに決まった run でも、timeout した worker が在れば出る —— 測った事実は、どの停止理由が勝ったかで
+消えない。上表で `timeout` の行に置いてあるのは、単独で出るときの典型的な組を示すためである。
 
 ## 6. completion_check（report）
 

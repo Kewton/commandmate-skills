@@ -1,0 +1,105 @@
+{
+  "description": "[#179] 受入条件4: **capture が読めなかった**世界。読めなかったことを「動いている」とも「止まっている」とも読み替えず、`worker_liveness_unreadable` として**測れなかったこと自体**を記録するか（merge の `change_evidence_unavailable` と同型の考え方: 「見られなかった」は「何も無かった」ではない）。読めない形は2つあるので2 Issue で両方を注入する: #101 は `capture` が exit 0 のまま**想定外の出力**を返す（JSON でない）、#102 は `capture` **自体が失敗**する（exit 1）。detail はどちらなのかを名指しし、code は同じ1つになる。blocking reason は timeout した worker ごとに1件で、**`workers` の順**（#101 → #102）に並ぶ —— 並行監督の完了順で report が変わってはならない。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "101",
+      "102",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "timeout",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      101,
+      102
+    ],
+    "send_counts": {
+      "101": 2,
+      "102": 2
+    },
+    "cli_subcommand_counts": {
+      "capture": 4
+    },
+    "worker_states": {
+      "101": "timeout",
+      "102": "timeout"
+    },
+    "verification_outcomes": {
+      "101": "not_run",
+      "102": "not_run"
+    },
+    "worker_liveness": {
+      "101": {
+        "code": "worker_liveness_unreadable",
+        "is_running": null,
+        "is_generating": null,
+        "is_prompt_waiting": null,
+        "session_status": null
+      },
+      "102": {
+        "code": "worker_liveness_unreadable",
+        "is_running": null,
+        "is_generating": null,
+        "is_prompt_waiting": null,
+        "session_status": null
+      }
+    },
+    "worker_notes_include": {
+      "101": [
+        "wait timed out after",
+        "worker_liveness_unreadable"
+      ],
+      "102": [
+        "wait timed out after",
+        "worker_liveness_unreadable"
+      ]
+    },
+    "blocking_codes": [
+      "worker_liveness_unreadable",
+      "worker_timeout"
+    ],
+    "absent_blocking_codes": [
+      "wait_window_exhausted",
+      "worker_stalled"
+    ],
+    "blocking_details_include": [
+      "#101: `commandmate wait` returned exit 124",
+      [
+        "#101:",
+        "the worker's liveness was NOT measured: `commandmate capture <worktree-id> --json` printed no parseable JSON object"
+      ],
+      [
+        "#102:",
+        "the worker's liveness was NOT measured: `commandmate capture <worktree-id> --json` exited 1"
+      ],
+      "This is neither \"still running\" nor \"stopped\" — read neither into it"
+    ],
+    "blocking_order": [
+      "worker_liveness_unreadable:#101",
+      "worker_liveness_unreadable:#102"
+    ],
+    "summary_includes": [
+      "読めなかったことを",
+      "commandmate capture <worktree-id> --json"
+    ]
+  }
+}

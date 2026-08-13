@@ -1210,6 +1210,35 @@ function runDispatchCase(caseId) {
       }
     }
   }
+  // The liveness the runner measured when a `commandmate wait` timed out (Issue
+  // #179). This is the field that separates "the runner stopped watching" from
+  // "the worker stopped", so the case pins the CODE and the transcribed capture
+  // values rather than only the prose. `null` asserts the field is ABSENT, which
+  // is what a worker that never timed out must look like — an always-present
+  // liveness object would make "we measured this" unfalsifiable.
+  //
+  // `elapsed_seconds` is checked for SHAPE only: it is wall-clock, so pinning a
+  // value would pin the speed of the machine running the suite.
+  if (expect.worker_liveness) {
+    for (const [num, expected] of Object.entries(expect.worker_liveness)) {
+      const worker = allWorkers(report).find((w) => w.issue === Number(num));
+      if (!check(worker !== undefined, `#${num} has no worker record`)) continue;
+      if (expected === null) {
+        check(worker.worker_liveness === undefined,
+          `#${num} carries a worker_liveness ${JSON.stringify(worker.worker_liveness)} on a worker that never timed out`);
+        continue;
+      }
+      if (!check(worker.worker_liveness !== undefined, `#${num} has no worker_liveness after a wait timeout`)) continue;
+      for (const [key, value] of Object.entries(expected)) {
+        check(deepEqual(worker.worker_liveness[key], value),
+          `#${num} worker_liveness.${key} ${JSON.stringify(worker.worker_liveness[key])} !== ${JSON.stringify(value)}`);
+      }
+      check(Number.isInteger(worker.worker_liveness.elapsed_seconds) && worker.worker_liveness.elapsed_seconds >= 0,
+        `#${num} worker_liveness.elapsed_seconds ${JSON.stringify(worker.worker_liveness.elapsed_seconds)} is not a non-negative integer`);
+      check(typeof worker.worker_liveness.detail === 'string' && worker.worker_liveness.detail.length > 0,
+        `#${num} worker_liveness carries no detail`);
+    }
+  }
   for (const id of expect.completion_checks_failed ?? []) {
     const entry = report.completion_check.checks.find((c) => c.id === id);
     if (check(entry !== undefined, `completion_check is missing "${id}"`)) {
@@ -1333,11 +1362,37 @@ function runDispatchCase(caseId) {
   }
   // A blocking reason's DETAIL is what an operator acts on: a refusal that names
   // only a code cannot tell them what to write in the issue (Issue #52).
+  // An entry may be a LIST of needles, which must then all land in the SAME
+  // detail (`sent_message_includes`'s rule). That is what ties a finding to the
+  // issue it is about when a run records one entry per issue: two separate
+  // needles would be satisfied by two different entries, so "#101 could not be
+  // parsed" and "#102's capture exited 1" would still pass if the runner had
+  // swapped them (Issue #179).
   if (expect.blocking_details_include) {
     const details = report.blocking_reasons.map((entry) => entry.detail);
-    for (const needle of expect.blocking_details_include) {
-      check(details.some((detail) => detail.includes(needle)), `no blocking detail contains "${needle}"; details: ${JSON.stringify(details)}`);
+    for (const entry of expect.blocking_details_include) {
+      const needles = Array.isArray(entry) ? entry : [entry];
+      check(details.some((detail) => needles.every((needle) => detail.includes(needle))),
+        `no blocking detail contains ${JSON.stringify(needles)}; details: ${JSON.stringify(details)}`);
     }
+  }
+  // The ORDER of the blocking reasons, where the report writes one entry per
+  // issue. Those loops run over concurrently-supervised workers, so an entry
+  // pushed from inside the supervision would order the report by whichever
+  // worker finished first and two runs of the same plan could differ (the rule
+  // Issue #148 wrote for `scope_unsatisfiable` and #179 inherits). Each item is
+  // `<code>:<needle>`; the matching entries must appear in the given order.
+  if (expect.blocking_order) {
+    const indices = expect.blocking_order.map((item) => {
+      const split = item.indexOf(':');
+      const code = item.slice(0, split);
+      const needle = item.slice(split + 1);
+      return report.blocking_reasons.findIndex((entry) => entry.code === code && entry.detail.includes(needle));
+    });
+    check(indices.every((index) => index >= 0),
+      `blocking_order: no blocking reason matches ${JSON.stringify(expect.blocking_order.filter((_, i) => indices[i] < 0))}`);
+    check(indices.every((index, i) => i === 0 || (indices[i - 1] >= 0 && index > indices[i - 1])),
+      `blocking reasons are not in the expected order: ${JSON.stringify(expect.blocking_order)} landed at ${JSON.stringify(indices)}`);
   }
   // The human-facing half of the same finding. `summary_markdown` is what a
   // reviewer reads first, so a fact that only exists in the JSON is not reported.

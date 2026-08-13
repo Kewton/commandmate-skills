@@ -3846,6 +3846,10 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
   // where it came from (#97 / ADR §8.2).
   const requiredGateIds = new Set(requiredGates);
   const baseSha = await worktreeHeadSha(inputs, worktreePath);
+  // When this worker's supervision opened. The elapsed time a liveness probe
+  // reports is measured from here (Issue #179) — against `--wait-timeout` it is
+  // what shows whether one turn simply outgrew the window.
+  const startedAtMs = Date.now();
   let autoResponded = false;
 
   const sent0 = await sendContractAndConfirm(inputs, worktreeId, relativeContractPath);
@@ -3937,7 +3941,14 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       return { state: 'prompt', taskId, verdict, notJudged: false, promptExcerpt, nudges: turns - 1, autoResponded, note: '' };
     }
     if (code === WAIT_EXIT_TIMEOUT) {
-      return done('timeout', `wait timed out after ${inputs.waitTimeout}s`);
+      // One `capture`, here, before returning (Issue #179): this timeout is
+      // either "the runner stopped watching" or "the worker stopped", and the
+      // report cannot say which unless it is read at the moment it happened.
+      const liveness = await probeWorkerLiveness(inputs, worktreeId, startedAtMs, turns);
+      return {
+        ...done('timeout', `wait timed out after ${inputs.waitTimeout}s; ${livenessNoteClause(liveness)}`),
+        liveness,
+      };
     }
 
     if (!passed && code === VERIFY_EXIT_NO_VERDICT) {
@@ -4096,6 +4107,9 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
 // A prompt is answered only under --auto-yes; otherwise it halts for a human.
 async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMessage) {
   const baseSha = await worktreeHeadSha(inputs, worktreePath);
+  // As on the contract path (Issue #179): the clock the liveness probe's elapsed
+  // time is measured against.
+  const startedAtMs = Date.now();
   let autoResponded = false;
 
   // The fallback path arms the worktree exactly as the contract path does (Issue
@@ -4153,7 +4167,19 @@ async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMes
       return { state: 'prompt', promptExcerpt, nudges: turns - 1, autoResponded, note: '' };
     }
     if (!waited.ok && waited.status === WAIT_EXIT_TIMEOUT) {
-      return { state: 'timeout', promptExcerpt: null, nudges: turns - 1, autoResponded, note: `wait timed out after ${inputs.waitTimeout}s` };
+      // The same one `capture` as on the contract path (Issue #179). Which
+      // dispatch path a CLI version put the run on is not something the operator
+      // chose, and the question — did the runner stop watching, or did the
+      // worker stop? — is identical on both.
+      const liveness = await probeWorkerLiveness(inputs, worktreeId, startedAtMs, turns);
+      return {
+        state: 'timeout',
+        promptExcerpt: null,
+        nudges: turns - 1,
+        autoResponded,
+        liveness,
+        note: `wait timed out after ${inputs.waitTimeout}s; ${livenessNoteClause(liveness)}`,
+      };
     }
     if (!waited.ok) {
       return { state: 'failed', promptExcerpt: null, nudges: turns - 1, autoResponded, note: excerpt(waited.stderr || waited.stdout || `wait exited ${waited.status ?? 'with an error'}`) };
@@ -4190,6 +4216,115 @@ async function capturePrompt(inputs, worktreeId) {
   const payload = parseCliJson(result);
   const raw = payload?.promptData?.question ?? payload?.content ?? result.stdout ?? '';
   return excerpt(raw) ?? 'a prompt is awaiting input';
+}
+
+// =============================================================================
+// Worker liveness at a wait timeout (Issue #179)
+// =============================================================================
+//
+// `--wait-timeout` is the ceiling on ONE `commandmate wait`, not on the worker.
+// When a turn outlasts that window the runner reports a timeout while the worker
+// keeps going — MEASURED (Kewton/BorderFreeKidsMap #62, 2026-08-10): with
+// `--wait-timeout 1800` against a ~40-minute turn, the worker ran on, finished,
+// and committed. Nothing in the report could tell that from a worker that died,
+// so an operator either re-dispatched on top of finished work (a second worker
+// landing on the first one's tree) or ran `capture --json` by hand to find out
+// which had happened. #89 / #121 built the recovery (`--reverify`); this is the
+// step before it — WHICH of the two this timeout was.
+//
+// So the runner asks, ONCE, at the moment the wait times out. Once, not polled:
+// this is a fact about the instant the run stopped watching, and a loop here
+// would be `--wait-while-generating` — a different feature with a different
+// clock (see the Issue's optional item, deliberately not implemented).
+//
+// Three findings, and the third is the one that has to exist: a capture that
+// cannot be read is not evidence of either state. It gets its own code, on the
+// rule merge.mjs wrote for `change_evidence_unavailable` — "we could not look"
+// must never be recorded as "there was nothing there".
+const LIVENESS_ALIVE = 'wait_window_exhausted';
+const LIVENESS_STALLED = 'worker_stalled';
+const LIVENESS_UNREADABLE = 'worker_liveness_unreadable';
+
+async function probeWorkerLiveness(inputs, worktreeId, startedAtMs, turns) {
+  const result = await runCmAsync(inputs, ['capture', worktreeId, '--json']);
+  const elapsed = Math.max(0, Math.round((Date.now() - startedAtMs) / 1000));
+  const windowClause = `\`commandmate wait\` returned exit ${WAIT_EXIT_TIMEOUT} after --wait-timeout ${inputs.waitTimeout}s on turn ${turns}, `
+    + `${elapsed}s after this worker was dispatched`;
+  const stopClause = 'The run still stopped here and worker_state stays `timeout`; this entry says WHICH KIND of timeout it was';
+  const unreadable = (why) => ({
+    code: LIVENESS_UNREADABLE,
+    is_running: null,
+    is_generating: null,
+    is_prompt_waiting: null,
+    session_status: null,
+    elapsed_seconds: elapsed,
+    detail: `${windowClause}; the worker's liveness was NOT measured: ${why}. `
+      + `This is neither "still running" nor "stopped" — read neither into it. `
+      + `Run \`commandmate capture <worktree-id> --json\` by hand before deciding between waiting (then --reverify) and re-dispatching. ${stopClause}`,
+  });
+  if (!result.ok) {
+    return unreadable(`\`commandmate capture <worktree-id> --json\` exited ${result.status ?? 'with an error'}`
+      + ` (${excerpt(result.stderr || result.stdout) ?? 'no output'})`);
+  }
+  let payload = null;
+  try {
+    payload = JSON.parse(result.stdout);
+  } catch {
+    payload = null;
+  }
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return unreadable('`commandmate capture <worktree-id> --json` printed no parseable JSON object');
+  }
+  // A field this runner cannot read as a boolean is recorded as null rather than
+  // as `false`: the CLI not saying "running" is not the CLI saying "not running".
+  const flag = (value) => (typeof value === 'boolean' ? value : null);
+  const isRunning = flag(payload.isRunning);
+  const isGenerating = flag(payload.isGenerating);
+  const isPromptWaiting = flag(payload.isPromptWaiting);
+  const sessionStatus = typeof payload.sessionStatus === 'string' && payload.sessionStatus.length > 0
+    ? excerpt(payload.sessionStatus, 40)
+    : null;
+  if (isRunning === null && isGenerating === null && isPromptWaiting === null) {
+    return unreadable('the capture JSON carries none of isRunning / isGenerating / isPromptWaiting, so it says nothing about whether the worker is alive');
+  }
+  const observed = `capture reports isRunning=${String(isRunning)} / isGenerating=${String(isGenerating)}`
+    + ` / isPromptWaiting=${String(isPromptWaiting)} / sessionStatus=${sessionStatus ?? 'unknown'}`;
+  // The same predicate the send-confirmation uses (`sendAndConfirm`): any one of
+  // the three is a session that is alive. A pending prompt is alive but blocked,
+  // so it is named separately — waiting alone would never move it.
+  const alive = isRunning === true || isGenerating === true || isPromptWaiting === true;
+  return {
+    code: alive ? LIVENESS_ALIVE : LIVENESS_STALLED,
+    is_running: isRunning,
+    is_generating: isGenerating,
+    is_prompt_waiting: isPromptWaiting,
+    session_status: sessionStatus,
+    elapsed_seconds: elapsed,
+    detail: alive
+      ? `${windowClause}; ${observed} — the WAIT WINDOW ran out, not the worker. `
+        + (isPromptWaiting === true
+          ? 'The capture also reports a PENDING PROMPT, so this worker is waiting for a human answer rather than working: answer it (or re-dispatch), because waiting alone will not move it. '
+          : 'Do NOT re-dispatch: a second worker would land on a tree the first one may still be finishing. Wait for it to go idle, then re-judge in place with --reverify (nothing is sent). '
+            + 'If one turn is routinely longer than the window, raise --wait-timeout to the measured turn length. ')
+      + stopClause
+      : `${windowClause}; ${observed} — NO EVIDENCE of a running worker. `
+        + 'Read the worker\'s log and its worktree before re-dispatching: "not running" is not "nothing was done", and an uncommitted change is still work this run would put a second worker on top of. '
+        + stopClause,
+  };
+}
+
+// The one-sentence version of the same finding, for the worker `note` a human
+// reads first. Rendered from the recorded object rather than composed beside it,
+// for the reason Issue #83 gave: two independent claims about one fact drift.
+function livenessNoteClause(liveness) {
+  if (liveness.code === LIVENESS_UNREADABLE) {
+    return `worker liveness at the timeout: ${LIVENESS_UNREADABLE} — the \`capture\` could not be read, so neither "still running" nor "stopped" was measured`;
+  }
+  const observed = `isRunning=${String(liveness.is_running)} / sessionStatus=${liveness.session_status ?? 'unknown'}`;
+  return liveness.code === LIVENESS_ALIVE
+    ? `worker liveness at the timeout: ${LIVENESS_ALIVE} — capture still reported a live worker (${observed}) ${liveness.elapsed_seconds}s in, `
+      + 'so the wait window ran out rather than the worker; wait for it to idle and re-judge with --reverify instead of re-dispatching'
+    : `worker liveness at the timeout: ${LIVENESS_STALLED} — capture reported no running worker (${observed}) ${liveness.elapsed_seconds}s in`;
 }
 
 // =============================================================================
@@ -5063,6 +5198,10 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
       if (supervised.taskId) worker.task_id = supervised.taskId;
       if (supervised.verdict) contractVerdicts.set(worker.issue, supervised.verdict);
       if (supervised.notJudged) notJudged.add(worker.issue);
+      // Only the workers whose wait really timed out carry this (Issue #179).
+      // Its ABSENCE is a fact too — "no probe was made" — so it is never written
+      // as an empty or null-filled object.
+      if (supervised.liveness) worker.worker_liveness = supervised.liveness;
       if (supervised.autoResponded) autoResponded = true;
       if (supervised.scopeUnsatisfiable) scopeUnsatisfiable.set(worker.issue, supervised.scopeUnsatisfiable);
       if (supervised.state === 'prompt') {
@@ -5099,6 +5238,28 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
             : '')
           + '. '
           + 'The verdict is untouched: verification really did fail, and that is CommandMate\'s exit code to give — what this stops is the run going further'),
+      });
+    }
+
+    // The liveness of every worker whose `commandmate wait` timed out (Issue
+    // #179), read out of the record the supervision wrote. In `workers` order
+    // and outside the concurrent loop, for the reason above: an entry pushed
+    // from inside the supervision would order the report by whichever worker
+    // finished first, and two runs of the same plan could differ.
+    //
+    // Recorded as its own blocking reason BESIDE the existing `worker_timeout`
+    // rather than in place of it. `worker_timeout` answers "why did the run
+    // stop" and has not changed meaning; this answers "what kind of timeout was
+    // it", which is the question an operator could not answer from the report at
+    // all. Whether the halt ladder below even reaches `worker_timeout` (a prompt
+    // or an exit 99 elsewhere in the wave outranks it) does not change the fact
+    // this measured, so it is written here and not there.
+    for (const worker of workers) {
+      const liveness = worker.worker_liveness;
+      if (!liveness) continue;
+      report.blocking_reasons.push({
+        code: liveness.code,
+        detail: redact(`#${worker.issue}: ${liveness.detail}`),
       });
     }
 
@@ -5648,6 +5809,20 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
     }
     if (report.blocking_reasons.some((reason) => reason.code === 'wall_clock_budget_exhausted')) {
       lines.push('- next: `--wall-clock-budget` に到達して打ち切った。**成功ではない。** 何に時間を使ったか（baseline / acceptance コマンドは自前の timeout を持たない）を確認し、原因を潰すか budget を実測に合わせて増やしたうえで `--resume` で再開する（owner: operator）。');
+    }
+    // The three readings of one `wait` timeout (Issue #179). They are separate
+    // lines because they name DIFFERENT commands: `--reverify` re-judges finished
+    // work in place, `--resume` sends a new worker, and doing the second one to a
+    // worker that is still running is exactly the failure this measurement exists
+    // to prevent. The third says only that nobody measured, and refuses to guess.
+    if (report.blocking_reasons.some((reason) => reason.code === LIVENESS_ALIVE)) {
+      lines.push('- next: **`--wait-timeout` が worker の1ターンより短かっただけで、worker は生きている**（timeout 時の `capture` が稼働を示した。blocking の `wait_window_exhausted` と該当 worker の `worker_liveness` を読む）。**ここで再 dispatch しない** —— 完走しかけの作業の上に2人目の worker を重ねることになる。worker が idle 化するのを待ってから `dispatch.mjs --plan <plan.json> --reverify <この run の dispatch ディレクトリ>` で**送らずに裁定だけ取り直す**。1ターンの実測に対して窓が恒常的に短いなら `--wait-timeout` をその実測に合わせて上げる（owner: operator）。');
+    }
+    if (report.blocking_reasons.some((reason) => reason.code === LIVENESS_STALLED)) {
+      lines.push('- next: timeout した時点の `capture` に**稼働の証拠が無かった**（blocking の `worker_stalled`）。worker のログと worktree を読み、**作業証跡（commit / 未 commit の変更）を確かめてから** `dispatch.mjs --plan <plan.json> --resume <この run の dispatch ディレクトリ>` で再 dispatch する。**「動いていない」は「作業が無い」ではない** —— 未 commit の作業が在るなら、それを潰さないことが先である（owner: operator）。');
+    }
+    if (report.blocking_reasons.some((reason) => reason.code === LIVENESS_UNREADABLE)) {
+      lines.push('- next: timeout した worker の生死を**測れていない**（`capture` が失敗した / 出力が読めなかった。blocking の `worker_liveness_unreadable`）。**読めなかったことを「動いている」とも「止まっている」とも読み替えない。** `commandmate capture <worktree-id> --json` を手で叩いて確かめ、動いていれば idle 化を待って `--reverify`、止まっていれば worktree の作業証跡を確かめてから `--resume` で再 dispatch する（owner: operator）。');
     }
     // Issue #161 / #162. Placed BEFORE the empty-scope line because the drop is
     // what emptied the scope whenever both fire on the same issue, and because
