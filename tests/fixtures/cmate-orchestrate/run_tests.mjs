@@ -466,9 +466,19 @@ function classificationsOf(plan) {
   return map;
 }
 
+// `basis` is compared only when a case states one (Issue #182). Every edge
+// carries it, but most cases are about something else, and requiring the field
+// everywhere would make one planner change rewrite fifty expectations — the kind
+// of churn that gets absorbed by regenerating rather than by reading.
 function dependencyMatches(actual, expected) {
   return expected.every((exp) =>
-    actual.some((dep) => dep.issue === exp.issue && dep.depends_on === exp.depends_on && dep.kind === exp.kind),
+    actual.some(
+      (dep) =>
+        dep.issue === exp.issue &&
+        dep.depends_on === exp.depends_on &&
+        dep.kind === exp.kind &&
+        (exp.basis === undefined || dep.basis === exp.basis),
+    ),
   );
 }
 
@@ -546,6 +556,20 @@ function runCase(caseId) {
   }
   if (expect.classifications) {
     check(deepEqual(classificationsOf(plan), expect.classifications), `classifications ${JSON.stringify(classificationsOf(plan))} !== ${JSON.stringify(expect.classifications)}`);
+  }
+  // Every edge this planner emits carries its `basis` (Issue #182), asserted for
+  // every case rather than only the ones that name it. The schema cannot: the
+  // field is optional there so that a plan.json written before it existed — the
+  // artifacts status.mjs reads — stays valid, which leaves nothing else to notice
+  // an edge produced TODAY without one.
+  for (const edge of plan.dependencies) {
+    check(
+      ['declared', 'file_conflict', 'lexical'].includes(edge.basis),
+      `edge #${edge.issue}->#${edge.depends_on} has basis ${JSON.stringify(edge.basis)}`,
+    );
+    // The suppression is the point of #182: a lexical-only inference is a
+    // question, never an edge, so no plan may carry one.
+    check(edge.basis !== 'lexical', `edge #${edge.issue}->#${edge.depends_on} is lexical-only and must not be an edge`);
   }
   // An edge's `reason` is the only place dependency-plan.md explains WHY the
   // planner read a body line the way it did. Keyed "<issue>:<depends_on>", each

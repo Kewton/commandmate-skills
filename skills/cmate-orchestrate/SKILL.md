@@ -507,6 +507,12 @@ plan の失敗 code と exit、plan の warning code、limitation code の**全�
 - 失敗時も stdout に `status: failure` の result を出す。**plan を推測で埋めない。**
 - `no_acceptance_criteria` / `no_suspected_files` は dispatch の open question ゲートと対になる。
   **この2つを放置したまま `--allow-questions` で押し通さないこと。**
+- planner は**推測で決めない2つ**を question にする（#182）。同じ file の2つの綴りが本文に在れば
+  `ambiguous_file_candidate`（**どちらも落とさず**両方 scope に入れて訊く）、生産者/消費者の推論が
+  **共有 topic token だけ**を根拠にしていれば `unconfirmed_lexical_dependency`（**edge にせず**、
+  同じ wave に置いて訊く）。後者は「語彙が一致しただけの3 Issue が3 wave に直列化する」を
+  止めるためのもので、edge が要るなら本文か `--depends` で述べる
+  （[plan-contract.md](./references/plan-contract.md) 第3.1節・第5.4節）。
 - planner は agent ハーネスの path（`.claude/skills/**` / `.agents/skills/**` / `.commandmate/**`）を
   **既定で `scope.allow` に入れない** —— worker が自分を裁く runner を書き換えられる状態を作らない
   ためである。Issue が `## 対象ファイル` に明示的に書いたときだけ入り、`harness_path_in_scope` が
@@ -542,6 +548,8 @@ report/artifact に残さない（redaction）。
 |---|---|
 | plan `no_acceptance_criteria` / `no_suspected_files` | **Issue 本文に受入条件と対象 file を書いて re-plan する** |
 | plan `harness_path_in_scope` | Issue が `## 対象ファイル` に agent ハーネス（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）の path を書いたので scope に入れた（既定は「入れない」）。**その Issue の成果物が本当にハーネスなのかを読んで決める。** 違うなら成果物見出しから外して散文か参考見出しへ移し、re-plan する |
+| plan `ambiguous_file_candidate` | 同じ file の2つの綴り（例: `data/demo/facilities.json` と `web/public/dist/data/demo/facilities.json`）が本文に在る。**どちらが対象かを決めて、もう片方を本文から消して re-plan する。** 両方とも対象なら `--allow-questions`（両方 scope に入っている） |
+| plan `unconfirmed_lexical_dependency` | 語彙は共有するが file は共有しない2 Issue が在る。**順序が要るなら本文に `depends on #N` を書くか `--depends <consumer>:<producer>` を渡す。** 独立なら `--allow-questions` で進めてよい。**`--no-infer` はこの答えではない**（推論を丸ごと切るだけである） |
 | plan `cycle_detected` / `override_incomplete` / `dependency_order_violation` | `dependency-plan.md` の edge `reason` を見て、Issue 本文か `--depends` を直す |
 | plan `run_exists` | 既存の `plan.json` と突き合わせ、違うなら本文か profile を直す。同じでよいなら `--run-id <new-id>` / `--runs-dir <dir>` を渡す |
 | plan `profile_repository_mismatch` | `--profile` / `--profile-json` / `--repo` のどれかを渡して意図を明示する |

@@ -353,13 +353,19 @@ const LIVENESS = [
           !entry.planner.paths.includes('config/legacy.json5'),
       ),
   },
+  // Planner Issue #182 turned the shadow DROP into a question and both sides
+  // stopped dropping in the same commit, so this asserts the pair survives
+  // whole. The assertion is not weaker for having flipped: it still requires the
+  // corpus to reach the shadow branch, and it now fails on either copy that
+  // drops one side — which is the drift that would make an author's `paths`
+  // differ from the planner's `suspected_files`.
   {
-    name: 'the corpus reaches the shadow drop',
+    name: 'the corpus reaches the shadow pair and keeps both spellings',
     holds: (results) =>
       results.some(
         (entry) =>
           entry.planner.paths.includes('web/src/lib/filter.ts') &&
-          !entry.planner.paths.includes('src/lib/filter.ts'),
+          entry.planner.paths.includes('src/lib/filter.ts'),
       ),
   },
   {

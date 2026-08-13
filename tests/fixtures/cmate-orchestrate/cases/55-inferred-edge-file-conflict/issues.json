@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 310,
+      "title": "feat: payment checkout flow",
+      "body": "Implement the payment checkout that consumes the payment gateway. It integrates the settlement path in `src/checkout.ts` and applies the gateway types declared in `src/payment/types.ts`.\n\n## Acceptance criteria\n- [ ] `src/checkout.ts` completes a payment\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 311,
+      "title": "feat: payment gateway schema",
+      "body": "Define the payment gateway schema and interface contract in `src/payment/types.ts`.\n\n## Acceptance criteria\n- [ ] `src/payment/types.ts` declares the payment gateway type\n",
+      "labels": ["feature"]
+    }
+  ]
+}

@@ -501,6 +501,14 @@
           ],
           "description": "explicit: stated in the issue body. inferred: a consumer of a shared contract, from the heuristic. override: supplied by the caller."
         },
+        "basis": {
+          "enum": [
+            "declared",
+            "file_conflict",
+            "lexical"
+          ],
+          "description": "What grounds the edge, which is not the same question as who stated it. declared: a human wrote it (every explicit and override edge). file_conflict: inferred, and the two issues name at least one suspected file in common — the reason names it. lexical: inferred from shared topic tokens alone. A lexical-only inference is NOT an edge and therefore never appears in this array: the planner raises the unconfirmed_lexical_dependency question on the consumer instead, so ordering follows only from a statement or from the files. This planner always emits the field; it is not in `required` because it was added without raising plan_schema_version, so a plan.json written by 0.27.0 or earlier — which status.mjs still reads — has no basis on its edges and stays valid. Absent means \"written before the distinction existed\", never \"ungrounded\". See references/plan-contract.md section 3.1."
+        },
         "reason": {
           "type": "string",
           "minLength": 1

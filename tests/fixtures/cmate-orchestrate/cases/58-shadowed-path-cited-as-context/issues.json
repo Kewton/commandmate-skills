@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 900,
+      "title": "feat: 施設一覧を差し替える",
+      "body": "`data/demo/facilities.json` を差し替える。\n\n## 対象ファイル\n- `data/demo/facilities.json`\n\n## 根拠\n- `web/public/dist/data/demo/facilities.json` はビルド生成物である。\n\n## 受入条件\n- [ ] 一覧が新しい内容になる\n",
+      "labels": ["feature"]
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "issues": [
+    {
+      "number": 31,
+      "title": "feat: 施設カードの余白を整える",
+      "body": "施設カードの余白が詰まりすぎている。\n\n## 対象ファイル\n- `web/src/card.ts`\n\n## 受入条件\n- [ ] カードの余白が仕様どおりになる\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 33,
+      "title": "feat: 施設カードに見出しを足す",
+      "body": "施設カードに見出しを足す。余白の変更のあとに入れる。\n\n## 対象ファイル\n- `web/src/heading.ts`\n\n## 依存\n- depends on #31\n\n## 受入条件\n- [ ] カードが見出しを持つ\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 34,
+      "title": "fix: 見出しが折り返さない",
+      "body": "長い見出しが折り返さない。\n\n## 対象ファイル\n- `web/src/wrap.ts`\n\n## 根拠\n- 旧本文には depends on #33 と書いてあったが、これは成立しない。折り返しは見出しの有無と無関係である。\n\n## 受入条件\n- [ ] 長い見出しが折り返す\n",
+      "labels": ["bug"]
+    }
+  ]
+}
