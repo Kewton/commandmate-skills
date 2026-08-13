@@ -7,7 +7,10 @@
 cases/<case-id>/issues.json     planner に渡す Issue fixture（オフライン）
 cases/<case-id>/case.json       引数と、機械で判定できる期待値
 cases/<case-id>/expected-plan.json  （任意）golden な plan。byte 一致で照合
-dispatch-cases/<id>/case.json   plan 生成引数・scenario・dispatch 期待値
+dispatch-cases/<id>/case.json   plan 生成引数・scenario・dispatch 期待値。`plan_patch` は
+                                生成された plan を dispatch に渡す前に書き換える（merge-case と
+                                同じ理由。profile の `dispatch_defaults` は planner がまだ受け取らない
+                                field なので、この経路でしか plan に載せられない。#180）
 dispatch-cases/<id>/scenario.json  fake CLI に注入する worker/verify/drift の挙動
 dispatch-cases/<id>/contracts/  （契約 case のみ）生成された実行契約の golden。byte 一致で照合
 dispatch-cases/issues-multifile.json  複数 file を保有する Issue fixture（契約決定性の case 用）
@@ -204,6 +207,12 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 | `d78-timeout-liveness-unreadable` | **読めなかった側（受入条件4）。** `capture` が失敗する worker と、exit 0 のまま想定外の出力を返す worker の2件で、どちらも `worker_liveness_unreadable` になり detail がどちらの壊れ方かを名指しするか。**「読めなかった」を「止まっている」に丸めない。** blocking reason が `workers` の順に並ぶ（並行監督の完了順で report が変わらない）ことも固定する |
 | `d79-open-questions-block-refused` | 著者が宣言した未決の問いが**既存の** open question ゲートで止めるか。`send` は 0 回で、blocking reason が著者の原文を引用するか（#178） |
 | `d80-open-questions-block-accepted` | 同じ plan が `--allow-questions` では通り、しかし question は消えず `open_questions_accepted` と summary に残るか（#178。新しい緩和フラグを足していないことの確認） |
+| `d81-dispatch-defaults-from-profile` | **profile が宣言した運転既定（#180）。** flag を1つも渡さない run で `dispatch_defaults` の3値が効くか。効いた証拠は report の self-report ではなく **fake CLI が受け取った argv**（`wait --timeout 600` / `send --auto-yes --duration 3h`）に取る。3h は `max_turns × wait_timeout` から導かれる窓なので、宣言を読んだだけで使っていない実装はここで 1h を送る |
+| `d82-dispatch-defaults-cli-overrides` | **d79 の相方（二点測定）。** 世界も plan patch も同一で `dispatch_args` だけが違う。`--wait-timeout` / `--max-turns` が profile を上書きし、600 を運ぶ `wait` が1つも無く、auto-yes の窓が**解決後の値から導き直されて** 1h になるか |
+| `d83-dispatch-defaults-explicit-false` | **明示した off が profile の true を上書きするか（受入条件2）。** profile が `auto_yes: true`、run は `--no-auto-yes` だけ。三値で読んでいない実装は profile の true を残して prompt を自動応答し、**exit 0 の success** を返す —— 断れなかったことが status の違いとして出る |
+| `d84-dispatch-defaults-unattended-refused` | **既存の排他が解決後の値に効くか（受入条件3）。** flag を1つも渡していないのに profile 由来の auto-yes と `--unattended` の併用を `invalid_input`（exit 3）で拒否し、**`--out` を作らず CLI を1回も呼ばない**か。`accepted_with_args` で `--no-auto-yes` を足せば完走することも測るので、「`--unattended` を常に拒否する」実装では緑にならない |
+| `d85-dispatch-defaults-no-infer-mismatch` | **dispatch が消費できない宣言を黙って無視しないか。** `no_infer` は planner の flag なので、承認済み plan を dispatch が un-infer することはできない。profile が宣言しているのに plan は `inputs.infer: true` で作られている（付け忘れが残る形そのもの）とき、止まりはしないが limitation で名指しし `--no-infer` で取り直せと言うか |
+| `d86-dispatch-defaults-no-infer-honored` | **d83 の相方。** 世界も plan patch も同一で、planner を `--no-infer` で回した側。依存が explicit なので wave 構成は d83 と同じで、差分は **limitation が1件も出ないこと**だけ。合致まで報告する実装は、読む価値のある行を noise で埋める |
 
 ## merge case 一覧
 
@@ -322,6 +331,13 @@ checked-in artifact が古い形のまま緑になり続けることを防ぐた
 - provenance の `source` が case.json の宣言どおりであること（`detected` / `default` / `flag` / `derived` / `fixed`）
 - **`source: default` の field には必ず対の TODO があり、evidence を主張しないこと**
   （「材料が無くて雛形を置いた」が「読み取った」に化けないこと。この feature の要点）
+- **`dispatch_defaults` を起案しないこと**（#180。key も TODO も出さない）。case 固有ではなく
+  **全 case で無条件に**見る —— これは repo についての判定ではなく runner についての決定だからである。
+  「このリポジトリには `--no-infer` が要る」は tree に書いてある事実ではなく動かした人間が到達した
+  結論なので、起案すれば必ず推測になり、推測した `auto_yes: true` は検出した値と見分けがつかない。
+  `scope_companions` のような空宣言 + TODO も置かない（決定すべき材料が最初から無いので、
+  その TODO はどのリポジトリでも永久に消えない）。新しい case directory を足していないのは、
+  足しても同じ1つの決定を2回測ることにしかならないためである
 - provenance の evidence が実在する file を指し、**その行番号の行が引用文を実際に含む**こと
 - todo code 列・warning code 列が期待と完全一致すること
 - `--out` が既存 file を上書きせず `out_exists`（exit 4）で拒否すること
@@ -352,6 +368,7 @@ plan は入力の純粋関数なので、Agent の種類によらず同じ plan 
 
 | suite | 何を見るための suite か |
 |---|---|
+| **run id vs profile**（#157 / #180） | profile を1 field だけ変えた2つの plan が**別の run_id になる**か（かつ、その field が本当に plan を動かしているか）。key の並べ替えでは id が割れないこと、同一入力の再実行は同じ id で `run_exists` に落ちること。末尾の1件は #180 の**分割の現状を pin する**もので、`dispatch_defaults` を持つ profile を planner が今なお `load_error` で拒否することを固定する —— planner 側が着地したとき最初に赤くなるのがここであり、直し方は上の variants 表へ `project: (plan) => plan.profile.dispatch_defaults` として1行足すことである（hash は field を列挙しないので、受理された瞬間に性質は付いてくる） |
 | contract parity | runner が叩く `commandmate` の subcommand と flag が `commandmate-cli-contract.json` の範囲内か（実 CLI が在れば実物とも突き合わせる） |
 | launcher resolution | `--cli` の多トークン展開・`$CM` へのフォールバック・起動不能な launcher の拒否（#37） |
 | worktree-setup input | `--worktree-setup` の二重指定・shell 構文を、世界に触れる前に `invalid_input` で拒否するか（#93） |

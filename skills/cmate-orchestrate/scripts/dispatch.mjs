@@ -353,7 +353,14 @@ Options:
   --git <path>           The git CLI used for drift checks (default "git").
   --gh <path>            The gh CLI used for the repo-access check (default "gh").
   --auto-yes             Answer worker prompts automatically. OFF by default; a
-                         prompt otherwise halts the loop for a human.
+                         prompt otherwise halts the loop for a human. The plan's
+                         profile may declare this default instead
+                         (dispatch_defaults.auto_yes); the flag always wins.
+  --no-auto-yes          State the OFF side explicitly, so a profile that
+                         declares dispatch_defaults.auto_yes can be declined for
+                         one run. Without it there is no way to type "not this
+                         time": an absent boolean flag and an off one are the
+                         same argv.
   --allow-questions      Dispatch a plan whose issues still carry unanswered
                          open questions. OFF by default: an issue the planner
                          could not read acceptance criteria or affected files
@@ -416,8 +423,12 @@ Options:
   --expect-branch <name> Integration branch the plan was approved from; a
                          mismatch at dispatch time is treated as drift.
   --wait-timeout <sec>   --timeout passed to commandmate wait (default ${DEFAULT_WAIT_TIMEOUT_SECONDS}).
+                         The plan's profile may declare this default instead
+                         (dispatch_defaults.wait_timeout); the flag always wins.
   --max-turns <n>        Max turns to drive each worker (initial send + nudges)
                          before giving up with no commit (default ${DEFAULT_MAX_TURNS}).
+                         The plan's profile may declare this default instead
+                         (dispatch_defaults.max_turns); the flag always wins.
   --poll-limit <n>       Retained for compatibility; wait now blocks (default ${DEFAULT_POLL_LIMIT}).
   --help                 Show this help.
 
@@ -440,6 +451,11 @@ function parseCli(argv) {
         git: { type: 'string' },
         gh: { type: 'string' },
         'auto-yes': { type: 'boolean' },
+        // The OFF side, spelled out (Issue #180). `parseArgs` refuses
+        // `--auto-yes=false` outright ("does not take an argument"), and an
+        // absent boolean and an off one are the same argv, so a profile-declared
+        // default could not otherwise be declined for a single run.
+        'no-auto-yes': { type: 'boolean' },
         'allow-questions': { type: 'boolean' },
         unattended: { type: 'boolean' },
         'wall-clock-budget': { type: 'string' },
@@ -639,6 +655,15 @@ function resolveInputs(parsed) {
         + 'already in the worktree and sends nothing. Choose the one that matches why the prior attempt stopped', 3);
   }
   const unattended = resolveUnattended(values);
+  // The three-state reading of every flag a profile may also declare (Issue
+  // #180). `stated` is the answer to "did the operator type this?", which is a
+  // different question from "what is its value?" — and for a boolean flag the
+  // two answers are the same bit unless they are kept apart here.
+  const stated = {
+    autoYes: statedBoolean(values, 'auto-yes'),
+    waitTimeout: values['wait-timeout'] === undefined ? null : positiveInt(values['wait-timeout'], 'wait-timeout', null),
+    maxTurns: values['max-turns'] === undefined ? null : positiveInt(values['max-turns'], 'max-turns', null),
+  };
   return {
     planPath: values.plan,
     outDir: values.out ?? null,
@@ -648,7 +673,10 @@ function resolveInputs(parsed) {
     cli: cliArgv.join(' '),
     git: values.git ?? 'git',
     gh: values.gh ?? 'gh',
-    autoYes: Boolean(values['auto-yes']),
+    // Resolved from the flags alone. `applyDispatchDefaults` re-resolves the
+    // three below once the plan (and with it the profile) has been read; a run
+    // whose profile declares nothing keeps exactly these values.
+    autoYes: stated.autoYes === true,
     allowQuestions: Boolean(values['allow-questions']),
     unattended: unattended.unattended,
     wallClockBudget: unattended.wallClockBudget,
@@ -658,10 +686,188 @@ function resolveInputs(parsed) {
     contractMode: unattended.contractMode,
     verifyGates: resolveVerifyGates(values['verify-gates']),
     expectBranch: values['expect-branch'] ?? null,
-    waitTimeout: positiveInt(values['wait-timeout'], 'wait-timeout', DEFAULT_WAIT_TIMEOUT_SECONDS),
-    maxTurns: positiveInt(values['max-turns'], 'max-turns', DEFAULT_MAX_TURNS),
+    waitTimeout: stated.waitTimeout ?? DEFAULT_WAIT_TIMEOUT_SECONDS,
+    maxTurns: stated.maxTurns ?? DEFAULT_MAX_TURNS,
     pollLimit: positiveInt(values['poll-limit'], 'poll-limit', DEFAULT_POLL_LIMIT),
+    stated,
+    // Filled in by applyDispatchDefaults, and read by emptyReport. Empty on a run
+    // whose profile declares nothing, which is what keeps such a run's report
+    // byte-for-byte the one it was before this field existed.
+    dispatchDefaultNotes: [],
   };
+}
+
+// =============================================================================
+// Profile-declared operating defaults (Issue #180)
+// =============================================================================
+//
+// Three of this runner's knobs encode REPOSITORY knowledge rather than run
+// knowledge: `--no-infer` (a repository whose issues share vocabulary gets
+// phantom dependencies without it), `--auto-yes` (a repository whose workers ask
+// before they write stalls without it) and `--wait-timeout` (a repository whose
+// baseline builds and runs e2e cannot finish a turn inside the 300 s default).
+// Their only home was a human's memory and a CLAUDE.md paragraph, and a
+// forgotten flag there is not a slower run — it is a phantom edge, a worker
+// waiting on a prompt nobody will answer, or a `wait_window_exhausted` the report
+// then has to explain (§2.11 / Issue #179).
+//
+// The planner already refuses to hardcode `develop` / `npm`: repository
+// knowledge enters through the PROFILE and nowhere else
+// (references/profile-contract.md). Operating defaults are the same kind of
+// knowledge, so they enter the same way — `profile.dispatch_defaults`, carried
+// in the approved plan and read here. Two rules make them safe to declare:
+//
+//   EXPLICIT WINS, and explicit includes explicit OFF. `Boolean(values['auto-yes'])`
+//   cannot tell "the operator passed nothing" from "the operator meant off", so
+//   the flag layer keeps a three-state reading (`inputs.stated`: true / false /
+//   not stated) and `--no-auto-yes` is how the false is typed. A default that
+//   could not be declined for one run is not a default, it is a setting.
+//
+//   EVERY EXISTING CHECK RUNS ON THE RESOLVED VALUE. `--unattended` refuses
+//   `--auto-yes` because the one halt that exists FOR the absent human must stay
+//   reachable (adr-unattended-mode.md §2). A profile-declared auto-yes arms the
+//   same worktree through the same `send`, so it is refused too: the exclusion is
+//   a property of the value, and a check that only reads argv is one the profile
+//   walks around.
+//
+// `no_infer` is accepted here but consumed by nobody: it is the PLANNER's flag,
+// and dispatch cannot un-infer an approved plan. It is declared in one place
+// because a profile is one declaration and not one per runner — and rather than
+// ignore it, this runner compares it with the plan it was handed and records the
+// disagreement (`dispatch_defaults_no_infer_not_applied`).
+
+// The keys a profile may declare. Closed, and closed LOUDLY: an unknown key is
+// refused rather than skipped, for the reason the profile loader refuses an
+// unknown profile field (profile-contract.md §9.3) — a profile written for a
+// newer runner must fail on an older one instead of being half-honored by it.
+const DISPATCH_DEFAULT_BOOLEANS = ['no_infer', 'auto_yes'];
+const DISPATCH_DEFAULT_COUNTS = ['wait_timeout', 'max_turns'];
+const DISPATCH_DEFAULT_KEYS = [...DISPATCH_DEFAULT_BOOLEANS, ...DISPATCH_DEFAULT_COUNTS];
+
+// true / false / null, where null means "the operator said nothing". The
+// negation is a separate option rather than a parsed `--flag=false` because
+// `parseArgs` rejects a value on a boolean option before this code runs.
+function statedBoolean(values, name) {
+  const on = values[name] === true;
+  const off = values[`no-${name}`] === true;
+  if (on && off) {
+    throw new SkillError('invalid_input',
+      `--${name} and --no-${name} cannot both hold: one invocation cannot state both sides of the same switch, and picking `
+        + 'one of them here would make the report claim a choice nobody made', 3);
+  }
+  return on ? true : (off ? false : null);
+}
+
+// The declaration as the plan carries it, or null when the profile has none.
+// ABSENT STAYS ABSENT: a plan without the key resolves exactly the values it
+// resolved before this feature existed, down to the report's bytes.
+//
+// A malformed declaration is `plan_invalid` rather than `invalid_input` because
+// it is a fact about the plan file, not about the argv: the operator who typed
+// the command is not the person who wrote the profile, and the message has to
+// send them to the right file.
+function readDispatchDefaults(plan) {
+  const raw = plan.profile?.dispatch_defaults;
+  if (raw === undefined) return null;
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new SkillError('plan_invalid',
+      `plan.profile.dispatch_defaults must be a JSON object of ${DISPATCH_DEFAULT_KEYS.join(' / ')}, got ${JSON.stringify(raw)}`, 3);
+  }
+  for (const key of Object.keys(raw)) {
+    if (!DISPATCH_DEFAULT_KEYS.includes(key)) {
+      throw new SkillError('plan_invalid',
+        `plan.profile.dispatch_defaults has an unknown key "${key}"; this runner understands ${DISPATCH_DEFAULT_KEYS.join(', ')}. `
+          + 'A profile written for a newer runner is refused rather than half-applied: the keys it declares would otherwise be '
+          + 'silently dropped, and a run driven by half a declaration is the accident the declaration was written to prevent', 3);
+    }
+  }
+  const declared = {};
+  for (const key of DISPATCH_DEFAULT_BOOLEANS) {
+    if (!(key in raw)) continue;
+    if (typeof raw[key] !== 'boolean') {
+      throw new SkillError('plan_invalid',
+        `plan.profile.dispatch_defaults.${key} must be true or false, got ${JSON.stringify(raw[key])}`, 3);
+    }
+    declared[key] = raw[key];
+  }
+  for (const key of DISPATCH_DEFAULT_COUNTS) {
+    if (!(key in raw)) continue;
+    if (!Number.isInteger(raw[key]) || raw[key] < 1) {
+      throw new SkillError('plan_invalid',
+        `plan.profile.dispatch_defaults.${key} must be a positive integer, got ${JSON.stringify(raw[key])}`, 3);
+    }
+    declared[key] = raw[key];
+  }
+  return declared;
+}
+
+// Resolves the declared defaults against the flags actually typed, IN PLACE, and
+// records what it decided. Called once, after the plan is loaded and before
+// anything is locked, created, probed or sent: a refusal here must leave `--out`
+// unconsumed and the CLI untouched, exactly like the argv-only refusals above.
+function applyDispatchDefaults(inputs, plan) {
+  const declared = readDispatchDefaults(plan);
+  if (declared === null) return;
+  const stated = inputs.stated;
+  const profileId = String(plan.profile?.id ?? 'unknown');
+  const resolutions = [];
+
+  if (declared.auto_yes !== undefined) {
+    const flag = stated.autoYes === null ? null : (stated.autoYes ? '--auto-yes' : '--no-auto-yes');
+    if (flag === null) inputs.autoYes = declared.auto_yes;
+    resolutions.push(resolutionNote('auto_yes', declared.auto_yes, flag, inputs.autoYes));
+  }
+  if (declared.wait_timeout !== undefined) {
+    const flag = stated.waitTimeout === null ? null : '--wait-timeout';
+    if (flag === null) inputs.waitTimeout = declared.wait_timeout;
+    resolutions.push(resolutionNote('wait_timeout', declared.wait_timeout, flag, inputs.waitTimeout));
+  }
+  if (declared.max_turns !== undefined) {
+    const flag = stated.maxTurns === null ? null : '--max-turns';
+    if (flag === null) inputs.maxTurns = declared.max_turns;
+    resolutions.push(resolutionNote('max_turns', declared.max_turns, flag, inputs.maxTurns));
+  }
+  // Declared, and consumed by the planner rather than here. Nothing is recorded
+  // when the plan already agrees (`inputs.infer` false): the plan says so itself,
+  // and a limitation for the agreeing case would be noise on every run.
+  if (declared.no_infer === true && plan.inputs?.infer === true) {
+    inputs.dispatchDefaultNotes.push({
+      code: 'dispatch_defaults_no_infer_not_applied',
+      detail: `profile ${profileId} declares dispatch_defaults.no_infer, but plan ${plan.run_id} was built WITH dependency `
+        + 'inference (inputs.infer true). Dispatch cannot un-infer an approved plan: the waves below are the ones the planner '
+        + 'produced. If a wave was serialized by a lexical edge, re-plan with --no-infer and dispatch that plan instead',
+    });
+  }
+
+  if (resolutions.length > 0) {
+    inputs.dispatchDefaultNotes.push({
+      code: 'dispatch_defaults_applied',
+      detail: `profile ${profileId} declares dispatch_defaults; this run resolved ${resolutions.join(', ')}. `
+        + 'A flag always wins over the profile, and --no-auto-yes is how the off side is stated explicitly',
+    });
+  }
+
+  // The resolved-value half of the unattended exclusions (ADR §2, invariant 2).
+  // The argv-only check in resolveUnattended still fires first for the flag —
+  // it needs no plan, and its advice ("drop one of the two") is about two things
+  // the operator typed. This one is about a value the operator did not type, so
+  // it names the profile and the flag that declines it.
+  if (inputs.unattended && inputs.autoYes) {
+    throw new SkillError('invalid_input',
+      `--unattended and profile ${profileId}'s dispatch_defaults.auto_yes cannot both hold: the profile arms the worktree `
+        + 'auto-yes for every worker this run sends, which makes the one halt that exists FOR the absent human (exit 10) '
+        + 'structurally unreachable — the same reason --auto-yes itself is refused. Pass --no-auto-yes to decline the profile '
+        + 'default for this run, or drop auto_yes from the profile', 3);
+  }
+}
+
+// `auto_yes=true (from the profile)` / `max_turns=10 overridden by --max-turns (8)`.
+// The declared value is named even when it lost, because the operator reading
+// this is deciding whether their flag was the one that mattered.
+function resolutionNote(key, declaredValue, flag, resolvedValue) {
+  return flag === null
+    ? `${key}=${JSON.stringify(resolvedValue)} (from the profile)`
+    : `${key}=${JSON.stringify(resolvedValue)} (${flag} overrode the profile's ${JSON.stringify(declaredValue)})`;
 }
 
 // =============================================================================
@@ -4633,7 +4839,14 @@ function emptyReport(inputs, plan, outDir) {
     drift_checks: [],
     waves: [],
     blocking_reasons: [],
-    limitations: [],
+    // The profile's operating defaults are stated FIRST, before the mode
+    // declarations below (Issue #180): every value the rest of this report is
+    // read against — the wait timeout a `wait_window_exhausted` is measured
+    // from, the turn cap a `failed` gave up at, whether auto-yes was armed — is
+    // decided there, and a reader who does not know which of them came from the
+    // profile cannot reconstruct the run from the argv. Empty (and therefore
+    // invisible) on a plan whose profile declares nothing.
+    limitations: [...inputs.dispatchDefaultNotes],
     redactions: [],
     completion_check: { passed: false, checks: [] },
     summary_markdown: '',
@@ -5976,6 +6189,12 @@ async function run(argv) {
   startWallClockBudget(inputs.wallClockBudget);
   const rawPlan = loadPlan(inputs.planPath);
   const plan = validatePlan(rawPlan);
+  // The profile's operating defaults (Issue #180), resolved against the flags
+  // actually typed. It happens HERE — after the plan is readable and before the
+  // resume decision, the lock, the pre-flight and `--out` — because the values it
+  // decides are inputs to all four, and because a refusal it raises has to leave
+  // the world exactly as untouched as an argv refusal does.
+  applyDispatchDefaults(inputs, plan);
 
   // The resume decision (Issue #98) is made FIRST: it decides which directory
   // this attempt writes into, which wave the pre-flight has to probe, and which

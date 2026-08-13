@@ -1,0 +1,27 @@
+{
+  "description": "d83 の相方（#180 二点測定）: **profile も plan も同じことを言っている側**。世界も plan patch も d83 と同一で、違うのは planner を `--no-infer` で回したこと（`inputs.infer` が false）だけである。Issue の依存は explicit なので wave 構成は d83 と変わらず、差分は limitation が1件も出ないことだけになる。「宣言と plan が合っている run は、宣言が無い run と同じ report を書く」——合致まで報告する実装は、読む価値のある行を noise で埋める。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan", "--no-infer"]
+  },
+  "plan_patch": {
+    "profile": {
+      "dispatch_defaults": {
+        "no_infer": true
+      }
+    }
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "auto_yes": false,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "sent": [201, 200],
+    "absent_limitation_codes": ["dispatch_defaults_no_infer_not_applied", "dispatch_defaults_applied"]
+  }
+}

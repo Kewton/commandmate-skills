@@ -33,6 +33,7 @@ worktree path、baseline 検証 — を **profile** から解決する。planner
 | `baseline` | 必須 | 各 worker が実行する検証 command の配列 |
 | `verified` | 任意 | 実機確認済みなら `true`。既定は `false` |
 | `scope_companions` | 任意 | このリポジトリ固有の**伴走ファイル規約**。宣言済み path の関数を書く `derive` と、名前が固定された伴走を書く `require` の2 key。第9節。**未指定なら宣言が無いのと同じ**で、planner は組み込みの導出だけを行う |
+| `dispatch_defaults` | 任意 | このリポジトリ固有の**運転既定**（`no_infer` / `auto_yes` / `wait_timeout` / `max_turns`）。第10節。**未指定なら宣言が無いのと同じ**で、CLI flag の既定値がそのまま効く |
 
 placeholder は次のとおり展開する。
 
@@ -154,6 +155,7 @@ node scripts/orchestrate.mjs 123 --profile-json /tmp/my-profile.json --allow-unv
 | `id` | `<toolchain>-<repository 名>`（内蔵 profile と同じ命名） | `custom-repo` |
 | `verified` | — | **常に `false`。この runner が変えることはない** |
 | `scope_companions` | `spec/` `test/` `tests/` の実ファイルと、それが写している `src/` `app/` `lib/` の実ファイルの**対**。両方が実在するときだけ `derive` を1件起案する。`require` は起案しない（第9.4節） | `{"derive": []}`（空。＝宣言が無いのと同じ挙動） |
+| `dispatch_defaults` | **起案しない**（key ごと出さない）。第10.5節に理由を書く | — |
 
 toolchain が複数ある場合は `node` > `rust` > `python` > `go` > `make` の固定順で
 1つを選び、選ばなかったものを warning `multiple_ecosystems` に載せる。npm 系 lockfile が
@@ -405,3 +407,95 @@ package と、「verified とは何か」を決める設定 —— は、planner
   唯一の許可であり、L1 も同じ宣言から慣習テスト path を導出している
 
 出口は今までどおり Issue 本文の成果物見出し1つだけで、そこには warning が付く。
+
+## 10. `dispatch_defaults` — repo 固有の運転既定（任意）
+
+runner 側の正本は [dispatch-contract.md](./dispatch-contract.md) 第1.1節である
+（[#180](https://github.com/Kewton/commandmate-skills/issues/180)）。
+
+### 10.1 何を解く field か
+
+`--no-infer` / `--auto-yes` / `--wait-timeout` は、その run の事情ではなく**リポジトリの事情**を
+書いている flag である。
+
+- `--no-infer` — 散文の語彙が重なるリポジトリでは、依存でないものが依存に見える
+- `--auto-yes` — worker が書く前に訊くリポジトリでは、付け忘れた run が prompt で止まる
+- `--wait-timeout` — e2e / build を含む baseline は、既定 300 秒では必ず timeout する
+
+これらの置き場は人間の記憶と CLAUDE.md しかなく、**付け忘れは「遅い run」ではなく事故**
+（phantom edge、誰も答えない prompt、`wait_window_exhausted`）になっていた。第5節が言うとおり
+リポジトリ知識の入口は profile だけであり、運転既定もリポジトリ知識である。
+
+### 10.2 形
+
+```json
+"dispatch_defaults": {
+  "no_infer": true,
+  "auto_yes": true,
+  "wait_timeout": 3600,
+  "max_turns": 10
+}
+```
+
+| key | 型 | 対応する flag | 消費するのは |
+|---|---|---|---|
+| `no_infer` | boolean | `--no-infer` | **planner**（`orchestrate.mjs`） |
+| `auto_yes` | boolean | `--auto-yes` / `--no-auto-yes` | dispatch |
+| `wait_timeout` | 1 以上の整数（秒） | `--wait-timeout` | dispatch |
+| `max_turns` | 1 以上の整数 | `--max-turns` | dispatch |
+
+すべて任意で、**未指定の key は宣言が無いのと同じ**である。未知の key・型違い・0 以下は
+`plan_invalid`（exit 3）で dispatch を始めない。読み飛ばす実装だと、新しい runner 向けの profile が
+古い runner で**半分だけ効く**ことになるからである（第9.3節と同じ理由）。
+
+### 10.3 解決規則
+
+1. **CLI flag は常に上書きする（explicit wins）。明示された off も上書きする。**
+   boolean flag は「渡していない」と「off のつもりで渡した」が同じ argv になるので、
+   dispatch は三値（true / false / 未宣言）で読み、false を打つ手段として `--no-auto-yes` を持つ。
+   `--auto-yes` と `--no-auto-yes` の同時指定は `invalid_input`。
+2. **既存の検証は解決後の値に対して行う。** `--unattended` と auto-yes の排他は、
+   flag 由来でも profile 由来でも同じく `invalid_input`（exit 3）である。逃げ道は `--no-auto-yes`。
+3. 解決結果は dispatch report の limitation `dispatch_defaults_applied` に1行で残る。
+   宣言の無い plan では entry が出ないので、**その run の report は本 field 以前と byte 一致する。**
+
+`no_infer` を dispatch は消費できない（承認済み plan を後から un-infer はできない）。
+plan の `inputs.infer` と突き合わせ、食い違ったときだけ limitation
+`dispatch_defaults_no_infer_not_applied` を残す。**黙って無視はしない。**
+
+### 10.4 run_id と運転既定
+
+profile は **field を選ばず丸ごと** run_id の hash に入る（[#157](https://github.com/Kewton/commandmate-skills/issues/157)、
+[plan-contract.md](./plan-contract.md) 第1節）。したがって `dispatch_defaults` を編集した profile で
+plan を取り直すと**別の run_id になり、別の run directory に書かれる**。これは
+`baseline` や `scope_companions` を直したときと同じ性質で、`dispatch_defaults` のために
+新しく作った仕組みではない —— 列挙を持たない hash の設計がそのまま効く。
+
+運用上の注意も第9.5節と同じである: 宣言を直して同じ plan を取り直そうとすると
+`run_exists`（exit 4）になるので、`--run-id` か `--runs-dir` を使う。
+
+### 10.5 起案（`profile-init.mjs`）は `dispatch_defaults` を出さない
+
+起案 runner が読むのは**リポジトリが自分について宣言していること**である（第7.1節）。
+base branch は workflow に、baseline は `package.json` に、テスト配置は互いを写す2つの実ファイルに
+書いてある。運転既定はそのどれでもない ——「このリポジトリには `--no-infer` が要る」は
+**動かしてみた人間が到達した結論**であって、tree の中に書いてある事実ではない。
+
+起案すれば必ず推測になり、推測した `auto_yes: true` は検出した `auto_yes: true` と
+出力上見分けがつかない（第7.2節が消しに来た性質そのもの）。`scope_companions` のように
+**空の宣言 + TODO** を置くこともしない。あちらの空宣言は「配置を決定できなかった」という
+TODO と対になっているから意味があるのに対し、ここには決定すべき材料が最初から無く、
+TODO はすべてのリポジトリで永久に立ち続けることになる。
+
+**key ごと出さない。** 出さなければ flag の既定値がそのまま効き、draft の使い勝手は変わらない。
+運転して分かった時点で、人間がこの節を見て書き足す。
+
+### 10.6 現時点の制約 — planner 側は未着地
+
+**この version の `orchestrate.mjs` は、契約外の field を持つ profile を `load_error` で拒否する
+（第1節）。`dispatch_defaults` を書いた profile はまだ plan 段階を通らない。**
+本 field を読む側（dispatch runner・`execution-plan.v2` schema・本節）が先に着地しており、
+planner 側は `PROFILE_FIELDS` への追加と `publicProfile()` での echo という別 Issue の変更を待っている
+（#180 は `orchestrate.mjs` を触らない範囲で切られている）。着地するまでは、
+`plan.profile.dispatch_defaults` を持つ plan を手で用意した場合にだけ本節の解決規則が働く。
+第10.4節の run_id の性質は、planner が field を受け取った時点で**追加の実装なしに**得られる。

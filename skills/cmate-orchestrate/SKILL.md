@@ -165,6 +165,7 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 | `--reverify <dir>` | — | **`send` を1回も呼ばずに**裁定だけ取り直す。`<dir>` は対象 run の `--out`。作業が既に worktree に在るのに裁定が古い、という状態のための経路（[運転ノート](./references/runner-operations.md) 第8節）。`--out` / `--resume` とは排他 |
 | `--cli` / `--git` / `--gh <path>` | `commandmate`/`git`/`gh` | 実行する CLI |
 | `--auto-yes` | **off** | worker prompt を自動応答する。既定は停止して human へ提示。**契約のポリシーと worktree の auto-yes 状態は別物で、この flag は両方を動かす**（片方だけでは1つも応答されない。[dispatch-contract.md](./references/dispatch-contract.md) 第2.10節）|
+| `--no-auto-yes` | — | **off 側を明示する。** profile が `dispatch_defaults.auto_yes` を宣言していても、この run だけ off にできる（[profile-contract.md](./references/profile-contract.md) 第10節）。`--auto-yes` との同時指定は `invalid_input` |
 | `--allow-questions` | **off** | 未回答 question を持つ Issue を含む plan を dispatch する |
 | `--unattended` | **off** | **人間が居ないことの宣言。締め付けだけを含意し、権限は1つも足さない**（[運転ノート](./references/runner-operations.md) 第10節）。`--approve` を含意しない。緩和フラグとの併用は `invalid_input` |
 | `--wall-clock-budget <sec>` | **off** | run 全体の壁時計上限。到達で `partial` / `stop_reason: timeout`。`--unattended` では**必須** |
@@ -176,6 +177,12 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 | `--expect-branch <name>` | — | plan 承認時の統合 branch。不一致なら drift |
 | `--wait-timeout <sec>` | `300` | `commandmate wait` の**1回あたり** timeout。**worker の1ターンの上限ではない** —— ターンがこの窓より長いと runner は timeout を報告するが worker は走り続ける。timeout の時点で `capture` を1回叩いて生死を測り、`worker_liveness` と blocking（`wait_window_exhausted` / `worker_stalled` / `worker_liveness_unreadable`）に転記する（第5節の対処表・[dispatch-contract.md](./references/dispatch-contract.md) 第2.11節） |
 | `--max-turns <n>` | `8` | 各 worker を駆動する最大ターン数。未 commit で到達なら `failed` |
+
+`--auto-yes` / `--wait-timeout` / `--max-turns` の**既定は profile 側でも宣言できる**
+（`dispatch_defaults`。[profile-contract.md](./references/profile-contract.md) 第10節）。
+リポジトリの事情を毎回 flag で言い直すのをやめるための field であり、
+**flag は常に profile を上書きする**。`--unattended` と auto-yes の排他のような既存の検証は、flag 由来か
+profile 由来かを問わず**解決後の値**に対して効く。
 
 `commandmatedev` は使わない。公式経路は public `commandmate` である（ADR CommandMate
 [#1447](https://github.com/Kewton/CommandMate/issues/1447)）。

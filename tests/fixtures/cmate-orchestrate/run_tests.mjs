@@ -939,6 +939,13 @@ function runDispatchCase(caseId) {
   const runsDir = mkdtempSync(join(tmpdir(), 'cmate-disp-plan-'));
   const planPath = generatePlan(spec, runsDir);
   if (!check(existsSync(planPath), `plan.json was not generated at ${planPath}`)) return;
+  // The same knob the merge cases have, for the same reason (see patchPlan): the
+  // plan is this runner's INPUT, and a state a real profile reaches cannot always
+  // be produced by running the planner. `profile.dispatch_defaults` (Issue #180)
+  // is exactly that state today — the plan-core runner refuses a profile field it
+  // does not list, so the declaration is written into the plan here, which is
+  // what the dispatch runner reads either way.
+  if (spec.plan_patch) patchPlan(planPath, spec.plan_patch);
 
   const work = mkdtempSync(join(tmpdir(), 'cmate-disp-'));
   const outDir = join(work, 'dispatch'); // must not pre-exist; dispatch creates it
@@ -964,6 +971,13 @@ function runDispatchCase(caseId) {
   check(report.stop_reason === expect.stop_reason, `stop_reason "${report.stop_reason}" !== "${expect.stop_reason}"`);
   if (expect.human_required !== undefined) {
     check(report.human_required === expect.human_required, `human_required ${report.human_required} !== ${expect.human_required}`);
+  }
+  // The RESOLVED value of --auto-yes, as the report states it (Issue #180). It is
+  // the one operating default with a field of its own, and the field is what a
+  // reader of the report sees: a profile-declared auto-yes that armed the workers
+  // but left `auto_yes: false` in the report would be a run nobody can reconstruct.
+  if (expect.auto_yes !== undefined) {
+    check(report.auto_yes === expect.auto_yes, `report.auto_yes ${report.auto_yes} !== ${expect.auto_yes}`);
   }
   if (expect.waves_count !== undefined) {
     check(report.waves.length === expect.waves_count, `waves ${report.waves.length} !== ${expect.waves_count}`);
@@ -1341,6 +1355,56 @@ function runDispatchCase(caseId) {
         calls.some((args) => needles.every((needle) => args.includes(needle))),
         `no "${name}" invocation carried all of ${JSON.stringify(needles)}; calls: ${JSON.stringify(calls)}`,
       );
+    }
+  }
+  // The other half of that measurement, for the cases where a value was OVERRIDDEN
+  // (Issue #180): "some wait carried 300" is satisfied by a runner that also sent
+  // the profile's 600 on another turn, and a supervision loop that read the
+  // override once and the declaration afterwards is exactly the bug worth pinning.
+  // NO invocation of the subcommand may carry any of these tokens.
+  if (expect.cli_args_absent) {
+    for (const [name, tokens] of Object.entries(expect.cli_args_absent)) {
+      const calls = cliLog.filter((entry) => entry.sub === name).map((entry) => entry.args.map(String));
+      for (const token of tokens) {
+        check(
+          !calls.some((args) => args.includes(token)),
+          `a "${name}" invocation carried "${token}"; calls: ${JSON.stringify(calls)}`,
+        );
+      }
+    }
+  }
+  // A refusal that happens in argument resolution touches nothing at all: no
+  // `--out`, and not one CLI call (the shape #122's input suite pins for the
+  // argv-only refusals, asserted here for the ones that need the plan first).
+  if (expect.no_cli_calls) {
+    check(cliLog.length === 0, `a refused invocation called the CLI ${cliLog.length} time(s): ${JSON.stringify(cliLog.slice(0, 3))}`);
+  }
+  // The escape hatch a refusal claims to leave (Issue #180): the SAME plan and the
+  // SAME world, run again with the argv the error message names, must actually go
+  // through. Without this half, a runner that refused `--unattended` unconditionally
+  // would pass every assertion above — and the refusal would be a wall, not a rule.
+  if (expect.accepted_with_args) {
+    const acceptWork = mkdtempSync(join(tmpdir(), 'cmate-disp-accept-'));
+    const accepted = runDispatchRunner(
+      planPath, scenarioObject, acceptWork, join(acceptWork, 'dispatch'), expect.accepted_with_args.args, null,
+    );
+    check(accepted.exit === expect.accepted_with_args.exit,
+      `the argv the refusal names exited ${accepted.exit} !== ${expect.accepted_with_args.exit}: ${accepted.stdout.slice(0, 300)}`);
+    let acceptedReport = null;
+    try {
+      acceptedReport = JSON.parse(accepted.stdout);
+    } catch {
+      check(false, `the accepted re-run printed no report: ${accepted.stdout.slice(0, 200)}`);
+    }
+    if (acceptedReport) {
+      if (expect.accepted_with_args.status !== undefined) {
+        check(acceptedReport.status === expect.accepted_with_args.status,
+          `the accepted re-run's status "${acceptedReport.status}" !== "${expect.accepted_with_args.status}"`);
+      }
+      if (expect.accepted_with_args.auto_yes !== undefined) {
+        check(acceptedReport.auto_yes === expect.accepted_with_args.auto_yes,
+          `the accepted re-run's auto_yes ${acceptedReport.auto_yes} !== ${expect.accepted_with_args.auto_yes}`);
+      }
     }
   }
   // The structured preparation evidence written beside the report (Issue #93).
@@ -4377,6 +4441,20 @@ function runProfileInitCase(caseId) {
 
   check(result.draft === true, 'the envelope must declare itself a draft');
   check(result.profile.verified === false, 'a drafted profile must never claim verification');
+  // The operating defaults are NOT drafted, on any tree (Issue #180 /
+  // profile-contract.md §10.5). Asserted for every case rather than in one of
+  // them, because the decision is about the runner and not about a repository:
+  // no file states "this repository needs --no-infer", so a drafted
+  // `dispatch_defaults` could only ever be a guess — and a guessed `auto_yes:
+  // true` reads exactly like a detected one while arming auto-yes for every
+  // worker of every run made from the draft. The empty-declaration route
+  // `scope_companions` takes is refused for the same reason it works there: that
+  // one comes with a TODO saying the layout could not be determined, and here
+  // there is nothing to determine, so the TODO would never clear.
+  check(!('dispatch_defaults' in result.profile),
+    'the draft carries dispatch_defaults; operating defaults are a conclusion somebody reached by RUNNING the repository, not a declaration in its tree');
+  check(!(result.todos ?? []).some((todo) => todo.field === 'dispatch_defaults'),
+    'the draft raises a TODO for dispatch_defaults; nothing in a tree can ever clear it');
   check(result.status === expect.status, `status ${result.status} != ${expect.status}`);
   check(result.completion_check.passed === true, 'the drafting completion check should pass');
 
@@ -4764,6 +4842,35 @@ function runIdCoversProfileTest() {
   for (const field of ['baseline', 'branch_template', 'worktree_template', 'verified', 'scope_companions']) {
     check(detail.includes(field), `run_exists detail should name the profile field ${field}: ${detail}`);
   }
+
+  // ---- dispatch_defaults and the run id (Issue #180, acceptance condition 4) --
+  //
+  // The property asked for is "editing an operating default forks the run id",
+  // and the measurement of it is the variants table above: nothing in the
+  // signature enumerates fields, so a profile field inherits the property by
+  // construction the moment the LOADER accepts it — which is the half that has
+  // not landed. `dispatch_defaults` is read by the dispatch runner, declared by
+  // the plan schema and documented in profile-contract.md §10, while
+  // orchestrate.mjs's PROFILE_FIELDS still refuses it (Issue #180 is cut to
+  // leave that file to the Issue editing it concurrently).
+  //
+  // So the state of the split is pinned rather than described: today the planner
+  // REFUSES the field, loudly and by name. When the planner half lands this
+  // assertion is the first thing that goes red, and the fix is to move the field
+  // into the variants table above with `project: (plan) => plan.profile
+  // .dispatch_defaults` — at which point the run-id property is measured for it
+  // exactly as it is measured for the other six.
+  log('  the planner still refuses profile.dispatch_defaults, so the run-id property is not yet reachable through it (#180)');
+  const defaultsPath = join(dir, 'dispatch-defaults.json');
+  writeFileSync(defaultsPath, `${JSON.stringify({
+    ...RUN_ID_BASE_PROFILE,
+    dispatch_defaults: { no_infer: true, auto_yes: true, wait_timeout: 3600 },
+  }, null, 2)}\n`);
+  const refused = planWithProfile(defaultsPath, issuesPath);
+  check(refused.exit === 6, `a profile with dispatch_defaults should be refused with load_error (exit 6), exited ${refused.exit}`);
+  const refusedDetail = (refused.result?.errors ?? []).map((error) => `${error.code} ${error.detail}`).join(' ');
+  check(refusedDetail.includes('load_error') && refusedDetail.includes('dispatch_defaults'),
+    `the refusal should name the field it refused: ${refusedDetail}`);
 }
 
 // =============================================================================

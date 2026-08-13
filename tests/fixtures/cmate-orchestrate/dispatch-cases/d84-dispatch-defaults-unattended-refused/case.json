@@ -1,0 +1,37 @@
+{
+  "description": "**既存の排他は解決後の値に効く（#180 受入条件3）。** `--unattended` は `--auto-yes` を拒否する（人が居ない run で唯一残る停止点 exit 10 を構造的に到達不能にするから。ADR 第2節）。profile 由来の auto-yes は同じ `send` で同じ worktree を arm するので、argv だけを見る検査は profile に回り込まれる。ここでは flag を1つも渡していないのに `invalid_input`（exit 3）で拒否し、**`--out` を作らず CLI を1回も呼ばない**ことを固定する。逃げ道が本当に在ることは `accepted_with_args`（同じ世界・同じ plan に `--no-auto-yes` を足すと完走する）で測る —— 「`--unattended` をいつでも拒否する」実装はそこで赤くなる。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "plan_patch": {
+    "profile": {
+      "dispatch_defaults": {
+        "auto_yes": true
+      }
+    }
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration", "--unattended", "--wall-clock-budget", "600"],
+  "expect": {
+    "exit": 3,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "auto_yes": false,
+    "waves_count": 0,
+    "out_dir_created": false,
+    "completion_check_passed": false,
+    "no_cli_calls": true,
+    "blocking_codes": ["invalid_input"],
+    "blocking_details_include": [
+      ["--unattended", "dispatch_defaults.auto_yes", "--no-auto-yes"]
+    ],
+    "accepted_with_args": {
+      "args": ["--expect-branch", "feature/integration", "--unattended", "--wall-clock-budget", "600", "--no-auto-yes"],
+      "exit": 0,
+      "status": "success",
+      "auto_yes": false
+    }
+  }
+}

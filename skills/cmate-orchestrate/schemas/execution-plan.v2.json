@@ -345,6 +345,27 @@
               }
             }
           }
+        },
+        "dispatch_defaults": {
+          "description": "Optional repository-level operating defaults for the dispatch runner (Issue #180). Every key is optional and every one is overridden by the corresponding CLI flag; --no-auto-yes is how auto_yes is declined for a single run. no_infer is the planner's flag and is declared here only so one profile holds one declaration.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "no_infer": {
+              "type": "boolean"
+            },
+            "auto_yes": {
+              "type": "boolean"
+            },
+            "wait_timeout": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_turns": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
         }
       }
     },
