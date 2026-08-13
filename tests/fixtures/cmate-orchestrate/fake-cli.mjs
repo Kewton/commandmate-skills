@@ -87,6 +87,17 @@
 // caller exactly as before, which is the other real ordering. `workers.<n>.
 // prompt_type` chooses the type the policy is judged against (default `yes_no`).
 //
+// Integration verification (Issue #175). `merge.mjs --merge-prs
+// --integration-verify` judges the state its merges ADD UP TO: it runs `git fetch
+// origin <base>`, checks the fetched tip out with `git worktree add --detach`,
+// runs the profile baseline in that throwaway checkout and removes it again. The
+// scenario's `integration` block drives all four — `verify: "pass"` puts the
+// `cmate-verify-ok` marker in the detached checkout (so the baseline exits 0),
+// anything else leaves it out (red), and `fetch` / `worktree_add` / `remove` set
+// to `"fail"` model the probes that make the verification impossible rather than
+// red. That distinction matters: "could not measure the merged state" must never
+// be reported as "the merged state is green".
+//
 // A PR number in this fake is always equal to its issue number, so that
 // `pr view` (keyed by branch) and `pr checks`/`pr merge` (keyed by number) can
 // look the same worker's behavior up by a single key.
@@ -99,12 +110,26 @@
 // Node stdlib only. Not part of the release pipeline; used only by run_tests.mjs.
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, appendFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, appendFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const argv = process.argv.slice(2);
+// `git -c <key>=<value> … <sub>` (Issue #174): git's global config options come
+// BEFORE the subcommand, so they are consumed here — the rest of this file keeps
+// reading `argv[0]` as the subcommand, and a runner that sets one gets the same
+// behaviour change the real git would give it (see cQuotePath below).
+const rawArgv = process.argv.slice(2);
+const gitConfig = new Map();
+let firstArg = 0;
+while (rawArgv[firstArg] === '-c' && typeof rawArgv[firstArg + 1] === 'string') {
+  const setting = rawArgv[firstArg + 1];
+  const eq = setting.indexOf('=');
+  const key = (eq === -1 ? setting : setting.slice(0, eq)).toLowerCase();
+  gitConfig.set(key, eq === -1 ? 'true' : setting.slice(eq + 1));
+  firstArg += 2;
+}
+const argv = rawArgv.slice(firstArg);
 const sub = argv[0] ?? '';
 
 // The marker file the node-fake profile's baseline (`cat cmate-verify-ok`) reads.
@@ -766,6 +791,38 @@ function applyDelay(spec) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+// How git PRINTS a pathname (Issue #174). `git diff --name-only|--numstat` does
+// not emit the path it holds: `quote_c_style` wraps it in double quotes and
+// escapes the offending bytes whenever the path contains `"`, a backslash or a
+// control character — and, while `core.quotePath` is true (git's default), every
+// byte >= 0x80 as a three-digit octal escape. That is why a UTF-8 path from
+// `plan.json` never equalled the "same" path from a diff. `-c
+// core.quotePath=false` only removes the third rule; only `-z` turns the munging
+// off entirely, which is what this models: the caller passing `-z` never reaches
+// here.
+//
+// Bytes, not code units: the escapes are per UTF-8 byte, so the path is encoded
+// first and reassembled at the end (a non-ASCII byte left unquoted must go back
+// out unchanged).
+const C_ESCAPES = new Map([[0x07, '\\a'], [0x08, '\\b'], [0x0c, '\\f'], [0x0a, '\\n'], [0x0d, '\\r'], [0x09, '\\t'], [0x0b, '\\v']]);
+function cQuotePath(path, quotePath) {
+  const out = [];
+  let quoted = false;
+  for (const byte of Buffer.from(path, 'utf8')) {
+    if (byte === 0x22 || byte === 0x5c) {
+      quoted = true;
+      out.push(0x5c, byte);
+    } else if (byte < 0x20 || byte === 0x7f || (byte >= 0x80 && quotePath)) {
+      quoted = true;
+      const escape = C_ESCAPES.get(byte) ?? `\\${byte.toString(8).padStart(3, '0')}`;
+      out.push(...Buffer.from(escape, 'ascii'));
+    } else {
+      out.push(byte);
+    }
+  }
+  return quoted ? `"${Buffer.from(out).toString('utf8')}"` : path;
+}
+
 function main() {
   logInvocation();
   enforceContract();
@@ -855,8 +912,58 @@ function main() {
     process.stdout.write(dirty ? ' M some/file.ts\n' : '');
     process.exit(0);
   }
+  if (sub === 'fetch') {
+    // `git fetch origin <base-branch>` from merge.mjs's integration verification
+    // (Issue #175): the runner re-reads the base branch from the remote before it
+    // judges the state the merges add up to. `integration.fetch: "fail"` models an
+    // unreachable remote, which must NOT be rounded up to "the merged state is
+    // green" — the merges have already landed at that point.
+    const integration = spec.integration ?? {};
+    if (integration.fetch === 'fail') fail('fatal: could not read from remote repository');
+    process.stdout.write('');
+    process.exit(0);
+  }
   if (sub === 'worktree') {
     const action = argv[1] ?? '';
+    // `git worktree add --detach <dir> FETCH_HEAD` — the throwaway checkout of the
+    // MERGED base merge.mjs runs the profile baseline in (Issue #175). No `-b`:
+    // this one carries no branch and belongs to no issue, which is how it is told
+    // apart from the uat fix loop's `worktree add <dir> -b <branch> <sha>` below.
+    //
+    // The green/red difference is the DELIVERABLE, exactly as it is for a worker's
+    // worktree: `integration.verify: "pass"` drops the `cmate-verify-ok` marker the
+    // node-fake profile's baseline (`cat cmate-verify-ok`) reads, and anything else
+    // leaves the checkout without it so the same baseline exits non-zero. The two
+    // cases are then the same world with one file's presence flipped.
+    if (action === 'add' && argv.includes('--detach')) {
+      const integration = spec.integration ?? {};
+      if (integration.worktree_add === 'fail') fail('fatal: could not create work tree: destination already exists');
+      const dir = argv[argv.length - 2];
+      const absDir = resolve(process.cwd(), dir ?? '.');
+      try {
+        mkdirSync(absDir, { recursive: true });
+        if (integration.verify === 'pass') writeFileSync(join(absDir, VERIFY_MARKER), 'ok');
+      } catch {
+        // best effort; a missing directory surfaces as a baseline failure, which
+        // is a red integration verification rather than a silent pass
+      }
+      process.stdout.write(`Preparing worktree (detached HEAD ${(argv[argv.length - 1] || 'deadbeef').slice(0, 8)})\n`);
+      process.exit(0);
+    }
+    if (action === 'remove') {
+      // `git worktree remove --force <dir>`. `integration.remove: "fail"` models a
+      // checkout the runner could not clean up, which it must say out loud rather
+      // than leave for the next `git worktree add` to discover.
+      const integration = spec.integration ?? {};
+      if (integration.remove === 'fail') fail('fatal: validation failed, cannot remove working tree');
+      const absDir = resolve(process.cwd(), argv[argv.length - 1] ?? '.');
+      try {
+        rmSync(absDir, { recursive: true, force: true });
+      } catch {
+        // best effort; the directory simply stays behind in the temp world
+      }
+      process.exit(0);
+    }
     if (action === 'add') {
       // `git worktree add <dir> -b <branch> <sha>` from uat.mjs's fix loop. On
       // success create the real directory so the runner's baseline can cwd into
@@ -911,12 +1018,21 @@ function main() {
     const diff = (spec.diff ?? {})[issue] ?? (spec.diff ?? {})[String(issue)] ?? {};
     if (diff === 'fail') fail(`fatal: ambiguous argument '${range}': unknown revision or path not in the working tree`, 128);
     const files = Array.isArray(diff.files) ? diff.files : [];
+    // Path MUNGING (Issue #174). Real git does not print the pathname it holds:
+    // unless `-z` is given it C-quotes anything it considers unsafe and separates
+    // the results with newlines. A fake that echoed the scenario's paths verbatim
+    // modelled a git nobody runs, and made the escaping bug invisible here while
+    // it misreported every non-ASCII path in production.
+    const nul = argv.includes('-z');
+    const render = (file) => (nul ? file : cQuotePath(file, gitConfig.get('core.quotepath') !== 'false'));
     // Deterministic per-file line counts: the Nth changed file is +10N / -N, so a
     // fixture can assert an exact "+X / -Y" summary without pinning real content.
     const body = argv.includes('--numstat')
-      ? files.map((file, i) => `${(i + 1) * 10}\t${i + 1}\t${file}`)
-      : files;
-    process.stdout.write(body.length ? `${body.join('\n')}\n` : '');
+      ? files.map((file, i) => `${(i + 1) * 10}\t${i + 1}\t${render(file)}`)
+      : files.map(render);
+    // `-z` TERMINATES each record with NUL (it does not separate them), so the
+    // output of a one-file diff ends in NUL and an empty diff is empty.
+    process.stdout.write(body.length ? `${body.join(nul ? '\0' : '\n')}${nul ? '\0' : '\n'}` : '');
     process.exit(0);
   }
   if (sub === 'push') {
@@ -1006,6 +1122,31 @@ function main() {
       emit({ defaultBranchRef: { name: gh.default_branch ?? 'develop' } });
     }
     emit({ nameWithOwner: gh.name ?? 'Kewton/CommandMate' });
+  }
+
+  // --- gh issue view (dispatch.mjs, Issue #176) ----------------------------
+  //
+  // `gh issue view <n> --repo <owner/repo> --json body`. The dispatch runner reads
+  // the body to transcribe its prohibitions into the task text, so the world this
+  // serves has to be the SAME body the plan was built from — otherwise a fixture
+  // would pin a contract generated from one issue against a plan generated from
+  // another. run_tests.mjs injects `gh.issues` straight from the case's planner
+  // fixture for exactly that reason; nothing here invents a body.
+  //
+  // An issue the scenario knows nothing about FAILS rather than returning an empty
+  // body: "the body is empty" and "nobody could read the body" are different facts
+  // and the runner reports them differently. `gh.issue_view: "fail"` injects the
+  // second one for a known issue (no network, no auth, no `gh`).
+  if (sub === 'issue') {
+    const gh = spec.gh ?? {};
+    if (String(argv[1] ?? '') !== 'view') fail(`fake-cli: unsupported gh issue subcommand "${argv[1] ?? ''}"`);
+    if (gh.issue_view === 'fail') fail('gh: could not read the issue (HTTP 403)');
+    const number = String(argv[2] ?? '');
+    const known = gh.issues ?? {};
+    if (!Object.prototype.hasOwnProperty.call(known, number)) {
+      fail(`gh: no issue ${number} in this scenario (the case's issue fixture is what the fake serves)`);
+    }
+    emit({ body: String(known[number] ?? '') });
   }
 
   // --- gh pull-request lifecycle (merge.mjs) -------------------------------

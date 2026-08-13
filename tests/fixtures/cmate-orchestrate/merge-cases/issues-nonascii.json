@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 300,
+      "title": "docs: add the proposal document",
+      "body": "Write the proposal document for the 2026 submission.\n\n## Deliverables\n- `docs/企画書_都知事杯2026_改訂版.md`\n\n## Acceptance criteria\n- [ ] `docs/企画書_都知事杯2026_改訂版.md` states the schedule\n",
+      "labels": ["docs"]
+    },
+    {
+      "number": 301,
+      "title": "docs: add the release notes",
+      "body": "Write the release notes for the next tag.\n\n## Deliverables\n- `docs/notes.md`\n\n## Acceptance criteria\n- [ ] `docs/notes.md` lists the shipped changes\n",
+      "labels": ["docs"]
+    }
+  ]
+}

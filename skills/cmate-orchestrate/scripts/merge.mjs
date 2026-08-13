@@ -111,6 +111,51 @@ const CI_PENDING_STATES = new Set(['PENDING', 'QUEUED', 'IN_PROGRESS', 'WAITING'
 const UNATTENDED_STAGE = 'C（dispatch + merge + uat）';
 
 // =============================================================================
+// Integration verification — the wave barrier's missing half (Issue #175)
+// =============================================================================
+//
+// A wave's conflict detection compares `suspected_files`, and its guarded merge
+// confirms each PR's own CI. Neither sees the state the merges ADD UP TO. The
+// measured case (Kewton/BorderFreeKidsMap #105 x #106, 2026-08-12): one branch
+// removed a duplicate from a data file, the other added a test that depended on
+// that duplicate existing. File overlap zero, no plan conflict, both PRs' CI
+// green — because both CI runs happened on a base that did not yet contain the
+// sibling. Eight seconds after the second merge the base branch was red, and
+// nobody learned that until the promotion PR's CI ran.
+//
+// `--integration-verify` is the one stage that closes it: after every merge this
+// invocation performed, run the profile baseline ON THE MERGED RESULT. It is
+// opt-in and default OFF, so a run without it is byte-identical to a pre-#175
+// run (fixture m22).
+//
+// Three rules the implementation below is shaped by:
+//
+//   1. WHAT to run comes from the profile, never from this file. No `develop`,
+//      no `npm`: the base branch is `plan.profile.base` and the commands are
+//      `plan.profile.baseline`, the same pair the dispatch runner's fallback
+//      verification re-runs inside a worktree (profile-contract.md section 1).
+//   2. A profile with no baseline is an ERROR, not a skip, and it is raised
+//      BEFORE the first merge (see `integrationBaselineCommands`). Opting in and
+//      being told "verified" by a stage that never ran is the failure mode this
+//      whole issue is about; refusing before anything moves leaves nothing to
+//      undo.
+//   3. The merged state is measured in a THROWAWAY DETACHED CHECKOUT of the
+//      freshly fetched base, never by mutating the invocation's own working
+//      tree. `git worktree add --detach` + `git worktree remove --force` is the
+//      whole of it — no branch, no CommandMate registration, no baseline-as-
+//      acceptance — so this is not the worker-worktree preparation path that
+//      adr-worktree-preparation.md routes through `cmate-worktree-setup`.
+const INTEGRATION_TREE_DIRNAME = 'integration-tree';
+
+// The red verdict, and the two ways the verification can fail to happen at all.
+// `integration_verify_failed` is the one the next wave's dispatch reads
+// (references/merge-contract.md section 5.4): the barrier is not satisfied.
+const INTEGRATION_VERIFY_FAILED_CODE = 'integration_verify_failed';
+const INTEGRATION_VERIFY_UNAVAILABLE_CODE = 'integration_verify_unavailable';
+const INTEGRATION_VERIFY_NOT_RUN_CODE = 'integration_verify_not_run';
+const INTEGRATION_TREE_LEFT_CODE = 'integration_verify_tree_left';
+
+// =============================================================================
 // Redaction (SkillError, the pattern list and redact/redactionsList are shared
 // with the dispatch and uat runners in lib.mjs)
 // =============================================================================
@@ -156,6 +201,15 @@ Options:
                                        criteria. One that does not stops the
                                        phase — nothing is merged, and the target
                                        set is never quietly shrunk instead.
+  --integration-verify   --merge-prs only, default OFF. After every merge this
+                         invocation performed, run the profile baseline on the
+                         MERGED result: fetch the base branch, check it out into
+                         a throwaway detached worktree and run
+                         plan.profile.baseline there. A red result is recorded as
+                         integration_verify_failed and the run is not a success,
+                         so the next wave is not dispatched. Nothing is merged at
+                         all when the profile declares no baseline — an opt-in
+                         verification that cannot run is refused, not skipped.
   --merge-method <m>     merge | squash | rebase for --merge-prs (default ${DEFAULT_MERGE_METHOD}).
   --out <dir>            Where merge artifacts are written
                          (default: <dispatch-dir>/<phase>).
@@ -180,6 +234,7 @@ function parseCli(argv) {
         'merge-prs': { type: 'boolean' },
         approve: { type: 'boolean' },
         unattended: { type: 'boolean' },
+        'integration-verify': { type: 'boolean' },
         'merge-method': { type: 'string' },
         out: { type: 'string' },
         gh: { type: 'string' },
@@ -226,6 +281,20 @@ function resolveInputs(parsed) {
   if (!values.plan) throw new SkillError('invalid_input', '--plan <path> is required', 3);
   if (!values.dispatch) throw new SkillError('invalid_input', '--dispatch <path> is required', 3);
 
+  // `--integration-verify` belongs to the merge phase alone (Issue #175): the
+  // thing it measures is the state the merges add up to, and `--create-prs`
+  // merges nothing. Refused rather than accepted-and-ignored, for the same
+  // reason the stage-B runner refused `--merge-prs --unattended`: an invocation
+  // whose declaration this runner cannot honour must not have it silently
+  // dropped, because the reader of the report cannot tell that it was.
+  if (values['integration-verify'] && phases[0] !== 'merge_prs') {
+    throw new SkillError(
+      'invalid_input',
+      '--integration-verify verifies the state the merges add up to, so it is accepted with --merge-prs only (--create-prs merges nothing)',
+      3,
+    );
+  }
+
   const method = values['merge-method'] ?? DEFAULT_MERGE_METHOD;
   if (!MERGE_METHODS.has(method)) {
     throw new SkillError('invalid_input', `--merge-method must be one of merge|squash|rebase`, 3);
@@ -237,6 +306,7 @@ function resolveInputs(parsed) {
     dispatchPath: values.dispatch,
     approve: Boolean(values.approve),
     unattended: Boolean(values.unattended),
+    integrationVerify: Boolean(values['integration-verify']),
     mergeMethod: method,
     outDir: values.out ?? null,
     gh: values.gh ?? 'gh',
@@ -548,12 +618,20 @@ function inDeclaredScope(scope, path) {
 // `git diff --numstat` is parsed rather than `--shortstat`: the numeric form is
 // machine-readable and locale-independent. A binary file reports `-` for both
 // counts and is counted as a file without inventing line numbers for it.
+//
+// Read with `-z`, like the name list below and for the same reason (Issue #174):
+// only the counts are used today, but a `--numstat` read without `-z` carries
+// MUNGED pathnames, and the next reader to reach for the third column would
+// reintroduce the mismatch this issue was about. `-z` terminates each record with
+// NUL instead of a newline; a rename records `<added>\t<deleted>\t` followed by
+// the two pathnames as their own NUL-terminated records, which have no counts and
+// are therefore skipped by the same `parts.length < 3` guard.
 function parseNumstat(stdout) {
   let files = 0;
   let added = 0;
   let deleted = 0;
   let binary = 0;
-  for (const line of String(stdout).split('\n')) {
+  for (const line of String(stdout).split('\0')) {
     const parts = line.split('\t');
     if (parts.length < 3) continue;
     files += 1;
@@ -579,7 +657,17 @@ function changeEvidence(inputs, plan, issue) {
     return { ok: false, range, reason: 'the plan names no worktree or no safe branch for this issue', files: [], stat: null };
   }
 
-  const names = runCli(inputs.git, ['diff', '--name-only', range], { cwd: worktree });
+  // `-z`, NOT the default newline form (Issue #174). git does not print the
+  // pathname it holds: it C-quotes anything it deems unsafe — every byte >= 0x80
+  // as a three-digit octal escape inside double quotes while `core.quotePath` is
+  // true (git's default), and `"`, `\` and control characters whatever that is
+  // set to. `scope.allow` holds the path as the issue wrote it, so comparing the
+  // two forms made a file that IS in scope read as out of scope, and the body
+  // listed the same file twice under two spellings. `-c core.quotePath=false`
+  // would only cover the non-ASCII half; `-z` turns the munging off outright and
+  // takes the newline out of the record separator, so a path containing one can
+  // no longer be split into two paths that do not exist.
+  const names = runCli(inputs.git, ['diff', '--name-only', '-z', range], { cwd: worktree });
   if (!names.ok) {
     return {
       ok: false,
@@ -592,13 +680,14 @@ function changeEvidence(inputs, plan, issue) {
   // The WHOLE change set, not the part the body has room for: the out-of-scope
   // count is computed from this list, and counting only the first page of it
   // would report a clean branch that is not one. Capping happens at render time.
+  // Not trimmed: with `-z` the record IS the pathname, and a leading or trailing
+  // space in it is part of the name rather than layout to tidy away.
   const files = names.stdout
-    .split('\n')
-    .map((line) => line.trim())
+    .split('\0')
     .filter(Boolean)
-    .map((line) => redact(line));
+    .map((path) => redact(path));
 
-  const numstat = runCli(inputs.git, ['diff', '--numstat', range], { cwd: worktree });
+  const numstat = runCli(inputs.git, ['diff', '--numstat', '-z', range], { cwd: worktree });
   const stat = numstat.ok ? parseNumstat(numstat.stdout) : null;
   return { ok: true, range, reason: '', files, stat };
 }
@@ -612,7 +701,7 @@ function scopeLines(issue, change) {
 
   if (!change.ok) {
     lines.push(
-      `The branch's actual change set could NOT be read (\`git diff --name-only ${change.range ?? '<range>'}\`: ${cell(change.reason)}), so this section cannot show what changed. **This is not evidence that the branch stayed in scope.**`,
+      `The branch's actual change set could NOT be read (\`git diff --name-only -z ${change.range ?? '<range>'}\`: ${cell(change.reason)}), so this section cannot show what changed. **This is not evidence that the branch stayed in scope.**`,
     );
     lines.push('');
     lines.push(`- Declared scope (\`scope.allow\`, ${scope.length} entr${scope.length === 1 ? 'y' : 'ies'}):`);
@@ -627,7 +716,10 @@ function scopeLines(issue, change) {
   const stat = change.stat;
   const total = change.files.length;
 
-  lines.push(`Declared scope (\`scope.allow\`, from the plan's target files) against \`git diff --name-only ${change.range}\`, run in this issue's worktree.`);
+  // The command is quoted WITH `-z`: this table lists pathnames as they are, and
+  // the newline-separated form of the same command prints some of them escaped
+  // (Issue #174). A reviewer who reruns what is written here gets what is here.
+  lines.push(`Declared scope (\`scope.allow\`, from the plan's target files) against \`git diff --name-only -z ${change.range}\`, run in this issue's worktree.`);
   lines.push('');
   if (outOfScope.length === 0) {
     lines.push(`- Out-of-scope changes: **0** — every one of the ${total} changed file(s) is inside the declared scope.`);
@@ -640,7 +732,7 @@ function scopeLines(issue, change) {
   }
   lines.push(
     stat === null
-      ? `- Diff size: **${total} file(s) changed** (line counts unavailable: \`git diff --numstat\` did not answer).`
+      ? `- Diff size: **${total} file(s) changed** (line counts unavailable: \`git diff --numstat -z\` did not answer).`
       : `- Diff size: **${stat.files} file(s) changed, +${stat.added} / -${stat.deleted} line(s)**${stat.binary > 0 ? ` (${stat.binary} binary file(s) counted without line numbers)` : ''}.`,
   );
   lines.push('');
@@ -1149,6 +1241,158 @@ function runMergePrs(inputs, plan, eligible, report) {
 }
 
 // =============================================================================
+// Integration verification (Issue #175)
+// =============================================================================
+
+// The commands the PROFILE declares, cleaned and in the profile's order. Empty
+// means the profile declares no baseline, which under `--integration-verify` is
+// refused before the first merge rather than skipped (rule 2 at the top of this
+// file, and the same reading the dispatch runner's fallback verification takes:
+// "profile has no baseline to verify against" is a fail there too).
+function integrationBaselineCommands(plan) {
+  const declared = plan.profile && Array.isArray(plan.profile.baseline) ? plan.profile.baseline : [];
+  return declared
+    .filter((command) => typeof command === 'string' && command.trim() !== '')
+    .map((command) => command.trim());
+}
+
+function newIntegrationVerify(plan) {
+  return {
+    requested: true,
+    ran: false,
+    outcome: 'not_run',
+    base: plan.profile.base,
+    base_sha: null,
+    merged_issues: [],
+    // Transcribed through redact() like every other value this report carries
+    // from a document the runner did not write.
+    commands: integrationBaselineCommands(plan).map((command) => redact(command)),
+    failed_command: null,
+    exit_code: null,
+    detail: 'not run: the invocation had not reached the merge phase',
+  };
+}
+
+// The verification could not be performed at all. It is NOT a pass: the merges
+// already landed, so a run that cannot measure the result must not report one.
+function integrationUnavailable(report, detail) {
+  report.integration_verify.outcome = 'not_run';
+  report.integration_verify.detail = detail;
+  halt(report, 'partial', 'merge_failed', INTEGRATION_VERIFY_UNAVAILABLE_CODE, detail);
+}
+
+// Run after the merge loop, over whatever this invocation actually merged.
+//
+// The base branch is re-read from the remote (`git fetch origin <branch>`) and
+// materialised as `FETCH_HEAD` rather than as the profile's base ref: FETCH_HEAD
+// is exactly what origin holds for that branch right now — after the merges this
+// invocation just made — whereas a local `develop` or a stale `origin/develop`
+// is the state whose green-ness every PR's own CI already claimed.
+function runIntegrationVerify(inputs, plan, outDir, report) {
+  const iv = report.integration_verify;
+  const merged = report.targets.filter((target) => target.merge_attempted && target.merged).map((target) => target.issue);
+  iv.merged_issues = merged;
+
+  if (merged.length === 0) {
+    // A preview, an already-merged set, or a phase that stopped before its first
+    // merge: the base branch did not move, so there is no merged state to judge.
+    // Recorded as a limitation because nothing about this run is unsafe — but
+    // recorded, because `outcome: not_run` must never be read as green.
+    iv.detail = 'not run: this invocation merged no PR, so the base branch did not move and there is no merged state to judge';
+    report.limitations.push({
+      code: INTEGRATION_VERIFY_NOT_RUN_CODE,
+      detail: '--integration-verify was requested but this invocation merged no PR (preview, nothing eligible, or the phase stopped before the first merge), '
+        + 'so the integration branch was not verified. This is "not measured", not "green"',
+    });
+    return;
+  }
+
+  const baseBranch = baseBranchName(plan.profile.base);
+  const fetched = runCli(inputs.git, ['fetch', 'origin', baseBranch]);
+  if (!fetched.ok) {
+    integrationUnavailable(
+      report,
+      `the merged state of ${baseBranch} could not be fetched (${excerpt(fetched.stderr || fetched.stdout || 'git fetch failed', 200) || 'git fetch failed'}), `
+        + `so PR(s) for ${merged.map((n) => `#${n}`).join(', ')} were merged and the result was NOT verified`,
+    );
+    return;
+  }
+
+  const head = runCli(inputs.git, ['rev-parse', '--verify', 'FETCH_HEAD']);
+  if (!head.ok) {
+    integrationUnavailable(
+      report,
+      `the fetched tip of ${baseBranch} could not be resolved (${excerpt(head.stderr || 'git rev-parse --verify FETCH_HEAD failed', 200) || 'git rev-parse --verify FETCH_HEAD failed'}), `
+        + 'so the merged state was NOT verified',
+    );
+    return;
+  }
+  iv.base_sha = head.stdout.trim().slice(0, 7) || null;
+
+  // A throwaway detached checkout, inside the run's own output directory. The
+  // invocation's working tree is never touched: whatever branch the operator (or
+  // the CI job) has checked out is theirs, and a verification that moved it
+  // would be a mutation nobody approved.
+  const treeDir = join(outDir, INTEGRATION_TREE_DIRNAME);
+  const added = runCli(inputs.git, ['worktree', 'add', '--detach', treeDir, 'FETCH_HEAD']);
+  if (!added.ok) {
+    integrationUnavailable(
+      report,
+      `the merged ${baseBranch} could not be checked out for verification (${excerpt(added.stderr || added.stdout || 'git worktree add failed', 200) || 'git worktree add failed'}), `
+        + 'so the merged state was NOT verified',
+    );
+    return;
+  }
+
+  iv.ran = true;
+  const commands = integrationBaselineCommands(plan);
+  let failure = null;
+  for (const command of commands) {
+    const argv = command.split(/\s+/).filter(Boolean);
+    if (argv.length === 0) continue;
+    const result = runCli(argv[0], argv.slice(1), { cwd: treeDir });
+    if (!result.ok) {
+      failure = { command, status: result.status, note: excerpt(result.stderr || result.stdout || 'baseline step failed', 200) };
+      break;
+    }
+  }
+
+  // Removal is best effort and never changes the verdict, but a checkout left
+  // behind is said out loud: a git worktree nobody knows about is a surprise the
+  // next `git worktree add` reports instead of this run.
+  const removed = runCli(inputs.git, ['worktree', 'remove', '--force', treeDir]);
+  if (!removed.ok) {
+    report.limitations.push({
+      code: INTEGRATION_TREE_LEFT_CODE,
+      detail: `the throwaway checkout used for the integration verification could not be removed (${excerpt(removed.stderr || removed.stdout || 'git worktree remove failed', 200) || 'git worktree remove failed'}); `
+        + `it is the ${INTEGRATION_TREE_DIRNAME} directory under this run's merge output — remove it with \`git worktree remove --force\``,
+    });
+  }
+
+  const where = `${baseBranch}${iv.base_sha === null ? '' : ` at ${iv.base_sha}`}`;
+  if (failure === null) {
+    iv.outcome = 'pass';
+    iv.detail = `every one of the ${commands.length} profile baseline command(s) exited 0 on the merged ${where} `
+      + `(the state after merging ${merged.map((n) => `#${n}`).join(', ')})`;
+    return;
+  }
+
+  iv.outcome = 'fail';
+  iv.failed_command = redact(failure.command);
+  iv.exit_code = Number.isInteger(failure.status) ? failure.status : null;
+  iv.detail = `the profile baseline is RED on the merged ${where}: \`${redact(failure.command)}\` exited `
+    + `${iv.exit_code === null ? 'non-zero' : iv.exit_code} (${failure.note})`;
+  halt(
+    report,
+    'partial',
+    'merge_failed',
+    INTEGRATION_VERIFY_FAILED_CODE,
+    `${iv.detail}. The PR(s) for ${merged.map((n) => `#${n}`).join(', ')} are already merged and each one's own CI was green on a base that did not yet contain the others, `
+      + 'so this is the semantic conflict their file sets could not show. Do not dispatch the next wave on this base',
+  );
+}
+
+// =============================================================================
 // Report assembly
 // =============================================================================
 
@@ -1214,6 +1458,12 @@ function baseReport(inputs, plan, eligible, outDir) {
     eligible_issues: eligible.slice(),
     preflight: [],
     targets: [],
+    // Present ONLY when `--integration-verify` was passed (Issue #175). A report
+    // written without the flag keeps the exact key set — and therefore the exact
+    // bytes — it had before this field existed, which is what makes the opt-in
+    // an opt-in rather than a change of output for everybody (fixture m22).
+    // Absent means "this run did not verify the merged state", never "green".
+    ...(inputs.integrationVerify ? { integration_verify: newIntegrationVerify(plan) } : {}),
     blocking_reasons: [],
     limitations: [],
     redactions: [],
@@ -1302,18 +1552,53 @@ function renderSummary(report) {
     lines.push('- job 定義側で `GH_TOKEN`（または `GH_ENTERPRISE_TOKEN`）と `GIT_TERMINAL_PROMPT=0` を置くこと。**`git push` の資格情報プロンプトだけは「止まる」ではなく無言で待つに化ける**（SKILL.md 第3.3節）。');
     lines.push('');
   }
+  // The integration verification section (Issue #175). Printed only when the
+  // operator opted in, so a run without `--integration-verify` reads exactly as
+  // it did before the flag existed.
+  const integration = report.integration_verify;
+  if (integration) {
+    const verdict = integration.outcome === 'pass' ? 'green' : integration.outcome === 'fail' ? '**RED**' : '未実行';
+    lines.push('## 統合検証（--integration-verify）');
+    lines.push(`- 合流後の ${integration.base}${integration.base_sha === null ? '' : `（${integration.base_sha}）`}で profile baseline を実行: ${verdict}。`);
+    lines.push(`- 対象（この invocation が merge した PR の Issue）: ${integration.merged_issues.length === 0 ? 'なし' : integration.merged_issues.map((n) => `#${n}`).join(', ')}`);
+    lines.push(`- 詳細: ${integration.detail}`);
+    lines.push('- **wave barrier は「全 worker completed + verification pass」だけでは満たされない。** 合流後の統合ブランチが green であることまでが barrier である。');
+    lines.push('');
+  }
   lines.push('## 未解決と next action');
   const evidenceBlocked = report.blocking_reasons.some((r) => r.code === EVIDENCE_UNAVAILABLE_CODE);
   const acceptanceBlocked = report.blocking_reasons.some(
     (r) => r.code === ACCEPTANCE_GATES_REQUIRED_CODE || r.code === NO_ACCEPTANCE_CRITERIA_CODE,
   );
+  // The integration stop (Issue #175) shares `merge_failed` with the conflict /
+  // branch-protection stop, but nothing about a `gh pr merge` failed there: the
+  // merges succeeded and their SUM is red, so the generic next action ("resolve
+  // the conflict and re-run") would send the operator after a conflict that does
+  // not exist — and re-running the merge phase cannot undo a landed merge.
+  const integrationFailed = report.blocking_reasons.some((r) => r.code === INTEGRATION_VERIFY_FAILED_CODE);
+  const integrationUnavailableStop = report.blocking_reasons.some((r) => r.code === INTEGRATION_VERIFY_UNAVAILABLE_CODE);
+  // The two unavailable stops need opposite instructions, and they are told
+  // apart by WHAT was missing rather than by the stop_reason they landed on: a
+  // profile with no baseline is refused before the first merge, everything else
+  // is a probe that failed after the merges had landed.
+  const integrationUndeclared = integrationUnavailableStop && (report.integration_verify?.commands.length ?? 0) === 0;
   if (report.blocking_reasons.length === 0 && report.limitations.length === 0) {
     lines.push(report.approved ? '- なし。全 eligible を処理した。' : '- なし。preview のみ（mutation なし）。');
   } else {
     for (const r of report.blocking_reasons) lines.push(`- blocking: ${r.code} — ${r.detail}`);
     for (const l of report.limitations) lines.push(`- limitation: ${l.code} — ${l.detail}`);
     if (report.stop_reason === 'ci_failed' || report.stop_reason === 'ci_pending') lines.push('- next: CI を green にしてから再実行する（owner: operator）。無条件 merge はしない。');
-    if (report.stop_reason === 'merge_failed') lines.push('- next: conflict/branch protection を解消し、再実行する（owner: operator）。');
+    if (report.stop_reason === 'merge_failed' && !integrationFailed && !integrationUnavailableStop) lines.push('- next: conflict/branch protection を解消し、再実行する（owner: operator）。');
+    if (integrationFailed) {
+      lines.push('- next: **合流後の統合ブランチが赤い。既に merge 済みなので、この phase の再実行では戻らない。** 統合ブランチを green にする（前進修正、または revert）まで **次の wave を dispatch しない**（owner: operator/human）。');
+      lines.push(`- next: ${INTEGRATION_VERIFY_FAILED_CODE} は「file 重なりに出ない意味的衝突」の徴候である。同 wave の Issue 同士が同じデータ・同じ前提を別方向へ動かしていないかを読む（owner: human）。`);
+    }
+    if (integrationUndeclared) {
+      lines.push('- next: **profile に `baseline` を宣言してから再実行する（owner: operator）。1件も merge していないので、直して同じコマンドを回せばよい。** 統合検証をしない運転に戻すなら `--integration-verify` を外す（#175 以前の挙動）。');
+    }
+    if (integrationUnavailableStop && !integrationUndeclared) {
+      lines.push('- next: **merge は済んでいるのに、その結果を測れていない。** `git fetch` / base の解決 / 検証用 checkout の失敗要因を直し、統合ブランチで profile baseline を手で1回通してから次の wave へ進む（owner: operator）。');
+    }
     // The evidence stop shares `pr_create_failed`, but nothing about push or gh
     // failed there, so it gets its own next action instead of the generic one.
     if (evidenceBlocked) lines.push('- next: 対象 Issue の worktree を復旧してから再実行する（`git diff <base>...<branch>` が答える状態にする）。人間が読む運転に戻すなら `--unattended` を外せば従来どおり limitation として続行する（owner: operator）。');
@@ -1324,7 +1609,7 @@ function renderSummary(report) {
     if (acceptanceBlocked) {
       lines.push('- next: 無人 merge の対象 Issue に受入ゲートブロック（```acceptance-gates）／受入条件が無い。**Issue 本文に書いて re-plan する。** 該当 Issue を除外して回す道は用意していない（対象集合を黙って縮めないため）。人間が読む運転に戻すなら `--unattended` を外す（owner: human）。');
     }
-    if (report.stop_reason === 'preflight_failed' && !acceptanceBlocked) lines.push('- next: gh 認証・repo 到達性・base 解決を復旧し、再実行する（owner: operator）。');
+    if (report.stop_reason === 'preflight_failed' && !acceptanceBlocked && !integrationUndeclared) lines.push('- next: gh 認証・repo 到達性・base 解決を復旧し、再実行する（owner: operator）。');
   }
   return lines.join('\n');
 }
@@ -1351,6 +1636,13 @@ function runMerge(inputs, plan, dispatch, outDir) {
 
   if (eligible.length === 0) {
     report.limitations.push({ code: 'no_eligible_issues', detail: 'the dispatch report has no completed-and-verified issue; nothing to do' });
+    if (inputs.integrationVerify) {
+      report.integration_verify.detail = 'not run: no issue was eligible, so nothing was merged and the base branch did not move';
+      report.limitations.push({
+        code: INTEGRATION_VERIFY_NOT_RUN_CODE,
+        detail: '--integration-verify was requested but nothing was eligible to merge, so the integration branch was not verified. This is "not measured", not "green"',
+      });
+    }
     finalize(report);
     return report;
   }
@@ -1371,11 +1663,33 @@ function runMerge(inputs, plan, dispatch, outDir) {
     }
   }
 
+  // Issue #175, and BEFORE the first merge: an opt-in verification the profile
+  // cannot supply the commands for is refused, not skipped. Skipping would let a
+  // report say the phase completed while the one stage that would have caught a
+  // semantic conflict never ran — the exact shape of the failure this flag
+  // exists for. Refusing here leaves the world untouched, so the operator fills
+  // in `baseline` and re-runs with nothing to undo.
+  if (inputs.integrationVerify && integrationBaselineCommands(plan).length === 0) {
+    const detail = `--integration-verify was requested, but profile "${String(plan.profile.id ?? 'unknown')}" declares no baseline command, `
+      + 'so there is nothing to run on the merged branch. Nothing was merged: an opt-in verification that cannot run is refused rather than skipped '
+      + '(a skipped verification would report a completed merge phase whose result nobody measured). '
+      + 'Declare `baseline` in the profile and re-run, or drop --integration-verify to accept the pre-#175 behaviour';
+    report.integration_verify.detail = detail;
+    halt(report, 'failure', 'preflight_failed', INTEGRATION_VERIFY_UNAVAILABLE_CODE, detail);
+    finalize(report);
+    return report;
+  }
+
   if (inputs.phase === 'create_prs') {
     runCreatePrs(inputs, plan, dispatch, eligible, outDir, report);
   } else {
     runMergePrs(inputs, plan, eligible, report);
   }
+
+  // The wave barrier's second half (Issue #175): every merge this invocation
+  // performed has landed, so the state they add up to is measured now — after
+  // the loop, once per invocation, never per PR.
+  if (inputs.integrationVerify) runIntegrationVerify(inputs, plan, outDir, report);
 
   finalize(report);
   return report;

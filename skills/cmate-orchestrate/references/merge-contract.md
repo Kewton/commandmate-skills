@@ -40,6 +40,7 @@ merge.mjs --plan <plan.json> --dispatch <dispatch-report.json> (--create-prs | -
 | `--create-prs` / `--merge-prs` | どちらか1つ必須 | なし | 有効化する mutating phase |
 | `--approve` | 任意 | **off** | 明示承認。無ければ mutation しない preview |
 | `--unattended` | 任意 | **off** | この invocation に人間は居ない、という**入力の宣言**（5.3節）。**`--create-prs` でのみ受理**する。`--merge-prs` との併用は `invalid_input`（段階 C 未実装） |
+| `--integration-verify` | 任意 | **off** | 合流後の統合ブランチを検証する（5.4節）。**`--merge-prs` でのみ受理**する。`--create-prs` との併用は `invalid_input`（merge しない phase には合流後が無い） |
 | `--merge-method <m>` | 任意 | `squash` | `merge_prs` の merge 方式（`merge`/`squash`/`rebase`） |
 | `--out <dir>` | 任意 | `<dispatch-dir>/<phase>` | 出力先。既存なら `out_exists` で拒否 |
 | `--gh <path>` | 任意 | `gh` | PR 作成・CI 確認・merge に使う GitHub CLI |
@@ -56,6 +57,12 @@ worker 完了だけでは対象にしない。verification が pass していな
 
 eligible が空の場合は `no_eligible_issues`（limitation）を載せて no-op success とし、mutation
 はしない。
+
+**dispatch の wave barrier は、この runner まで含めて完成する**（[#175](https://github.com/Kewton/commandmate-skills/issues/175)）。
+「全 worker completed かつ verification pass」は **1本ずつの branch について**の条件であって、
+**それらを合流させた統合ブランチについては何も言っていない**。`--integration-verify`（5.4節）を
+渡した run では、barrier は「合流後の統合ブランチも green」まで含む。渡さない run では
+従来どおりの意味のままである（既定 off）。
 
 ## 4. 2つの gate（承認 と CI pass）
 
@@ -83,13 +90,18 @@ merge runner は次を呼ぶ。各呼び出しは失敗で非0を返し、握り
 | preflight | `gh repo view <repo> --json nameWithOwner` | `{ "nameWithOwner": "…" }` | repo アクセス |
 | preflight | `git rev-parse --verify <base>` | exit 0 | base 解決 |
 | create_prs | `gh repo view <repo> --json defaultBranchRef` | `{ "defaultBranchRef": { "name": "…" } }` | Issue 自動クローズの到達性（invocation あたり1回） |
-| create_prs | `git diff --name-only <base>...<branch>`（cwd = その Issue の worktree） | 変更 file の一覧 | PR 本文の「実変更」（読めなければ本文に「読めなかった」と書く） |
-| create_prs | `git diff --numstat <base>...<branch>`（cwd = 同上） | `<added>\t<deleted>\t<path>` | PR 本文の diff 規模 |
+| create_prs | `git diff --name-only -z <base>...<branch>`（cwd = その Issue の worktree） | NUL 終端の変更 file 一覧 | PR 本文の「実変更」（読めなければ本文に「読めなかった」と書く） |
+| create_prs | `git diff --numstat -z <base>...<branch>`（cwd = 同上） | `<added>\t<deleted>\t<path>` の NUL 終端レコード | PR 本文の diff 規模 |
 | create_prs | `git push --set-upstream origin <branch>` | exit 0 | verification pass branch を push |
 | create_prs | `gh pr create --repo R --base B --head <branch> --title T --body-file F` | PR URL を stdout | PR 作成 |
 | merge_prs | `gh pr view <branch> --repo R --json number,url,state` | `{ "number", "url", "state" }` | PR 発見 |
 | merge_prs | `gh pr checks <number> --repo R --json name,state` | `[{ "name", "state" }]` | CI 確認 |
 | merge_prs | `gh pr merge <number> --repo R --<method>` | exit 0 | guarded merge |
+| merge_prs（`--integration-verify` のみ） | `git fetch origin <base-branch>` | exit 0 | 合流後の base を remote から読み直す（5.4節） |
+| merge_prs（同上） | `git rev-parse --verify FETCH_HEAD` | 合流後の tip の SHA | 検証対象の同定（短縮 SHA を report に載せる） |
+| merge_prs（同上） | `git worktree add --detach <out>/integration-tree FETCH_HEAD` | exit 0 | 使い捨ての合流後 checkout |
+| merge_prs（同上） | profile の `baseline` の各 command（cwd = 上の checkout） | すべて exit 0 なら green | 統合検証そのもの。**runner は command を1つも持たない** |
+| merge_prs（同上） | `git worktree remove --force <out>/integration-tree` | exit 0 | 後始末（失敗しても裁定は変えず、`integration_verify_tree_left` に残す） |
 
 規則:
 
@@ -100,6 +112,13 @@ merge runner は次を呼ぶ。各呼び出しは失敗で非0を返し、握り
   （`PENDING`/`QUEUED`/`IN_PROGRESS`/…）・それ以外（failure 扱い）に分け、
   **1件以上 かつ 全て pass** のときだけ green とする。check が0件なら green にしない。
 - branch 名は safe-ref 検査（英数・`._/-` のみ、`..` 無し、先頭 `/`・`-` 不可）を通す。
+- `git diff` は **必ず `-z`** で読む（[#174](https://github.com/Kewton/commandmate-skills/issues/174)）。
+  既定の改行区切りでは git が path を C クォートして返す（`core.quotePath` が既定 true なので
+  非ASCII バイトは8進エスケープ、`"`・`\`・制御文字はその設定に関係なくクォート）ため、
+  plan の `scope.allow`（Issue が書いたままの UTF-8）と突き合わせると**同じ file が一致しない**。
+  `-c core.quotePath=false` は非ASCII しか解かない。`-z` は munge を止め、区切りも NUL になるので
+  改行を含む path が2件に割れることも無い。PR 本文が引用する command 行も `-z` 付きで書く
+  （読み手が同じ command を再実行して同じ path を得られるようにするため）。
 
 ## 5.1 Issue 自動クローズの到達性（`Resolves #n` の限界）
 
@@ -132,8 +151,8 @@ exit code を一次ソースとし、verification pass だけを merge 対象に
 | verdict | `verification.outcome`。`ran: false` なら「検証は走っていない」と明示する | dispatch report の当該 worker（同じ Issue が複数 wave にあれば**最後**の記録） |
 | Gates 表 | gate 名 / 合否 / exit code（`gate <id>: <status> (exit n)` 形の check 行から拾える場合。無ければ `—`） | `verification.gates` + `verification.checks` |
 | Checks 表 | 記録された check 行そのまま / そこに書かれた exit code | `verification.checks` |
-| 宣言 scope vs 実変更 | `scope.allow`（plan の `suspected_files`）と実変更 file の対比表、**scope 外変更の件数** | plan + `git diff --name-only <base>...<branch>`（当該 worktree で実行） |
-| diff 規模 | 変更 file 数・追加/削除行数 の1行 | `git diff --numstat`（同上） |
+| 宣言 scope vs 実変更 | `scope.allow`（plan の `suspected_files`）と実変更 file の対比表、**scope 外変更の件数** | plan + `git diff --name-only -z <base>...<branch>`（当該 worktree で実行） |
+| diff 規模 | 変更 file 数・追加/削除行数 の1行 | `git diff --numstat -z`（同上） |
 
 規則:
 
@@ -192,6 +211,96 @@ mutation の権限を与えるフラグではない。含意するのは締め�
 経路である。**runner はこれを検査しない**（別プロセスの環境を runner は保証できない。
 第4節の monitor と同じ理由）。
 
+## 5.4 合流後の統合ブランチ検証（`--integration-verify`。既定 off。`--merge-prs` のみ）
+
+[#175](https://github.com/Kewton/commandmate-skills/issues/175) である。**wave barrier の
+意味を「全 worker completed + verification pass」から「合流後の統合ブランチも green」へ
+拡張する**のがこの節であり、拡張は opt-in で入る（既定 off、フラグ無しの挙動は #175 以前と
+**byte 単位で同一**。fixture `m22-integration-verify-absent` が pre-#175 の runner が書いた
+golden と byte 比較して固定している）。
+
+### なぜ要るか（実測）
+
+wave の衝突検出が見るのは `suspected_files` の重なりだけである。**片方がデータを直し、
+もう片方がそのデータの性質に依存する検査を書く**類の衝突は file が重ならないので
+「衝突なし」として同一 wave に入る。そして guarded merge が確認するのは **PR 個別の CI**
+であり、その CI は**兄弟 PR が merge される前の base** で走っている。結果として
+**合流後の状態は誰も検証していない**。
+
+実測（2026-08-12、Kewton/BorderFreeKidsMap #105 × #106）: 一方が `facilities.json` の重複を
+除去し、他方が「同じ素材名が2回出るデータが存在する」ことに依存する空振り検査を test に
+足した。file 重なり 0、plan の file conflict にも出ず、PR 個別 CI は両方 green（8秒差で merge）。
+develop に入った直後から `npm run test:unit` が赤で、**発覚は develop → stg の promotion PR の CI**
+だった。
+
+### 何を、どこで、いつ実行するか
+
+| 論点 | 規定 |
+|---|---|
+| 何を | **profile の `baseline`**（[profile-contract.md](./profile-contract.md) 第1節）。dispatch の fallback 検証が worktree の中で再実行するのと**同じ配列**である。**`npm` も `develop` も runner は1つも持たない** —— 規約の出どころは profile だけ、という設計原則（同第1節・ADR [#1447](https://github.com/Kewton/CommandMate/issues/1447)）をここでも守る |
+| どこで | **使い捨ての detached checkout**。`git fetch origin <base-branch>` で remote を読み直し、`FETCH_HEAD`（＝ **今この invocation が merge し終えた後の** base の tip）を `git worktree add --detach <out>/integration-tree` で取り出し、その中で baseline を回して `git worktree remove --force` で畳む。**invocation の作業ツリーには一切触れない**（operator が checkout している branch は operator のものである）。ここで作るのは branch を持たず CommandMate にも登録しない使い捨てなので、[adr-worktree-preparation.md](./adr-worktree-preparation.md) が `cmate-worktree-setup` に委ねている **worker 用 worktree の準備段ではない** |
+| なぜ `FETCH_HEAD` か | ローカルの `develop` も、fetch 前の `origin/develop` も、**各 PR の CI が既に green だと主張した状態**である。合流後を測るには remote が今持っている tip でなければならない |
+| いつ | merge ループの**後**に**1回だけ**（PR ごとではない）。対象は **この invocation が実際に merge した PR** の集合（`integration_verify.merged_issues`）。途中で止まった run でも、1件でも merge していれば実行する —— 止まったことと、既に入った分が green かは別の問いだからである |
+| 走らない場合 | この invocation が1件も merge していないとき（preview・eligible 無し・最初の merge の前に停止）。`outcome: not_run` と limitation `integration_verify_not_run` を残す。**「測っていない」であって「green」ではない** |
+| `--approve` との関係 | 含意しない。承認が無ければ merge が無く、merge が無ければ検証する合流後も無い（上の行に落ちる） |
+| `--unattended` との関係 | **独立である。** `--unattended`（5.3節）はこのフラグを含意せず、このフラグも `--unattended` を含意しない。段階 C が `--merge-prs` に含意する締め付けは**受入ゲートブロックと受入条件の1つだけ**であり、後から品目を足して段階 B / C の意味を変えることはしない（5.3節「phase をまたがないこと」と同じ規律）。無人で合流後まで見たい CI は**両方書く** |
+
+### profile に baseline が無いとき —— **error（skip ではない）**
+
+`--integration-verify` を渡したのに profile が `baseline` を1つも宣言していない場合、
+**最初の merge の前に `failure` / exit 1 / `stop_reason: preflight_failed` /
+`blocking_reasons[]` に `integration_verify_unavailable` で拒否する。1件も merge しない。**
+
+- skip にすると、**opt-in した検証が走らないまま「merge phase 完了」と報告される**。それは
+  この Issue が消しに来た事象そのものである（誰も合流後を見ていないのに緑に見える）。
+- 同じ読みは既に2箇所にある: dispatch の fallback 検証は baseline が空なら
+  `outcome: fail`（「検証すべき gate が無いから pass」に化けさせない）、profile-init が
+  埋められない baseline に置く雛形は **exit 0 しない command** である
+  （profile-contract.md 第7.2節）。**埋め忘れた baseline は fail-closed でなければならない。**
+- **merge の前**に拒否するので世界は動いていない。operator は profile に `baseline` を書いて
+  同じコマンドを再実行すればよく、取り消すものは何も無い。
+
+### code と、停止が次 wave へ伝わる経路
+
+| code | どこに | いつ | status / stop_reason |
+|---|---|---|---|
+| `integration_verify_failed` | `blocking_reasons[]` | 合流後の baseline が赤 | `partial` / `merge_failed`（exit 7） |
+| `integration_verify_unavailable` | `blocking_reasons[]` | 検証を実行できない（baseline 未宣言 ／ fetch・rev-parse・checkout の失敗） | baseline 未宣言は `failure` / `preflight_failed`（exit 1、merge 前）。merge 後の probe 失敗は `partial` / `merge_failed`（exit 7） |
+| `integration_verify_not_run` | `limitations[]` | 1件も merge していないので検証対象が無い | 変えない |
+| `integration_verify_tree_left` | `limitations[]` | 使い捨て checkout を畳めなかった | 変えない（裁定は baseline の結果のまま） |
+
+**次 wave の dispatch が読むのは `merge-report.json` の `integration_verify.outcome` である。**
+
+- `"pass"` —— 合流後の統合ブランチが green。**barrier のこの半分は満たされた。**
+- `"fail"` —— 赤。**次 wave を dispatch しない。**（`blocking_reasons[]` に
+  `integration_verify_failed` が、`status` に `partial` が同じ事実を運ぶ。3つは同時に立つので、
+  どれを読んでも同じ結論になる）
+- `"not_run"` —— **測っていない。green ではない。** barrier は満たされていないので進まない。
+- **field ごと無い** —— その run は `--integration-verify` を渡していない。**「検証して green だった」
+  ではなく「検証していない」である。** 既定 off なのでこれが従来どおりの run であり、
+  barrier を旧来の意味（全 worker completed + verification pass）で運用している。
+
+**`outcome` は既存の判定を置き換えるのではなく、条件を1つ足す。** 進んでよいのは
+**`status: "success"` かつ `integration_verify.outcome: "pass"`** のときだけである
+（この2つは独立している —— 途中で止まった phase でも、既に merge した分の合流後が green であれば
+`pass` は立つ。それは「入った分は健全である」であって「wave を配り切った」ではない）。
+
+**この Issue では dispatch runner を1行も変えていない**（`orchestrate.mjs` / `dispatch.mjs` は
+別 Issue が同時に触っているため）。受け口の実装は
+[#183](https://github.com/Kewton/commandmate-skills/issues/183) が拾う。ここで決めてあるのは
+**report 側の field 設計**であり、dispatch はそれを読むだけでよい。
+
+### 変えていないもの
+
+- `merge_schema_version` は **1 のまま**。`stop_reason` にも target `outcome` にも
+  `preflight[].code` にも **値を1つも足していない**（第6節・第10節）。
+- 足したのは **optional な field `integration_verify` 1つだけ**で、それも
+  `--integration-verify` を渡した run にしか現れない。渡さない run の report は
+  **key 集合も bytes も #175 以前と同一**である。
+- merge queue 方式（base 更新 → CI 再走 → merge の直列化）は**実装しない**。Issue 本文が
+  「まずは合流後検証の1段で十分」と裁定している。合流後検証で赤を捕まえられない事象が
+  実運用で繰り返し出たときに、その事例とともに再検討する。
+
 ## 6. 停止と status / stop_reason / exit
 
 failure・blocked は途中で **停止** し、`blocking_reasons` と該当 target に記録する。停止後の
@@ -215,6 +324,28 @@ eligible は outcome `skipped` として残し、対象集合を隠さない。
 （dispatch の `wall_clock_budget_exhausted` と同じ形）。**新しい値は足さない。**
 `preflight[]` の `code` は schema の閉じた enum なので、この検査は**そこには載らない**
 （version を上げないための帰結。ADR 第11節）。
+
+`--integration-verify`（5.4節）も**新しい値を足さない**。写像は次のとおりである。
+
+| 何が起きたか | status / stop_reason | 名指しする code |
+|---|---|---|
+| 合流後の baseline が赤 | `partial` / **`merge_failed`** | `integration_verify_failed` |
+| merge 済みだが検証を実行できなかった | `partial` / **`merge_failed`** | `integration_verify_unavailable` |
+| baseline 未宣言で merge の前に拒否 | `failure` / **`preflight_failed`** | `integration_verify_unavailable` |
+
+**`ci_failed` / `ci_pending` は使わない。** この report の2値は「**その PR の CI が green で
+なかったので merge しなかった**」を意味しており、合流後の赤は **merge が成功した後**の話である。
+そこへ流すと、report の中で最も安全に関わる事実（何が既に base に入ったか）が**逆に読める**。
+`merge_failed` は「merge 段で悪い結果になった」であり、そこに寄せたうえで
+**何が起きたかは `blocking_reasons[]` の code が名指しする**（dispatch の
+`wall_clock_budget_exhausted` と同じ形）。summary の next action も、conflict/branch protection
+の行ではなく統合検証専用の行を出す（「既に merge 済みなので phase の再実行では戻らない」）。
+
+**`stop_reason` に `integration_verify_failed` を足さなかったのは意図である。** 足すには
+第10節どおり `merge_schema_version` を上げる必要があり、上げると `status.mjs`
+（`SUPPORTED_MERGE_SCHEMA_VERSION = 1` を pin している。かつ #175 の宣言 scope の外である）が
+**フラグを使っていない run の report まで含めて全部読めなくなる**。version を上げられる Issue で
+まとめて見直す。
 
 ## 7. security（redaction）
 
@@ -250,3 +381,20 @@ UAT 修正ループ（[#1456](https://github.com/Kewton/CommandMate/issues/1456)
 
 - field の追加・削除・意味の変更、enum への値追加 → `merge_schema_version` を上げる。
 - 文言・見出しの調整のみ → Skill の `version` だけを上げる。
+
+**例外は1つだけあり、それが `integration_verify`（5.4節・[#175](https://github.com/Kewton/commandmate-skills/issues/175)）である。**
+version を据え置いたまま **optional な field を1つ**足した。判断の材料は次の3つである。
+
+1. **この field は opt-in の run にしか現れない。** `--integration-verify` を渡さない run の
+   report は key 集合も bytes も従来と同一なので、既存の読み手が出会う文書は1 byte も変わらない
+   （fixture で byte 固定してある）。
+2. **上げると壊れる読み手が居て、それをこの Issue では直せない。** `status.mjs` は
+   `merge_schema_version === 1` を pin しており、`scripts/status.mjs` は #175 の宣言 scope の外である。
+   2 に上げると **フラグを使っていない run の report まで「読取不能」になる** —— optional field を
+   足すより明確に悪い。
+3. **enum には1つも足していない。** `stop_reason` / target `outcome` / `preflight[].code` は
+   閉じたままである（第6節）。
+
+version 規則を緩めたのではなく、**この1件について理由を書いて据え置いた**。次に
+`merge_schema_version` を上げる変更（`status.mjs` も一緒に直せる Issue）で、この field の扱いを
+required にするかを含めて見直す。

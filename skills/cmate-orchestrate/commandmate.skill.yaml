@@ -107,8 +107,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: aa316ac7d13278dcd885e1f6d6925e8a7f1aa7f489b578c48b1adb57e63f808c
-    size: 49294
+    sha256: d37d2927f5ce29f03fb9917457d7b8afbc6a31e87629b14eaab54cb2b595601b
+    size: 54875
     kind: skill_md
     executable: false
     script: false
@@ -155,20 +155,20 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: 0f3d7d3d5bac97c91d8a2aa5a889231a267decb727a9ff45a3722653d01bf8a6
-    size: 37206
+    sha256: 5011ed8d5878fbff1e7c7a388234aa93162d36a63534cc3779ff94975d888816
+    size: 42716
     kind: instruction
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: 2dbb9cb3b00df17ee19500fc4c35731447be36fb8866ebebb325f1402060c1b2
-    size: 104587
+    sha256: f5e3c2de50135cb9d5d88b9cbf82a43aca1ecc0a5f3d33d4d0e5d1135faef230
+    size: 112202
     kind: instruction
     executable: false
     script: false
   - path: references/merge-contract.md
-    sha256: 9b553a878bb416c5e1c8b1efb81150ed6fdcfea2ba62da61a1b50494a52ae494
-    size: 20546
+    sha256: 9b0cbd5530dfaed5c534dfe4d5382276e853c18b7e230f3c29aba80056410e7d
+    size: 35423
     kind: instruction
     executable: false
     script: false
@@ -191,8 +191,8 @@ files:
     executable: false
     script: false
   - path: references/runner-operations.md
-    sha256: 7d3b8e1ba362b9061f5ff1015c14ca570fb70523854cc593f04e160ce3cb2613
-    size: 33920
+    sha256: 19a23dd9a1ad6a90bc1dc522ffd308ea3ab4b059d9006800bcb8d2d3f607eb65
+    size: 33926
     kind: instruction
     executable: false
     script: false
@@ -221,8 +221,8 @@ files:
     executable: false
     script: false
   - path: schemas/merge-report.v1.json
-    sha256: 3b306f719a182a8454c39ab9930adae0e74663d72b1d74dc71967275d4fc33f7
-    size: 9451
+    sha256: 206b90cf8eccbb372e1c3443b3d52d4b463c39d9f49d3cb79cfee9a0536b580e
+    size: 13781
     kind: asset
     executable: false
     script: false
@@ -239,8 +239,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: c26bbab4eac4c6334cf6633f5a8b3c971bb671d6a619220262d0d5be36a32608
-    size: 324201
+    sha256: a7a3832a58239cee7634ed1203caefb545b446aca54a8f0a09133edd58a14bd2
+    size: 346373
     kind: script
     executable: true
     script: true
@@ -251,8 +251,8 @@ files:
     executable: false
     script: true
   - path: scripts/merge.mjs
-    sha256: f005479aa1c36f6477214bb103230bc6519ebec390362621b0f45d807e7ffbb4
-    size: 69251
+    sha256: 4fe126a20f47bc3b17f172a3f0344013cfdace400a99d9204a7c6cf24c14a6e2
+    size: 88731
     kind: script
     executable: true
     script: true

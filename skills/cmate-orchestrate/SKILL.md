@@ -189,6 +189,10 @@ dispatch.mjs --plan <承認済み plan.json> [options]
    ので、`wait` の idle を完了とみなさない。
 3. **Wave barrier と verification gate。** 全 worker が `completed` かつ verification pass に
    なるまで次 Wave へ進まない。**worker completion を verification success と同一視しない。**
+   そして **barrier は「1本ずつの branch が green」では閉じない** ——
+   `merge.mjs --merge-prs --integration-verify`（第3.3節）を使う運転では、
+   **合流後の統合ブランチが green であることまでが barrier である**（[#175](https://github.com/Kewton/commandmate-skills/issues/175)）。
+   file が重ならない意味的衝突は plan にも PR 個別 CI にも出ないので、合流させてから測るしかない。
 
 **オプション別の運用は、この文書の外にある。** 下の表は「何をしたいときにどの flag か」だけで、
 規則・停止条件・設計理由は名指しした先が持つ（**一方向参照**である。食い違ったら正本が勝つ）。
@@ -211,6 +215,16 @@ dispatch.mjs --plan <承認済み plan.json> [options]
   再実行**すればよい。**Issue の分割や re-plan は要らない。**
 - **`--resume` / `--reverify` は `completed` かつ verification `pass` の Issue を引き継ぎ、
   再判定しない。** `--reverify` は `send` を1回も呼ばず、worker のターンを1つも消費しない。
+- **契約が言及していない禁止事項は、契約が許可したのではなく書いていないだけである。Issue 本文が
+  正本である**（[#176](https://github.com/Kewton/commandmate-skills/issues/176)）。`goal` は本文の
+  要約だが、**否定的制約（「## 非対象」「## 禁止」「## セキュリティ上の考慮」等の節、および
+  「してはいけない / 送ってはいけない」を含む表・箇条書き）だけは要約せず原文転記する**。
+  そのために dispatch は Issue ごとに1回 `gh issue view <n> --json body` を **read-only** で呼ぶ。
+  読めなければ停止せず、goal がそう名乗って `issue_body_unreadable` を記録する。上限に収まらず
+  落ちた節が在れば、goal に `本文に他節がある。gh issue view <n> で全文を読め` の1行が入り
+  `issue_constraints_untranscribed` を記録する。**転記が完走しても、worker 側は本文を自分で読む**
+  （[cmate-worker-development](../cmate-worker-development/) A 段）。契約の正本は
+  [dispatch-contract.md](./references/dispatch-contract.md) 第2.4.1節。
 - **`--unattended` が含意するのは締め付けだけである。** ゲートを1つも無効化せず、`--approve` を
   含意せず、緩和フラグとの併用は `invalid_input` で拒否する。**無人運転の driver は CI の job 定義
   （または cron script）であって runner ではない。**
@@ -241,6 +255,7 @@ merge.mjs --plan <plan.json> --dispatch <dispatch-report.json> (--create-prs | -
 | `--create-prs` / `--merge-prs` | どちらか1つ | PR 作成 / CI 確認付き guarded merge |
 | `--approve` | **off** | 明示承認。無ければ mutation しない preview |
 | `--unattended` | **off** | **人間が居ないことの宣言。締め付けだけを含意し、権限は1つも足さない。**`--approve` を含意しない。**両 phase で受理する**（phase ごとに含意する締め付けが違う。下記） |
+| `--integration-verify` | **off** | **合流後の統合ブランチで profile baseline を回す**（`--merge-prs` のみ。下記）。赤なら success にせず、次 wave を止める |
 | `--merge-method <m>` | `squash` | `merge` / `squash` / `rebase` |
 | `--out <dir>` | `<dispatch-dir>/<phase>` | 出力先。既存なら `out_exists` |
 | `--gh` / `--git <path>` | `gh`/`git` | 実行する CLI |
@@ -262,6 +277,37 @@ exit code・宣言 scope と実変更 file の対比（scope 外の件数を含�
 
 merge-report.json / merge-summary.md の構造は変わらない。
 
+#### 合流後の統合ブランチ検証（`--integration-verify`。既定 off。**`--merge-prs` のみ**）
+
+**wave barrier の後半である。** 「全 worker completed + verification pass」は
+**1本ずつの branch** についての条件で、**合流後については何も言っていない**。
+wave の衝突検出は `suspected_files` の重なりしか見ず、guarded merge が確認する CI は
+**兄弟 PR が入る前の base** で走っているので、「片方がデータを直し、もう片方がそのデータの
+性質に依存する検査を書く」類の**意味的衝突は誰にも捕まらない**
+（[#175](https://github.com/Kewton/commandmate-skills/issues/175) の実測では develop に入った
+直後から赤で、**発覚は promotion PR の CI** だった）。
+
+- **やること**: この invocation の全 merge が終わったあと、`git fetch origin <base>` で合流後の
+  tip を読み直し、**使い捨ての detached checkout** に取り出して **profile の `baseline`** を
+  そこで回す。終わったら畳む。**invocation の作業ツリーには触れない。**
+- **何を実行するかは profile から取る。** `npm` も `develop` も runner は持たない。
+- **赤なら success にしない**（`partial` / exit 7 / `stop_reason: merge_failed` / 名指しは
+  `blocking_reasons[]` の **`integration_verify_failed`**）。**次 wave を dispatch しない。**
+  次 wave 側が読むのは `merge-report.json` の **`integration_verify.outcome`** で、
+  進んでよいのは **`status: success` かつ `outcome: "pass"`** のときだけである
+  （`"not_run"` は「測っていない」であって green ではない。field ごと無いのはフラグを
+  使っていない run である）。**受け口の実装は
+  [#183](https://github.com/Kewton/commandmate-skills/issues/183) が入れる**
+  —— #175 では dispatch を1行も変えていない。
+- **profile が `baseline` を宣言していなければ、1件も merge せずに拒否する**
+  （`failure` / exit 1 / `preflight_failed` / `integration_verify_unavailable`）。
+  opt-in した検証が走らないまま「完了」と報告されるのが、この機能が消しに来た事象そのものだからである。
+- **既定 off で、フラグ無しの report は #175 以前と byte 単位で同一**である（fixture で固定）。
+  `merge_schema_version` は 1 のまま、`stop_reason` にも `outcome` にも値を足していない。
+- 代替案の **merge queue（base 更新 → CI 再走 → merge の直列化）は実装していない** ——
+  まずは合流後検証の1段で足りる、が #175 の裁定である。
+
+正本は [merge-contract.md](./references/merge-contract.md) 第5.4節。
 
 #### 無人運転（`--unattended`。既定 off。**両 phase**）
 
@@ -525,6 +571,8 @@ report/artifact に残さない（redaction）。
 | merge `ci_failed` / `ci_pending` | CI を直す。**green 無しに merge しない** |
 | merge `pr_missing` / `merge_failed` | PR の状態を確認し、conflict は手で解消する |
 | merge `issue_autoclose_not_default_branch` | merge 後に **Issue を手動でクローズする** |
+| merge `integration_verify_failed`（`--integration-verify`。`stop_reason: merge_failed` / `partial`） | **合流後の統合ブランチが赤い。既に merge 済みなので phase の再実行では戻らない。** 統合ブランチを green にする（前進修正か revert）まで**次の wave を dispatch しない**。file 重なりに出ない**意味的衝突**の徴候なので、同 wave の Issue が同じデータ・同じ前提を別方向へ動かしていないかを読む |
+| merge `integration_verify_unavailable`（同上） | 統合検証を実行できなかった。**profile に `baseline` が無い場合は1件も merge していない**ので、profile に書いて再実行する。merge 後の probe 失敗（fetch / checkout）なら、**merge は済んでいるのに結果を測れていない** —— 原因を直し、統合ブランチで baseline を手で1回通してから次の wave へ進む |
 | uat `acceptance_conditional` | **条件を読んで人間が判断する。** 自動修正の対象ではない |
 | uat `blocked` / `max_attempts_reached` | `unresolved_issues` と `next_actions` を読む。**success に丸めない** |
 | uat `acceptance_not_run` | cmate-acceptance-test を入れて result を用意し、必要なら `--require-acceptance` で必須にする |

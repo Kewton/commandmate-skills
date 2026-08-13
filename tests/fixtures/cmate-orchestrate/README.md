@@ -11,6 +11,8 @@ dispatch-cases/<id>/case.json   plan 生成引数・scenario・dispatch 期待�
 dispatch-cases/<id>/scenario.json  fake CLI に注入する worker/verify/drift の挙動
 dispatch-cases/<id>/contracts/  （契約 case のみ）生成された実行契約の golden。byte 一致で照合
 dispatch-cases/issues-multifile.json  複数 file を保有する Issue fixture（契約決定性の case 用）
+dispatch-cases/issues-negative-constraints.json  否定的制約（禁止の表・非対象節）を持つ Issue
+                                fixture（#176 の転記 case 用）
 dispatch-cases/issues-acceptance-gates*.json  受入ゲート case の Issue fixture（ブロック有り / 無し / 未知 id）
 resume-cases/<id>/case.json     複数 attempt を1つの run directory に append する case。
                                 `--resume`（再 dispatch）と `--reverify`（送らずに再裁定）の両方が
@@ -18,6 +20,8 @@ resume-cases/<id>/case.json     複数 attempt を1つの run directory に appe
                                 整合性ガードが同じものだからである
 resume-cases/<id>/attempt-N.json  attempt ごとに fake CLI へ注入する世界
 merge-cases/<id>/case.json      plan/dispatch 生成・merge scenario・merge 期待値（scenario は inline）
+merge-cases/<id>/expected-merge-report.json  （任意）golden な merge report。`out_dir` だけ
+                                `<out>` に置換して byte 一致で照合（#175 の非回帰 case）
 uat-cases/<id>/case.json        plan/dispatch 生成・uat scenario・UAT/修正ループ 期待値（scenario は inline）
 status-cases/<id>/case.json     status view の期待値（phase 状態・Issue ごとの値・次アクション）
 status-cases/<id>/run/          checked-in の run directory。実 runner の出力をそのまま置いた status の入力
@@ -109,6 +113,15 @@ false（既定）の scenario は逆にそれらを**拒否**し `--help` から
 exit code の列。`0` / `20` / `21` / `99`）で、`failed_gates` が `commandmate verify --json` の
 失敗ゲートになる。
 
+**Issue 本文（#176）**: dispatch runner は task text を作るとき `gh issue view <n> --json body` を
+呼んで本文の否定的制約を原文転記する。plan は本文を運んでいないので、fake `gh` が返す本文は
+**その plan を作った issue fixture そのもの**でなければならない（違う本文を返す fake に対して
+契約 golden を pin しても、何も pin していない）。harness は plan 生成時に `issue-bodies.json` を
+plan の隣へ書き、dispatch 実行時にそれを `scenario.gh.issues` として fake へ渡す —— case ごとの
+ノブにすると、書き忘れた case が plan と食い違う本文を配ることになるからである。scenario が自分で
+`gh.issues` を宣言すればそちらが勝つ（plan 承認後に本文が動いた世界のモデル）。
+`gh.issue_view: "fail"` は読めない世界（未認証 / 網なし / `gh` 未 install）を注入する。
+
 **受入ゲート（#114）**: `verify_exits` は「fake がこう答えろと言われた」でしかないので、
 **受入ゲートが何かを測っている証拠にはならない** — 成果物が壊れていようがいまいが 20 を返す。
 **時間（#122）**: scenario の `delay_ms`（`{"wait": 900, "send": 300}`。subcommand ごとの
@@ -168,6 +181,9 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 | `d54-scope-refused-without-unattended` | **d53 の対（二点測定のフラグ無し側）。** 同じ plan・同じ世界で、`--unattended` 無しなら他 Issue は従来どおり dispatch される（＝ d53 の停止は新しい拒否ではなく**検出時点を早めた**もの）ことを示す |
 | `d55-unattended-contract-required` | `--contract-mode` を渡していないのに `require` が含意され、契約非対応 CLI が limitation ではなく blocking になるか（scope 必須化と契約必須化は同義） |
 | `d56-unattended-wall-clock-budget` | `--wall-clock-budget` 到達で `partial` / `stop_reason: timeout` になり、**`stop_reason` の enum に新値を足していない**か。`scenario.delay_ms` で `wait` / `send` に実時間を持たせている |
+| `d73-constraints-transcribed-verbatim` | **否定的制約の原文転記（#176）。** 否定語を含まない見出しの下に在る「送ってはいけない」表と `## 非対象` 節が、要約されず**全行原文で** goal に載るか。転記が完走したので切り捨ての1行は入らない |
+| `d74-constraints-untranscribed` | 転記が上限に収まらなかったとき、**ブロックを途中で切らず**に打ち切り、落とした節を名指しして `本文に他節がある。gh issue view <n> で全文を読め` を入れ、`issue_constraints_untranscribed` を記録するか（#176） |
+| `d75-issue-body-unreadable` | `gh issue view` が落ちる世界で dispatch は止まらないが、goal が「読めなかったこと」と `gh issue view <n>` を名指しし、`issue_body_unreadable` を記録するか。**「制約なし」の goal を黙って送らない**（#176） |
 
 ## merge case 一覧
 
@@ -178,6 +194,21 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 PR 作成・CI・merge の挙動を注入する。`fake-cli.mjs` は各呼び出しを `CMATE_FAKE_LOG` に記録
 するので、`--approve` 無しに `git push`/`gh pr create`/`gh pr merge` が呼ばれていないこと、
 CI が green でないときに `gh pr merge` が呼ばれていないことまで検証できる。
+
+**合流後の統合ブランチ検証（#175）**: `--integration-verify` を渡した run は、merge の後に
+`git fetch origin <base>` → `git worktree add --detach` → **profile baseline をその checkout で
+実行** → `git worktree remove --force` を行う。`merge_scenario.integration` がその4段を injection
+する（`verify: "pass"` で使い捨て checkout に `cmate-verify-ok` を置く＝ baseline が緑になる。
+`fetch` / `worktree_add` / `remove` に `"fail"`）。緑 case と赤 case は **同じ world・同じ引数**で、
+違いは合流後の checkout に成果物が在るかどうかだけである。フラグ**無し**の case（`m22`）は
+`expected-merge-report.json`（`out_dir` だけを `<out>` に置換）と **byte 比較**し、その golden は
+**#175 実装前の runner**（`git show HEAD:skills/cmate-orchestrate/scripts/merge.mjs`）が書いたもので
+ある —— opt-in が opt-in であること（既定の出力を1 byte も変えていないこと）の機械的な証明である。
+
+case.json は `plan_patch` で**生成された plan を merge に渡す前に書き換えられる**
+（`dispatch_report_patch` と同じ理由: plan はこの runner の**入力**であり、`baseline` を埋め忘れた
+profile のような状態は、harness 自身の dispatch 段が baseline を必要とするため planner だけでは
+作れない）。
 
 | case | 何を見るための case か |
 |---|---|
@@ -196,6 +227,13 @@ CI が green でないときに `gh pr merge` が呼ばれていないことま�
 | `m13-base-not-default-branch` | base がデフォルトブランチでないとき `Resolves #n` の無効を limitation と PR body に記録するか（#39） |
 | `m14-base-is-default-branch` | base がデフォルトブランチのとき何も記録しないか（#39） |
 | `m15-default-branch-unknown` | `gh repo view` 失敗時に照合をスキップするだけで PR 作成を阻害しないか（#39） |
+| `m21-pr-body-nonascii-path` | 非ASCII を含む path で、対比が git の**表記**でなく path そのもので行われるか（#174）。fake の `git diff` は本物と同じく出力を munge する（`core.quotePath` 既定 true で非ASCII を8進エスケープ、`"` は設定に関係なくクォート）ので、`-z` を使わない runner は同じ file を2行に割り `Out-of-scope changes: 1` を立てる。宣言 scope が日本語ファイル名の #300 は 0 件・表1行、宣言外の変更を持つ #301 は 1 件を**読める形で**名指し（空振り防止）。#301 の宣言外 path が `"` を含むので、最小修正 `-c core.quotePath=false` へ後退しても赤になる |
+| `m22-integration-verify-absent` | **#175 (a)。** `--integration-verify` 無しの run が **#175 実装前と byte 一致**するか（`expected-merge-report.json` と byte 比較。`out_dir` だけ `<out>` に置換）。`integration_verify` field を持たず、`git fetch` も `git worktree` も**1回も呼ばない**こと。m24 の双子で、違うのは `merge_args` だけである |
+| `m23-integration-verify-red` | **#175 (b)。** PR 個別 CI が両方 green で2件とも merge できたのに、**合流後の baseline が赤**。`integration_verify.outcome: fail` と blocking `integration_verify_failed` を載せ、`partial`（exit 7 / `stop_reason: merge_failed`）にして **success に丸めない**か。次 wave を止める信号がこの3つである。m24 との違いは合流後 checkout に成果物が在るかだけ |
+| `m24-integration-verify-green` | **#175 (c)。** 合流後が green なら従来どおり `success` / `completed` で、`integration_verify.outcome: pass`。使い捨て checkout を**作って畳む**（fetch 1回・worktree 2回）ので、緑の検証は何も残さない |
+| `m25-integration-verify-no-baseline` | profile が `baseline` を宣言していない plan に `--integration-verify` を渡したとき、**1件も merge せずに拒否**するか（`failure` / exit 1 / `preflight_failed` / `integration_verify_unavailable`）。skip にすると「opt-in した検証が走らないまま merge phase 完了」になり、#175 が消しに来た事象そのものになる |
+| `m26-integration-verify-create-prs-refused` | `--create-prs` との併用を `invalid_input`（exit 3）で拒否し、**受理して無視しない**か。push も PR 作成も 0 回 |
+| `m27-integration-verify-preview-not-run` | preview（`--approve` 無し）では merge が無いので合流後も無く、`outcome: not_run` + limitation `integration_verify_not_run` になるか。**fetch も checkout もしない**こと。「測っていない」を pass に丸めない |
 
 ## uat case 一覧
 

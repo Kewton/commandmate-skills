@@ -120,6 +120,9 @@ Issue が `## 対象ファイル`（成果物見出し）に書いた場合だ�
 | `worktree_setup_partial` | dispatch | 要求したうち一部しか作られなかった。作れた分は**消さずに保持**し、未解決 Issue については停止する |
 | `worktree_setup_skipped` | dispatch | `--prepare-worktrees` を指定したが、pre-flight が別の drift で先に止まったため provider を呼んでいない |
 | `worktree_sync_rescanned` | dispatch | 準備段のため `commandmate sync` を2回実行した（解決時の1回＋作成後の強制1回） |
+| `issue_constraints_transcribed` | dispatch | Issue 本文の否定的制約を task text へ**原文転記した**（[#176](https://github.com/Kewton/commandmate-skills/issues/176)、[dispatch-contract.md](./dispatch-contract.md) 第2.4.1節）。**Issue ごとに1件**（転記した節を detail に名指しする）。**転記したことは、守られたことではない** |
+| `issue_constraints_untranscribed` | dispatch | 否定的制約を見つけたが、上限（1200 文字 / 8 ブロック）に収まらず**一部を運べなかった**。**Issue ごとに1件。** ブロックを途中で切ることはしないので、落ちたのは節単位である。goal には落とした節の名前と `gh issue view <n>` の1行が入っている |
+| `issue_body_unreadable` | dispatch | `gh issue view` が Issue 本文を読めなかった（未 install / 未認証 / 網なし）。**Issue ごとに1件。** 停止はしない（scope と verify は plan 由来なので運べる）が、**否定的制約は1件も運べていない**。goal はその旨と `gh issue view <n>` を名指ししている |
 | `worker_method_declared` | dispatch | `--worker-method <id>` 付きの run である。**run 全体で1件。** 停止した run にも残る（何を前提にした run だったかが読めるように） |
 | `worker_method_applied` | dispatch | その Issue の worktree に skill が在り、task text に `## Method` 節を書いた。**Issue ごとに1件。** 「適用された」であって「守られた」ではない |
 | `unattended_mode` | dispatch / merge / uat | `--unattended` 付きの run である。**run 全体で1件。** 停止した run にも残る。**その runner・その phase が含意した締め付け**を detail に記録する（dispatch: contract require / pre-flight の scope 検査 / wall-clock budget / worktree lock / 裁定根拠の要求。merge `--create-prs`: 変更証拠の要求。merge `--merge-prs`: 受入ゲートブロックと受入条件の要求。uat: 意味ゲートと上限の明示＋再merge 先の pre-flight） |
@@ -131,6 +134,8 @@ Issue が `## 対象ファイル`（成果物見出し）に書いた場合だ�
 | `unsafe_branch` | merge | branch 名が safe-ref guard に弾かれた |
 | `change_evidence_unavailable` | merge | branch の実変更 file を読めなかった（worktree 不在など）。PR 本文もそう書く。**scope 内に収まっていた証拠ではない** |
 | `branch_changed_outside_declared_scope` | merge | 実変更に宣言 scope（`scope.allow`）外の file がある。PR 本文が違反 path を名指しする |
+| `integration_verify_not_run` | merge | `--integration-verify` を渡したが、この invocation は1件も merge していない（preview / eligible 無し / 最初の merge の前に停止）ので合流後を測っていない。**「測っていない」であって「green」ではない**（`integration_verify.outcome` は `not_run`） |
+| `integration_verify_tree_left` | merge | 統合検証に使った**使い捨ての detached checkout**（`<out>/integration-tree`）を畳めなかった。裁定は baseline の結果のまま。`git worktree remove --force` で消す |
 | `acceptance_not_run` | uat | 意味ゲートが verdict を出せず、baseline のみで裁定した |
 | `no_eligible_issues` | merge / uat | dispatch report に completed かつ verification pass の Issue が無い |
 | `completion_check_failed` | dispatch / merge / uat | completion check のどれかが passed でない |
@@ -138,6 +143,18 @@ Issue が `## 対象ファイル`（成果物見出し）に書いた場合だ�
 `conditional_go` の保持（`acceptance_conditional`）と fix 上限到達（`max_attempts_reached`）は
 limitation ではなく **stop_reason / blocking reason** である。**停止であって、続行しながらの
 注記ではない。**
+
+`issue_constraints_untranscribed` / `issue_body_unreadable` は**止まらないが、放置してよい種類では
+ない**。どちらも「否定的制約が worker へ全部届いていない」と言っており、scope ゲートも verification
+ゲートも**それを測らない**（[dispatch-contract.md](./dispatch-contract.md) 第2.4.1節）。人間がすること:
+`issue_constraints_untranscribed` なら detail と goal が落とした節を名指ししているので、その節を
+worker へ渡すべきなら **Issue を分割するか本文の制約節を短くして re-plan する**；
+`issue_body_unreadable` なら `gh auth status` を確かめて（未 install / 未認証 / 網なし）から
+**同じコマンドで再実行する** —— 本文が読めれば転記が入る。どちらの場合も、その run の pass は
+**「本文の禁止事項を守った」ことを意味しない**。なお、この3つの code は現時点で status runner の
+hint 表に**入っていない**（`status.mjs` は #176 の宣言 scope の外だった。
+`acceptance_requires_tests_but_scope_has_none` と同じ事情で、第4節の注記を見よ）。したがって
+`status.mjs` は detail を読ませる既定に落ちる。
 
 
 ## 4. 停止したとき、人間が何をするか（対処表の正本）
@@ -189,6 +206,8 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | merge `ci_failed` / `ci_pending` | CI が green でない | CI を直す。**green 無しに merge しない** |
 | merge `pr_missing` / `merge_failed` | PR が無い / conflict | PR の状態を確認し、conflict は手で解消する |
 | merge `issue_autoclose_not_default_branch` | base がデフォルトブランチでない | merge 後に **Issue を手動でクローズする** |
+| merge `integration_verify_failed`（**`--integration-verify`**。`stop_reason: merge_failed` / `partial`） | **合流後の統合ブランチで profile baseline が赤い。** 各 PR の CI は green だったが、それらは**兄弟 PR が入る前の base** で走ったものである（[#175](https://github.com/Kewton/commandmate-skills/issues/175) の実測）。merge 自体は成功しており、赤いのは**合流の結果**である | **既に merge 済みなので、この phase の再実行では戻らない。** 統合ブランチを green にする（前進修正、または revert）まで **次の wave を dispatch しない**（`integration_verify.outcome` が `fail` の間は barrier が満たされていない）。この code は **file 重なりに出ない意味的衝突**の徴候なので、同じ wave の Issue が**同じデータ・同じ前提を別方向へ動かしていないか**を読む（owner: human）。**「PR 個別の CI は緑だったのだから大丈夫」で押し通さない** |
+| merge `integration_verify_unavailable`（同上） | 統合検証を実行できなかった。2通りある: **(a) profile が `baseline` を宣言していない**（`stop_reason: preflight_failed` / `failure`。**1件も merge していない**）／**(b) merge 後の probe が失敗した**（`git fetch` / `rev-parse` / 検証用 checkout。`stop_reason: merge_failed` / `partial`。**merge は済んでいる**） | (a) **profile に `baseline` を書いて同じコマンドを再実行する。** 世界は動いていないので取り消すものは無い（統合検証をしない運転に戻すなら `--integration-verify` を外す）。(b) **merge は済んでいるのに結果を測れていない。** remote 到達性 / base の解決 / worktree 作成の失敗要因を直し、**統合ブランチで profile baseline を手で1回通してから**次の wave へ進む（owner: operator） |
 | uat `acceptance_conditional` | 受入判定が `conditional_go` | **条件を読んで人間が判断する。** 自動修正の対象ではない |
 | uat `blocked` / `max_attempts_reached` | 上限まで直しても不合格 | `unresolved_issues` と `next_actions` を読む。**success に丸めない** |
 | uat `acceptance_not_run` | 意味ゲートを掛けずに baseline だけで裁定した | cmate-acceptance-test を入れて result を用意し、必要なら `--require-acceptance` で必須にする |
@@ -229,16 +248,21 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 `worktree_setup_unavailable` / `worktree_setup_failed` / `worktree_profile_mismatch` と
 `resume_attempt` / `resume_no_work` / `resume_invalid` / `resume_plan_mismatch`、
 そして `scope_unsatisfiable` / `contract_scope_dropped` / `harness_path_in_scope` /
-`ambiguous_file_candidate` / `unconfirmed_lexical_dependency` は、
+`ambiguous_file_candidate` / `unconfirmed_lexical_dependency` /
+`integration_verify_failed` / `integration_verify_unavailable` は、
 この表には在るが **status runner の hint map にはまだ無い**（`status.mjs` は別 Issue で追随する。
 `contract_scope_dropped` については `status.mjs` が #161 / #162 の宣言 scope の外だった。
 `harness_path_in_scope` も同じく [#177](https://github.com/Kewton/commandmate-skills/issues/177)
-の宣言 scope の外であり、後ろ2つも
-[#182](https://github.com/Kewton/commandmate-skills/issues/182) の宣言 scope の外である。
+の宣言 scope の外であり、`ambiguous_file_candidate` / `unconfirmed_lexical_dependency` は
+[#182](https://github.com/Kewton/commandmate-skills/issues/182) の、`integration_verify_*` は
+[#175](https://github.com/Kewton/commandmate-skills/issues/175) の宣言 scope の外である。
 #182 は `status.mjs` に在る `shadowed_file_candidate` の hint —— 「候補から落ちた」と述べる
 1行 —— を**古くしている**: planner はもう落とさないし、その code も出さない。文面としては
 「Issue 本文で path を完全形で書き直す」が今も対処として正しいので、実害は
-「落ちた」の一語だけである）。
+「落ちた」の一語だけである。
+なお #175 の停止は `stop_reason` としては既存の `merge_failed` / `preflight_failed` に載るので、
+status runner はそちらの hint（conflict の解消 / gh・base の復旧）を引く —— **その1行では
+足りない停止**なので、`blocking_reasons` の code と `summary_markdown` の「統合検証」節を読むこと）。
 それまで `status.mjs --run` はこれらを「detail と `summary_markdown` を読む」に落として表示する。
 **推測で別の対処を出さない**のが status runner の約束なので、これは劣化ではなく既定の振る舞いである。
 dispatch report の `summary_markdown` には上表と同じ next action が出ている。
