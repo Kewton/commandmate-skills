@@ -1,0 +1,45 @@
+{
+  "description": "#175 — --integration-verify against a plan whose profile declares no baseline. The verification cannot run, so the phase is REFUSED before the first merge (failure / preflight_failed / integration_verify_unavailable) rather than merging and skipping the check: an opt-in verification that silently does not happen is the failure this flag exists to remove. Nothing is merged, so the operator fills in the profile and re-runs with nothing to undo. The plan is patched after the dispatch report is generated, because the plan is an INPUT to this runner and a profile with an unfilled baseline is a state a hand-written profile really reaches.",
+  "phase": "merge-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "plan_patch": { "profile": { "baseline": [] } },
+  "merge_args": ["--approve", "--integration-verify"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" },
+      "201": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" }
+    },
+    "integration": { "verify": "pass" }
+  },
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "preflight_failed",
+    "approved": true,
+    "mutated": false,
+    "eligible": [201, 200],
+    "completion_passed": false,
+    "no_merge": true,
+    "pr_merge_calls": 0,
+    "blocking_codes": ["integration_verify_unavailable"],
+    "integration_verify": {
+      "requested": true,
+      "ran": false,
+      "outcome": "not_run",
+      "base": "origin/develop",
+      "base_sha": null,
+      "merged_issues": [],
+      "commands": [],
+      "failed_command": null,
+      "exit_code": null
+    },
+    "git_calls": { "fetch": 0, "worktree": 0 },
+    "summary_contains": ["profile に `baseline` を宣言してから再実行する"]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "description": "#175 — --integration-verify with --create-prs is refused (invalid_input, exit 3) rather than accepted and ignored: the flag judges the state the merges add up to, and this phase merges nothing. Nothing is pushed and no PR is created, so a run that declared a verification this phase cannot perform never reaches the world.",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--integration-verify", "--approve"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true }
+  },
+  "expect": {
+    "exit": 3,
+    "status": "failure",
+    "stop_reason": "runner_error",
+    "no_mutation": true,
+    "pr_create_calls": 0,
+    "pr_merge_calls": 0,
+    "completion_passed": false,
+    "no_integration_verify": true,
+    "blocking_codes": ["invalid_input"],
+    "git_calls": { "fetch": 0, "worktree": 0 }
+  }
+}

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/merge-report.v1.json",
   "title": "cmate-orchestrate merge report v1",
-  "description": "Report printed to stdout and written to merge-report.json by the cmate-orchestrate merge runner (scripts/merge.mjs). Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records one mutating phase — either PR creation (create_prs) or guarded merge (merge_prs) — over the verification-passed issues of an already-executed plan. A single invocation enables exactly one phase. Nothing is created or merged without explicit approval, and no PR is merged unless its CI passed; a create failure, a red or pending CI, or a merge conflict stops the phase and is reported as partial, never rounded up to success.",
+  "description": "Report printed to stdout and written to merge-report.json by the cmate-orchestrate merge runner (scripts/merge.mjs). Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records one mutating phase — either PR creation (create_prs) or guarded merge (merge_prs) — over the verification-passed issues of an already-executed plan. A single invocation enables exactly one phase. Nothing is created or merged without explicit approval, and no PR is merged unless its CI passed; a create failure, a red or pending CI, or a merge conflict stops the phase and is reported as partial, never rounded up to success. Every property is required EXCEPT integration_verify, which exists only in a run that opted into --integration-verify (Issue #175) — a report written without that flag carries the same key set, and the same bytes, as it did before the field existed.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -51,7 +51,7 @@
         "merge_failed",
         "runner_error"
       ],
-      "description": "Why the phase stopped. completed: every eligible issue was handled. The rest name the first blocking condition; a failure is never reported as completed."
+      "description": "Why the phase stopped. completed: every eligible issue was handled. The rest name the first blocking condition; a failure is never reported as completed. No value was added for the integration verification of Issue #175: a red merged state lands on merge_failed and a requested-but-impossible verification on merge_failed (after the merges) or preflight_failed (refused before them), with blocking_reasons[].code — integration_verify_failed / integration_verify_unavailable — naming what actually happened. ci_failed and ci_pending deliberately do NOT receive it: in this report those two mean 'a PR was not merged because its CI was not green', and an integration failure happens after successful merges."
     },
     "approved": {
       "type": "boolean",
@@ -105,6 +105,10 @@
       "type": "array",
       "description": "One record per eligible issue, in merge order. A target reached after the phase stopped is recorded with outcome skipped so the full set stays visible.",
       "items": { "$ref": "#/$defs/target" }
+    },
+    "integration_verify": {
+      "$ref": "#/$defs/integration_verify",
+      "description": "Present only when --integration-verify was passed (merge_prs only, Issue #175). The wave barrier's second half: after every merge this invocation performed, the profile baseline is run on the MERGED state of the base branch — fetched from origin and checked out into a throwaway detached worktree, so the invocation's own working tree is never touched. Absent means the run did not verify the merged state; it never means the merged state is green."
     },
     "blocking_reasons": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
     "limitations": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
@@ -162,6 +166,64 @@
       "required": ["code", "detail"],
       "properties": {
         "code": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string", "minLength": 1 }
+      }
+    },
+    "integration_verify": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requested",
+        "ran",
+        "outcome",
+        "base",
+        "base_sha",
+        "merged_issues",
+        "commands",
+        "failed_command",
+        "exit_code",
+        "detail"
+      ],
+      "properties": {
+        "requested": {
+          "const": true,
+          "description": "Always true: the object exists only because --integration-verify was passed."
+        },
+        "ran": {
+          "type": "boolean",
+          "description": "Whether the baseline commands were actually executed on the merged checkout. False with outcome not_run means nothing measured the merged state."
+        },
+        "outcome": {
+          "enum": ["pass", "fail", "not_run"],
+          "description": "pass: every profile baseline command exited 0 on the merged base. fail: one exited non-zero — the state the merges add up to is red even though each PR's own CI was green on a base that did not yet contain the others (integration_verify_failed). not_run: nothing was merged in this invocation, or the verification could not be performed (integration_verify_not_run / integration_verify_unavailable). not_run is never green. The next wave is dispatched only when the run is a success AND this is pass — this outcome adds a condition, it does not replace the status check."
+        },
+        "base": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The profile's base ref, transcribed. What to run and where to run it both come from the profile; no branch name and no toolchain is hardcoded in the runner."
+        },
+        "base_sha": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+          "description": "Short SHA of the fetched base tip that was verified, or null when it could not be read."
+        },
+        "merged_issues": {
+          "type": "array",
+          "description": "The issues whose PRs THIS invocation merged — the merges whose combined result is being judged. Empty means the base branch did not move here.",
+          "items": { "$ref": "#/$defs/issue_number" }
+        },
+        "commands": {
+          "type": "array",
+          "description": "The profile baseline commands, transcribed in profile order. Empty means the profile declares none, which is refused before the first merge rather than skipped.",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "failed_command": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+          "description": "The first baseline command that exited non-zero, or null."
+        },
+        "exit_code": {
+          "oneOf": [{ "type": "null" }, { "type": "integer" }],
+          "description": "That command's exit status, or null when it could not be captured."
+        },
         "detail": { "type": "string", "minLength": 1 }
       }
     },

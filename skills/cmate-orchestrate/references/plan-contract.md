@@ -104,6 +104,33 @@ edge は「`issue` が `depends_on` に依存する」を表す。`kind` は3種
 
 同じ (issue, depends_on) に複数の由来が付く場合、優先度の高い kind を採用する。
 
+edge はもう1つ **`basis`** を持つ（[#182](https://github.com/Kewton/commandmate-skills/issues/182)）。
+`kind` が「**誰が**言ったか」なのに対し、`basis` は「**何を根拠に**その edge が在るか」である。
+2つは別の問いであり、混ぜると「散文の語が偶然一致した」と「同じ file を書く」が同じ重みで
+wave を直列化する —— それが #182 の実測した障害である。
+
+| basis | 意味 | 出る kind |
+|---|---|---|
+| `declared` | 人間が述べた（本文の記述、または `--depends`） | `explicit` / `override` |
+| `file_conflict` | 推論であり、かつ両 Issue が `suspected_files` を1件以上共有する。**共有 file は `reason` に名前が出る** | `inferred` |
+| `lexical` | 推論であり、根拠が共有 topic token だけである | —— |
+
+`basis` は**採用された edge のもの**である。同じ (issue, depends_on) を推論と本文の両方が
+述べていれば、優先度により `kind: explicit` / `basis: declared` になる ——
+人が述べた以上、根拠を推論に遡って名乗る必要が無いからである。
+
+**`lexical` の edge は `dependencies` に載らない。** 載せる代わりに消費者側 Issue の
+question（`unconfirmed_lexical_dependency`）にする（第3.1節）。したがって
+`dependencies` に実際に現れる値は `declared` と `file_conflict` の2つで、
+`lexical` は**語彙として schema に在り、planner が使うが、edge にはならない**値である。
+これは #182 の裁定そのものなので、fixture が「`basis: lexical` の edge が1つも無いこと」を
+全 case に対して固定している。
+
+`basis` は schema の `required` に**入れていない**。`plan_schema_version` を上げずに足した
+field だからで（第9節）、0.27.0 以前が書いた v2 の `plan.json` —— `status.mjs` が読む過去 run の
+artifact —— には無い。**無いのは「この区別が生まれる前に書かれた plan」であって
+「根拠が無い edge」ではない。** 本 planner は必ず出す。
+
 ### 3.0 explicit の方向（Issue #51）
 
 **方向は「行」の性質であり、「節」の性質ではない。** `## 依存` という見出しは
@@ -125,7 +152,32 @@ reverse の両方があるときは、どちらかを黙って選ばず forward 
 で落とす（先に書いた行を勝たせて矛盾を隠さない）。
 
 edge の `reason` には、**どの方向語を・どの行から読んだか**を記録する。
-`dependency-plan.md` だけで edge を再導出できることが要件である。
+`dependency-plan.md` だけで edge を再導出できることが要件である（`kind` と `basis` も
+同じ行に出る）。
+
+**CONTEXT 見出し配下の `#N` は edge にならない**（[#182](https://github.com/Kewton/commandmate-skills/issues/182)）。
+Issue #54 が path に与えている除外規則（本文側の正本は
+[cmate-issue-authoring/references/issue-body-contract.md](../../cmate-issue-authoring/references/issue-body-contract.md)
+第2.3節）を、Issue 番号にもそのまま適用する —— `根拠` / `出典` / `参考` / `参照` /
+`背景` / `関連` / `References` / `Context` / `Background` / `See also` / `Appendix` の
+見出し配下**にしか現れない**番号は、その Issue が**引用している**のであって
+依存を述べていない。
+
+これが無かった間、**依存を否定するために書いた行が依存を作っていた**。実測は 2026-08-07 の
+#33/#34 で、`## 根拠` に書いた
+
+```
+旧本文の depends on #31 は成立しない
+```
+
+が phantom 依存 `#34 → #31` になった。番号を書き換えれば依存先が追従するだけで、消すには
+**その行ごと消す**しかない —— つまり「なぜ依存しないのか」の記録を消すしかない。
+
+判定は path と同じく**出現ごとではなく番号単位**である。1度でも CONTEXT 見出しの外で
+依存として述べていれば edge は残る（引用は記述を取り消さない）。除外しすぎる側の誤りは
+こちらの方が高くつく —— 実在する edge を落とすと、順序の要る2 Issue が同じ Wave に入る。
+**依存見出し（`## 依存` / `Dependencies` 等）は CONTEXT 見出しに優先する**。
+成果物見出しが CONTEXT 見出しに優先するのと同じ向きである。
 
 ### 3.1 inferred の規則
 
@@ -136,9 +188,45 @@ edge の `reason` には、**どの方向語を・どの行から読んだか**�
 - **消費者 signal**: title/body が implement・integrate・consume・利用・連携・実装 等を含む。
 - **接続条件**: 生産者と消費者が **共通の topic token** を1つ以上持つ
   （title/body の4文字以上の英数語、stopword 除く）。
+- **edge にする条件（#182）**: 上記に加えて、両者が `suspected_files` を1件以上共有する。
+  このとき `basis: file_conflict` の edge になり、`reason` に共有 token と**共有 file** が入る。
 
-file overlap は依存では **なく** conflict として扱う（同一 Wave に置かない、第5節）。
-推論は heuristic であり、`--depends` で上書き、`--no-infer` で無効化できる。
+**共有 token しか無い組は edge にしない。** 代わりに消費者側 Issue に question を1件出す
+（`unconfirmed_lexical_dependency`、`warnings` にも同 code で載るので run は `partial`）。
+question なので dispatch は `--allow-questions` 無しにはその Issue を送らない ——
+「明示承認が要る」の実体はこの既存フラグであり、承認は run の command line に残る。
+
+理由は実測である。2026-08-11、Kewton/BorderFreeKidsMap #104/#105/#106 は**相互参照ゼロ**の
+3 Issue でありながら `shared: data, page, cmate` の3 edge で**3 wave に直列化**した。
+`cmate` は受入条件の散文「cmate-verify の全ゲート」から、`data` / `page` は互いの
+`## 参考` に書いた path 片から来ている。実 file 衝突は1組だけだった。当時の回避策は
+`--no-infer` だけで、それは推論を丸ごと切ることでしかない。
+
+**共有 file はこれと質が違う。** 語の選び方ではなく plan の事実であり、その組はどのみち
+同一 Wave に置けない（第4節の規則2）。したがって生産者を先に置く順序付けは**待ち時間を
+増やさない** —— 推論が元々やりたかったのはこれである。
+
+file overlap 自体は依存では **なく** conflict である（同一 Wave に置かない、第4節・第5節）。
+`basis: file_conflict` は「file が重なる」ことを edge の**根拠**として使うだけで、
+「file が重なるから依存」ではない —— 生産者/消費者 signal は依然として必要である。
+
+推論は heuristic のままであり、`--depends` で上書き、`--no-infer` で無効化できる。
+`--no-infer` は question も含めて推論を止める（「一切推測するな」のスイッチである）。
+**`--no-infer` でも file 衝突による Wave 分離は効き、`waves_conflict_free` は passed のままである** ——
+あれは edge ではなく Wave 詰めの規則だからで、この性質は #182 でも変えていない。
+
+**却下した案**（#182）:
+
+- *lexical の edge を `dependencies` に載せたうえで「拘束しない」印を付ける。* 載せる先が
+  無い。`dependencies` を読む consumer は `status.mjs` の表示だけで、そこでは
+  `dep:#N` として**依存と同じ見た目**になる。「載っているが効かない edge」は、
+  読み手に対しては載っている edge である。
+- *推論そのものを消す。* file を共有する生産者/消費者の順序付けは**待ち時間を増やさない**
+  正しい推論であり、消す理由が無い。#182 が測ったのは推論の存在ではなく、
+  **根拠の質を区別しないこと**である。
+- *`basis` を配列にする（`["file_conflict", "lexical"]`）。* edge に載る値は
+  「最も強い根拠」1つで足り、弱い根拠は edge の有無を変えない。#183 が読むのは
+  「この edge は順序を強制するのか、排他だけなのか」であり、単値の方が答えやすい。
 
 ### 3.2 拒否する dependency
 
@@ -333,7 +421,7 @@ worker は満たすべき runner を読めるが、書けない。第5.1節の�
 **除外は hardcode である**（profile では宣言できない）。判断の根拠は
 [adr-scope-derivation.md](./adr-scope-derivation.md) 第17節にある。
 
-### Kewton/CommandMate#1756 との整合
+### 5.3.1 Kewton/CommandMate#1756 との整合
 
 CommandMate#1756 は「`.commandmate/verify.yaml` を **scope の変更集合から除外しない**」——
 つまり worker がそれを触ったら**検出する** —— のが tamper 検出のための意図的設計である、と決めた。
@@ -343,6 +431,43 @@ CommandMate#1756 は「`.commandmate/verify.yaml` を **scope の変更集合か
 検出は**弱まらず、強くなる**: 今まで許可されていた編集が、これからは許可されていない編集として
 現れる。両者が食い違うのは「planner が渡さない」かつ「core が見逃す」ときだけで、
 そういう組み合わせは作っていない。
+
+## 5.4 同じ file の2つの綴り（`ambiguous_file_candidate`）
+
+候補 A が候補 B の **path 境界つき suffix**（`B.endsWith("/" + A)`）であるとき、2つは
+同じ file の2つの綴りであり、Issue が対象にしているのは**多くとも一方**である。
+planner は **どちらも落とさず**、どちらを意図したかを question にする
+（[#182](https://github.com/Kewton/commandmate-skills/issues/182)）。両方が
+`suspected_files` に入り、run は `partial` に落ち、dispatch は `--allow-questions` 無しには
+その Issue を送らない。
+
+以前は長い方を残して短い方を落とし、warning（`shadowed_file_candidate`）を出していた。
+**推測が外れる向きが悪い方だった。** 実測: Issue が `## 対象ファイル` に
+`data/demo/facilities.json` を挙げ、説明文でビルド生成物
+`web/public/dist/data/demo/facilities.json` に触れたところ、**宣言した方**が scope から落ち、
+**触るなと書いてある生成物**が scope に残った。しかも warning は停止しないので、
+気づかなければそのまま dispatch される。
+
+「長い方が正しい」は、どちらが対象かの証拠ではない —— **2つが重なっている**ことの証拠である。
+どちらが対象かは書いた人にしか分からないので訊く。両方を残す側に倒すのは、2つの誤りの
+安い方だからである: 使われない許可は何も起こさないが、足りない許可は worker 1人分の run を
+失わせ、契約 scope は send 時 snapshot なので **worker 側からは直せない**（第5.1節の
+不変条件と同じ非対称）。
+
+`shadowed_file_candidate` は**廃止**した（本 planner はもう出さない）。判定の位置は
+`extractFileCandidates` の中、すなわち cmate-issue-authoring の
+`validate-plan.mjs` が写している抽出領域なので、**同じ commit で両方を変えてある** ——
+Issue 本文の検査器と planner が同じ path 集合を読むという保証は、この Issue でも壊していない。
+
+**却下した案**（#182）:
+
+- *落とす規則は残したまま warning を question に上げる。* 停止はするが、
+  **落ちるのは相変わらず短い方**である。実測の障害は「気づかず dispatch される」だけでなく
+  「宣言した path が scope から消える」ことでもあった。
+- *成果物見出しの下に在る方を勝たせる。* 推測を別の推測に置き換えているだけで、
+  両方が成果物見出しの下に在る本文（`19-shadowed-path-candidate` の逆形）では何も決まらない。
+- *どちらも落とさず、黙って両方入れる。* scope が黙って1ディレクトリ広がる。
+  第5.1節の不変条件2/4（足した分も引いた分も可視）と同じ理由で採らない。
 
 ## 6. risk
 
@@ -428,3 +553,24 @@ Issue 本文の ```acceptance-gates ブロックの転記である。**記法の
 - field の追加・削除・意味の変更、enum への値追加 → `plan_schema_version`（または
   `result_schema_version`）を上げる。
 - 文言・見出しの調整のみ → Skill の `version` だけを上げる。
+
+例外は2つあり、どちらも**任意 field として足し、`required` に入れない**形を取っている。
+1つ目は `issues[].acceptance_gates`（第10節、[adr-issue-acceptance-gates.md](./adr-issue-acceptance-gates.md)
+第12.1節）。2つ目は `dependencies[].basis`（第3節、[#182](https://github.com/Kewton/commandmate-skills/issues/182)）である。
+
+`basis` を 3 に上げなかった理由:
+
+1. plan を読む4 runner（dispatch / merge / uat / status）は `plan_schema_version` を
+   `[1, 2]` に pin しており、3 を出せば**その場で全員が `plan_invalid` で止まる**。
+   4つの pin を同じ commit で上げるのが規則だが、#182 の宣言 scope は planner だけである
+   （dispatch / merge は別 Issue が同時に触っている）。
+2. `dependencies` を読むのは `status.mjs` の表示（`kind` だけ）である。**field が1つ増えても
+   読み方が変わる consumer が居ない。**
+3. `required` にすると、0.27.0 以前が書いた v2 の `plan.json` が schema 違反になる。
+   `status.mjs` は**過去 run の artifact を読む view** なので、それは第「plan_schema_version」節が
+   「後退である」と述べた向きそのものである。実際 `tests/fixtures/cmate-orchestrate/status-cases/*/run/plan.json`
+   は `basis` を持たないまま置いてあり、それが正しい状態である。
+
+代わりに **planner が必ず出すこと**は fixture 側で固定してある（全 plan case に対して
+「edge は必ず `basis` を持ち、`lexical` は1件も無い」を検査する）。schema が緩い分を
+test で締めるという配置であり、**緩いまま放置ではない。**

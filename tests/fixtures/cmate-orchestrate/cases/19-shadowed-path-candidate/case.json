@@ -1,16 +1,33 @@
 {
-  "description": "Issue #49, second half: the issue itself writes both \"web/src/lib/filter.ts\" and the shorter \"src/lib/filter.ts\". At most one is the file it means, and the shorter is a path-boundary suffix of the longer, so it is dropped from suspected_files (= the worker's scope.allow) rather than widening it by a directory the issue never named — and the drop is reported as a shadowed_file_candidate warning, which makes the run partial, instead of being discarded silently.",
+  "description": "Issue #49, second half, as Issue #182 re-decided it: the issue itself writes both \"web/src/lib/filter.ts\" and the shorter \"src/lib/filter.ts\", and at most one is the file it means. The planner used to drop the shorter one — the guess \"the longer path wins\" — and report it. It no longer guesses: both stay in suspected_files and it asks which was meant (`ambiguous_file_candidate`), which is a QUESTION and therefore stops dispatch, where the old warning did not. What #49 established is still pinned here — the shorter path is a real candidate rather than an invention of the extraction, and it is present because the body wrote it, not because a `\\b` match manufactured it out of the longer one (case 18 covers that direction). The measured shape where the DECLARED path was the one dropped is 57-shadowed-path-is-a-question.",
   "args": ["415", "--profile", "node-commandmate"],
   "expect": {
     "exit": 0,
     "status": "partial",
-    "warning_codes": ["shadowed_file_candidate"],
+    "warning_codes": ["ambiguous_file_candidate"],
     "waves": [[415]],
     "merge_order": [415],
     "dependencies": [],
     "classifications": { "415": "independent" },
-    "risk_level": "low",
-    "suspected_files": { "415": ["web/src/lib/filter.ts", "web/src/lib/filter.test.ts", "web/src/lib/filter.spec.ts", "web/src/lib/__tests__/filter.ts", "web/src/lib/__tests__/filter.test.ts"] },
+    "risk_level": "moderate",
+    "questions_count": { "415": 1 },
+    "questions_include": {
+      "415": ["`src/lib/filter.ts` and `web/src/lib/filter.ts`"]
+    },
+    "suspected_files": {
+      "415": [
+        "web/src/lib/filter.ts",
+        "src/lib/filter.ts",
+        "web/src/lib/filter.test.ts",
+        "web/src/lib/filter.spec.ts",
+        "web/src/lib/__tests__/filter.ts",
+        "web/src/lib/__tests__/filter.test.ts",
+        "src/lib/filter.test.ts",
+        "src/lib/filter.spec.ts",
+        "src/lib/__tests__/filter.ts",
+        "src/lib/__tests__/filter.test.ts"
+      ]
+    },
     "reference_files": { "415": [] }
   }
 }

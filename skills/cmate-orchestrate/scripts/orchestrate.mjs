@@ -921,8 +921,8 @@ function inSpans(spans, index) {
 
 // Returns { paths, deliverable, contextOnly, shadowed }: the de-duplicated
 // candidates in order of first appearance, the subset a deliverable heading
-// covers, the subset that appears ONLY under a context heading, and the ones
-// dropped for being a partial of another candidate.
+// covers, the subset that appears ONLY under a context heading, and the pairs
+// where one candidate is a path-boundary suffix of another.
 function extractFileCandidates(text) {
   const patterns = [
     new RegExp(CANDIDATE_BACKTICK, 'g'),
@@ -957,26 +957,41 @@ function extractFileCandidates(text) {
   // the instruction. This also gives deliverable headings their precedence for
   // free, since a deliverable span is never a context span.
   const contextOnly = new Set([...inContext].filter((candidate) => !outsideContext.has(candidate)));
-  const { kept, shadowed } = dropShadowedCandidates(found);
-  return { paths: kept, deliverable, contextOnly, shadowed, found };
+  return { paths: found, deliverable, contextOnly, shadowed: shadowedCandidates(found) };
 }
 
 // The other half of Issue #49. Anchoring stops the extraction INVENTING a
 // partial path, but an issue can still write "web/src/lib/filter.ts" in one
 // place and "src/lib/filter.ts" in another. At most one of the two is the file
-// the issue means, and the shorter one is a path-boundary suffix of the longer:
-// keeping it would hand the worker a second directory the issue never named.
-// It is dropped — and, like an unrecognised extension, reported rather than
-// silently discarded, because the drop is what removes it from scope.allow.
-function dropShadowedCandidates(paths) {
-  const kept = [];
+// the issue means, and the shorter one is a path-boundary suffix of the longer.
+//
+// #49 answered that by DROPPING the shorter one. Issue #182 took the answer
+// away, because the guess is wrong exactly when it costs the most. Measured on
+// 0.27.0 (Kewton/BorderFreeKidsMap): an issue listed `data/demo/facilities.json`
+// under `## 対象ファイル` and mentioned the build output
+// `web/public/dist/data/demo/facilities.json` in prose. The rule dropped the
+// DECLARED path and kept the generated one, so `scope.allow` held the artifact
+// the issue says not to touch and not the file it says to write — and the run
+// still planned, because the drop was only a warning.
+//
+// "The longer path wins" was never evidence about which path the issue means:
+// it is evidence that the two OVERLAP. Which one is the target is a question
+// only the author can answer, so it is asked (`ambiguous_file_candidate`) and
+// BOTH candidates stay — a question stops dispatch, where the warning did not.
+// Widening the scope by one directory is the cheaper error of the two: an
+// unused allowance costs nothing, a missing one costs the worker its run and
+// cannot be repaired from inside it (the contract's scope is a send-time
+// snapshot). Deciding for the author is what this function no longer does.
+//
+// Returns the pairs only; nothing is removed. Order follows the candidate list,
+// so the plan stays byte-deterministic.
+function shadowedCandidates(paths) {
   const shadowed = [];
   for (const candidate of paths) {
     const covering = paths.find((other) => other !== candidate && other.endsWith(`/${candidate}`));
-    if (covering === undefined) kept.push(candidate);
-    else shadowed.push({ path: candidate, covered_by: covering });
+    if (covering !== undefined) shadowed.push({ path: candidate, covered_by: covering });
   }
-  return { kept, shadowed };
+  return shadowed;
 }
 
 // Client-controlled text must never name anything outside the target repository:
@@ -1119,18 +1134,7 @@ function extractionWarnings(analyses) {
         ),
       });
     }
-    for (const { path, covered_by: coveredBy } of analysis._shadowedPaths) {
-      out.push({
-        code: 'shadowed_file_candidate',
-        detail: redact(
-          `#${analysis.number} names \`${path}\`, which is a path-boundary suffix of \`${coveredBy}\`; ` +
-            'at most one of the two is the file the issue means, so the shorter path is not in ' +
-            "suspected_files and stays outside the worker's scope; write the full repository-relative " +
-            'path if the worker must also touch it',
-        ),
-      });
-    }
-    // The opposite direction of the two above: not a path that failed to reach
+    // The opposite direction of the one above: not a path that failed to reach
     // `suspected_files`, but one that reached it and had to be argued for
     // (Issue #177). It is raised only where the issue DECLARED the path under a
     // deliverable heading — the deny is the silent-by-design case, because it is
@@ -1895,6 +1899,20 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
   const harness = partitionHarnessPaths(classified.suspected, extraction.deliverable);
   const suspected = harness.kept;
   const references = [...classified.references, ...harness.denied];
+  // The shadow pairs the plan cannot tell apart: BOTH spellings reached the
+  // scope (Issue #182). Read here, before the derived paths below join the list,
+  // because a spelling is something the issue WROTE.
+  //
+  // A pair where the other spelling is a reference — cited under `## 根拠`, or a
+  // doc path, or a denied harness path — is not raised. The author already drew
+  // the distinction the question would ask about, and the shorter path is in
+  // scope either way now that nothing is dropped. Asking anyway would fire the
+  // question on a body that did everything right, and a question that does that
+  // teaches operators to reach for --allow-questions by habit.
+  const inScope = new Set(suspected);
+  const shadowedInScope = extraction.shadowed.filter(
+    (pair) => inScope.has(pair.path) && inScope.has(pair.covered_by),
+  );
   // All THREE default sources feed ONE list, which is then appended to
   // suspected_files and reported as `scope_defaults` — the plan can never grant
   // a path it does not also declare it granted. Every source derives from the
@@ -1934,6 +1952,21 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
     openQuestions.push({
       code: 'no_suspected_files',
       text: 'Affected files are unclear; add likely modules or paths.',
+    });
+  }
+  // Which of two overlapping paths the issue means (Issue #182). Raised here,
+  // next to the question about the same list, because both are about what
+  // `suspected_files` is: this one says the list holds two spellings of one file
+  // and the planner will not pick for you. See shadowedCandidates for why
+  // picking — dropping the shorter path — was the wrong default. The question is
+  // what stops dispatch; the candidates themselves both stay in scope.
+  for (const { path, covered_by: coveredBy } of shadowedInScope) {
+    openQuestions.push({
+      code: 'ambiguous_file_candidate',
+      text:
+        'Two spellings of one file are in scope and at most one is meant. ' +
+        'Delete the one that is not a target from the body, or say both are, and re-plan. ' +
+        `Paths: \`${path}\` and \`${coveredBy}\``,
     });
   }
   // L3 of the scope-derivation ADR (Issue #145), raised LAST: the two questions
@@ -2009,10 +2042,7 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
     _consumer: CONSUMER_RE.test(text),
     _topics: topicTokens(`${issue.title} ${body}`),
     _rawBody: body,
-    // `found` rather than `paths`: a candidate dropped as a partial was still
-    // recognised, so it must not be re-reported as an unknown extension.
-    _unrecognizedPaths: extractUnrecognizedPaths(text, extraction.found),
-    _shadowedPaths: extraction.shadowed,
+    _unrecognizedPaths: extractUnrecognizedPaths(text, extraction.paths),
     // Harness paths a deliverable heading claimed, hence granted (Issue #177).
     // The denied ones need no private field: they are in `reference_files`.
     _harnessPathsInScope: harness.declared,
@@ -2052,16 +2082,45 @@ function quoteBodyLine(line) {
 // it). Deduplication is per (ref, direction): a body that states both directions
 // about the same issue contradicts itself, and the contradiction must surface as
 // a cycle rather than be resolved by whichever line came first.
+//
+// A reference cited ONLY under a context heading is not a dependency, by exactly
+// the rule #54 gave paths (Issue #182). The two halves of a body were being read
+// with different rules: `## 根拠` demoted a path written under it to a citation,
+// but an issue NUMBER under the same heading still became an edge. So the line
+//
+//     旧本文の depends on #31 は成立しない
+//
+// — written to DENY a dependency — created it (measured 2026-08-07, #33/#34).
+// Nothing in the body could take it back: editing the number moved the phantom
+// edge to a different issue, and the only fix was deleting the sentence, i.e.
+// deleting the record of why the dependency does not hold. A planner that reads
+// a denial as an assertion is worse than one that reads nothing there.
+//
+// Same rule as paths, in both directions. `outsideContext` is collected per
+// MENTION, so a reference the body states once as a dependency and cites again
+// under `## 根拠` survives — the citation does not retract the statement, which
+// is the over-exclusion #54 was careful to avoid (its 26-… fixture) and the one
+// that would cost more here: a dropped real edge dispatches two issues into the
+// same wave in the wrong order. A dependency heading also outranks a context
+// heading, the precedence a deliverable heading already has over one.
 function extractExplicitRefs(body) {
+  const cSpans = contextSpans(body);
   const refs = [];
   const seen = new Set();
+  const outsideContext = new Set();
   let inSection = false;
-  for (const line of body.split(/\r?\n/)) {
+  // Offsets are counted the way headingSpans counts them (split on '\n', one
+  // character per line break), so a span and a line agree about where they are.
+  let offset = 0;
+  for (const line of body.split('\n')) {
     const stripped = line.trim();
     if (HEADING_RE.test(stripped)) {
       inSection = EXPLICIT_HEADING_RE.test(stripped);
+      offset += line.length + 1;
       continue;
     }
+    const contextual = !inSection && inSpans(cSpans, offset);
+    offset += line.length + 1;
     const forward = EXPLICIT_FORWARD_RE.exec(stripped);
     const reverse = EXPLICIT_REVERSE_RE.exec(stripped);
     if (!forward && !reverse && !inSection) continue;
@@ -2073,13 +2132,17 @@ function extractExplicitRefs(body) {
     const cue = ambiguous ? null : (reverse ?? forward)?.[0] ?? null;
     for (const match of stripped.matchAll(/#(\d+)/g)) {
       const ref = Number.parseInt(match[1], 10);
+      // Recorded per mention, before the (ref, direction) de-duplication: what
+      // decides the exclusion is whether EVERY mention of the number is a
+      // citation, not whether the first one this loop reached was.
+      if (!contextual) outsideContext.add(ref);
       const key = `${ref}:${direction}`;
       if (seen.has(key)) continue;
       seen.add(key);
       refs.push({ ref, direction, cue, ambiguous, line: stripped });
     }
   }
-  return refs;
+  return refs.filter((ref) => outsideContext.has(ref.ref));
 }
 
 // How the direction was decided — the evidence half of an explicit edge's reason.
@@ -2099,15 +2162,22 @@ function explicitReason(issueNumber, ref) {
   return `#${issueNumber} states a dependency on #${ref.ref} (${evidence})`;
 }
 
+// The suspected files two issues both name, in `a`'s order. The list rather
+// than a boolean because it is EVIDENCE (Issue #182): an inferred edge that a
+// shared file grounds says which file in its `reason`.
+function sharedFiles(a, b) {
+  const right = new Set(b.suspected_files);
+  return a.suspected_files.filter((path) => right.has(path));
+}
+
 function hasFileOverlap(a, b) {
-  const left = new Set(a.suspected_files);
-  return b.suspected_files.some((path) => left.has(path));
+  return sharedFiles(a, b).length > 0;
 }
 
 // Builds the dependency edge set from three sources, in precedence order:
 // override > explicit > inferred. Returns edges plus any validation errors and
-// warnings. Each edge is {issue, depends_on, kind, reason}: `issue` depends on
-// `depends_on`.
+// warnings, and the inferences that were NOT made into edges. Each edge is
+// {issue, depends_on, kind, basis, reason}: `issue` depends on `depends_on`.
 function buildDependencies(analyses, inputs) {
   const inSet = new Set(analyses.map((a) => a.number));
   const errors = [];
@@ -2115,11 +2185,11 @@ function buildDependencies(analyses, inputs) {
 
   // consumer -> Map(dependency -> edge), so a stronger source overrides a weaker.
   const edges = new Map();
-  const put = (issue, dependsOn, kind, reason, precedence) => {
+  const put = (issue, dependsOn, kind, basis, reason, precedence) => {
     if (!edges.has(issue)) edges.set(issue, new Map());
     const existing = edges.get(issue).get(dependsOn);
     if (!existing || precedence > existing._precedence) {
-      edges.get(issue).set(dependsOn, { issue, depends_on: dependsOn, kind, reason, _precedence: precedence });
+      edges.get(issue).set(dependsOn, { issue, depends_on: dependsOn, kind, basis, reason, _precedence: precedence });
     }
   };
 
@@ -2144,7 +2214,7 @@ function buildDependencies(analyses, inputs) {
         ? [ref.ref, analysis.number]
         : [analysis.number, ref.ref];
       if (inSet.has(ref.ref)) {
-        put(issue, dependsOn, 'explicit', redact(explicitReason(analysis.number, ref)), 2);
+        put(issue, dependsOn, 'explicit', 'declared', redact(explicitReason(analysis.number, ref)), 2);
       } else {
         warnings.push({
           code: 'external_dependency',
@@ -2156,9 +2226,33 @@ function buildDependencies(analyses, inputs) {
     }
   }
 
-  // 2. Inferred — a consumer of a shared contract depends on its producer. A
-  //    shared topic token grounds the link; file overlap is a conflict, not a
-  //    dependency, and is handled by wave packing.
+  // 2. Inferred — a consumer of a shared contract depends on its producer.
+  //
+  //    Two things ground such a link and they are NOT the same strength, which
+  //    is what Issue #182 is about. A shared topic token is a LEXICAL
+  //    coincidence: measured 2026-08-11 on #104/#105/#106 (Kewton/BorderFreeKidsMap),
+  //    three issues with zero cross-reference were serialised into three waves by
+  //    `shared: data, page, cmate` — `cmate` read out of the prose "cmate-verify
+  //    の全ゲート" in an acceptance criterion, `data` and `page` out of path
+  //    fragments each issue cited under `## 参考` about the OTHER one. One real
+  //    file conflict existed. The other two thirds of the wall-clock were spent
+  //    waiting on vocabulary.
+  //
+  //    A shared FILE is different in kind: the two issues would edit the same
+  //    bytes, which is a fact about the plan rather than about word choice. Such
+  //    a pair cannot share a wave anyway (rule 2 of wave packing), so ordering it
+  //    producer-first costs nothing and is what the heuristic is for.
+  //
+  //    So the edge carries its `basis` and only a file-grounded one is an edge.
+  //    A lexical-only inference becomes a QUESTION on the consumer instead
+  //    (`unconfirmed_lexical_dependency`, recorded below by
+  //    recordSuppressedInferences): the planner still says what it noticed, a
+  //    human decides, and the answer — `--depends 106:104`, or a line in the body
+  //    — is an edge with a real basis. `--no-infer` still turns the whole
+  //    heuristic off, including these questions; it is the switch for "do not
+  //    guess at all", and it never disabled the conflict rule that keeps two
+  //    file-overlapping issues out of one wave (`waves_conflict_free`).
+  const suppressed = [];
   if (inputs.infer) {
     for (const consumer of analyses) {
       if (!consumer._consumer) continue;
@@ -2166,11 +2260,18 @@ function buildDependencies(analyses, inputs) {
         if (producer.number === consumer.number || !producer._producer) continue;
         const shared = [...consumer._topics].filter((t) => producer._topics.has(t));
         if (shared.length === 0) continue;
+        const files = sharedFiles(consumer, producer);
+        if (files.length === 0) {
+          suppressed.push({ consumer: consumer.number, producer: producer.number, shared });
+          continue;
+        }
         put(
           consumer.number,
           producer.number,
           'inferred',
-          `#${consumer.number} consumes the contract from #${producer.number} (shared: ${shared.slice(0, 3).join(', ')})`,
+          'file_conflict',
+          `#${consumer.number} consumes the contract from #${producer.number} ` +
+            `(shared: ${shared.slice(0, 3).join(', ')}; shared file: ${files.slice(0, 3).join(', ')})`,
           1,
         );
       }
@@ -2197,14 +2298,20 @@ function buildDependencies(analyses, inputs) {
       errors.push({ code: 'override_incomplete', detail: `dependency override "${raw}" makes an issue depend on itself` });
       continue;
     }
-    put(issue, dependsOn, 'override', `override: #${issue} depends on #${dependsOn}`, 3);
+    put(issue, dependsOn, 'override', 'declared', `override: #${issue} depends on #${dependsOn}`, 3);
   }
 
   // Flatten to a sorted, deterministic list.
   const list = [];
   for (const perIssue of edges.values()) {
     for (const edge of perIssue.values()) {
-      list.push({ issue: edge.issue, depends_on: edge.depends_on, kind: edge.kind, reason: edge.reason });
+      list.push({
+        issue: edge.issue,
+        depends_on: edge.depends_on,
+        kind: edge.kind,
+        basis: edge.basis,
+        reason: edge.reason,
+      });
     }
   }
   list.sort((a, b) => a.issue - b.issue || a.depends_on - b.depends_on);
@@ -2224,7 +2331,43 @@ function buildDependencies(analyses, inputs) {
     validateOrder(inputs.order, analyses, list, errors);
   }
 
-  return { edges: list, errors, warnings };
+  return { edges: list, errors, warnings, suppressed };
+}
+
+// The lexical-only inferences above, as one open question each on the CONSUMER
+// (Issue #182). A question rather than a warning alone for the reason #145 gives
+// in the L3 comment: `plan.status` stops nobody, while dispatch refuses an issue
+// carrying an unanswered question — and it is a question in the ordinary sense,
+// answerable only by the person who wrote the two bodies.
+//
+// It rides `--allow-questions` like every other question, which is the "explicit
+// approval" half of the arbitration: an operator who reads the pair and decides
+// they are independent proceeds with the flag, and that decision is in the run's
+// command line rather than in nobody's head.
+//
+// Attached after the graph is resolved rather than inside analyzeIssue because
+// it is the only finding here that is not a property of ONE issue: it takes the
+// pair. `_openQuestions` and `questions` are appended in step so the warning a
+// reviewer reads and the question dispatch refuses on stay the same list.
+function recordSuppressedInferences(analyses, suppressed) {
+  const byNumber = new Map(analyses.map((analysis) => [analysis.number, analysis]));
+  for (const { consumer, producer, shared } of suppressed) {
+    const analysis = byNumber.get(consumer);
+    if (analysis === undefined) continue;
+    const question = {
+      code: 'unconfirmed_lexical_dependency',
+      // The pair goes LAST for the same reason the L3 question quotes its
+      // criterion last: dispatch prints a blocking question through an
+      // excerpt() that keeps the TAIL, so what identifies the finding must not
+      // sit where a truncation would take it.
+      text:
+        'Only vocabulary is shared with another issue, no file, so the planner did NOT order the two. ' +
+        'Confirm they are independent, or state the dependency in the body and re-plan ' +
+        `(or pass --depends ${consumer}:${producer}). Shared: ${shared.slice(0, 3).join(', ')} with #${producer}`,
+    };
+    analysis._openQuestions.push(question);
+    analysis.questions.push(question.text);
+  }
 }
 
 function adjacency(analyses, edges) {
@@ -2675,7 +2818,10 @@ function renderDependencyPlan(plan) {
     lines.push('- none');
   } else {
     for (const edge of plan.dependencies) {
-      lines.push(`- #${edge.issue} depends on #${edge.depends_on} (${edge.kind}): ${edge.reason}`);
+      // `basis` is on the line because it is what says whether the edge is a
+      // statement someone made or a fact about the files (Issue #182). An edge a
+      // reviewer cannot tell those apart for is an edge they cannot judge.
+      lines.push(`- #${edge.issue} depends on #${edge.depends_on} (${edge.kind}, basis: ${edge.basis}): ${edge.reason}`);
     }
   }
   lines.push('', '## Waves', '');
@@ -2767,7 +2913,16 @@ function run(argv) {
   const companionRules = compileScopeCompanions(profile.scope_companions ?? null);
   const analyses = rawIssues.map((issue) => analyzeIssue(issue, profile, binaries, companionRules));
 
-  const { edges, errors: depErrors, warnings: dependencyWarnings } = buildDependencies(analyses, inputs);
+  const {
+    edges,
+    errors: depErrors,
+    warnings: dependencyWarnings,
+    suppressed,
+  } = buildDependencies(analyses, inputs);
+  // Before the warnings are assembled: a suppressed inference becomes an open
+  // question on its consumer, and openQuestionWarnings below is what carries
+  // every question into `warnings` (Issue #52).
+  recordSuppressedInferences(analyses, suppressed);
   // Profile warnings first: a plan built against the wrong repository is the
   // premise a reviewer has to settle before reading anything downstream of it.
   // Then per-issue extraction warnings — first the candidates that never reached

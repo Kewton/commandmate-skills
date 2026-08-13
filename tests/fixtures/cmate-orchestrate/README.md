@@ -20,6 +20,8 @@ resume-cases/<id>/case.json     複数 attempt を1つの run directory に appe
                                 整合性ガードが同じものだからである
 resume-cases/<id>/attempt-N.json  attempt ごとに fake CLI へ注入する世界
 merge-cases/<id>/case.json      plan/dispatch 生成・merge scenario・merge 期待値（scenario は inline）
+merge-cases/<id>/expected-merge-report.json  （任意）golden な merge report。`out_dir` だけ
+                                `<out>` に置換して byte 一致で照合（#175 の非回帰 case）
 uat-cases/<id>/case.json        plan/dispatch 生成・uat scenario・UAT/修正ループ 期待値（scenario は inline）
 status-cases/<id>/case.json     status view の期待値（phase 状態・Issue ごとの値・次アクション）
 status-cases/<id>/run/          checked-in の run directory。実 runner の出力をそのまま置いた status の入力
@@ -72,7 +74,7 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 |---|---|
 | `01-independent` | 依存も conflict も無い3件が1 Wave に収まるか |
 | `02-explicit-dependency` | 本文の `Depends on #N` を explicit 依存として2 Wave に割るか（golden 照合つき） |
-| `03-inferred-dependency` | contract 生産者と消費者を inferred 依存として結ぶか |
+| `03-inferred-dependency` | contract 生産者と消費者が **語彙しか共有していない**とき、edge にせず question にするか（#182。file を共有する側は `55-…`） |
 | `04-file-conflict` | 同一 file を触る2件を、依存が無くても同一 Wave に置かないか |
 | `05-cycle` | 相互依存を cycle として拒否するか |
 | `06-override-incomplete` | 集合外を指す override を不完全として拒否するか |
@@ -87,6 +89,11 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 | `28-acceptance-gates-block` | ```acceptance-gates ブロックが `acceptance_gates` に載るか。ブロック有無の**双子 Issue**で `test_expectations` が byte 一致するか（#114 Phase 0-3: strip しないと本ブロックの終了 fence が後続 ```bash の開始として拾われ、3件が1件に落ちる） |
 | `29-acceptance-gates-invalid` | 2個・未知 version・不正 id・空ブロックを `acceptance_gate_block_invalid` として open question にし、**「ブロックが無かった」に丸めない**か |
 | `30-acceptance-gates-unsupported` | `gates:`（段階2の新規コマンドゲート）を黙って無視せず `acceptance_gate_block_unsupported` で止めるか |
+| `54-lexical-edge-not-serialized` | 相互参照ゼロの3 Issue（実測 #104/#105/#106 の形）が、語彙一致だけで3 wave に直列化されず、1 wave のまま question になるか（#182） |
+| `55-inferred-edge-file-conflict` | 逆向き: 同じ file を書く生産者/消費者は inferred edge のまま残り、`basis: file_conflict` と共有 file を名乗るか（#182） |
+| `56-context-heading-issue-number` | `## 根拠` 配下で**否定するために**書いた `depends on #N` が phantom 依存にならず、かつ CONTEXT の外に書いた依存は残るか（#182） |
+| `57-shadowed-path-is-a-question` | 宣言した短い path が、説明文の長い path に shadow されて scope から落ちないか（両方 scope に入り question になるか。#182） |
+| `58-shadowed-path-cited-as-context` | 逆向き: 長い方を `## 根拠` で引用しただけなら**訊かない**か（著者が既に区別を書いている。かつ、旧規則ではこの形が scope 空になっていた。#182） |
 
 ## dispatch case 一覧
 
@@ -198,6 +205,21 @@ PR 作成・CI・merge の挙動を注入する。`fake-cli.mjs` は各呼び出
 するので、`--approve` 無しに `git push`/`gh pr create`/`gh pr merge` が呼ばれていないこと、
 CI が green でないときに `gh pr merge` が呼ばれていないことまで検証できる。
 
+**合流後の統合ブランチ検証（#175）**: `--integration-verify` を渡した run は、merge の後に
+`git fetch origin <base>` → `git worktree add --detach` → **profile baseline をその checkout で
+実行** → `git worktree remove --force` を行う。`merge_scenario.integration` がその4段を injection
+する（`verify: "pass"` で使い捨て checkout に `cmate-verify-ok` を置く＝ baseline が緑になる。
+`fetch` / `worktree_add` / `remove` に `"fail"`）。緑 case と赤 case は **同じ world・同じ引数**で、
+違いは合流後の checkout に成果物が在るかどうかだけである。フラグ**無し**の case（`m22`）は
+`expected-merge-report.json`（`out_dir` だけを `<out>` に置換）と **byte 比較**し、その golden は
+**#175 実装前の runner**（`git show HEAD:skills/cmate-orchestrate/scripts/merge.mjs`）が書いたもので
+ある —— opt-in が opt-in であること（既定の出力を1 byte も変えていないこと）の機械的な証明である。
+
+case.json は `plan_patch` で**生成された plan を merge に渡す前に書き換えられる**
+（`dispatch_report_patch` と同じ理由: plan はこの runner の**入力**であり、`baseline` を埋め忘れた
+profile のような状態は、harness 自身の dispatch 段が baseline を必要とするため planner だけでは
+作れない）。
+
 | case | 何を見るための case か |
 |---|---|
 | `m01-create-prs-approved` | 承認ありで verification pass branch を push し PR を作成し success になるか |
@@ -216,6 +238,12 @@ CI が green でないときに `gh pr merge` が呼ばれていないことま�
 | `m14-base-is-default-branch` | base がデフォルトブランチのとき何も記録しないか（#39） |
 | `m15-default-branch-unknown` | `gh repo view` 失敗時に照合をスキップするだけで PR 作成を阻害しないか（#39） |
 | `m21-pr-body-nonascii-path` | 非ASCII を含む path で、対比が git の**表記**でなく path そのもので行われるか（#174）。fake の `git diff` は本物と同じく出力を munge する（`core.quotePath` 既定 true で非ASCII を8進エスケープ、`"` は設定に関係なくクォート）ので、`-z` を使わない runner は同じ file を2行に割り `Out-of-scope changes: 1` を立てる。宣言 scope が日本語ファイル名の #300 は 0 件・表1行、宣言外の変更を持つ #301 は 1 件を**読める形で**名指し（空振り防止）。#301 の宣言外 path が `"` を含むので、最小修正 `-c core.quotePath=false` へ後退しても赤になる |
+| `m22-integration-verify-absent` | **#175 (a)。** `--integration-verify` 無しの run が **#175 実装前と byte 一致**するか（`expected-merge-report.json` と byte 比較。`out_dir` だけ `<out>` に置換）。`integration_verify` field を持たず、`git fetch` も `git worktree` も**1回も呼ばない**こと。m24 の双子で、違うのは `merge_args` だけである |
+| `m23-integration-verify-red` | **#175 (b)。** PR 個別 CI が両方 green で2件とも merge できたのに、**合流後の baseline が赤**。`integration_verify.outcome: fail` と blocking `integration_verify_failed` を載せ、`partial`（exit 7 / `stop_reason: merge_failed`）にして **success に丸めない**か。次 wave を止める信号がこの3つである。m24 との違いは合流後 checkout に成果物が在るかだけ |
+| `m24-integration-verify-green` | **#175 (c)。** 合流後が green なら従来どおり `success` / `completed` で、`integration_verify.outcome: pass`。使い捨て checkout を**作って畳む**（fetch 1回・worktree 2回）ので、緑の検証は何も残さない |
+| `m25-integration-verify-no-baseline` | profile が `baseline` を宣言していない plan に `--integration-verify` を渡したとき、**1件も merge せずに拒否**するか（`failure` / exit 1 / `preflight_failed` / `integration_verify_unavailable`）。skip にすると「opt-in した検証が走らないまま merge phase 完了」になり、#175 が消しに来た事象そのものになる |
+| `m26-integration-verify-create-prs-refused` | `--create-prs` との併用を `invalid_input`（exit 3）で拒否し、**受理して無視しない**か。push も PR 作成も 0 回 |
+| `m27-integration-verify-preview-not-run` | preview（`--approve` 無し）では merge が無いので合流後も無く、`outcome: not_run` + limitation `integration_verify_not_run` になるか。**fetch も checkout もしない**こと。「測っていない」を pass に丸めない |
 
 ## uat case 一覧
 

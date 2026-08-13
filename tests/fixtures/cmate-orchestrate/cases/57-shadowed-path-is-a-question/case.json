@@ -1,0 +1,23 @@
+{
+  "description": "Issue #182 (3), the measured shape: the issue DECLARES `data/demo/facilities.json` under `## 対象ファイル` and mentions the build output `web/public/dist/data/demo/facilities.json` in prose. 0.27.0 kept the longer path and dropped the shorter one, so `scope.allow` held the generated artifact the body says not to touch and NOT the file it says to write — with only a warning, which nothing downstream stops on. Both spellings now stay in scope and the planner asks which is meant. Widening the scope by one directory is the cheaper of the two errors: an unused allowance costs nothing, a missing one costs the worker its run and cannot be repaired from inside it. The question is pinned as well as the paths — a case that only checked `suspected_files` would stay green if the drop came back as a silent one.",
+  "args": ["420", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": ["ambiguous_file_candidate"],
+    "waves": [[420]],
+    "merge_order": [420],
+    "dependencies": [],
+    "classifications": { "420": "independent" },
+    "risk_level": "moderate",
+    "suspected_files": {
+      "420": ["data/demo/facilities.json", "web/public/dist/data/demo/facilities.json"]
+    },
+    "scope_defaults": { "420": [] },
+    "reference_files": { "420": [] },
+    "questions_count": { "420": 1 },
+    "questions_include": {
+      "420": ["`data/demo/facilities.json` and `web/public/dist/data/demo/facilities.json`"]
+    }
+  }
+}

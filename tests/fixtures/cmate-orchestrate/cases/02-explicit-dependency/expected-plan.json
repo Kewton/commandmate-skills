@@ -101,6 +101,7 @@
       "issue": 200,
       "depends_on": 201,
       "kind": "explicit",
+      "basis": "declared",
       "reason": "#200 states a dependency on #201 (direction word \"Depends on\" in \"- Depends on #201\")"
     }
   ],

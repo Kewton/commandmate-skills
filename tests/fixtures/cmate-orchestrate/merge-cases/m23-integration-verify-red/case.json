@@ -1,0 +1,48 @@
+{
+  "description": "#175 (b) — both PRs merge on their own green CI, and the state they add up to is RED. The runner fetches the merged base, runs the profile baseline in a throwaway detached checkout, records integration_verify_failed with outcome fail, and refuses to call the run a success — which is the signal that stops the next wave's dispatch. Same world as m24 with the deliverable removed from the merged checkout (integration.verify), so the difference between green and red is the artifact and nothing else.",
+  "phase": "merge-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--approve", "--integration-verify"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" },
+      "201": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" }
+    },
+    "integration": { "verify": "fail" }
+  },
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "merge_failed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "merged", "200": "merged" },
+    "pr_merge_calls": 2,
+    "completion_passed": true,
+    "blocking_codes": ["integration_verify_failed"],
+    "absent_limitation_codes": ["integration_verify_not_run", "integration_verify_tree_left"],
+    "integration_verify": {
+      "requested": true,
+      "ran": true,
+      "outcome": "fail",
+      "base": "origin/develop",
+      "base_sha": "deadbee",
+      "merged_issues": [201, 200],
+      "commands": ["cat cmate-verify-ok"],
+      "failed_command": "cat cmate-verify-ok",
+      "exit_code": 1
+    },
+    "git_calls": { "fetch": 1, "worktree": 2 },
+    "summary_contains": [
+      "## 統合検証（--integration-verify）",
+      "次の wave を dispatch しない"
+    ]
+  }
+}

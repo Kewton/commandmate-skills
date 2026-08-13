@@ -48,14 +48,31 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | `no_acceptance_criteria` | 受入条件を1件も読み取れない。何をもって完了かが宣言されていない |
 | `no_suspected_files` | 対象 file を1件も読み取れない。worker に与える scope が空になる |
 | `unrecognized_file_extension` | 既知拡張子外の backtick path が抽出から落ちた |
-| `shadowed_file_candidate` | 他候補の path 境界つき suffix だったため候補から落とした |
+| `ambiguous_file_candidate` | 同じ file の2つの綴り（一方が他方の path 境界つき suffix）が本文に在り、どちらを意図したか決められない。**どちらも落とさず**両方 scope に入れたうえで訊いている |
+| `unconfirmed_lexical_dependency` | 生産者/消費者の推論が**共有 topic token だけ**を根拠にしていたので、依存 edge にしなかった。順序が要るなら人間が述べる |
 | `harness_path_in_scope` | agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を、Issue が**成果物見出しで明示的に宣言した**ので scope に入れた。既定は「入れない」である |
 | `acceptance_requires_tests_but_scope_has_none` | 受入条件がテストの**作成**を能動的に要求しているのに、対象 file（**段1 の導出結果を含めて**）にテストらしき path が1件も無い |
 | `contract_scope_dropped` | 宣言された対象 file の一部が、dispatch の実行契約の `scope.allow` に**入らない**（件数上限 200 超過、または契約が扱えない形の path）。detail に**落ちた件数・落ちた path（先頭3件）・落ちた理由**が入る |
 
-`no_acceptance_criteria` / `no_suspected_files` / `acceptance_requires_tests_but_scope_has_none`
+`no_acceptance_criteria` / `no_suspected_files` / `acceptance_requires_tests_but_scope_has_none` /
+`ambiguous_file_candidate` / `unconfirmed_lexical_dependency`
 は dispatch の open question ゲートと対になる。**これらを放置したまま `--allow-questions` で
 押し通さないこと。** このフラグは plan 全体に効くので、1件を黙らせるつもりで全部を黙らせる。
+
+後ろ2つは [#182](https://github.com/Kewton/commandmate-skills/issues/182) で足した。どちらも
+**planner が推測をやめて訊く**ようにした結果であり、以前は前者が warning だけ
+（`shadowed_file_candidate` —— 本 planner はもう出さない）、後者が黙って作られる
+依存 edge だった。どちらの場合も、気づかない人間に対しては**推測がそのまま dispatch されていた**。
+
+- `ambiguous_file_candidate`: 本文に `data/demo/facilities.json` と
+  `web/public/dist/data/demo/facilities.json` の両方が在るような状態である。**どちらを対象から
+  消すかを決めて本文を直し、re-plan する。** 両方が対象なら `--allow-questions` でよい ——
+  両方とも scope に入っている。
+- `unconfirmed_lexical_dependency`: 「語彙は共有しているが file は共有していない」2 Issue が
+  在るという報告である。**順序が要るなら Issue 本文に `depends on #N` と書くか
+  `--depends <consumer>:<producer>` を渡して re-plan する。** 要らない（＝独立である）と
+  読んだなら `--allow-questions` で進めてよい。3 Issue が語彙一致だけで3 wave に直列化していた
+  のが元の障害なので、**この question の正しい答えは多くの場合「独立である」**である。
 
 `acceptance_requires_tests_but_scope_has_none` は前2つと違って**推論**である
 （[adr-scope-derivation.md](./adr-scope-derivation.md) 第7節・第8節、第14節）。判定の元になった
@@ -117,6 +134,8 @@ Issue が `## 対象ファイル`（成果物見出し）に書いた場合だ�
 | `unsafe_branch` | merge | branch 名が safe-ref guard に弾かれた |
 | `change_evidence_unavailable` | merge | branch の実変更 file を読めなかった（worktree 不在など）。PR 本文もそう書く。**scope 内に収まっていた証拠ではない** |
 | `branch_changed_outside_declared_scope` | merge | 実変更に宣言 scope（`scope.allow`）外の file がある。PR 本文が違反 path を名指しする |
+| `integration_verify_not_run` | merge | `--integration-verify` を渡したが、この invocation は1件も merge していない（preview / eligible 無し / 最初の merge の前に停止）ので合流後を測っていない。**「測っていない」であって「green」ではない**（`integration_verify.outcome` は `not_run`） |
+| `integration_verify_tree_left` | merge | 統合検証に使った**使い捨ての detached checkout**（`<out>/integration-tree`）を畳めなかった。裁定は baseline の結果のまま。`git worktree remove --force` で消す |
 | `acceptance_not_run` | uat | 意味ゲートが verdict を出せず、baseline のみで裁定した |
 | `no_eligible_issues` | merge / uat | dispatch report に completed かつ verification pass の Issue が無い |
 | `completion_check_failed` | dispatch / merge / uat | completion check のどれかが passed でない |
@@ -158,6 +177,8 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 |---|---|---|
 | plan `status: partial` + `no_acceptance_criteria` / `no_suspected_files` | Issue に受入条件か対象 file が書かれていない | **Issue 本文に書き足して re-plan する。** run_id は本文を含む hash なので自動的に別 run になる |
 | plan `status: partial` + `acceptance_requires_tests_but_scope_has_none`（dispatch 側では `open_questions` として止まる） | 受入条件はテストの作成を要求しているのに、宣言された file からテスト path が1件も導出できていない。**そのまま dispatch すれば worker は正しくテストを書いて scope ゲートで落ち、契約 scope は send 時 snapshot なので worker 側に回復手段は無い** | **Issue 本文の対象 file にテスト path を書いて re-plan する。** テストが本当に不要なら受入条件にそう書く（否定形は検出から除外される）。判定の元になった受入条件が warning detail と question に原文で入っているので、偽陽性の確認はその1行で済む。**`--allow-questions` で押し通すのは、そのまま worker 1人分の run を捨てることである** |
+| plan `status: partial` + `ambiguous_file_candidate`（dispatch 側では `open_questions` として止まる） | 同じ file の2つの綴りが本文に在る（一方が他方の path 境界つき suffix）。**どちらも scope に入れてある** —— 以前は長い方を残して短い方を落としており、実測では「宣言した path が落ちて、触るなと書いたビルド生成物が scope に残る」向きに外れた | **どちらが対象かを決めて、もう片方を本文から消して re-plan する。** 両方とも対象なら `--allow-questions` で進めてよい（両方入っている）。question の本文が2つの path を名指ししているので、判断は本文を開かずに済む |
+| plan `status: partial` + `unconfirmed_lexical_dependency`（同上） | 生産者/消費者の推論が当たったが、根拠が**共有 topic token だけ**で共有 file が無かったので edge にしていない。**その2 Issue は同じ wave に入る** | **順序が要るなら述べる**（Issue 本文に `depends on #N`、または `--depends <consumer>:<producer>`）。要らないなら `--allow-questions` で進めてよい。散文の語が一致しただけで3 Issue が3 wave に直列化していたのが元の障害なので、**「独立である」が正しい答えであることが多い**。**edge が欲しいのに `--no-infer` を足さない** —— それは推論を丸ごと切るだけで、この question の答えにはならない |
 | plan `status: partial` + `harness_path_in_scope` | Issue が `## 対象ファイル`（成果物見出し）に agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を書いたので、**worker がそれを書き換えられる状態で dispatch される**。既定では入らない path が、明示宣言によって入っている | **その Issue の成果物が本当にハーネスなのかを読んで決める。** そうなら（このリポジトリ自身の Issue のように）そのまま進めてよい —— warning は宣言の記録であって停止ではない。そうでない（ただ「その runner を実行して通ること」を言いたいだけの）なら、**成果物見出しから path を消して散文か参考見出し（`根拠` / `参考`）へ移し、re-plan する**。移しても worker はその path を読める（`reference_files` に出る）。**審判を書き換えられる worker を「たぶん大丈夫」で送らない** |
 | plan `cycle_detected` / `override_incomplete` / `dependency_order_violation` | 依存グラフが実行不能 | `dependency-plan.md` の edge `reason`（どの方向語をどの行から読んだか）を見て、Issue 本文か `--depends` を直す |
 | plan `run_exists` | **同じ既定 run_id に hash された run が既にある**（Issue 集合・Issue 内容・**profile 全体**・CLI option がすべて同じ、が典型）。「何も変えていない」とまでは断定できない —— 既定 profile の cwd `origin` 判定は hash の外にある（Issue #157） | エラーが指す既存の `plan.json` と突き合わせて、意図した plan かを確かめる。違うなら Issue 本文か profile を直す（**profile はどの field を編集しても別 run_id になる**）。同じでよいなら `--run-id <new-id>` / `--runs-dir <dir>` を渡す |
@@ -188,6 +209,8 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | merge `ci_failed` / `ci_pending` | CI が green でない | CI を直す。**green 無しに merge しない** |
 | merge `pr_missing` / `merge_failed` | PR が無い / conflict | PR の状態を確認し、conflict は手で解消する |
 | merge `issue_autoclose_not_default_branch` | base がデフォルトブランチでない | merge 後に **Issue を手動でクローズする** |
+| merge `integration_verify_failed`（**`--integration-verify`**。`stop_reason: merge_failed` / `partial`） | **合流後の統合ブランチで profile baseline が赤い。** 各 PR の CI は green だったが、それらは**兄弟 PR が入る前の base** で走ったものである（[#175](https://github.com/Kewton/commandmate-skills/issues/175) の実測）。merge 自体は成功しており、赤いのは**合流の結果**である | **既に merge 済みなので、この phase の再実行では戻らない。** 統合ブランチを green にする（前進修正、または revert）まで **次の wave を dispatch しない**（`integration_verify.outcome` が `fail` の間は barrier が満たされていない）。この code は **file 重なりに出ない意味的衝突**の徴候なので、同じ wave の Issue が**同じデータ・同じ前提を別方向へ動かしていないか**を読む（owner: human）。**「PR 個別の CI は緑だったのだから大丈夫」で押し通さない** |
+| merge `integration_verify_unavailable`（同上） | 統合検証を実行できなかった。2通りある: **(a) profile が `baseline` を宣言していない**（`stop_reason: preflight_failed` / `failure`。**1件も merge していない**）／**(b) merge 後の probe が失敗した**（`git fetch` / `rev-parse` / 検証用 checkout。`stop_reason: merge_failed` / `partial`。**merge は済んでいる**） | (a) **profile に `baseline` を書いて同じコマンドを再実行する。** 世界は動いていないので取り消すものは無い（統合検証をしない運転に戻すなら `--integration-verify` を外す）。(b) **merge は済んでいるのに結果を測れていない。** remote 到達性 / base の解決 / worktree 作成の失敗要因を直し、**統合ブランチで profile baseline を手で1回通してから**次の wave へ進む（owner: operator） |
 | uat `acceptance_conditional` | 受入判定が `conditional_go` | **条件を読んで人間が判断する。** 自動修正の対象ではない |
 | uat `blocked` / `max_attempts_reached` | 上限まで直しても不合格 | `unresolved_issues` と `next_actions` を読む。**success に丸めない** |
 | uat `acceptance_not_run` | 意味ゲートを掛けずに baseline だけで裁定した | cmate-acceptance-test を入れて result を用意し、必要なら `--require-acceptance` で必須にする |
@@ -228,14 +251,26 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 `worktree_setup_unavailable` / `worktree_setup_failed` / `worktree_profile_mismatch` と
 `resume_attempt` / `resume_no_work` / `resume_invalid` / `resume_plan_mismatch`、
 そして `scope_unsatisfiable` / `contract_scope_dropped` / `harness_path_in_scope` /
+`ambiguous_file_candidate` / `unconfirmed_lexical_dependency` /
+`integration_verify_failed` / `integration_verify_unavailable` /
 `wait_window_exhausted` / `worker_stalled` / `worker_liveness_unreadable` は、
 この表には在るが **status runner の hint map にはまだ無い**（`status.mjs` は別 Issue で追随する。
 `contract_scope_dropped` については `status.mjs` が #161 / #162 の宣言 scope の外だった。
 `harness_path_in_scope` も同じく [#177](https://github.com/Kewton/commandmate-skills/issues/177)
-の宣言 scope の外である。timeout の生死3 code も
-[#179](https://github.com/Kewton/commandmate-skills/issues/179) の宣言 scope の外だった ——
-`status.mjs` は既存の `worker_timeout` の hint を引き続き出すので、**timeout であることは読めるが
-「どちらの timeout か」は dispatch report の blocking detail と `worker_liveness` を読む**）。
+の宣言 scope の外であり、`ambiguous_file_candidate` / `unconfirmed_lexical_dependency` は
+[#182](https://github.com/Kewton/commandmate-skills/issues/182) の、`integration_verify_*` は
+[#175](https://github.com/Kewton/commandmate-skills/issues/175) の、timeout の生死3 code は
+[#179](https://github.com/Kewton/commandmate-skills/issues/179) の宣言 scope の外である。
+#182 は `status.mjs` に在る `shadowed_file_candidate` の hint —— 「候補から落ちた」と述べる
+1行 —— を**古くしている**: planner はもう落とさないし、その code も出さない。文面としては
+「Issue 本文で path を完全形で書き直す」が今も対処として正しいので、実害は
+「落ちた」の一語だけである。
+なお #175 の停止は `stop_reason` としては既存の `merge_failed` / `preflight_failed` に載るので、
+status runner はそちらの hint（conflict の解消 / gh・base の復旧）を引く —— **その1行では
+足りない停止**なので、`blocking_reasons` の code と `summary_markdown` の「統合検証」節を読むこと。
+#179 も同様に `status.mjs` は既存の `worker_timeout` の hint を引き続き出すので、**timeout で
+あることは読めるが「どちらの timeout か」は dispatch report の blocking detail と
+`worker_liveness` を読む**）。
 それまで `status.mjs --run` はこれらを「detail と `summary_markdown` を読む」に落として表示する。
 **推測で別の対処を出さない**のが status runner の約束なので、これは劣化ではなく既定の振る舞いである。
 dispatch report の `summary_markdown` には上表と同じ next action が出ている。

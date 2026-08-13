@@ -1,0 +1,18 @@
+{
+  "description": "Issue #182 (1), the other side of the same rule: the inference survives when a FILE grounds it. #310 consumes the gateway types #311 declares, and both name `src/payment/types.ts` — a fact about the plan rather than about word choice. The pair could not share a wave anyway (rule 2 of wave packing), so ordering it producer-first costs nothing, which is what the heuristic is for. The edge carries `basis: file_conflict` and its reason names the shared file, so a reviewer can tell it from an edge someone stated (`declared`) without opening either issue. Without this case, the suppression above would be indistinguishable from deleting the heuristic.",
+  "args": ["310", "311", "--profile", "node-commandmate", "--max-parallel", "3"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[311], [310]],
+    "merge_order": [311, 310],
+    "dependencies": [{ "issue": 310, "depends_on": 311, "kind": "inferred", "basis": "file_conflict" }],
+    "dependency_reasons_include": {
+      "310:311": ["shared: payment, gateway, types", "shared file: src/payment/types.ts"]
+    },
+    "classifications": { "310": "dependent", "311": "conflicting" },
+    "risk_level": "moderate",
+    "questions_count": { "310": 0, "311": 0 }
+  }
+}
