@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 490,
+      "title": "refactor: tile 名の正規化を共有実装に寄せる",
+      "body": "`scripts/build-tiles.mjs` と `web/src/shared/format.mjs` が tile 名の正規化をそれぞれ持っていて、片方だけ全角空白を落とす。共有の正規化に寄せる。\n\n## 対象ファイル\n- `scripts/build-tiles.mjs`\n- `web/src/shared/format.mjs`\n\n## Acceptance criteria\n- [ ] 両方が同じ入力に同じ tile 名を返す\n- [ ] 全角空白が落ちる\n",
+      "labels": ["refactor"]
+    }
+  ]
+}

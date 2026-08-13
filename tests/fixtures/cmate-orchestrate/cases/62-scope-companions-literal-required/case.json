@@ -1,0 +1,46 @@
+{
+  "description": "Issue #181: the companion an aggregate contract test IS. `scripts/tests/shared-contract.test.mjs` checks several modules at once, so its NAME corresponds to no source name — L1 cannot reach it (it derives the four conventional shapes of each declared `.mjs` and stops) and `derive` cannot express it either, because every `derive` add must be a function of the declared path. It is declared as a LITERAL under `require`, and this case pins the three things that makes true: the literal reaches `scope_defaults` (hence `suspected_files`, hence the worker's scope.allow) when a declared path matches a rule's `when`; it appears exactly ONCE even though both declared paths match a rule (the second is deduplicated against `have`, so it does not eat two of dispatch's 200 scope slots); and it COEXISTS with the placeholder form — the same profile's `derive` rule contributes `scripts/tests/build-tiles.test.mjs`, and L1's eight shapes are untouched. Diff against 63: same profile, an issue whose files match no `when`.",
+  "args": ["490", "--profile-json", "PROFILE:companions-literal-require.json", "--run-id", "fixture-l2-literal"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[490]],
+    "merge_order": [490],
+    "dependencies": [],
+    "classifications": { "490": "independent" },
+    "risk_level": "low",
+    "suspected_files": {
+      "490": [
+        "scripts/build-tiles.mjs",
+        "web/src/shared/format.mjs",
+        "scripts/build-tiles.test.mjs",
+        "scripts/build-tiles.spec.mjs",
+        "scripts/__tests__/build-tiles.mjs",
+        "scripts/__tests__/build-tiles.test.mjs",
+        "web/src/shared/format.test.mjs",
+        "web/src/shared/format.spec.mjs",
+        "web/src/shared/__tests__/format.mjs",
+        "web/src/shared/__tests__/format.test.mjs",
+        "scripts/tests/build-tiles.test.mjs",
+        "scripts/tests/shared-contract.test.mjs"
+      ]
+    },
+    "scope_defaults": {
+      "490": [
+        "scripts/build-tiles.test.mjs",
+        "scripts/build-tiles.spec.mjs",
+        "scripts/__tests__/build-tiles.mjs",
+        "scripts/__tests__/build-tiles.test.mjs",
+        "web/src/shared/format.test.mjs",
+        "web/src/shared/format.spec.mjs",
+        "web/src/shared/__tests__/format.mjs",
+        "web/src/shared/__tests__/format.test.mjs",
+        "scripts/tests/build-tiles.test.mjs",
+        "scripts/tests/shared-contract.test.mjs"
+      ]
+    },
+    "reference_files": { "490": [] },
+    "questions_count": { "490": 0 }
+  }
+}

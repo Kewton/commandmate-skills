@@ -63,7 +63,8 @@ runner が自分で再試行ループを回すことはない。
 orchestration 全体が要求する集合である（plan にも同じ集合を提示する）。base branch・branch 名・
 worktree path・baseline は **profile から解決**し、`develop`/`npm`/`cargo` を hardcode しない
 （[profile-contract.md](./references/profile-contract.md)）。**リポジトリ固有の伴走ファイル規約
-（`spec/` ミラー等）も profile の任意 field `scope_companions` で宣言する** —— planner は
+も profile の任意 field `scope_companions` で宣言する** —— `spec/` ミラーのような
+宣言済み path の関数は `derive`、集約テストのような固定名の伴走は `require` に書く。planner は
 リポジトリを開かないので、規約の出どころは profile だけである
 （[adr-scope-derivation.md](./references/adr-scope-derivation.md) 第3節）。内蔵 profile
 （`node-commandmate` / `rust-commandagent`）以外のリポジトリで使うなら、まず
@@ -171,7 +172,7 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 | `--prepare-worktrees` | **off** | pre-flight で未解決だった worktree を `cmate-worktree-setup` に作らせてから続行する。既定 off＝従来どおり停止 |
 | `--worktree-setup <launcher>` | — | 上記 provider の呼び出し口（`--cli` と同じ argv 規約）。`--prepare-worktrees` 無しに渡すと `invalid_input` |
 | `--worker-method <skill-id>` | **off** | worker が従うべき開発スキル（例 `cmate-worker-development`）を名指しする。**install を実測してから** dispatch し、無ければ停止する。契約 goal と worker prompt の**両方**に `## Method` 節が入る。**渡さない run は 1 bit も変わらない** |
-| `--schedule <mode>` | **`wave`** | `wave` / `dag`。`dag` は wave barrier をやめ、**その Issue 自身の依存**が pass した時点で空き枠へ投入する（第3.2節）。**渡さない run は report が byte 単位で従来どおり。** `--reverify` との併用は `invalid_input` |
+| `--schedule <mode>` | **`wave`** | `wave` / `dag`。`dag` は wave barrier をやめ、**その Issue 自身の依存**が pass した時点で空き枠へ投入する。**渡さない run は report が byte 単位で従来どおり。** 規則・停止・制約は第3.2節 |
 | `--contract-mode <m>` | `auto` | `auto` / `require`（フォールバック拒否）/ `off`（probe せず baseline 裁定） |
 | `--verify-gates <ids>` | 省略＝全ゲート | 契約の `verify.gates` に載せる gate id。**存在しない id を発明しない**。run 全体に1つ。Issue 側の `require:` とは**和集合**を取る（絞り込みが Issue の要求を落とすことは許さない） |
 | `--expect-branch <name>` | — | plan 承認時の統合 branch。不一致なら drift |
@@ -195,12 +196,13 @@ profile 由来かを問わず**解決後の値**に対して効く。
 2. **裁定と完了は別物である。** 裁定の ground truth は `wait --verify` の exit code、完了の
    ground truth は **worktree ブランチの新規 commit** である。worker は各ターン後に idle 化する
    ので、`wait` の idle を完了とみなさない。
-3. **Wave barrier と verification gate。** 全 worker が `completed` かつ verification pass に
-   なるまで次 Wave へ進まない。**worker completion を verification success と同一視しない。**
-   そして **barrier は「1本ずつの branch が green」では閉じない** ——
-   `merge.mjs --merge-prs --integration-verify`（第3.3節）を使う運転では、
-   **合流後の統合ブランチが green であることまでが barrier である**（[#175](https://github.com/Kewton/commandmate-skills/issues/175)）。
-   file が重ならない意味的衝突は plan にも PR 個別 CI にも出ないので、合流させてから測るしかない。
+3. **barrier と verification gate。** `completed` かつ verification pass が揃うまで次へ進まない
+   ——既定（`wave`）は Wave 単位、`--schedule dag` は **Issue ごと**（第3.2節）。**worker
+   completion を verification success と同一視しない。** そして **barrier は「1本ずつの branch が
+   green」では閉じない** —— `merge.mjs --merge-prs --integration-verify`（第3.3節）を使う運転では
+   **合流後の統合ブランチが green であることまでが barrier である**
+   （[#175](https://github.com/Kewton/commandmate-skills/issues/175)。file が重ならない意味的衝突は
+   plan にも PR 個別 CI にも出ないので、合流させてからしか測れない）。
 
 **オプション別の運用は、この文書の外にある。** 下の表は「何をしたいときにどの flag か」だけで、
 規則・停止条件・設計理由は名指しした先が持つ（**一方向参照**である。食い違ったら正本が勝つ）。
@@ -226,26 +228,21 @@ profile 由来かを問わず**解決後の値**に対して効く。
   再判定しない。** `--reverify` は `send` を1回も呼ばず、worker のターンを1つも消費しない。
 - **契約が言及していない禁止事項は、契約が許可したのではなく書いていないだけである。Issue 本文が
   正本である**（[#176](https://github.com/Kewton/commandmate-skills/issues/176)）。`goal` は本文の
-  要約だが、**否定的制約（「## 非対象」「## 禁止」「## セキュリティ上の考慮」等の節、および
-  「してはいけない / 送ってはいけない」を含む表・箇条書き）だけは要約せず原文転記する**。
-  そのために dispatch は Issue ごとに1回 `gh issue view <n> --json body` を **read-only** で呼ぶ。
-  読めなければ停止せず、goal がそう名乗って `issue_body_unreadable` を記録する。上限に収まらず
-  落ちた節が在れば、goal に `本文に他節がある。gh issue view <n> で全文を読め` の1行が入り
+  要約だが、**否定的制約の節と、禁止表現を含む表・箇条書きだけは要約せず原文転記する**。読めない
+  ときも上限で落ちたときも停止せず、goal がそう名乗って `issue_body_unreadable` /
   `issue_constraints_untranscribed` を記録する。**転記が完走しても、worker 側は本文を自分で読む**
-  （[cmate-worker-development](../cmate-worker-development/) A 段）。契約の正本は
-  [dispatch-contract.md](./references/dispatch-contract.md) 第2.4.1節。
+  （[cmate-worker-development](../cmate-worker-development/) A 段）。転記対象の見出し語・上限・
+  配置・非回帰は [dispatch-contract.md](./references/dispatch-contract.md) 第2.4.1節。
 - **`--schedule dag` は並列度を上げるため、検証ゲートが資源（ポート等）を共有するリポジトリでは
   偽赤が増えうる。[Kewton/CommandMate#1771](https://github.com/Kewton/CommandMate/issues/1771)
-  が着地するまでは `--max-parallel` を保守的に設定すること。** 失敗の伝播・合流後検証を回す位置・
+  が着地するまでは `--max-parallel` を保守的に設定すること。** 失敗の伝播・合流後検証・
   `--max-parallel` を runner が下げない理由は第3.2節。
 - **`--unattended` が含意するのは締め付けだけである。** ゲートを1つも無効化せず、`--approve` を
   含意せず、緩和フラグとの併用は `invalid_input` で拒否する。**無人運転の driver は CI の job 定義
   （または cron script）であって runner ではない。**
 - **dispatch で `--unattended` が足す締め付けの1つは、裁定の根拠の要求である。** 契約 pass なのに
-  `GATE <id> PASS|FAIL` 行を1本も読めなかった Issue（`verification_gates_unrecorded`）が在れば、
-  **次の wave を dispatch せずに停止する**（`partial` / `stop_reason: dispatch_error`）。
-  **裁定そのものは書き換えない** —— exit code の pass はそのまま残り、変わるのは run が先へ進むかだけ。
-  フラグ無しでは従来どおり limitation を記録して続行する（fixture で二点測定してある）。
+  ゲートを1つも名指しできない Issue（`verification_gates_unrecorded`）で先へ進むのをやめる。
+  **裁定そのものは書き換えない**（第3.0.3節。フラグ無しは limitation で続行。対処は第5節）。
 - **`--unattended` と monitor を併用するなら、monitor 側の `--no-auto-approve` は推奨ではなく
   要件である**（[#115](https://github.com/Kewton/commandmate-skills/issues/115) の実測。
   [runner-operations.md](./references/runner-operations.md) 第11節）。
@@ -578,7 +575,7 @@ report/artifact に残さない（redaction）。
 | dispatch `open_questions` + `human_required` | blocking reason に出ている質問の答えを Issue 本文に書いて re-plan する |
 | dispatch `drift` | drift の内容を確認し、必要なら re-plan する。**drift の上に dispatch しない** |
 | dispatch `worktree_unresolved` | **`cmate-worktree-setup` で worktree を作り、同じコマンドを再実行する。** plan と同じ profile を使う。**re-plan は不要** |
-| dispatch `blocked_by_upstream_failure` / `schedule_halted_unattended`（`--schedule dag`） | 上流が green にならず、**下流だけ**（`--unattended` では全部）投入しなかった。**上流を直して `--resume`** |
+| dispatch `blocked_by_upstream_failure` / `schedule_halted_unattended`（`--schedule dag`） | 上流が green にならず**下流だけ**（無人では全部）投入しなかった。**上流を直して `--resume`** |
 | dispatch `worktree_setup_unavailable` / `worktree_setup_failed` / `worktree_profile_mismatch` | provider を install する / `--worktree-setup <launcher>` で呼び出し口を渡す / plan と**同じ profile** を渡す。**作成済みの worktree は消していない** |
 | dispatch `worker_method_unavailable` | **`commandmate skill install <skill-id>` で対象 worktree に入れ、同じコマンドを再実行する。** **re-plan は不要** |
 | dispatch exit 10（prompt 検出） | `capture` の内容が report に出ている。**自分で判断して答える。** runner は自動応答しない |
