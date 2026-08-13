@@ -103,6 +103,9 @@ Issue が `## 対象ファイル`（成果物見出し）に書いた場合だ�
 | `worktree_setup_partial` | dispatch | 要求したうち一部しか作られなかった。作れた分は**消さずに保持**し、未解決 Issue については停止する |
 | `worktree_setup_skipped` | dispatch | `--prepare-worktrees` を指定したが、pre-flight が別の drift で先に止まったため provider を呼んでいない |
 | `worktree_sync_rescanned` | dispatch | 準備段のため `commandmate sync` を2回実行した（解決時の1回＋作成後の強制1回） |
+| `issue_constraints_transcribed` | dispatch | Issue 本文の否定的制約を task text へ**原文転記した**（[#176](https://github.com/Kewton/commandmate-skills/issues/176)、[dispatch-contract.md](./dispatch-contract.md) 第2.4.1節）。**Issue ごとに1件**（転記した節を detail に名指しする）。**転記したことは、守られたことではない** |
+| `issue_constraints_untranscribed` | dispatch | 否定的制約を見つけたが、上限（1200 文字 / 8 ブロック）に収まらず**一部を運べなかった**。**Issue ごとに1件。** ブロックを途中で切ることはしないので、落ちたのは節単位である。goal には落とした節の名前と `gh issue view <n>` の1行が入っている |
+| `issue_body_unreadable` | dispatch | `gh issue view` が Issue 本文を読めなかった（未 install / 未認証 / 網なし）。**Issue ごとに1件。** 停止はしない（scope と verify は plan 由来なので運べる）が、**否定的制約は1件も運べていない**。goal はその旨と `gh issue view <n>` を名指ししている |
 | `worker_method_declared` | dispatch | `--worker-method <id>` 付きの run である。**run 全体で1件。** 停止した run にも残る（何を前提にした run だったかが読めるように） |
 | `worker_method_applied` | dispatch | その Issue の worktree に skill が在り、task text に `## Method` 節を書いた。**Issue ごとに1件。** 「適用された」であって「守られた」ではない |
 | `unattended_mode` | dispatch / merge / uat | `--unattended` 付きの run である。**run 全体で1件。** 停止した run にも残る。**その runner・その phase が含意した締め付け**を detail に記録する（dispatch: contract require / pre-flight の scope 検査 / wall-clock budget / worktree lock / 裁定根拠の要求。merge `--create-prs`: 変更証拠の要求。merge `--merge-prs`: 受入ゲートブロックと受入条件の要求。uat: 意味ゲートと上限の明示＋再merge 先の pre-flight） |
@@ -123,6 +126,18 @@ Issue が `## 対象ファイル`（成果物見出し）に書いた場合だ�
 `conditional_go` の保持（`acceptance_conditional`）と fix 上限到達（`max_attempts_reached`）は
 limitation ではなく **stop_reason / blocking reason** である。**停止であって、続行しながらの
 注記ではない。**
+
+`issue_constraints_untranscribed` / `issue_body_unreadable` は**止まらないが、放置してよい種類では
+ない**。どちらも「否定的制約が worker へ全部届いていない」と言っており、scope ゲートも verification
+ゲートも**それを測らない**（[dispatch-contract.md](./dispatch-contract.md) 第2.4.1節）。人間がすること:
+`issue_constraints_untranscribed` なら detail と goal が落とした節を名指ししているので、その節を
+worker へ渡すべきなら **Issue を分割するか本文の制約節を短くして re-plan する**；
+`issue_body_unreadable` なら `gh auth status` を確かめて（未 install / 未認証 / 網なし）から
+**同じコマンドで再実行する** —— 本文が読めれば転記が入る。どちらの場合も、その run の pass は
+**「本文の禁止事項を守った」ことを意味しない**。なお、この3つの code は現時点で status runner の
+hint 表に**入っていない**（`status.mjs` は #176 の宣言 scope の外だった。
+`acceptance_requires_tests_but_scope_has_none` と同じ事情で、第4節の注記を見よ）。したがって
+`status.mjs` は detail を読ませる既定に落ちる。
 
 
 ## 4. 停止したとき、人間が何をするか（対処表の正本）

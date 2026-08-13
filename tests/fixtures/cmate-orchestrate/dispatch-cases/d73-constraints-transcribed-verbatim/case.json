@@ -1,0 +1,94 @@
+{
+  "description": "[#176] Issue 本文の否定的制約が、要約されずに **原文で** 契約 goal へ載るか。実測（Kewton/BorderFreeKidsMap #35）では「送ってよい / 送ってはいけない」表の3行目だけが plan の受入条件抽出から落ち、worker にとってその禁止は「許可されていない」ではなく **存在しない** ものになり、全ゲート green のまま受入条件違反が commit された。この case の Issue #360 は同じ形をしている——禁止の表は `## payload の設計` という **否定語を含まない見出しの下**（見出し語集合では拾えない位置）に在り、`## 非対象` 節が別に在る。goal には表の header・separator・データ3行の **全行**と 非対象 節が原文で載り、`Issue body:` の行と「禁止事項は許可ではない」の Rules 行は Issue に関わらず入る。転記は完走しているので、切り捨ての1行（`gh issue view` へ誘導する行）は **入らない**。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-negative-constraints.json",
+    "orchestrate_args": [
+      "360",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      360
+    ],
+    "send_counts": {
+      "360": 1
+    },
+    "worker_states": {
+      "360": "completed"
+    },
+    "verification_outcomes": {
+      "360": "pass"
+    },
+    "task_ids": {
+      "360": "task-issue-360"
+    },
+    "contract_issues": [
+      360
+    ],
+    "contract_contains": {
+      "360": [
+        "  Issue body: `gh issue view 360` — the authority. This goal is a summary of it.",
+        "  ## Prohibitions and constraints — transcribed from the issue body",
+        "  契約が言及していない禁止事項は、契約が許可したのではなく書いていないだけである。",
+        "  [原文転記] 本文「## payload の設計」の表",
+        "  | 送ってよい | 送ってはいけない |",
+        "  | --- | --- |",
+        "  | 施設の緯度経度（小数2桁に丸めたもの） | 施設の個別 ID |",
+        "  | 閲覧した市区町村コード | 施設の個別 ID と結び付いた閲覧履歴 |",
+        "  | 端末の言語設定 | 端末の広告 ID |",
+        "  [原文転記] 本文「## 非対象」の節",
+        "  - 既存の解析ダッシュボードの変更",
+        "  - 送信先エンドポイントの追加",
+        "  - A prohibition this contract does not state is NOT a permission — it is text the"
+      ]
+    },
+    "contract_absent": {
+      "360": [
+        "本文に他節がある。",
+        "転記しきれず落とした",
+        "本文を読み取れなかった"
+      ]
+    },
+    "contract_section_order": {
+      "360": [
+        "## Objective",
+        "## Prohibitions and constraints — transcribed from the issue body",
+        "## Acceptance criteria",
+        "## Files you may change",
+        "## Rules"
+      ]
+    },
+    "limitation_codes": [
+      "issue_constraints_transcribed"
+    ],
+    "limitation_details_include": [
+      "2 constraint block(s) from the issue body were transcribed verbatim"
+    ],
+    "absent_limitation_codes": [
+      "issue_constraints_untranscribed",
+      "issue_body_unreadable"
+    ],
+    "verify_calls": 0,
+    "wait_verify_calls_min": 1
+  }
+}

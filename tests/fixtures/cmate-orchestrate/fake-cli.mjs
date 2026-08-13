@@ -1124,6 +1124,31 @@ function main() {
     emit({ nameWithOwner: gh.name ?? 'Kewton/CommandMate' });
   }
 
+  // --- gh issue view (dispatch.mjs, Issue #176) ----------------------------
+  //
+  // `gh issue view <n> --repo <owner/repo> --json body`. The dispatch runner reads
+  // the body to transcribe its prohibitions into the task text, so the world this
+  // serves has to be the SAME body the plan was built from — otherwise a fixture
+  // would pin a contract generated from one issue against a plan generated from
+  // another. run_tests.mjs injects `gh.issues` straight from the case's planner
+  // fixture for exactly that reason; nothing here invents a body.
+  //
+  // An issue the scenario knows nothing about FAILS rather than returning an empty
+  // body: "the body is empty" and "nobody could read the body" are different facts
+  // and the runner reports them differently. `gh.issue_view: "fail"` injects the
+  // second one for a known issue (no network, no auth, no `gh`).
+  if (sub === 'issue') {
+    const gh = spec.gh ?? {};
+    if (String(argv[1] ?? '') !== 'view') fail(`fake-cli: unsupported gh issue subcommand "${argv[1] ?? ''}"`);
+    if (gh.issue_view === 'fail') fail('gh: could not read the issue (HTTP 403)');
+    const number = String(argv[2] ?? '');
+    const known = gh.issues ?? {};
+    if (!Object.prototype.hasOwnProperty.call(known, number)) {
+      fail(`gh: no issue ${number} in this scenario (the case's issue fixture is what the fake serves)`);
+    }
+    emit({ body: String(known[number] ?? '') });
+  }
+
   // --- gh pull-request lifecycle (merge.mjs) -------------------------------
   if (sub === 'pr') {
     const action = argv[1] ?? '';

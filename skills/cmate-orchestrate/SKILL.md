@@ -215,6 +215,16 @@ dispatch.mjs --plan <承認済み plan.json> [options]
   再実行**すればよい。**Issue の分割や re-plan は要らない。**
 - **`--resume` / `--reverify` は `completed` かつ verification `pass` の Issue を引き継ぎ、
   再判定しない。** `--reverify` は `send` を1回も呼ばず、worker のターンを1つも消費しない。
+- **契約が言及していない禁止事項は、契約が許可したのではなく書いていないだけである。Issue 本文が
+  正本である**（[#176](https://github.com/Kewton/commandmate-skills/issues/176)）。`goal` は本文の
+  要約だが、**否定的制約（「## 非対象」「## 禁止」「## セキュリティ上の考慮」等の節、および
+  「してはいけない / 送ってはいけない」を含む表・箇条書き）だけは要約せず原文転記する**。
+  そのために dispatch は Issue ごとに1回 `gh issue view <n> --json body` を **read-only** で呼ぶ。
+  読めなければ停止せず、goal がそう名乗って `issue_body_unreadable` を記録する。上限に収まらず
+  落ちた節が在れば、goal に `本文に他節がある。gh issue view <n> で全文を読め` の1行が入り
+  `issue_constraints_untranscribed` を記録する。**転記が完走しても、worker 側は本文を自分で読む**
+  （[cmate-worker-development](../cmate-worker-development/) A 段）。契約の正本は
+  [dispatch-contract.md](./references/dispatch-contract.md) 第2.4.1節。
 - **`--unattended` が含意するのは締め付けだけである。** ゲートを1つも無効化せず、`--approve` を
   含意せず、緩和フラグとの併用は `invalid_input` で拒否する。**無人運転の driver は CI の job 定義
   （または cron script）であって runner ではない。**

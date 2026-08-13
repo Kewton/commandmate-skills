@@ -42,6 +42,9 @@ const FAKE_CLI = join(HERE, 'fake-cli.mjs');
 // (fix worktrees) create for the workers a scenario says should pass.
 const NODE_FAKE_PROFILE = join(PROFILES_DIR, 'node-fake.json');
 const CLI_CONTRACT_PATH = join(HERE, 'commandmate-cli-contract.json');
+// Written beside every generated plan: the issue bodies that plan was built from,
+// which the fake `gh issue view` serves back to the dispatch runner (Issue #176).
+const ISSUE_BODIES_FILE = 'issue-bodies.json';
 
 const planSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'execution-plan.v2.json'), 'utf8'));
 const planSchemaV1 = JSON.parse(readFileSync(join(SCHEMA_DIR, 'execution-plan.v1.json'), 'utf8'));
@@ -237,6 +240,16 @@ function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, lo
   const absent = [...(scenarioObject.unregistered_worktrees ?? []).map(Number), ...toPrepare];
   const syncOnly = (scenarioObject.sync_only_worktrees ?? []).map(Number);
   const scenario = { ...scenarioObject, worktrees: planToWorktrees(plan, pathOverrides, hiddenFromLs(scenarioObject)) };
+  // The issue bodies generatePlan recorded beside this plan (Issue #176), handed to
+  // the fake `gh issue view`. A scenario that declares its own `gh.issues` wins —
+  // that is how a case models an issue whose body moved after the plan was
+  // approved. A checked-in plan with no bodies file leaves `gh.issues` unset, and
+  // the fake then fails the read, which is the honest answer for a world where
+  // nobody said what the body is.
+  const bodiesPath = join(dirname(planPath), ISSUE_BODIES_FILE);
+  if (existsSync(bodiesPath)) {
+    scenario.gh = { issues: JSON.parse(readFileSync(bodiesPath, 'utf8')), ...(scenarioObject.gh ?? {}) };
+  }
   // The rows the `worktree-setup` provider may create (Issue #93). Handed to the
   // fake separately: it reveals them only once it has created them, and only to
   // `commandmate ls` once a sync has re-scanned.
@@ -707,7 +720,31 @@ function generatePlan(spec, runsDir) {
   // The run id is pinned to "plan" by every dispatch case's orchestrate_args.
   // A resume case that needs a SECOND, different plan (to prove the run_id guard)
   // pins a different one and names it here.
-  return join(runsDir, spec.plan.run_dir ?? 'plan', 'plan.json');
+  const planPath = join(runsDir, spec.plan.run_dir ?? 'plan', 'plan.json');
+  // The bodies the plan was built from, dropped beside it (Issue #176). The
+  // dispatch runner re-reads the issue body with `gh issue view` — the plan cannot
+  // carry a prohibition it never extracted — so the fake `gh` has to answer with
+  // the SAME body this plan came from. Writing it here, next to the plan, is what
+  // makes that true for every one of the ~25 runDispatchRunner call sites at once:
+  // a per-case knob would leave the ones nobody remembered serving a body that
+  // disagrees with the plan, and a fixture that pins a contract against a
+  // disagreement pins nothing.
+  // Guarded: a planner that REFUSED (a cycle, an order violation) writes no run
+  // directory at all, and the caller reports that missing plan itself. Throwing
+  // here would replace that case's finding with an ENOENT from the harness.
+  if (existsSync(dirname(planPath))) {
+    writeFileSync(join(dirname(planPath), ISSUE_BODIES_FILE), `${JSON.stringify(issueBodiesFrom(issuesPath), null, 2)}\n`);
+  }
+  return planPath;
+}
+
+// `{ "<number>": "<body>" }` from a planner issue fixture, in the shape the fake
+// `gh issue view` serves.
+function issueBodiesFrom(issuesPath) {
+  const bodies = {};
+  const fixture = JSON.parse(readFileSync(issuesPath, 'utf8'));
+  for (const issue of fixture.issues ?? []) bodies[String(issue.number)] = String(issue.body ?? '');
+  return bodies;
 }
 
 function readCliLog(logPath) {

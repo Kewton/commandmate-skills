@@ -81,8 +81,8 @@ risk_rationale: >-
   scope 外の file 削除は手順として禁止している。したがって computed_risk と同じ moderate を申告する。
 files:
   - path: SKILL.md
-    sha256: d7d7feb905f54672fac5fb1ffc606941898c215ddb08d39b7765786dcd58e168
-    size: 18805
+    sha256: db986335f08b2392fd8428d96973964ce07666e6e05790311641af2630df7ce9
+    size: 21677
     kind: skill_md
     executable: false
     script: false
