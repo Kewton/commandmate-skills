@@ -750,7 +750,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.27.0",
+      "latest": "0.28.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -1646,6 +1646,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.27.0/cmate-orchestrate-0.27.0.tar.gz",
             "sha256": "4ddc128f02ae7e7a8bbdef4a460b8499bfad66171480bad76446b0ff88548e3e",
             "size": 492352,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.28.0",
+          "changelog": "0.27.0 以降の 10 件（#174 / #175 / #176 / #177 / #178 / #179 / #180 / #181 / #182 / #183）を公開する。\n\n主題は2つある。**推測を推測と名乗らせること**と、**wall-clock を最長経路へ寄せること**である。\n\nplanner は「読み取れなかった」と「読み取った結果こうだった」を同じ形で出しており、\n下流からは区別できなかった。\n\n- **#182**: 語彙が一致するだけの Issue 3 件が、file 衝突と同格の依存として 3 wave に\n  直列化していた（実測: 実 file 衝突は 1 組だけ）。dependency edge に\n  `basis`（`declared` / `file_conflict` / `lexical`）を持たせ、**lexical だけの組は\n  edge にせず question にする**。CONTEXT 見出し配下の issue 番号も path と同じく\n  except の対象にした（「成立しない」と否定するために書いた行が phantom 依存を作っていた）。\n  `shadowed_file_candidate` は自動でどちらかを落とさず question にする —— 長い path が\n  短い path を shadow したとき、落ちていたのは**宣言した方**だった。\n- **#178**: 著者が本文に書いた「まだ決めていない」は `questions: []` のまま dispatch を\n  通過していた。`acceptance-gates` と同型の ```open-questions ブロックを読み、\n  1 件につき blocking question を立てる。**最も強い停止理由が機械に読まれていなかった。**\n- **#177**: 受入条件にバッククォートで書いた検証ランナーの path が `suspected_files` に入り、\n  そのまま `scope.allow` になっていた。**worker が自分を裁くランナーを書き換えられた。**\n  `.claude/skills/**` / `.agents/skills/**` / `.commandmate/**` を既定で除外し、\n  落とした path は捨てずに新フィールド `reference_files`（読めるが書けない）へ出す。\n  成果物見出しで明示宣言した場合だけ `harness_path_in_scope` warning つきで許す。\n- **#176**: 契約 `goal` は本文の要約で、抽出が肯定形に偏っていたため\n  **禁止事項は worker から「存在しない」ように見えていた**（実測: 禁止 3 件のうち 2 件しか\n  載らず、worker は残る 1 件に違反した成果物を全ゲート green のまま commit した）。\n  否定的制約を含む節・表・箇条書きを要約せず**原文転記**し、転記しきれなければ\n  `issue_constraints_untranscribed` で名乗り「本文の全文を読め」の 1 行を必ず入れる。\n  禁止の表を半分載せた goal は、落とした半分を許可したのと同じである。\n- **#179**: `--wait-timeout` は wait 1 回あたりの上限であって worker の 1 ターンの上限では\n  ないので、report からは「runner が見るのをやめた」と「worker が止まった」が区別できず、\n  再 dispatch が完成済みの作業に別 worker を重ねうる。timeout 時に `capture` を 1 回叩いて\n  `worker_liveness` を転記し、`wait_window_exhausted` / `worker_stalled` /\n  `worker_liveness_unreadable` に分ける。既存 `timeout` の意味は変えていない\n  （`dispatch_schema_version` は 1 のまま）。\n- **#174**: `git diff --name-only` は `core.quotePath` 既定 true のため非ASCII を\n  8 進エスケープして返す。これを plan の `scope.allow`（UTF-8 生表記）と比較していたので、\n  **スコープ内の変更が PR 本文で「宣言外」に化けていた**。裁定側は正しく、壊れていたのは\n  人間が読む本文だけだが、出るのは `branch_changed_outside_declared_scope` という\n  正常系の名前の limitation である。`-z`（NUL 区切り）に変え、改行を含む path の穴も塞いだ。\n\n- **#183**: wave barrier のため wall-clock が「各 wave の最遅 worker の合計」になっていた。\n  opt-in の `--schedule dag` を足し、依存が満たされた Issue から `--max-parallel` の空き枠へ\n  投入する。**既定は wave のままで、`--schedule` を渡さない run の report は byte 一致**\n  （非回帰を golden で固定）。barrier が兼ねていた安全装置は 3 点とも代替した:\n  失敗は下流だけへ伝播（`blocked_by_upstream_failure`。`--unattended` は従来どおり全停止）、\n  合流検証は run 末尾に 1 回（dispatch は merge を呼ばない）、\n  並列度増加は Kewton/CommandMate#1771 が未着地のため**直さずに宣言する**\n  （`--max-parallel` を保守的に、と SKILL.md / dispatch-contract / limitation に明記）。\n  ready 判定は #182 の `basis` を読んだ後の実効 edge に対して行う。\n\n- **#175**: wave の衝突検出は `suspected_files` の重なりしか見ず、guarded merge が確認する CI は\n  兄弟 PR が入る前の base で走っている。**合流後の状態は誰も検証していなかった**（実測:\n  develop に入った直後から赤で、発覚は promotion PR の CI）。`merge --merge-prs` に opt-in の\n  `--integration-verify` を足し、合流後の tip を使い捨ての detached checkout で測る。\n  profile に baseline の宣言が無ければ **skip ではなく error**（測っていないものを\n  「merge phase 完了」に丸めない）。\n- **#180**: `--no-infer` / `--auto-yes` / `--wait-timeout` はリポジトリの事情を書いた flag で、\n  置き場が人間の記憶しか無く、付け忘れがそのまま事故になっていた。profile に\n  `dispatch_defaults` を足す。CLI flag は常に上書きで、「渡していない」と「off のつもりで\n  渡した」を三値で区別する（`--no-auto-yes` を新設）。`--unattended` との排他は\n  **解決後の値**に対して行う —— argv だけを見る検査は profile が回り込める検査である。\n- **#181**: 複数モジュールをまとめて検証する集約テストは、名前がどのソースとも対応しないので\n  規則からは決して導出できず、Issue 本文への手書きが必須だった。`scope_companions` に\n  兄弟 key `require`（placeholder を含まないリテラル path）を足す。ADR 第15.2節が\n  「実例が出たら `derive` とは別の key として足す」と既に裁定していた形である。\n  `derive` は緩めていない。#177 の harness 境界は profile 側にも引いた。\n\n`cmate-worker-development` は #176 に伴い 0.2.0 を別途公開する（A 段の読取で、\ngoal が Issue 番号を参照しているなら本文全文を読み取り専用で取得することを必須手順にした）。\n\n`.commandmate/verify.yaml` の全 10 ゲートが exit 0。fixture は\n65 plan / 92 dispatch / 11 resume / 27 merge / 18 uat / 11 status / 6 profile-init case\n（0.27.0 から +42 case）。",
+          "published_at": "2026-08-13T13:40:52Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.28.0",
+            "commit": "902b21ce2a713d8e3927529d46039bed316e8e0b"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.28.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.28.0/cmate-orchestrate-0.28.0.tar.gz",
+            "sha256": "1abc52d0415060b2eef379f9872a5fdb15e1e8a3de099e568c5962f872f84882",
+            "size": 605469,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
