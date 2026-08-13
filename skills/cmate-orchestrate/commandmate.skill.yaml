@@ -167,8 +167,8 @@ files:
     executable: false
     script: false
   - path: references/merge-contract.md
-    sha256: 9b553a878bb416c5e1c8b1efb81150ed6fdcfea2ba62da61a1b50494a52ae494
-    size: 20546
+    sha256: 1151ad11f36053621694e9fd2d53a4a6bbebbf7c63acff988da7c62786b7b2c5
+    size: 21427
     kind: instruction
     executable: false
     script: false
@@ -191,8 +191,8 @@ files:
     executable: false
     script: false
   - path: references/runner-operations.md
-    sha256: 7d3b8e1ba362b9061f5ff1015c14ca570fb70523854cc593f04e160ce3cb2613
-    size: 33920
+    sha256: 19a23dd9a1ad6a90bc1dc522ffd308ea3ab4b059d9006800bcb8d2d3f607eb65
+    size: 33926
     kind: instruction
     executable: false
     script: false
@@ -251,8 +251,8 @@ files:
     executable: false
     script: true
   - path: scripts/merge.mjs
-    sha256: f005479aa1c36f6477214bb103230bc6519ebec390362621b0f45d807e7ffbb4
-    size: 69251
+    sha256: 76859dd65b409c5e9e7b1e8ef03218908ef12eae656408eba861912f46e7e282
+    size: 70970
     kind: script
     executable: true
     script: true

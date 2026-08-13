@@ -83,8 +83,8 @@ merge runner は次を呼ぶ。各呼び出しは失敗で非0を返し、握り
 | preflight | `gh repo view <repo> --json nameWithOwner` | `{ "nameWithOwner": "…" }` | repo アクセス |
 | preflight | `git rev-parse --verify <base>` | exit 0 | base 解決 |
 | create_prs | `gh repo view <repo> --json defaultBranchRef` | `{ "defaultBranchRef": { "name": "…" } }` | Issue 自動クローズの到達性（invocation あたり1回） |
-| create_prs | `git diff --name-only <base>...<branch>`（cwd = その Issue の worktree） | 変更 file の一覧 | PR 本文の「実変更」（読めなければ本文に「読めなかった」と書く） |
-| create_prs | `git diff --numstat <base>...<branch>`（cwd = 同上） | `<added>\t<deleted>\t<path>` | PR 本文の diff 規模 |
+| create_prs | `git diff --name-only -z <base>...<branch>`（cwd = その Issue の worktree） | NUL 終端の変更 file 一覧 | PR 本文の「実変更」（読めなければ本文に「読めなかった」と書く） |
+| create_prs | `git diff --numstat -z <base>...<branch>`（cwd = 同上） | `<added>\t<deleted>\t<path>` の NUL 終端レコード | PR 本文の diff 規模 |
 | create_prs | `git push --set-upstream origin <branch>` | exit 0 | verification pass branch を push |
 | create_prs | `gh pr create --repo R --base B --head <branch> --title T --body-file F` | PR URL を stdout | PR 作成 |
 | merge_prs | `gh pr view <branch> --repo R --json number,url,state` | `{ "number", "url", "state" }` | PR 発見 |
@@ -100,6 +100,13 @@ merge runner は次を呼ぶ。各呼び出しは失敗で非0を返し、握り
   （`PENDING`/`QUEUED`/`IN_PROGRESS`/…）・それ以外（failure 扱い）に分け、
   **1件以上 かつ 全て pass** のときだけ green とする。check が0件なら green にしない。
 - branch 名は safe-ref 検査（英数・`._/-` のみ、`..` 無し、先頭 `/`・`-` 不可）を通す。
+- `git diff` は **必ず `-z`** で読む（[#174](https://github.com/Kewton/commandmate-skills/issues/174)）。
+  既定の改行区切りでは git が path を C クォートして返す（`core.quotePath` が既定 true なので
+  非ASCII バイトは8進エスケープ、`"`・`\`・制御文字はその設定に関係なくクォート）ため、
+  plan の `scope.allow`（Issue が書いたままの UTF-8）と突き合わせると**同じ file が一致しない**。
+  `-c core.quotePath=false` は非ASCII しか解かない。`-z` は munge を止め、区切りも NUL になるので
+  改行を含む path が2件に割れることも無い。PR 本文が引用する command 行も `-z` 付きで書く
+  （読み手が同じ command を再実行して同じ path を得られるようにするため）。
 
 ## 5.1 Issue 自動クローズの到達性（`Resolves #n` の限界）
 
@@ -132,8 +139,8 @@ exit code を一次ソースとし、verification pass だけを merge 対象に
 | verdict | `verification.outcome`。`ran: false` なら「検証は走っていない」と明示する | dispatch report の当該 worker（同じ Issue が複数 wave にあれば**最後**の記録） |
 | Gates 表 | gate 名 / 合否 / exit code（`gate <id>: <status> (exit n)` 形の check 行から拾える場合。無ければ `—`） | `verification.gates` + `verification.checks` |
 | Checks 表 | 記録された check 行そのまま / そこに書かれた exit code | `verification.checks` |
-| 宣言 scope vs 実変更 | `scope.allow`（plan の `suspected_files`）と実変更 file の対比表、**scope 外変更の件数** | plan + `git diff --name-only <base>...<branch>`（当該 worktree で実行） |
-| diff 規模 | 変更 file 数・追加/削除行数 の1行 | `git diff --numstat`（同上） |
+| 宣言 scope vs 実変更 | `scope.allow`（plan の `suspected_files`）と実変更 file の対比表、**scope 外変更の件数** | plan + `git diff --name-only -z <base>...<branch>`（当該 worktree で実行） |
+| diff 規模 | 変更 file 数・追加/削除行数 の1行 | `git diff --numstat -z`（同上） |
 
 規則:
 

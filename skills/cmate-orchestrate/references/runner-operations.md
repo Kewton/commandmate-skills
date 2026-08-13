@@ -329,8 +329,8 @@ run ディレクトリの JSON の中にしか無い状態を残さない。
 |---|---|
 | verdict（`verification.outcome`）と、走っていない場合（`ran: false`）の明示 | dispatch report の当該 worker |
 | gate 名・合否・exit code の表 | 同 `verification.gates` / `checks`（`gate <id>: … (exit n)` から exit を拾う） |
-| 宣言 scope（`scope.allow` = plan の対象 file）と実変更 file の対比表、**scope 外変更の件数** | plan の `suspected_files` と、worktree で実行した `git diff --name-only <base>...<branch>` |
-| diff 規模（file 数・追加/削除行数）1行 | 同 worktree の `git diff --numstat` |
+| 宣言 scope（`scope.allow` = plan の対象 file）と実変更 file の対比表、**scope 外変更の件数** | plan の `suspected_files` と、worktree で実行した `git diff --name-only -z <base>...<branch>` |
+| diff 規模（file 数・追加/削除行数）1行 | 同 worktree の `git diff --numstat -z` |
 
 規則:
 
