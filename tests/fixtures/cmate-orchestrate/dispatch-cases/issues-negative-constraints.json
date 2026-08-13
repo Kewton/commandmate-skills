@@ -1,0 +1,21 @@
+{
+  "_comment": "Issue bodies whose PROHIBITIONS live in text the plan's positive-form extraction never carries (Issue #176). 360 is the measured shape of Kewton/BorderFreeKidsMap #35: a 送ってよい / 送ってはいけない table under an ordinary heading, plus a 非対象 section — the goal must transcribe both verbatim. 361 states more constraint text than the goal's transcript budget, so its last block cannot be carried and the goal has to say so instead of shortening it.",
+  "issues": [
+    {
+      "number": 360,
+      "title": "feat: send only the allow-listed telemetry payload",
+      "body": "利用状況テレメトリを収集し、送信 payload を allow list だけから組み立てる。\n\n## 対象ファイル\n\n- `src/telemetry/payload.ts`\n\n## Acceptance criteria\n\n- [ ] `src/telemetry/payload.ts` builds the payload from the allow list only\n- [ ] the payload carries no facility identifier\n\n## payload の設計\n\n送ってよいものと送ってはいけないものを、この表で固定する。列の対応が意味であり、\n片方の列だけを読んだら別の規則になる。\n\n| 送ってよい | 送ってはいけない |\n| --- | --- |\n| 施設の緯度経度（小数2桁に丸めたもの） | 施設の個別 ID |\n| 閲覧した市区町村コード | 施設の個別 ID と結び付いた閲覧履歴 |\n| 端末の言語設定 | 端末の広告 ID |\n\n## 非対象\n\n- 既存の解析ダッシュボードの変更\n- 送信先エンドポイントの追加\n",
+      "labels": [
+        "feature"
+      ]
+    },
+    {
+      "number": 361,
+      "title": "feat: resolve API keys by declared scope",
+      "body": "API キーの取り扱いを、鍵ごとの scope 宣言つきに置き換える。\n\n## 対象ファイル\n\n- `src/auth/keyring.ts`\n\n## Acceptance criteria\n\n- [ ] `src/auth/keyring.ts` resolves a key by its declared scope\n- [ ] a key whose scope is not declared is rejected\n\n## 禁止事項\n\n| してはいけないこと | 理由 |\n| --- | --- |\n| 鍵の平文を log へ出す | log は集約先へ複製されるので、消しても消えない |\n| 鍵を error message へ載せる | error は telemetry へ送られ、外部へ出る |\n| 鍵を test fixture へ hardcode する | fixture は履歴に残るので、後から取り除けない |\n| 鍵を環境変数名ごと dump する | dump は support 経路で共有され、受け手を選べない |\n| 期限切れの鍵を silent に再発行する | 失効したことを誰も観測できなくなる |\n| scope 宣言の無い鍵を既定で通す | 宣言忘れが最大権限になり、既定が最も危険になる |\n| 鍵の比較を非定数時間で行う | 比較時間から鍵の先頭が漏れる |\n| 鍵を URL の query へ載せる | query は proxy と referer に残る |\n| 鍵を clipboard へ書き出す | clipboard は他 process から読めるので、範囲を選べない |\n| 鍵を 3rd party の SDK へそのまま渡す | 渡した先の保存先を、こちらから観測できない |\n| 鍵を含む request を retry log へ残す | retry log は保持期間が別に設定されており、消し忘れる |\n| 鍵の生成に予測可能な乱数源を使う | 生成器が分かれば鍵空間が縮む |\n| 鍵の scope を実行時に拡張する | 実行時の拡張は宣言と食い違い、宣言が意味を失う |\n| 失効 API の失敗を warning で流す | 失効できていないことが、成功と見分けられなくなる |\n| 鍵を worktree の生成物へ書き出す | 生成物は artifact として外へ持ち出される |\n| 鍵の一覧を管理画面へそのまま表示する | 画面は screenshot になり、共有先を選べない |\n| 鍵の hash を識別子として再利用する | hash から元の鍵を照合する経路が生まれる |\n| 鍵の scope 判定を client 側だけで行う | client の判定は差し替えられる |\n\n## セキュリティ上の考慮\n\n- 鍵の scope は宣言された集合の内側でのみ解決し、推測で補完しない\n- 鍵の識別子は先頭8文字のみを記録し、それ以上を残さない\n- 失効した鍵の参照は例外にし、既定値へ落とさない\n- 鍵の読み出しは1回に限り、複製をプロセス内に保持しない\n- 鍵の値を含む例外は再送せず、識別子だけを付けて投げ直す\n- 鍵の scope 判定は server 側の宣言表だけを正本とし、client の申告を信じない\n- 鍵の生成・失効・参照はすべて監査ログへ残し、参照は識別子だけを残す\n- 鍵の保管先は環境変数ではなく secret store とし、process 引数へ渡さない\n- 鍵の失効は同期で確認し、失効 API の応答を待たずに成功と扱わない\n- 鍵を含みうる payload は redaction を通してから、どの sink へも渡す\n\n## テスト方針\n\n- scope 宣言の無い鍵が拒否されることを、実 exit code で測る\n- 鍵の平文が log へ出ないことを、log 出力の突き合わせで測る\n",
+      "labels": [
+        "feature"
+      ]
+    }
+  ]
+}

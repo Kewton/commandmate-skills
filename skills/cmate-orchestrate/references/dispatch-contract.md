@@ -307,6 +307,76 @@ runner は承認済み plan **だけ**から契約を組み立てる。時刻・
   plan の欠落を worktree の不具合として調査させることになる。
 
 
+### 2.4.1 否定的制約は要約せず原文転記する（[#176](https://github.com/Kewton/commandmate-skills/issues/176)）
+
+**契約が言及していない禁止事項は、契約が許可したのではなく、書いていないだけである。
+Issue 本文が正本である。** この1文が本節の全部で、以下はその機械化である。
+
+`goal` は本文の要約（objective / 受入条件 / 対象 file）であり、plan の抽出は**肯定形に偏っている**
+——「やること」「受入条件」「対象ファイル」を読み、禁止事項を読む口が無い。実測
+（2026-08-09、Kewton/BorderFreeKidsMap #35）: 本文の「送ってよい / 送ってはいけない」表に在った
+禁止3件のうち、契約へ転記されたのは2件。worker は契約だけを読み、残る1件（施設の個別 ID と
+結び付いた閲覧履歴）を payload に載せて commit した。**全ゲート green のまま受入条件違反**で、
+発見は人間のレビューだった。scope は path を、`verify.gates` は exit code を締めるが、
+**禁止事項はそのどちらでもない**——載る場所は `goal` しか無い。落ちた制約は worker から見ると
+「許可されていない」ではなく「**存在しない**」ように見える。
+
+したがって runner は、この1種類のテキストだけ**要約をやめる**。
+
+- **本文を dispatch 時に読み直す。** plan は本文を運んでいない（運んでいるのは抽出結果である）ので、
+  `gh issue view <n> --repo <owner/repo> --json body` を **read-only で Issue ごとに1回**呼ぶ。
+  失敗（未 install / 未認証 / 網なし）は**停止理由ではない**: scope と verify は plan から来るので
+  運べる。goal は「読めなかったこと」と `gh issue view <n>` を名指しし、report は
+  `issue_body_unreadable` を記録する。これで契約は「制約は無かった」と読めなくなる。
+- **転記対象**は次の2つで、見出し語の集合は **hardcode である**（profile 宣言ではない）。
+  - **見出しで拾う**: 非対象 / やらないこと / やってはいけない / 対象外 / 禁止 / 禁じ /
+    しないこと / してはいけない / してはならない / セキュリティ（上の考慮）/ テスト方針、
+    および Non-goals / Out of scope / Must not / Security / Testing policy|strategy。
+    一致した節は**節ごと**転記する。
+  - **見出しに関わらず拾う**: 「してはいけない / してはならない / 送ってはいけない / 禁止 /
+    不可 / NG」等、および must not / may not / never / forbidden / prohibited / do not / don't を
+    含む**表・箇条書き**。表は header と separator を含めて**ブロックごと**転記する
+    ——列の対応が意味であり、行を1本抜き出したら別の規則になる。
+- **hardcode の根拠。** profile 宣言にすると、その語を宣言し忘れたリポジトリの goal から禁止事項が
+  **黙って消える**——本件そのものを設定で再現することになる。宣言しなければ効かない既定は既定ではない。
+  加えて「どの禁止を転記するか」を絞れる knob は、設定の見た目をした**権限の拡大**である
+  （第 2.9 節が `--verify-gates` に同じ形を禁じている: Issue が宣言したものを絞れない）。
+  `scope_companions` が profile 宣言なのはテスト file の配置が**リポジトリごとに本当に違う**からで、
+  禁止表現の語彙はリポジトリの道具立てではなく**Issue を書く言語**の性質である。
+  見出し語集合は**床であって天井ではない**: 見出しに関わらず拾う規則が、この集合の取りこぼしを覆う。
+- **配置**は `## Objective` の直後、`## Acceptance criteria` の前。worker は上から読むので、
+  作業を始めた後に届く禁止は遅い（`## Method` と同じ論拠、ADR §3.3）。goal の切り詰めは**末尾から**
+  効くので、前に在るほど切られにくい。加えて `Issue body: gh issue view <n>` の1行を header ブロックへ、
+  「契約が言及していない禁止事項は許可ではない」の1行を `## Rules` の**先頭**へ、**Issue に関わらず**
+  入れる（見出し語を取りこぼした Issue でも、本文を読めという指示だけは必ず届く）。
+- **切らない。落ちたら言う。** 転記は 1200 文字・8 ブロックで上限を切る（根拠は `dispatch.mjs` の
+  定数コメント）。**ブロックを途中で切ることはしない**——禁止の表を半分載せた goal は、落とした
+  半分を許可したのと同じである。収まらないブロックが出た時点で転記を打ち切り（後ろの短い節も
+  載せない: 載せると transcript が本文の prefix でなくなり、中抜けした要約と区別できない）、
+  落とした節を goal に名指しし、**「本文に他節がある。`gh issue view <n>` で全文を読め」の1行を
+  必ず入れる**。report には `issue_constraints_untranscribed` が入る。
+- **機械可読にする理由。** goal の1行は、それが制約する当の worker が書き換えられる file の中に在る。
+  report は run artifact なので動かない。「黙って短くなった契約を出荷しない」を CI が検査できる
+  ようにするには、名前の付いた code が要る（`contract_scope_dropped` と同じ設計、第3節）。
+  転記が完走したときは `issue_constraints_transcribed` を記録する——`worker_method_applied` と
+  同型の**肯定側の証跡**であり、**転記したことは、守られたことではない**。
+- **フォールバック経路も同じ文面を運ぶ。** `--contract-mode auto` が古い CLI で prompt 経路へ落ちた
+  ときも `## Prohibitions and constraints` 節と Rules の1行は入る。片方だけが運ぶと、禁止事項が
+  「古い CLI の run だけ落ちる」ことになり、それは ADR §1.2 が `## Method` で退けた非対称である。
+- **非回帰**: 否定的制約を1つも書いていない Issue の goal は、`Issue body:` の1行と Rules の1行を
+  除いて **#176 以前と byte 単位で同じ**である。転記節は1文字も出ない。
+- **`--unattended` でも blocking へ昇格させない**（検討して却下した）。`verification_gates_unrecorded`
+  の昇格（第3.0.3節 / ADR §6.5）は「根拠の無い pass の上に無人 merge を積まない」ためで、そこには
+  代替経路が在る。`issue_body_unreadable` を昇格させると、`gh` の認証を持たない CI は
+  **1人も dispatch できなくなる** —— 締め付けではなく機能の停止であり、しかも本文が読めないことは
+  plan の欠陥ではないので re-plan でも直らない。無人 run でこれを検査したいなら、report の
+  limitation code を job 側で読んで落とすのが正しい層である（そのために code を付けてある）。
+
+worker 側の対になる手順は `cmate-worker-development` の A 段（読取）に在る:
+**goal が Issue 番号を参照しているなら、契約とは別に本文全文を読み取り専用で取得して読む**。
+runner が転記を保証しても、見出し語の取りこぼしと上限は残るので、**最後の砦は worker が本文を
+読むこと**である。
+
 ### 2.5 pass は再検証しない
 
 exit 0 の run は契約タスクを `succeeded`（終端）へ遷移させる。その後に同じ worktree で検証 run を

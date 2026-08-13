@@ -1,0 +1,78 @@
+{
+  "description": "[#176] 本文を読めなかったときに、黙って「制約なし」の goal を送らないか。`gh issue view` が落ちる世界（認証なし / 網なし / gh 未 install）でも dispatch は止まらない——契約の scope と verify は plan から来るので運べる——が、否定的制約を運ぶ場所は goal だけなので、goal は **読めなかったことと `gh issue view <n>` を名指しし**、report は `issue_body_unreadable` を記録する。d73 と同じ Issue #360 に対して転記が1件も載らないことが、この case が測っているもの: 同じ Issue でも「読めた」と「読めなかった」で goal が別物になり、後者は自分が欠けていることを自分で申告する。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-negative-constraints.json",
+    "orchestrate_args": [
+      "360",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      360
+    ],
+    "send_counts": {
+      "360": 1
+    },
+    "worker_states": {
+      "360": "completed"
+    },
+    "verification_outcomes": {
+      "360": "pass"
+    },
+    "task_ids": {
+      "360": "task-issue-360"
+    },
+    "contract_issues": [
+      360
+    ],
+    "contract_contains": {
+      "360": [
+        "  Issue body: `gh issue view 360` — the authority. This goal is a summary of it.",
+        "  ## Prohibitions and constraints — the issue body could not be read",
+        "  本文を読み取れなかった（gh: could not read the issue (HTTP 403)）ので、本文由来の転記はこの goal に1件も無い。",
+        "  本文に他節がある。`gh issue view 360` で全文を読め",
+        "  - A prohibition this contract does not state is NOT a permission — it is text the"
+      ]
+    },
+    "contract_absent": {
+      "360": [
+        "transcribed from the issue body",
+        "[原文転記]",
+        "| 送ってよい | 送ってはいけない |",
+        "施設の個別 ID と結び付いた閲覧履歴"
+      ]
+    },
+    "limitation_codes": [
+      "issue_body_unreadable"
+    ],
+    "limitation_details_include": [
+      "#360: the issue body could not be read"
+    ],
+    "absent_limitation_codes": [
+      "issue_constraints_transcribed",
+      "issue_constraints_untranscribed"
+    ],
+    "verify_calls": 0,
+    "wait_verify_calls_min": 1
+  }
+}
