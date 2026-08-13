@@ -548,12 +548,20 @@ function inDeclaredScope(scope, path) {
 // `git diff --numstat` is parsed rather than `--shortstat`: the numeric form is
 // machine-readable and locale-independent. A binary file reports `-` for both
 // counts and is counted as a file without inventing line numbers for it.
+//
+// Read with `-z`, like the name list below and for the same reason (Issue #174):
+// only the counts are used today, but a `--numstat` read without `-z` carries
+// MUNGED pathnames, and the next reader to reach for the third column would
+// reintroduce the mismatch this issue was about. `-z` terminates each record with
+// NUL instead of a newline; a rename records `<added>\t<deleted>\t` followed by
+// the two pathnames as their own NUL-terminated records, which have no counts and
+// are therefore skipped by the same `parts.length < 3` guard.
 function parseNumstat(stdout) {
   let files = 0;
   let added = 0;
   let deleted = 0;
   let binary = 0;
-  for (const line of String(stdout).split('\n')) {
+  for (const line of String(stdout).split('\0')) {
     const parts = line.split('\t');
     if (parts.length < 3) continue;
     files += 1;
@@ -579,7 +587,17 @@ function changeEvidence(inputs, plan, issue) {
     return { ok: false, range, reason: 'the plan names no worktree or no safe branch for this issue', files: [], stat: null };
   }
 
-  const names = runCli(inputs.git, ['diff', '--name-only', range], { cwd: worktree });
+  // `-z`, NOT the default newline form (Issue #174). git does not print the
+  // pathname it holds: it C-quotes anything it deems unsafe — every byte >= 0x80
+  // as a three-digit octal escape inside double quotes while `core.quotePath` is
+  // true (git's default), and `"`, `\` and control characters whatever that is
+  // set to. `scope.allow` holds the path as the issue wrote it, so comparing the
+  // two forms made a file that IS in scope read as out of scope, and the body
+  // listed the same file twice under two spellings. `-c core.quotePath=false`
+  // would only cover the non-ASCII half; `-z` turns the munging off outright and
+  // takes the newline out of the record separator, so a path containing one can
+  // no longer be split into two paths that do not exist.
+  const names = runCli(inputs.git, ['diff', '--name-only', '-z', range], { cwd: worktree });
   if (!names.ok) {
     return {
       ok: false,
@@ -592,13 +610,14 @@ function changeEvidence(inputs, plan, issue) {
   // The WHOLE change set, not the part the body has room for: the out-of-scope
   // count is computed from this list, and counting only the first page of it
   // would report a clean branch that is not one. Capping happens at render time.
+  // Not trimmed: with `-z` the record IS the pathname, and a leading or trailing
+  // space in it is part of the name rather than layout to tidy away.
   const files = names.stdout
-    .split('\n')
-    .map((line) => line.trim())
+    .split('\0')
     .filter(Boolean)
-    .map((line) => redact(line));
+    .map((path) => redact(path));
 
-  const numstat = runCli(inputs.git, ['diff', '--numstat', range], { cwd: worktree });
+  const numstat = runCli(inputs.git, ['diff', '--numstat', '-z', range], { cwd: worktree });
   const stat = numstat.ok ? parseNumstat(numstat.stdout) : null;
   return { ok: true, range, reason: '', files, stat };
 }
@@ -612,7 +631,7 @@ function scopeLines(issue, change) {
 
   if (!change.ok) {
     lines.push(
-      `The branch's actual change set could NOT be read (\`git diff --name-only ${change.range ?? '<range>'}\`: ${cell(change.reason)}), so this section cannot show what changed. **This is not evidence that the branch stayed in scope.**`,
+      `The branch's actual change set could NOT be read (\`git diff --name-only -z ${change.range ?? '<range>'}\`: ${cell(change.reason)}), so this section cannot show what changed. **This is not evidence that the branch stayed in scope.**`,
     );
     lines.push('');
     lines.push(`- Declared scope (\`scope.allow\`, ${scope.length} entr${scope.length === 1 ? 'y' : 'ies'}):`);
@@ -627,7 +646,10 @@ function scopeLines(issue, change) {
   const stat = change.stat;
   const total = change.files.length;
 
-  lines.push(`Declared scope (\`scope.allow\`, from the plan's target files) against \`git diff --name-only ${change.range}\`, run in this issue's worktree.`);
+  // The command is quoted WITH `-z`: this table lists pathnames as they are, and
+  // the newline-separated form of the same command prints some of them escaped
+  // (Issue #174). A reviewer who reruns what is written here gets what is here.
+  lines.push(`Declared scope (\`scope.allow\`, from the plan's target files) against \`git diff --name-only -z ${change.range}\`, run in this issue's worktree.`);
   lines.push('');
   if (outOfScope.length === 0) {
     lines.push(`- Out-of-scope changes: **0** — every one of the ${total} changed file(s) is inside the declared scope.`);
@@ -640,7 +662,7 @@ function scopeLines(issue, change) {
   }
   lines.push(
     stat === null
-      ? `- Diff size: **${total} file(s) changed** (line counts unavailable: \`git diff --numstat\` did not answer).`
+      ? `- Diff size: **${total} file(s) changed** (line counts unavailable: \`git diff --numstat -z\` did not answer).`
       : `- Diff size: **${stat.files} file(s) changed, +${stat.added} / -${stat.deleted} line(s)**${stat.binary > 0 ? ` (${stat.binary} binary file(s) counted without line numbers)` : ''}.`,
   );
   lines.push('');

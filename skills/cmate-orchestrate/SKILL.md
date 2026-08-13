@@ -471,6 +471,11 @@ plan の失敗 code と exit、plan の warning code、limitation code の**全�
 - 失敗時も stdout に `status: failure` の result を出す。**plan を推測で埋めない。**
 - `no_acceptance_criteria` / `no_suspected_files` は dispatch の open question ゲートと対になる。
   **この2つを放置したまま `--allow-questions` で押し通さないこと。**
+- planner は agent ハーネスの path（`.claude/skills/**` / `.agents/skills/**` / `.commandmate/**`）を
+  **既定で `scope.allow` に入れない** —— worker が自分を裁く runner を書き換えられる状態を作らない
+  ためである。Issue が `## 対象ファイル` に明示的に書いたときだけ入り、`harness_path_in_scope` が
+  付いて `partial` になる。落とした path は `reference_files`（読むが scope 外）に出る
+  （[plan-contract.md](./references/plan-contract.md) 第5.3節）。
 - limitation は「停止はしていないが、後から効いてくる制約」である。`conditional_go` の保持
   （`acceptance_conditional`）と fix 上限到達（`max_attempts_reached`）は limitation ではなく
   **stop_reason / blocking reason** である。**停止であって、続行しながらの注記ではない。**
@@ -500,6 +505,7 @@ report/artifact に残さない（redaction）。
 | 止まり方 | 人間がすること |
 |---|---|
 | plan `no_acceptance_criteria` / `no_suspected_files` | **Issue 本文に受入条件と対象 file を書いて re-plan する** |
+| plan `harness_path_in_scope` | Issue が `## 対象ファイル` に agent ハーネス（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）の path を書いたので scope に入れた（既定は「入れない」）。**その Issue の成果物が本当にハーネスなのかを読んで決める。** 違うなら成果物見出しから外して散文か参考見出しへ移し、re-plan する |
 | plan `cycle_detected` / `override_incomplete` / `dependency_order_violation` | `dependency-plan.md` の edge `reason` を見て、Issue 本文か `--depends` を直す |
 | plan `run_exists` | 既存の `plan.json` と突き合わせ、違うなら本文か profile を直す。同じでよいなら `--run-id <new-id>` / `--runs-dir <dir>` を渡す |
 | plan `profile_repository_mismatch` | `--profile` / `--profile-json` / `--repo` のどれかを渡して意図を明示する |

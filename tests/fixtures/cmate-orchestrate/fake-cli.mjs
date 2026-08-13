@@ -104,7 +104,21 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const argv = process.argv.slice(2);
+// `git -c <key>=<value> … <sub>` (Issue #174): git's global config options come
+// BEFORE the subcommand, so they are consumed here — the rest of this file keeps
+// reading `argv[0]` as the subcommand, and a runner that sets one gets the same
+// behaviour change the real git would give it (see cQuotePath below).
+const rawArgv = process.argv.slice(2);
+const gitConfig = new Map();
+let firstArg = 0;
+while (rawArgv[firstArg] === '-c' && typeof rawArgv[firstArg + 1] === 'string') {
+  const setting = rawArgv[firstArg + 1];
+  const eq = setting.indexOf('=');
+  const key = (eq === -1 ? setting : setting.slice(0, eq)).toLowerCase();
+  gitConfig.set(key, eq === -1 ? 'true' : setting.slice(eq + 1));
+  firstArg += 2;
+}
+const argv = rawArgv.slice(firstArg);
 const sub = argv[0] ?? '';
 
 // The marker file the node-fake profile's baseline (`cat cmate-verify-ok`) reads.
@@ -766,6 +780,38 @@ function applyDelay(spec) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+// How git PRINTS a pathname (Issue #174). `git diff --name-only|--numstat` does
+// not emit the path it holds: `quote_c_style` wraps it in double quotes and
+// escapes the offending bytes whenever the path contains `"`, a backslash or a
+// control character — and, while `core.quotePath` is true (git's default), every
+// byte >= 0x80 as a three-digit octal escape. That is why a UTF-8 path from
+// `plan.json` never equalled the "same" path from a diff. `-c
+// core.quotePath=false` only removes the third rule; only `-z` turns the munging
+// off entirely, which is what this models: the caller passing `-z` never reaches
+// here.
+//
+// Bytes, not code units: the escapes are per UTF-8 byte, so the path is encoded
+// first and reassembled at the end (a non-ASCII byte left unquoted must go back
+// out unchanged).
+const C_ESCAPES = new Map([[0x07, '\\a'], [0x08, '\\b'], [0x0c, '\\f'], [0x0a, '\\n'], [0x0d, '\\r'], [0x09, '\\t'], [0x0b, '\\v']]);
+function cQuotePath(path, quotePath) {
+  const out = [];
+  let quoted = false;
+  for (const byte of Buffer.from(path, 'utf8')) {
+    if (byte === 0x22 || byte === 0x5c) {
+      quoted = true;
+      out.push(0x5c, byte);
+    } else if (byte < 0x20 || byte === 0x7f || (byte >= 0x80 && quotePath)) {
+      quoted = true;
+      const escape = C_ESCAPES.get(byte) ?? `\\${byte.toString(8).padStart(3, '0')}`;
+      out.push(...Buffer.from(escape, 'ascii'));
+    } else {
+      out.push(byte);
+    }
+  }
+  return quoted ? `"${Buffer.from(out).toString('utf8')}"` : path;
+}
+
 function main() {
   logInvocation();
   enforceContract();
@@ -911,12 +957,21 @@ function main() {
     const diff = (spec.diff ?? {})[issue] ?? (spec.diff ?? {})[String(issue)] ?? {};
     if (diff === 'fail') fail(`fatal: ambiguous argument '${range}': unknown revision or path not in the working tree`, 128);
     const files = Array.isArray(diff.files) ? diff.files : [];
+    // Path MUNGING (Issue #174). Real git does not print the pathname it holds:
+    // unless `-z` is given it C-quotes anything it considers unsafe and separates
+    // the results with newlines. A fake that echoed the scenario's paths verbatim
+    // modelled a git nobody runs, and made the escaping bug invisible here while
+    // it misreported every non-ASCII path in production.
+    const nul = argv.includes('-z');
+    const render = (file) => (nul ? file : cQuotePath(file, gitConfig.get('core.quotepath') !== 'false'));
     // Deterministic per-file line counts: the Nth changed file is +10N / -N, so a
     // fixture can assert an exact "+X / -Y" summary without pinning real content.
     const body = argv.includes('--numstat')
-      ? files.map((file, i) => `${(i + 1) * 10}\t${i + 1}\t${file}`)
-      : files;
-    process.stdout.write(body.length ? `${body.join('\n')}\n` : '');
+      ? files.map((file, i) => `${(i + 1) * 10}\t${i + 1}\t${render(file)}`)
+      : files.map(render);
+    // `-z` TERMINATES each record with NUL (it does not separate them), so the
+    // output of a one-file diff ends in NUL and an empty diff is empty.
+    process.stdout.write(body.length ? `${body.join(nul ? '\0' : '\n')}${nul ? '\0' : '\n'}` : '');
     process.exit(0);
   }
   if (sub === 'push') {

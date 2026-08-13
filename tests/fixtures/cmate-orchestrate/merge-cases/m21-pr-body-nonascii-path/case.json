@@ -1,0 +1,59 @@
+{
+  "description": "Issue #174: 対比が git の**表記**ではなく **path そのもの**で行われる。fake の `git diff` は本物と同じく出力を munge する（`core.quotePath` 既定 true が非ASCII バイトを8進エスケープし、`\"` とバックスラッシュは quotePath に関係なくクォートさせる）ので、`-z` を使わない runner ではここで表記が食い違う。#300 は宣言 scope（日本語ファイル名 1件）をそのまま変更した branch で、`Out-of-scope changes: **0**` になり、対比表で**同じ file が2行に割れない**（「宣言されたが変更なし」と「変更されたが未宣言」に分裂しない）ことを見る。#301 は空振り防止の逆側で、宣言外の変更は 1 件と数えられ**読める形で**名指しされる。#301 の宣言外 path は `\"` を含むので、最小修正（`-c core.quotePath=false`）へ後退するとこの case は赤に戻る。",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "merge-cases/issues-nonascii.json",
+    "orchestrate_args": ["300", "301", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "dispatch_scenario": {
+    "cli_available": true,
+    "git": { "branch": "feature/integration", "dirty": false },
+    "gh": { "repo_access": true },
+    "workers": {
+      "300": { "state": "completed", "verify": "pass" },
+      "301": { "state": "completed", "verify": "pass" }
+    }
+  },
+  "merge_args": ["--approve"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "300": { "create": "ok" },
+      "301": { "create": "ok" }
+    },
+    "diff": {
+      "301": { "files": ["docs/notes.md", "docs/メモ \"v2\".md"] }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [300, 301],
+    "targets_outcome": { "300": "pr_created", "301": "pr_created" },
+    "pr_create_calls": 2,
+    "completion_passed": true,
+    "limitation_codes": ["branch_changed_outside_declared_scope"],
+    "pr_bodies_contain": {
+      "300": [
+        "- Out-of-scope changes: **0** — every one of the 1 changed file(s) is inside the declared scope.",
+        "- Diff size: **1 file(s) changed, +10 / -1 line(s)**.",
+        "| `docs/企画書_都知事杯2026_改訂版.md` | yes | yes |"
+      ],
+      "301": [
+        "- Out-of-scope changes: **1** — changed but NOT declared: `docs/メモ \"v2\".md`.",
+        "- Diff size: **2 file(s) changed, +30 / -3 line(s)**.",
+        "| `docs/notes.md` | yes | yes |",
+        "| `docs/メモ \"v2\".md` | **no** | yes |"
+      ]
+    },
+    "pr_bodies_absent": {
+      "300": ["\\344", "\"docs/", "| yes | no |", "**no**"],
+      "301": ["\\343", "\\\"v2\\\""]
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 416,
+      "title": "fix: 絞り込み条件を verify の判定に合わせる",
+      "body": "web/src/lib/filter.ts の絞り込み条件が古い。\n\n## Acceptance criteria\n- [ ] `bash .claude/skills/cmate-verify/scripts/verify-run.sh --cwd .` が RESULT passed を返す\n- [ ] `.commandmate/verify.yaml` の filter gate が緑になる\n- [ ] `web/src/lib/filter.ts` が新しい条件で絞り込む\n",
+      "labels": ["bug"]
+    }
+  ]
+}

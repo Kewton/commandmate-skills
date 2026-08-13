@@ -205,6 +205,7 @@ CI が green でないときに `gh pr merge` が呼ばれていないことま�
 | `m13-base-not-default-branch` | base がデフォルトブランチでないとき `Resolves #n` の無効を limitation と PR body に記録するか（#39） |
 | `m14-base-is-default-branch` | base がデフォルトブランチのとき何も記録しないか（#39） |
 | `m15-default-branch-unknown` | `gh repo view` 失敗時に照合をスキップするだけで PR 作成を阻害しないか（#39） |
+| `m21-pr-body-nonascii-path` | 非ASCII を含む path で、対比が git の**表記**でなく path そのもので行われるか（#174）。fake の `git diff` は本物と同じく出力を munge する（`core.quotePath` 既定 true で非ASCII を8進エスケープ、`"` は設定に関係なくクォート）ので、`-z` を使わない runner は同じ file を2行に割り `Out-of-scope changes: 1` を立てる。宣言 scope が日本語ファイル名の #300 は 0 件・表1行、宣言外の変更を持つ #301 は 1 件を**読める形で**名指し（空振り防止）。#301 の宣言外 path が `"` を含むので、最小修正 `-c core.quotePath=false` へ後退しても赤になる |
 
 ## uat case 一覧
 

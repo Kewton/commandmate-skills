@@ -812,3 +812,141 @@ dispatch 側の判定は5形も含めて完全な mirror のまま残してあ�
 前者は「1件でも空なら」と書いたままで、**「宣言より狭ければ」も止めるようになった**ことを
 述べていない。後者は第14.5節と同じ扱いで、`codes-and-recovery.md` 第5節末尾に
 「hint map にまだ無い code」として名前を足してある。**それは次の変更の仕事である。**
+
+---
+
+## 17. 実装時の追記（段6・[#177](https://github.com/Kewton/commandmate-skills/issues/177)）
+
+### 17.1 何が見つかったか —— 導出は「成果物」と「審判」を区別していなかった
+
+第2節の裁定0は「認可境界は宣言の閉包である」と書いた。**閉包の入力である「宣言」が
+何を含むかを、そこでは限定していなかった。** 実測（2026-08-10、Kewton/BorderFreeKidsMap）で
+出たのはその穴である。受入条件に
+
+```
+- [ ] `bash .claude/skills/cmate-verify/scripts/verify-run.sh --cwd .` が RESULT passed を返す
+```
+
+と書くと、この `.sh` が `suspected_files` に入り、そのまま実行契約の `scope.allow` になる。
+**worker は自分を裁く verify runner を書き換えられる。** 検証を通すために検証を書き換えられる
+なら、そのゲートは1つ機能していないのと同じである。
+
+抽出の側に落ち度は無い。第1.1節が書いたとおり抽出は「拡張子を持つスラッシュ入りトークン」を
+拾うだけで、**受入条件の中の path は成果物であるのと同じくらい「実行するコマンド」である。**
+形では区別できない。区別できないなら、既定をどちらに倒すかという裁定の問題になる。
+
+回避は在った ——「受入条件に path を書かない」「読ませたいが変更させたくない path は参考見出しへ
+逃がす」。どちらも**著者の注意力に依存する運用ルール**である。第1.5節が turn の話で書いたのと
+同じ構図で、**規約は忘れられ、忘れられた回はゲートが無い回になる。**
+
+### 17.2 裁定: ハーネスは deny-by-default。出口は成果物見出し1つだけ
+
+`.claude/skills/**` / `.agents/skills/**` / `.commandmate/**` を `suspected_files` の導出から
+**既定で除外する。** Issue が `## 対象ファイル`（`DELIVERABLE_HEADING_RE`）配下に明示的に書いた
+場合だけ入れ、`harness_path_in_scope` の warning を付けて `partial` に落とす。
+
+出口を残すのは #50 の再発を避けるためである。自分のハーネスを in-repo で保守している
+リポジトリ（**このリポジトリがそうである**）に出口が無ければ、「言われたとおりに書いて scope
+ゲートで落ちる」——第1.3節が消した障害——がそのまま戻る。出口を**1つに絞り、通ったことを
+必ず名乗らせる**のが、閉じることと開けることの両立点である。
+
+落とした path は捨てず `reference_files`（「読むが `scope.allow` には入れない」）に出す。
+#54 が context 見出しの引用に与えたのと同じ channel で、第5.1節の不変条件4
+（「引いた分も必ず可視である」）はここでも成り立つ。**worker は満たすべき runner を読めるが、
+書けない。**
+
+### 17.3 却下: 既定除外そのものに warning を付ける
+
+第1.3節以来この ADR は「黙って捨てない」を守ってきたので、除外にも code を付ける案を検討し、
+**却下した。** 理由は精度ではなく**摩擦の向き**である。受入条件に verify runner を書くのは
+**正しい書き方**であり、そこに warning を出せば**ほぼすべての実 run が `partial` になる。**
+第5.2節が「除外を持たない検出は自分の存在意義を壊す」と書いたのと同じ壊れ方で、
+`--allow-questions` の常用と同じ道を通る。可視性は warning ではなく `reference_files` で
+担保する —— **plan artifact に構造化されて残るので、読めるが、読み飛ばしを教えない。**
+
+### 17.4 却下: 除外パターンを profile で宣言可能にする（hardcode を採った）
+
+Issue は「既定で除外」としか言っていないので、**hardcode か profile 宣言かはこちらの裁定である。**
+hardcode を採った。3つの理由を重い順に置く。
+
+1. **profile は対象リポジトリが供給するデータであり、この deny-list は「審判を、裁かれる側から
+   守る境界」である。** `scope_companions` 型の key で緩められる境界には**静かな二つ目の扉**が
+   在ることになり、穴が Issue 本文から profile へ**移動するだけ**である。しかも profile 側の扉には
+   warning が付かない。
+2. **この3つの root はハーネスが決めており、リポジトリが決めていない。**
+   `.claude/skills/` と `.agents/skills/` は CommandMate が Skill package を置く場所、
+   `.commandmate/` は `verify.yaml` の置き場である。リポジトリが改名できるものではないので、
+   **per-repository に宣言すべき中身が無い。** 第5節の「却下: profile 必須にする」は逆向きの
+   結論だが理由は同じ形で、あちらの主題（テスト配置）は**リポジトリしか知らない規約**である。
+   知っているのがハーネス側なら hardcode、リポジトリ側なら profile。
+3. **出口は既に在り、使う場所で監査できる。** Issue 自身の成果物見出しと、それに付く warning が
+   それである。
+
+したがって除外集合を広げるのは fixture つきの code 変更になる。**認可境界に対しては、それが
+適切な摩擦の量である。**
+
+なお **L2（profile の `scope_companions`）による派生はこの filter を通していない。** profile は
+prose ではなく**レビュー済みの宣言**であり、その entry は全件 `scope_defaults` に名前が出る。
+「client が書いた散文が審判への書き込み権限になる」という本件の脅威は、そこには無い。
+結果として、ハーネス path が `scope.allow` に入る道は**明示的な宣言2つだけ**になる ——
+Issue の成果物見出し（warning つき）と profile の companion 規則（`scope_defaults` に可視）。
+**散文からは入らない。**
+
+### 17.5 Kewton/CommandMate#1756 との整合
+
+#1756 は「`.commandmate/verify.yaml` を **scope の変更集合から除外しない**」——worker が触ったら
+**検出する**——のが tamper 検出のための意図的設計である、と決めた。本件はそれと矛盾しない。
+**層が違い、向きが同じ**だからである。#1756 は core の **scope ゲート**（変更を検出して裁く側）、
+本件は planner の **`allow` の導出**（何を許可として渡すか）で、向きは「`allow` に入れない」。
+したがって #1756 の検出は**弱まらず、強くなる**: これまで許可されていた編集が、これからは
+**許可されていない編集として現れる。** 両者が食い違うのは「planner が渡さない」かつ
+「core が見逃す」ときだけで、そういう組み合わせは作っていない。
+
+### 17.6 変異注入の実測
+
+fixture は2件（`cases/52-harness-path-denied` / `cases/53-harness-path-declared`）で、
+**先に赤を確認してから実装した。** 作業ツリーを戻さずに測るため、`git show HEAD:` で
+修正前の `orchestrate.mjs` を別ディレクトリへ出し、同じ Issue fixture を両方に通して差分を見た。
+
+| | 修正前（HEAD） | 修正後 |
+|---|---|---|
+| `52`（散文で runner を引用） | `suspected_files` に `.commandmate/verify.yaml` と `.claude/skills/cmate-verify/scripts/verify-run.sh` が**入る**。`reference_files` は空 | 両方 `reference_files` へ。`suspected_files` は `web/src/lib/filter.ts` とその派生テストのみ。`success` のまま |
+| `53`（`## 対象ファイル` で宣言） | `suspected_files` に入り、**warning は0件・`success`** | `suspected_files` に入り、`harness_path_in_scope` が付いて `partial` |
+
+`53` は「入ること」だけを見ると修正前後で同じであり、**空振りしない case にするには warning と
+status を併せて固定するしかない。** 逆に `52` は「入らないこと」が主張なので、
+`reference_files` を固定して**どこへ行ったか**まで書いた —— 消えたのか移したのかを
+区別しない期待値は、除外が広すぎる実装も緑にする。
+
+### 17.7 既存 golden への影響（1件だけ、意図した変化）
+
+`cases/18-anchored-path-candidates` が変わった。この case の Issue 本文は
+`` `bash .claude/skills/cmate-verify/scripts/verify-run.sh` `` を**散文で**引用しており、
+成果物見出しには何も書いていない。したがって本件の既定除外に**該当する**。
+`suspected_files` から落ち、`reference_files` へ移った。
+
+**この case が測っている #49 の主張は変わっていない。** 主張は「dotfile root が**丸ごと**
+抽出され、`scripts/verify-run.sh` や `claude/skills/...` のような中間一致が生まれない」ことで、
+それは移動先の `reference_files` でそのまま観測できる。期待値は「消えた」ではなく
+「移った」に書き換えてあり、`reference_files` に partial path が1つも無いことも同時に固定される。
+
+`expected-plan.json` を持つ3 case（`02` / `31` / `45`）はいずれもハーネス path を宣言して
+いないので、**1 byte も変わっていない。** 再生成はしていない。
+
+### 17.8 触っていない正本
+
+`status.mjs` の hint map は**本変更の宣言 scope の外**だったので `harness_path_in_scope` を
+持っていない。第14.5節・第16.7節と同じ扱いで、`codes-and-recovery.md` 第5節末尾の
+「hint map にまだ無い code」に名前を足してある。それまで `status.mjs --run` はこの warning を
+「detail と `summary_markdown` を読む」に落として表示する。**推測で別の対処を出さない**のが
+status runner の約束なので、これは劣化ではなく既定の振る舞いである。**hint を足すのは次の
+変更の仕事である。**
+
+`cmate-issue-authoring` の planner mirror（`scripts/validate-plan.mjs`）も宣言 scope の外である。
+本件の実装を `extractFileCandidates` / `classifyFileCandidates` の**内側に置かなかった**のは
+そのためでもある —— あの2つは `mirror-conformance.mjs` が byte 単位で照合する領域なので、
+内側に置けば mirror が即座に drift する。除外は `isSafeRepoPath` の直後（照合領域の外）に
+独立した述語として置き、`analyzeIssue` から呼んでいる。結果として validator は
+「散文でハーネス path を書いた Issue」を今も planner-ready と判定する ——
+**その判定は今も正しい**（他に対象 file が在れば `suspected_files` は空にならない）が、
+「その path は scope に入らない」ことは言わない。**それも次の変更の仕事である。**
