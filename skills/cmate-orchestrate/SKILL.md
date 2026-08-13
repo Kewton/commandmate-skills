@@ -173,7 +173,7 @@ dispatch.mjs --plan <承認済み plan.json> [options]
 | `--contract-mode <m>` | `auto` | `auto` / `require`（フォールバック拒否）/ `off`（probe せず baseline 裁定） |
 | `--verify-gates <ids>` | 省略＝全ゲート | 契約の `verify.gates` に載せる gate id。**存在しない id を発明しない**。run 全体に1つ。Issue 側の `require:` とは**和集合**を取る（絞り込みが Issue の要求を落とすことは許さない） |
 | `--expect-branch <name>` | — | plan 承認時の統合 branch。不一致なら drift |
-| `--wait-timeout <sec>` | `300` | `commandmate wait` の1回あたり timeout |
+| `--wait-timeout <sec>` | `300` | `commandmate wait` の**1回あたり** timeout。**worker の1ターンの上限ではない** —— ターンがこの窓より長いと runner は timeout を報告するが worker は走り続ける。timeout の時点で `capture` を1回叩いて生死を測り、`worker_liveness` と blocking（`wait_window_exhausted` / `worker_stalled` / `worker_liveness_unreadable`）に転記する（第5節の対処表・[dispatch-contract.md](./references/dispatch-contract.md) 第2.11節） |
 | `--max-turns <n>` | `8` | 各 worker を駆動する最大ターン数。未 commit で到達なら `failed` |
 
 `commandmatedev` は使わない。公式経路は public `commandmate` である（ADR CommandMate
@@ -517,6 +517,9 @@ report/artifact に残さない（redaction）。
 | dispatch exit 10（prompt 検出） | `capture` の内容が report に出ている。**自分で判断して答える。** runner は自動応答しない |
 | dispatch `verification_not_judged`（exit 99） | **再 dispatch では解けない。** CommandMate 側のログを見る |
 | dispatch `worker_failed` | prompt / worker ログを読む。指示が過大なら Issue を分割して re-plan する |
+| dispatch `wait_window_exhausted`（`stop_reason: timeout`。`worker_timeout` の隣） | `--wait-timeout` は **wait の1回あたりの上限**で、worker の1ターンより短かっただけ。timeout 時の `capture` は **worker が稼働中**だと答えている（`worker_liveness`）。**再 dispatch しない** —— idle 化を待って **`--reverify`** で送らずに裁定だけ取り直し、必要なら `--wait-timeout` を実測に合わせて上げる |
+| dispatch `worker_stalled`（同上） | 同じ timeout だが `capture` に**稼働の証拠が無い**。worker ログと worktree の作業証跡を確かめてから `--resume`。**「動いていない」は「作業が無い」ではない** |
+| dispatch `worker_liveness_unreadable`（同上） | `capture` 自体が読めず、**生死を測れていない**。**どちらとも読み替えない。** `commandmate capture <worktree-id> --json` を手で確かめてから上2つのどちらかへ進む |
 | dispatch で**一部の Issue だけ**落ちた | 落ちた分を直して **`--resume <その run の dispatch ディレクトリ>`**。pass 済みは再 dispatch されない。**re-plan は不要** |
 | dispatch `resume_plan_mismatch` / `resume_invalid` | その plan 自身の dispatch ディレクトリを指すか、`--out` で新規 run にする。**壊れた report を半分だけ信じて引き継がない** |
 | dispatch `resume_no_work`（`status: success`） | 停止ではない。その attempt の report をそのまま merge / uat に渡す |

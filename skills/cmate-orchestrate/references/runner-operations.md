@@ -210,6 +210,14 @@ dispatch 側の規約は [dispatch-contract.md](./dispatch-contract.md) 第2.9�
 契約を再送するので余計な差分が生まれる余地も残る。`--reverify` は同じ分割を行い、後半に対して
 **送らずに裁定だけを取り直す**。
 
+**どちらの timeout だったかは、report が言う**（[#179](https://github.com/Kewton/commandmate-skills/issues/179)）。
+runner は wait が timeout した時点で `capture --json` を1回だけ叩き、当該 worker の `worker_liveness`
+（`isRunning` / `isGenerating` / `isPromptWaiting` / `sessionStatus` / 経過秒）と blocking code を書く ——
+`wait_window_exhausted`（**稼働中。この flag の出番**）/ `worker_stalled`（稼働の証拠なし。要るのは
+裁定ではなく worker なので `--resume`）/ `worker_liveness_unreadable`（**測れていない**ので、どちらとも
+読み替えず手で `capture` を確かめる）。`capture --json` を人間が手で叩いて見分ける必要はもう無い。
+規範は [dispatch-contract.md](./dispatch-contract.md) 第2.11節。
+
 - **`send` を1回も呼ばない。** 実行契約も書かず、worker のターンも1つも消費しない。これがこの
   flag の存在理由である（fixture が `sent: []` で固定している）。
 - **引き継ぎ規則は `--resume` と同一である**（`completed` かつ `pass`）。同じ関数を使っている。

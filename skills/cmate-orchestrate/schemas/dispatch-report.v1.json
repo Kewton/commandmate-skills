@@ -209,7 +209,32 @@
         },
         "worker_state": {
           "enum": ["completed", "failed", "timeout", "prompt", "not_dispatched"],
-          "description": "completed is worker completion only; it is not verification success. Those are gated separately."
+          "description": "completed is worker completion only; it is not verification success. Those are gated separately. `timeout` means THIS RUNNER stopped waiting (`commandmate wait` returned exit 124); it does not mean the worker died — see worker_liveness for which of the two a given timeout was."
+        },
+        "worker_liveness": {
+          "type": "object",
+          "description": "OPTIONAL. What `commandmate capture --json` said about this worker AT THE MOMENT its `commandmate wait` timed out (Issue #179). `--wait-timeout` bounds one wait, not the worker, so a timeout is either 'the runner stopped watching' (the worker is still going and may still commit) or 'the worker stopped' — and re-dispatching on the first reading puts a second worker on top of work the first is finishing. The probe is made ONCE per timeout, never polled. ABSENT means no probe was made — the worker did not time out, or the record was transcribed from a prior attempt — and must NOT be read as 'the worker was not alive', for the same reason an absent gate `origin` is not `repo`. Added optionally, so reports written before this field keep validating and dispatch_schema_version stays 1.",
+          "additionalProperties": false,
+          "required": ["code", "is_running", "is_generating", "is_prompt_waiting", "session_status", "elapsed_seconds", "detail"],
+          "properties": {
+            "code": {
+              "enum": ["wait_window_exhausted", "worker_stalled", "worker_liveness_unreadable"],
+              "description": "wait_window_exhausted: the capture showed a live worker, so the WAIT WINDOW ran out and the recovery is to wait and re-judge in place (--reverify), never to re-dispatch. worker_stalled: the capture answered and showed no evidence of a running worker. worker_liveness_unreadable: the capture failed or its output could not be read, so NEITHER state was measured — it is never rounded to one of the other two. The same code is recorded as a blocking reason."
+            },
+            "is_running": { "oneOf": [{ "type": "null" }, { "type": "boolean" }] },
+            "is_generating": { "oneOf": [{ "type": "null" }, { "type": "boolean" }] },
+            "is_prompt_waiting": { "oneOf": [{ "type": "null" }, { "type": "boolean" }] },
+            "session_status": {
+              "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+              "description": "The capture's own `sessionStatus`, transcribed. Null when it was absent or unreadable."
+            },
+            "elapsed_seconds": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Wall-clock seconds between the send that opened this worker's supervision and the liveness probe. Against `--wait-timeout` it is what shows whether one turn simply outgrew the window."
+            },
+            "detail": { "type": "string", "minLength": 1 }
+          }
         },
         "verification": {
           "type": "object",
