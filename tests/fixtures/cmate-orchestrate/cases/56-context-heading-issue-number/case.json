@@ -1,0 +1,18 @@
+{
+  "description": "Issue #182 (2): a CONTEXT heading excepts an issue NUMBER exactly as #54 made it except a path. #34 writes \"旧本文には depends on #33 と書いてあったが、これは成立しない\" under `## 根拠` — a line written to DENY a dependency — and 0.27.0 read it as one, so #34 waited a whole wave for an issue it had just said it does not depend on (measured 2026-08-07, #33/#34). The denial is now read as a citation and #34 moves to wave 1. Both directions are pinned in one case: #33's `## 依存 - depends on #31` sits outside any context span and STAYS an edge, so the rule cannot be widened into \"a body that has a 根拠 section has no dependencies\" without turning this case red.",
+  "args": ["31", "33", "34", "--profile", "node-commandmate", "--max-parallel", "3"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[31, 34], [33]],
+    "merge_order": [31, 34, 33],
+    "dependencies": [{ "issue": 33, "depends_on": 31, "kind": "explicit", "basis": "declared" }],
+    "dependency_reasons_include": {
+      "33:31": ["direction word \"depends on\"", "- depends on #31"]
+    },
+    "classifications": { "31": "independent", "33": "dependent", "34": "independent" },
+    "risk_level": "moderate",
+    "questions_count": { "31": 0, "33": 0, "34": 0 }
+  }
+}

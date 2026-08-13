@@ -1,0 +1,18 @@
+{
+  "description": "Issue #182 (3), the case that gets NO question: the issue declares `data/demo/facilities.json` under `## 対象ファイル` and cites the longer `web/public/dist/data/demo/facilities.json` under `## 根拠`, so the author has already said which of the two spellings is the target. The pair is still a shadow pair, but only one of them reaches the scope, and asking anyway would fire a blocking question at a body that did everything right — the fastest way to teach an operator to reach for --allow-questions by habit. This is also the worst outcome the old drop produced: the declared path was the SHORTER one, so it was dropped, the cited build output was the only candidate left, the context heading demoted THAT to a reference, and the issue planned with an EMPTY scope (`no_suspected_files`) plus a `shadowed_file_candidate` warning. Now it plans clean: the declared file is the scope, the build output is a reference.",
+  "args": ["900", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[900]],
+    "merge_order": [900],
+    "dependencies": [],
+    "classifications": { "900": "independent" },
+    "risk_level": "low",
+    "suspected_files": { "900": ["data/demo/facilities.json"] },
+    "scope_defaults": { "900": [] },
+    "reference_files": { "900": ["web/public/dist/data/demo/facilities.json"] },
+    "questions_count": { "900": 0 }
+  }
+}

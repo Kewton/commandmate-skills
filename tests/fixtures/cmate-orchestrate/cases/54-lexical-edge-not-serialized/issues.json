@@ -1,0 +1,22 @@
+{
+  "issues": [
+    {
+      "number": 104,
+      "title": "feat: demo の施設 data を追加する",
+      "body": "demo 用の施設 data を追加する。項目のスキーマ定義は既存の facilities に合わせる。\n\n## 対象ファイル\n- `data/demo/facilities.json`\n\n## 受入条件\n- [ ] cmate-verify の全ゲートが passed になる\n- [ ] 施設が1件以上ある\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 105,
+      "title": "feat: 一覧 page の絞り込みを追加する",
+      "body": "一覧 page の絞り込みを足す。表示条件の型定義を置き、data を利用して絞り込む。\n\n## 対象ファイル\n- `web/src/page/filter.ts`\n\n## 参考\n- `data/demo/facilities.json` の項目名に合わせる\n\n## 受入条件\n- [ ] cmate-verify の全ゲートが passed になる\n- [ ] 絞り込みが期待どおりの件数を返す\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 106,
+      "title": "fix: 地図 page の初期表示を直す",
+      "body": "地図 page の初期表示がずれる。data の読み込み順を連携させ、期待値を現在の仕様へ直す。\n\n## 対象ファイル\n- `web/e2e/map.spec.ts`\n\n## 参考\n- `web/src/page/filter.ts` の絞り込みが先に走る\n\n## 受入条件\n- [ ] cmate-verify の全ゲートが passed になる\n- [ ] 初期表示が仕様どおりになる\n",
+      "labels": ["bug"]
+    }
+  ]
+}

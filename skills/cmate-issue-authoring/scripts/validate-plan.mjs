@@ -646,10 +646,16 @@ function plannerFileCandidates(text) {
   }
   // Excluded only when every mention is under a context heading (planner #54).
   const contextOnly = new Set([...inContext].filter((candidate) => !outsideContext.has(candidate)));
-  // A candidate that is a path-boundary suffix of another is a partial of it and
-  // never reaches suspected_files (planner Issue #49).
-  const paths = found.filter((candidate) => !found.some((other) => other !== candidate && other.endsWith(`/${candidate}`)));
-  return { paths, deliverable, contextOnly };
+  // A candidate that is a path-boundary suffix of another used to be dropped as
+  // a partial of it (planner Issue #49). It is NOT dropped any more (planner
+  // Issue #182): which of the two overlapping spellings the Issue means is a
+  // question for its author, and the planner asks it (`ambiguous_file_candidate`)
+  // instead of guessing "the longer one" — a guess measured wrong exactly when it
+  // cost the most, dropping the DECLARED path and keeping a build output. Both
+  // reach suspected_files, so this mirror keeps both too: an Issue whose only
+  // paths shadow each other is planner-READY, and a copy that still dropped one
+  // would call the same body unready.
+  return { paths: found, deliverable, contextOnly };
 }
 
 // A documentation path is context to read, not a file the Issue is expected to

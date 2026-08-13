@@ -1,13 +1,18 @@
 {
-  "description": "A consumer of a shared contract inferred-depends on its producer (shared topic: payment).",
+  "description": "A consumer of a shared contract and its producer, connected by the topic token `payment` and by NOTHING ELSE: #300 writes src/checkout.ts, #301 writes src/schema.ts, and no file is in both. Until Issue #182 that was an inferred edge and the two ran in separate waves. It is now a question on the consumer (`unconfirmed_lexical_dependency`) and the two share one wave — the producer-first ordering an author wants here is stated with `--depends 300:301` or a line in the body, which is an edge with a basis. This case is the SAME fixture as before, kept deliberately: the pair it describes is the one the heuristic was written for, so the plan it now produces is the honest measure of what suppressing lexical edges gives up. Its file-grounded counterpart is 55-inferred-edge-file-conflict.",
   "args": ["300", "301", "--profile", "node-commandmate", "--max-parallel", "3"],
   "expect": {
     "exit": 0,
-    "status": "success",
-    "waves": [[301], [300]],
-    "merge_order": [301, 300],
-    "dependencies": [{ "issue": 300, "depends_on": 301, "kind": "inferred" }],
-    "classifications": { "300": "dependent", "301": "independent" },
-    "risk_level": "moderate"
+    "status": "partial",
+    "warning_codes": ["unconfirmed_lexical_dependency"],
+    "waves": [[300, 301]],
+    "merge_order": [300, 301],
+    "dependencies": [],
+    "classifications": { "300": "independent", "301": "independent" },
+    "risk_level": "moderate",
+    "questions_count": { "300": 1, "301": 0 },
+    "questions_include": {
+      "300": ["--depends 300:301", "Shared: payment, gateway, acceptance with #301"]
+    }
   }
 }

@@ -1,0 +1,39 @@
+{
+  "description": "Issue #182 (1), the measured case: three issues with ZERO cross-reference, whose only connection is vocabulary. `cmate` comes from the prose \"cmate-verify の全ゲート\" in an acceptance criterion, `data` and `page` from path fragments each issue cites under `## 参考` about the OTHER one — and no two of them name a file in common. 0.27.0 built three inferred edges out of that and serialised the three into three waves; two thirds of the wall-clock was spent waiting on word choice. A lexical-only inference is now a question on the consumer instead of an edge, so all three share one wave and a human is asked to confirm or state the dependency. The question is what stops dispatch: `warnings` alone would not, and the run before this change was a clean `success`.",
+  "args": ["104", "105", "106", "--profile", "node-commandmate", "--max-parallel", "3"],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "unconfirmed_lexical_dependency",
+      "unconfirmed_lexical_dependency",
+      "unconfirmed_lexical_dependency"
+    ],
+    "waves": [[104, 105, 106]],
+    "merge_order": [104, 105, 106],
+    "dependencies": [],
+    "classifications": { "104": "independent", "105": "independent", "106": "independent" },
+    "risk_level": "moderate",
+    "questions_count": { "104": 0, "105": 1, "106": 2 },
+    "questions_include": {
+      "105": ["Shared: data, demo, facilities with #104", "--depends 105:104"],
+      "106": ["Shared: data, cmate, verify with #104", "Shared: page, data, filter with #105"]
+    },
+    "suspected_files": {
+      "104": ["data/demo/facilities.json"],
+      "105": [
+        "web/src/page/filter.ts",
+        "web/src/page/filter.test.ts",
+        "web/src/page/filter.spec.ts",
+        "web/src/page/__tests__/filter.ts",
+        "web/src/page/__tests__/filter.test.ts"
+      ],
+      "106": ["web/e2e/map.spec.ts"]
+    },
+    "reference_files": {
+      "104": [],
+      "105": ["data/demo/facilities.json"],
+      "106": ["web/src/page/filter.ts"]
+    }
+  }
+}

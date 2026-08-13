@@ -83,10 +83,16 @@ path は次の 3 通りで拾われる。
 
 いずれの pattern も **token 先頭**からしか一致しない。`web/src/lib/filter.ts` と書いても
 `src/lib/filter.ts` は生まれず、`` `.claude/skills/x/scripts/a.sh` `` は先頭の `.` を含めて
-丸ごと拾われる（Issue #49）。さらに、他の候補の **path 境界つき suffix** になっている候補は
-捨てられる。本文に `web/src/lib/filter.ts` と `src/lib/filter.ts` の両方を書いた場合、
-残るのは前者だけで、planner は `warnings` に `shadowed_file_candidate` を積む。
-両方を対象にしたいときは、短い方も repository 相対の完全な path として書くこと。
+丸ごと拾われる（Issue #49）。
+
+他の候補の **path 境界つき suffix** になっている候補は、**どちらも捨てられない**
+（planner Issue #182）。本文に `web/src/lib/filter.ts` と `src/lib/filter.ts` の両方を
+書いた場合、両方が `suspected_files` に入り、planner は「どちらを意図したか」を
+question（`ambiguous_file_candidate`）にする。question なので dispatch は
+`--allow-questions` 無しにはその Issue を送らない。**片方だけを対象にしたいなら、
+もう片方を本文から消すこと。** 以前は長い方を残して短い方を捨てていたが、
+その推測は「宣言した path を捨てて、ビルド生成物の方を scope に残す」形で外れた ——
+どちらが対象かは書いた人にしか分からない。
 
 拾われた path は 2 つに振り分けられる。
 

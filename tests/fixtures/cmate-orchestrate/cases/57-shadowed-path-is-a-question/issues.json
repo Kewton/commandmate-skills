@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 420,
+      "title": "feat: demo の施設一覧を差し替える",
+      "body": "`data/demo/facilities.json` を新しい施設一覧へ差し替える。\n\n## 対象ファイル\n- `data/demo/facilities.json`\n\n## 補足\n配信物の `web/public/dist/data/demo/facilities.json` はビルドが生成するので手では触らない。\n\n## 受入条件\n- [ ] 施設一覧が新しい内容と一致する\n",
+      "labels": ["feature"]
+    }
+  ]
+}

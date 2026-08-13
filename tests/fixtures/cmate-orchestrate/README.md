@@ -70,7 +70,7 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 |---|---|
 | `01-independent` | 依存も conflict も無い3件が1 Wave に収まるか |
 | `02-explicit-dependency` | 本文の `Depends on #N` を explicit 依存として2 Wave に割るか（golden 照合つき） |
-| `03-inferred-dependency` | contract 生産者と消費者を inferred 依存として結ぶか |
+| `03-inferred-dependency` | contract 生産者と消費者が **語彙しか共有していない**とき、edge にせず question にするか（#182。file を共有する側は `55-…`） |
 | `04-file-conflict` | 同一 file を触る2件を、依存が無くても同一 Wave に置かないか |
 | `05-cycle` | 相互依存を cycle として拒否するか |
 | `06-override-incomplete` | 集合外を指す override を不完全として拒否するか |
@@ -85,6 +85,11 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 | `28-acceptance-gates-block` | ```acceptance-gates ブロックが `acceptance_gates` に載るか。ブロック有無の**双子 Issue**で `test_expectations` が byte 一致するか（#114 Phase 0-3: strip しないと本ブロックの終了 fence が後続 ```bash の開始として拾われ、3件が1件に落ちる） |
 | `29-acceptance-gates-invalid` | 2個・未知 version・不正 id・空ブロックを `acceptance_gate_block_invalid` として open question にし、**「ブロックが無かった」に丸めない**か |
 | `30-acceptance-gates-unsupported` | `gates:`（段階2の新規コマンドゲート）を黙って無視せず `acceptance_gate_block_unsupported` で止めるか |
+| `54-lexical-edge-not-serialized` | 相互参照ゼロの3 Issue（実測 #104/#105/#106 の形）が、語彙一致だけで3 wave に直列化されず、1 wave のまま question になるか（#182） |
+| `55-inferred-edge-file-conflict` | 逆向き: 同じ file を書く生産者/消費者は inferred edge のまま残り、`basis: file_conflict` と共有 file を名乗るか（#182） |
+| `56-context-heading-issue-number` | `## 根拠` 配下で**否定するために**書いた `depends on #N` が phantom 依存にならず、かつ CONTEXT の外に書いた依存は残るか（#182） |
+| `57-shadowed-path-is-a-question` | 宣言した短い path が、説明文の長い path に shadow されて scope から落ちないか（両方 scope に入り question になるか。#182） |
+| `58-shadowed-path-cited-as-context` | 逆向き: 長い方を `## 根拠` で引用しただけなら**訊かない**か（著者が既に区別を書いている。かつ、旧規則ではこの形が scope 空になっていた。#182） |
 
 ## dispatch case 一覧
 
