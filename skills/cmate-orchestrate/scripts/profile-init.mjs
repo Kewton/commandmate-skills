@@ -62,6 +62,25 @@ const PROFILE_FIELDS = [
   // An undetectable layout yields an EMPTY declaration plus a TODO, which
   // derives exactly what no declaration derives (Issue #149).
   'scope_companions',
+  // `dispatch_defaults` (Issue #180) is deliberately NOT here, and its absence is
+  // a decision rather than an omission. This runner drafts what the repository
+  // DECLARES ABOUT ITSELF: a base branch is in a workflow file, a baseline is in
+  // package.json, a test layout is two real files that mirror each other. The
+  // operating defaults are none of those — "this repository needs --no-infer",
+  // "our workers ask before they write", "our e2e turn needs an hour" are
+  // conclusions somebody reached by RUNNING the thing, and no file in the tree
+  // states them. Drafting them would mean guessing, and this runner's whole
+  // contract is that "we defaulted" and "we detected" never look alike (§7.2);
+  // a guessed `auto_yes: true` would read exactly like a detected one and arm
+  // auto-yes for every worker of every run made from that draft.
+  //
+  // Nor is an empty `dispatch_defaults: {}` emitted the way `scope_companions`
+  // gets its empty declaration. That one is emitted BECAUSE it comes with a TODO
+  // that says the layout could not be determined, and a TODO here would fire on
+  // every repository forever: there is nothing to determine. An absent key
+  // resolves the same values the flags always resolved, so the draft stays
+  // exactly as usable as it was, and profile-contract.md §10 tells the reviewer
+  // where to add the key once they have run the repository enough to know.
 ];
 
 // Safe templates. Used when the repository says nothing about a field, always

@@ -107,8 +107,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: 6c9e28b5a8e9edb66d4e0b574250c6b057a7ce6699f2e5402781fcca598ef354
-    size: 58213
+    sha256: 9c61f89edd5789a77892faa8acd60acb1083bd510ec9a48ca0047e8730a3e0b8
+    size: 58993
     kind: skill_md
     executable: false
     script: false
@@ -155,14 +155,14 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: fe1074f4c2cd8a9136a8a72febb124dd7dcb3ed536acc0b387208df9bfc1d107
-    size: 49635
+    sha256: ba349be970f001234e4b69acd4109f432d1531eb009fc68fb0b74e4133c87e95
+    size: 50510
     kind: instruction
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: 250a166ddae2a5c144d2eb24fc5c60fe3f142d32cd727531374ae9536cb88f75
-    size: 117894
+    sha256: 60cc5f7e54f52cde47cc056eb491d5e45b451d2d3777ca84082c2c2aaa5e9641
+    size: 121890
     kind: instruction
     executable: false
     script: false
@@ -185,8 +185,8 @@ files:
     executable: false
     script: false
   - path: references/profile-contract.md
-    sha256: 152185ead10b188717f4f697371b0a812c58d04ac475f7c615a7c81089d785dd
-    size: 22253
+    sha256: 074e008bbb58e81a220fbba8f7afee9ce3f7342078ff4ccfd4e6a145df44b104
+    size: 28730
     kind: instruction
     executable: false
     script: false
@@ -221,8 +221,8 @@ files:
     executable: false
     script: false
   - path: schemas/execution-plan.v2.json
-    sha256: 06e7832cc6b5857b961827442627d99c858cd39fc22b7ea2713fb5c6fe114551
-    size: 17304
+    sha256: 0f730ecd94444e3c47bc7e651d5dd7533f44c47a63cbb3dd954b42beaf998050
+    size: 18152
     kind: asset
     executable: false
     script: false
@@ -245,8 +245,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: b977ff3872f7a1e66e46b16eff06689a5efe1579b7b489b391059470f232bcd8
-    size: 358490
+    sha256: bedac48ef410a3b7bd6e4fa26b7a1157fc59379837a2dcbaecfa2fb70cff9537
+    size: 371433
     kind: script
     executable: true
     script: true
@@ -269,8 +269,8 @@ files:
     executable: true
     script: true
   - path: scripts/profile-init.mjs
-    sha256: aa58e349885dc7e7b327bee427a6eea6ce5077158999901ba3da1ffdfb4de41d
-    size: 62366
+    sha256: 72ff86dd77105d22741c129b6818bb01623e183e49adb1dd510b1f8bac0bde10
+    size: 63788
     kind: script
     executable: true
     script: true

@@ -1,0 +1,48 @@
+{
+  "description": "profile が宣言した運転既定が、flag を1つも渡さない run に効く（#180）。plan の profile に `dispatch_defaults: {auto_yes, wait_timeout: 600, max_turns: 10}` が載っており、`dispatch_args` は空である。効いた証拠は report の self-report ではなく **fake CLI が受け取った argv** に取る: `wait` は `--timeout 600` で呼ばれ、`send` は `--auto-yes --duration 3h` を運ぶ。3h は宣言した2値の**積**から導かれる窓（10 × 600s = 100分 は 1h に収まらない）なので、`wait_timeout` / `max_turns` を読み落とした実装はここで 1h を送って赤くなる —— 「値を読んだ」ではなく「値が run を動かした」の測定である。上書き側の相方は d80。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "plan_patch": {
+    "profile": {
+      "dispatch_defaults": {
+        "auto_yes": true,
+        "wait_timeout": 600,
+        "max_turns": 10
+      }
+    }
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "auto_yes": true,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "sent": [201, 200],
+    "dispatch_send_args": {
+      "201": ["--auto-yes", "--duration", "3h"],
+      "200": ["--auto-yes", "--duration", "3h"]
+    },
+    "cli_args_include": {
+      "wait": ["--timeout", "600"]
+    },
+    "cli_args_absent": {
+      "wait": ["300"]
+    },
+    "limitation_codes": ["dispatch_defaults_applied"],
+    "limitation_code_counts": {
+      "dispatch_defaults_applied": 1
+    },
+    "limitation_details_include": [
+      "auto_yes=true (from the profile)",
+      "wait_timeout=600 (from the profile)",
+      "max_turns=10 (from the profile)"
+    ],
+    "absent_limitation_codes": ["auto_yes_window_short", "dispatch_defaults_no_infer_not_applied"]
+  }
+}
