@@ -28,7 +28,7 @@
 | 第3.2節 dispatch（`--unattended`） | 第10節 |
 | 第3.2節 dispatch（monitor との境界） | 第11節 |
 | 第3.3節 merge（PR 本文） | 第12節 |
-| 第3.5節 profile-init（押さえるべき3点） | 第13節 |
+| 第3.5節 profile-init（押さえるべき3点・`--check`） | 第13節 |
 | 第3.6節 status（read-only の契約と表示規則） | 第14節 |
 
 ---
@@ -356,7 +356,16 @@ run ディレクトリの JSON の中にしか無い状態を残さない。
 merge-report.json / merge-summary.md の構造は変わらない。
 
 
-## 13. profile-init: 押さえるべき3点
+## 13. profile-init: 押さえるべき3点、と `--check`
+
+profile-init には mode が2つあり、**どちらも read-only** である。
+
+| mode | 何をするか | 正本 |
+|---|---|---|
+| 起案（既定） | tree の宣言から profile draft を起案する | [profile-contract.md](./profile-contract.md) 第7節 |
+| `--check <profile.json>` | 既にある profile の `scope_companions` を tree に突き合わせる | [profile-contract.md](./profile-contract.md) 第9.7節 |
+
+### 13.1 起案（既定 mode）: 押さえるべき3点
 
 押さえるべき点は3つである（正本は
 [profile-contract.md](./profile-contract.md) 第7節）。
@@ -373,6 +382,34 @@ merge-report.json / merge-summary.md の構造は変わらない。
 3. **推定できなかった baseline は fail-closed の placeholder になる。** 空配列にすると
    「検証すべき gate が無いから pass」に化けうるので、必ず落ちる command を置く。
    **埋めずに dispatch すれば止まる**、が正しい壊れ方である。
+
+### 13.2 `--check`: 宣言を tree に突き合わせる（[#197](https://github.com/Kewton/commandmate-skills/issues/197)）
+
+```bash
+node scripts/profile-init.mjs --check .commandmate/profile.json --repo-root .
+```
+
+`scope_companions` の規則ごとに1行、`when` が実ファイル何件に一致したか、`add` が展開した
+path のうち何件が実在するかを出す。**構文として正しいまま何にも一致しない規則**——
+`scripts/{base}.mjs` は `scripts/adapters/human-review.mjs` に届かない —— を、plan を回す前に
+見るための mode である。押さえるべき点は4つ。
+
+1. **裁定しない。** 0 件一致は誤りではない（これから作る file を見越した宣言はありうる）ので
+   **warning であって error ではない**。`companion_when_unmatched` /
+   `companion_add_missing` が出て status は `partial` になるが、**exit は 0** である。
+   契約適合の裁定は planner 側（`orchestrate.mjs --profile-json` の `load_error`）にある。
+2. **read-only。** tree と profile を読むだけで何も書かない。`--out` / `--emit` / `--repo` /
+   `--id` は併用できず `invalid_input`（exit 3）になる —— 起案しない mode であることを、
+   flag の無視ではなく拒否で言う。
+3. **planner は対象リポジトリを開かない**（[profile-contract.md](./profile-contract.md)
+   第9.1節）は不変。これは planner ではなく、**人間が profile をレビューするときに使う別
+   runner** であり、plan の純関数性には触れない。
+4. **一致判定は planner と同じ関数**（`scripts/lib.mjs`）である。「`--check` は通るが planner
+   は一致しない」を作らないための固定事項で、fixture がその一致を両方向から測っている
+   （`tests/fixtures/cmate-orchestrate/README.md` の `--check` の節）。
+
+走査から外すのは `.git` / `node_modules` / `.venv` / `__pycache__` で、report がその一覧を
+載せる。走査上限に達したら warning `tree_scan_truncated` が出て、件数は**下界**として読む。
 
 
 ## 14. status: read-only の契約と表示規則

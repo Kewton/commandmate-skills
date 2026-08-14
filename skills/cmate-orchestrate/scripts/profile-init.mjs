@@ -36,12 +36,52 @@
 // contract-clean profile, stdout carries the envelope that explains it.
 //
 // Issue #94.
+//
+// ---- The second mode: --check (Issue #197) ----------------------------------
+//
+// Drafting runs FORWARD, from a repository to a proposed declaration. `--check`
+// runs BACKWARD, from an existing declaration to the repository it claims to
+// describe: for each `scope_companions` rule it reports how many real files the
+// `when` matches and how many of the paths the `add` produces exist. Same three
+// properties — read-only, no subprocess, a pure function of the bytes it reads —
+// and the same exit-code convention.
+//
+// It exists because a rule can be perfectly legal and match NOTHING.
+// references/profile-contract.md §9.3 already refuses the brace typos that would
+// leave "a rule that never matches and never says so", but `scripts/{base}.mjs`
+// and `scripts/{dir}{base}.mjs` are both legal and only the second one reaches
+// `scripts/adapters/human-review.mjs`. Before this, the only way to tell them
+// apart was to write an issue fixture, run the planner and read `scope_defaults`
+// — so a mistyped rule was normally discovered by a worker failing the scope
+// gate, which is the one place it cannot be repaired.
+//
+// Two properties make it a review tool rather than a second gate:
+//
+//   IT DOES NOT ADJUDICATE. A rule that matches nothing is a WARNING, never an
+//   error. Declaring a companion for files that do not exist yet is a legitimate
+//   thing to do, and a check that called it wrong would be teaching authors to
+//   write their profile after their code instead of before it.
+//
+//   IT IS NOT THE PLANNER. §9.1 — "the planner never opens the target
+//   repository" — is untouched, and untouchable: this is a different runner, run
+//   by a human, at profile-review time. What the two share is the MATCHER
+//   (lib.mjs), because a `--check` with its own reading of `{dir}` / `{base}`
+//   would be a second truth, and the first thing it would produce is a rule
+//   `--check` calls matched and the planner does not.
 
 import { parseArgs } from 'node:util';
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, isAbsolute, resolve } from 'node:path';
 
-import { REDACTIONS, SKILL_ID, SKILL_VERSION, SkillError } from './lib.mjs';
+import {
+  REDACTIONS,
+  SKILL_ID,
+  SKILL_VERSION,
+  SkillError,
+  normalizeScopeCompanions,
+  compileScopeCompanions,
+  companionsForPath,
+} from './lib.mjs';
 
 const PROFILE_INIT_SCHEMA_VERSION = 1;
 
@@ -127,10 +167,11 @@ function redact(value) {
 // Argument parsing
 // =============================================================================
 
-const USAGE = `cmate-orchestrate profile draft runner (read-only)
+const USAGE = `cmate-orchestrate profile runner (read-only): draft one, or check one
 
 Usage:
-  profile-init.mjs [options]
+  profile-init.mjs [options]                     draft a profile from this repository
+  profile-init.mjs --check <profile.json> [...]  report what its rules match here
 
 Options:
   --repo-root <path>     Repository to inspect (default: the working directory).
@@ -138,12 +179,23 @@ Options:
   --emit <mode>          What goes to stdout: "envelope" (default) or "profile".
   --repo <owner/name>    Declare the GitHub slug instead of inferring it.
   --id <id>              Declare the profile id instead of deriving it.
+  --check <path>         Read an EXISTING profile and report, one line per
+                         scope_companions rule, how many files under --repo-root
+                         its "when" matches and how many of the paths its "add"
+                         produces exist. Writes nothing. A rule that matches
+                         nothing is a warning, not an error.
   --help                 Show this help.
 
 The draft is always verified:false. It is a proposal for a human to check against
 references/profile-contract.md, not a profile this runner vouches for.`;
 
 const EMIT_MODES = new Set(['envelope', 'profile']);
+
+// The drafting flags, which --check refuses. Stated as a list rather than as
+// four conditions because the statement is one: --check DRAFTS NOTHING, so every
+// flag that shapes or writes a draft is meaningless with it, and a flag silently
+// ignored is a flag whose author believed it did something.
+const DRAFT_ONLY_FLAGS = ['out', 'emit', 'repo', 'id'];
 
 function parseCli(argv) {
   let parsed;
@@ -157,6 +209,7 @@ function parseCli(argv) {
         emit: { type: 'string' },
         repo: { type: 'string' },
         id: { type: 'string' },
+        check: { type: 'string' },
         help: { type: 'boolean' },
       },
     });
@@ -186,6 +239,30 @@ function resolveInputs(parsed) {
   }
   if (!statSync(repoRoot).isDirectory()) {
     throw new SkillError('invalid_input', `--repo-root ${redact(repoRoot)} is not a directory`, 3);
+  }
+
+  // --check is a MODE, not a modifier. It reads a profile that already exists
+  // and reports; it drafts nothing, so every flag that shapes or writes a draft
+  // is refused beside it rather than ignored.
+  const check = values.check ?? null;
+  if (check !== null) {
+    if (String(check).trim() === '') {
+      throw new SkillError('invalid_input', '--check must name a profile JSON file', 3);
+    }
+    const conflicting = DRAFT_ONLY_FLAGS.filter((flag) => values[flag] !== undefined);
+    if (conflicting.length > 0) {
+      throw new SkillError(
+        'invalid_input',
+        `--check cannot be combined with ${conflicting.map((flag) => `--${flag}`).join(' / ')}: ` +
+          '--check reads an existing profile and writes nothing, so there is no draft to name, ' +
+          'emit or write. Run the two modes separately.',
+        3,
+      );
+    }
+    if (!existsSync(check)) {
+      throw new SkillError('load_error', `no profile at --check ${redact(check)}`, 6);
+    }
+    return { repoRoot, check };
   }
 
   const emit = values.emit ?? 'envelope';
@@ -224,7 +301,7 @@ function resolveInputs(parsed) {
     );
   }
 
-  return { repoRoot, out, emit, repoOverride, idOverride };
+  return { repoRoot, out, emit, repoOverride, idOverride, check: null };
 }
 
 // =============================================================================
@@ -1457,6 +1534,329 @@ function draftProfile(inputs) {
 }
 
 // =============================================================================
+// --check: an existing declaration against this repository's tree (Issue #197)
+// =============================================================================
+//
+// The reverse of drafting, and the reason the file header calls it read-only
+// twice: this mode opens a profile somebody already wrote and answers, per rule,
+// "does it do anything here?".
+//
+// Everything about WHAT A RULE MATCHES comes from lib.mjs — the same
+// normalizeScopeCompanions the planner loads a profile with, the same
+// compileScopeCompanions, the same companionsForPath. Nothing about matching is
+// re-implemented here, and that is the whole design constraint of this mode
+// (Issue #197): a `--check` with its own reading of `{dir}` / `{base}` would
+// answer a question the planner never asked.
+//
+// The ONE refusal not shared is the repository-relative test on a
+// `require[].add` literal, which consults the planner's own path vocabulary
+// (`SYSTEM_ROOTS`). A literal that names a system root simply does not exist
+// under --repo-root, so this mode reports it as a rule adding nothing — which is
+// true, and is the warning an author needs — while the planner still refuses the
+// profile outright when it loads it. Nothing here overrides that; `--check` is
+// not a gate and does not certify a profile.
+
+// Directories a companion rule is never about, skipped so the scan measures the
+// repository rather than its dependencies and its history. Deliberately short:
+// every entry is a directory whose contents are NOT this repository's source by
+// universal convention, and the report names the list so a surprising count can
+// be read against it. Build outputs (`dist`, `target`, `build`) are NOT here —
+// a generated file is exactly the kind of companion `derive` exists to declare.
+const CHECK_SKIP_DIRS = ['.git', 'node_modules', '.venv', '__pycache__'];
+
+// A bound, not a budget. A scan that walked an unbounded tree would turn a review
+// command into a reason not to run one; the counts are reported as lower bounds
+// with a warning when either bound is reached, never silently truncated. The
+// directory bound is also what terminates a symlink cycle.
+const CHECK_SCAN_MAX_FILES = 20000;
+const CHECK_SCAN_MAX_DIRS = 4000;
+
+// How many concrete examples each rule's report carries. A count says whether a
+// rule fires; an example says whether it fires on what its author meant. Bounded
+// so the envelope stays a fixed size on a large repository.
+const CHECK_EXAMPLES = 3;
+
+// Breadth-first from the repository root, every directory's entries already
+// sorted by repo.list, so the file order — and therefore every example below —
+// is a function of the tree and not of the filesystem.
+function walkRepoFiles(repo, warnings) {
+  const skip = new Set(CHECK_SKIP_DIRS);
+  const files = [];
+  const queue = ['.'];
+  let visitedDirs = 0;
+  let truncated = null;
+  while (queue.length > 0 && truncated === null) {
+    if (visitedDirs >= CHECK_SCAN_MAX_DIRS) {
+      truncated = `${CHECK_SCAN_MAX_DIRS} directories`;
+      break;
+    }
+    const dir = queue.shift();
+    visitedDirs += 1;
+    for (const entry of repo.list(dir)) {
+      const path = dir === '.' ? entry : `${dir}/${entry}`;
+      if (repo.isDir(path)) {
+        if (!skip.has(entry)) queue.push(path);
+        continue;
+      }
+      files.push(path);
+      if (files.length >= CHECK_SCAN_MAX_FILES) {
+        truncated = `${CHECK_SCAN_MAX_FILES} files`;
+        break;
+      }
+    }
+  }
+  if (truncated !== null) {
+    warnings.push({
+      code: 'tree_scan_truncated',
+      detail:
+        `the scan stopped at ${truncated}, so every count below is a LOWER BOUND. ` +
+        'A rule reported as matching nothing may still match a file the scan never reached; ' +
+        'narrow --repo-root to the subtree the rules are about before reading the zero counts.',
+    });
+  }
+  return files;
+}
+
+// One report line per rule, in the profile's own declaration order (`derive`
+// first, then `require` — compileScopeCompanions' order, which is also the order
+// the planner applies them in).
+//
+// `when_matches` counts REAL FILES, because that is the question: a `when` is a
+// gate on a declared path, and a path an issue can declare is a path that
+// exists. `add` is reported per template, with how many distinct paths it
+// expanded to and how many of those are real — one number for `derive` (whose
+// expansion is a function of each match) and the degenerate case of the same
+// number for `require` (whose literal expands to itself, once).
+function checkCompanionRules(rules, files, repo) {
+  const perRule = rules.map((rule) => ({
+    rule,
+    matched: [],
+    // Insertion-ordered: a Map keyed by the expanded path, valued by whether it
+    // exists. Distinct paths, first-seen order, no sort — the same discipline
+    // every other output in this runner is held to.
+    expanded: rule.addTemplates.map(() => new Map()),
+  }));
+  const byRule = new Map(rules.map((rule, index) => [rule, perRule[index]]));
+
+  for (const file of files) {
+    for (const { rule, at, companion } of companionsForPath(rules, file)) {
+      const entry = byRule.get(rule);
+      if (entry.matched[entry.matched.length - 1] !== file) entry.matched.push(file);
+      const seen = entry.expanded[at];
+      if (!seen.has(companion)) seen.set(companion, repo.exists(companion));
+    }
+  }
+
+  return perRule.map(({ rule, matched, expanded }) => {
+    const add = rule.addTemplates.map((template, at) => {
+      const paths = [...expanded[at].entries()];
+      const existing = paths.filter(([, exists]) => exists);
+      return {
+        template,
+        expands_to: paths.length,
+        existing: existing.length,
+        missing_examples: paths.filter(([, exists]) => !exists).slice(0, CHECK_EXAMPLES).map(([path]) => path),
+      };
+    });
+    return {
+      key: rule.key,
+      index: rule.index,
+      when: rule.when,
+      when_matches: matched.length,
+      when_examples: matched.slice(0, CHECK_EXAMPLES),
+      add,
+    };
+  });
+}
+
+// The two zero-count shapes the Issue asks for, as WARNINGS. Neither is an error
+// and neither ever will be: a declaration written ahead of the files it
+// describes is legitimate, and a check that called it wrong would push authors
+// into writing the profile after the code instead of before it. What a warning
+// buys is that the author is told, at review time, instead of a worker being
+// told by the scope gate, at a point where it cannot be repaired.
+function checkWarnings(report) {
+  const warnings = [];
+  for (const rule of report) {
+    const at = `${rule.key}[${rule.index}]`;
+    if (rule.when_matches === 0) {
+      warnings.push({
+        code: 'companion_when_unmatched',
+        detail:
+          `${at}.when "${rule.when}" matches no file under --repo-root, so the rule adds nothing here. ` +
+          'That is legitimate if the files it describes do not exist yet; otherwise the template is ' +
+          'narrower than the tree — "{dir}{base}" spans a whole subtree where "{base}" spans one segment ' +
+          '(references/profile-contract.md §9.2).',
+      });
+      continue;
+    }
+    for (const add of rule.add) {
+      if (add.expands_to > 0 && add.existing === 0) {
+        warnings.push({
+          code: 'companion_add_missing',
+          detail:
+            `${at}.add "${add.template}" matched ${rule.when_matches} file(s) but none of the ` +
+            `${add.expands_to} path(s) it produces exist` +
+            (add.missing_examples.length === 0 ? '' : ` (e.g. ${add.missing_examples.join(', ')})`) +
+            '. That is legitimate for a companion the repository has yet to create; otherwise the two ' +
+            'halves of the rule disagree about this layout.',
+        });
+      }
+    }
+  }
+  return warnings;
+}
+
+function checkCompletionChecks(report, declared) {
+  const checks = [
+    {
+      id: 'read_only',
+      passed: true,
+      detail: 'nothing was written and no subprocess was run: the profile and the tree were only read',
+    },
+    {
+      id: 'shared_matcher',
+      passed: true,
+      detail:
+        'the declaration was loaded and matched with lib.mjs (normalizeScopeCompanions / ' +
+        'compileScopeCompanions / companionsForPath), the same functions orchestrate.mjs derives with',
+    },
+    {
+      id: 'rules_covered',
+      passed: report.length === declared,
+      detail: 'every declared rule has exactly one report line',
+    },
+    {
+      id: 'no_adjudication',
+      passed: true,
+      detail: 'a rule matching nothing is reported as a warning; this runner raises no error over it',
+    },
+    {
+      id: 'deterministic',
+      passed: true,
+      detail: 'the report is a pure function of the profile and the files under --repo-root',
+    },
+  ];
+  return { passed: checks.every((check) => check.passed), checks };
+}
+
+function renderCheckSummary({ profilePath, report, warnings, filesScanned }) {
+  const zero = warnings.filter((warning) => warning.code === 'companion_when_unmatched').length;
+  const lines = [
+    '## 目的',
+    `既にある profile の \`scope_companions\` 規則が、このリポジトリの tree で**実際に何に一致するか**を突き合わせた（read-only・起案なし）。`,
+    '',
+    '## 結論',
+    report.length === 0
+      ? `\`${profilePath}\` は \`scope_companions\` 規則を1本も宣言していない。突き合わせる対象が無い。`
+      : `規則 ${report.length} 本 / 走査 ${filesScanned} file。` +
+        `**0 件一致の規則 ${zero} 本**、警告 ${warnings.length} 件。` +
+        '**0 件一致は誤りではない**（これから作るファイルを見越した宣言はありうる）ので warning である。',
+  ];
+  if (report.length > 0) {
+    lines.push('', '## 規則ごとの一致件数');
+    for (const rule of report) {
+      const where = rule.when_examples.length === 0 ? '' : `（例: ${rule.when_examples.join(', ')}）`;
+      const adds = rule.add
+        .map((add) => `\`${add.template}\` → 展開 ${add.expands_to} / 実在 ${add.existing}`)
+        .join(' / ');
+      lines.push(`- \`${rule.key}[${rule.index}]\` \`${rule.when}\` — 一致 ${rule.when_matches} 件${where}: ${adds}`);
+    }
+  }
+  if (warnings.length > 0) {
+    lines.push('', '## Warnings', ...warnings.map((warning) => `- ${warning.code}: ${warning.detail}`));
+  }
+  lines.push(
+    '',
+    '## 次の一手',
+    '- 一致 0 件の規則は、テンプレートが tree より狭いのか、まだ作っていないファイルの宣言なのかを決める。',
+    '- 一致判定は planner と同じ関数（`lib.mjs`）なので、ここで一致した規則は plan でも一致する。',
+    '- **この runner は profile を承認しない。** 契約適合の裁定は `orchestrate.mjs --profile-json` の `load_error` 側にある。',
+    `- 走査から外した directory: ${CHECK_SKIP_DIRS.join(' / ')}。`,
+  );
+  return lines.join('\n');
+}
+
+function buildCheckResult({ status, profilePath, repoRoot, filesScanned, report, warnings, completionCheck, summary }) {
+  return {
+    profile_init_schema_version: PROFILE_INIT_SCHEMA_VERSION,
+    skill_id: SKILL_ID,
+    skill_version: SKILL_VERSION,
+    // Stated as data next to `draft`, so a consumer cannot read a check envelope
+    // as a drafting one: there is no profile in it, and `draft: false` here means
+    // "nothing was drafted", not "this profile is approved".
+    mode: 'check',
+    status,
+    draft: false,
+    profile: null,
+    check: {
+      profile_path: profilePath,
+      repo_root: repoRoot,
+      files_scanned: filesScanned,
+      skipped_directories: [...CHECK_SKIP_DIRS],
+      rules: report,
+    },
+    provenance: [],
+    todos: [],
+    artifacts: [],
+    errors: [],
+    warnings,
+    completion_check: completionCheck,
+    summary_markdown: summary,
+  };
+}
+
+function runCheck(inputs) {
+  const profilePath = redact(inputs.check);
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(inputs.check, 'utf8'));
+  } catch (error) {
+    throw new SkillError(
+      'load_error',
+      `cannot read profile at --check ${profilePath}: ${redact(error.message)}`,
+      6,
+    );
+  }
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new SkillError('load_error', `--check ${profilePath} is not a JSON object`, 6);
+  }
+
+  // The planner's loader, minus the one refusal that needs its path vocabulary
+  // (see the section header). A declaration this refuses is a declaration the
+  // planner refuses too, with the same message and the same exit code — which is
+  // the point: the two runners must not disagree about what a rule IS either.
+  const declaration = normalizeScopeCompanions(raw.scope_companions);
+  const rules = compileScopeCompanions(declaration);
+
+  const warnings = [];
+  const repo = openRepo(inputs.repoRoot, warnings);
+  const files = rules.length === 0 ? [] : walkRepoFiles(repo, warnings);
+  const report = checkCompanionRules(rules, files, repo);
+  warnings.push(...checkWarnings(report));
+
+  const completionCheck = checkCompletionChecks(report, rules.length);
+  const status = warnings.length > 0 ? 'partial' : 'success';
+  const result = buildCheckResult({
+    status,
+    profilePath,
+    repoRoot: redact(inputs.repoRoot),
+    filesScanned: files.length,
+    report,
+    warnings,
+    completionCheck,
+    summary: renderCheckSummary({ profilePath, report, warnings, filesScanned: files.length }),
+  });
+
+  process.stderr.write(
+    'checked scope_companions against the tree: nothing was written, and this runner does not certify a profile.\n',
+  );
+  // Exit 0 for `partial` exactly as drafting does. A zero-match rule is a finding
+  // for a human, not a failure of this run (Issue #197).
+  return { exitCode: 0, stdout: `${JSON.stringify(result, null, 2)}\n` };
+}
+
+// =============================================================================
 // Result envelope
 // =============================================================================
 
@@ -1546,11 +1946,15 @@ function renderSummary({ profile, provenance, todos, warnings, ecosystems, artif
   return lines.join('\n');
 }
 
-function buildResult({ status, profile, provenance, todos, warnings, errors, artifacts, completionCheck, summary }) {
+function buildResult({ status, mode, profile, provenance, todos, warnings, errors, artifacts, completionCheck, summary }) {
   return {
     profile_init_schema_version: PROFILE_INIT_SCHEMA_VERSION,
     skill_id: SKILL_ID,
     skill_version: SKILL_VERSION,
+    // Which of the two modes produced this envelope (Issue #197). Stated even on
+    // the drafting side, and even on a failure, so a consumer never has to infer
+    // it from which fields happen to be populated.
+    mode,
     status,
     // Stated as data, not only in prose: a consumer that reads this envelope
     // must not be able to mistake the draft for a reviewed profile.
@@ -1566,20 +1970,32 @@ function buildResult({ status, profile, provenance, todos, warnings, errors, art
   };
 }
 
-function initFailure(error) {
+// `mode` is what the argv ASKED for, resolved before anything else can fail, so
+// a failure envelope names the mode the operator ran even when the failure is
+// what stopped that mode from doing anything (Issue #197).
+function initFailure(error, mode) {
   const completionCheck = {
     passed: false,
-    checks: [
-      { id: 'verified_false', passed: true, detail: 'no draft was produced' },
-      { id: 'contract_shaped', passed: false, detail: 'no draft was produced' },
-      { id: 'provenance_complete', passed: false, detail: 'no draft was produced' },
-      { id: 'gaps_explicit', passed: false, detail: 'no draft was produced' },
-      { id: 'read_only', passed: true, detail: 'nothing was written' },
-      { id: 'deterministic', passed: true, detail: 'the failure is a pure function of the inputs' },
-    ],
+    checks: mode === 'check'
+      ? [
+        { id: 'read_only', passed: true, detail: 'nothing was written' },
+        { id: 'shared_matcher', passed: false, detail: 'no declaration was matched' },
+        { id: 'rules_covered', passed: false, detail: 'no rule was reported' },
+        { id: 'no_adjudication', passed: true, detail: 'the failure is about reading the inputs, not about what a rule matches' },
+        { id: 'deterministic', passed: true, detail: 'the failure is a pure function of the inputs' },
+      ]
+      : [
+        { id: 'verified_false', passed: true, detail: 'no draft was produced' },
+        { id: 'contract_shaped', passed: false, detail: 'no draft was produced' },
+        { id: 'provenance_complete', passed: false, detail: 'no draft was produced' },
+        { id: 'gaps_explicit', passed: false, detail: 'no draft was produced' },
+        { id: 'read_only', passed: true, detail: 'nothing was written' },
+        { id: 'deterministic', passed: true, detail: 'the failure is a pure function of the inputs' },
+      ],
   };
   return buildResult({
     status: 'failure',
+    mode,
     profile: null,
     provenance: [],
     todos: [],
@@ -1603,6 +2019,8 @@ function run(argv) {
   }
 
   const inputs = resolveInputs(parsed);
+  if (inputs.check !== null) return runCheck(inputs);
+
   const { profile, provenance, todos, warnings, ecosystems } = draftProfile(inputs);
 
   const profileJson = `${JSON.stringify(profile, null, 2)}\n`;
@@ -1627,6 +2045,7 @@ function run(argv) {
   const status = todos.length > 0 || warnings.length > 0 ? 'partial' : 'success';
   const result = buildResult({
     status,
+    mode: 'draft',
     profile,
     provenance,
     todos,
@@ -1648,6 +2067,9 @@ function run(argv) {
 
 function main() {
   const argv = process.argv.slice(2);
+  // Read off the raw argv rather than from resolveInputs, because the failure
+  // this labels may be resolveInputs itself refusing the arguments.
+  const mode = argv.includes('--check') || argv.some((arg) => arg.startsWith('--check=')) ? 'check' : 'draft';
   try {
     const { exitCode, stdout } = run(argv);
     if (stdout) process.stdout.write(stdout);
@@ -1657,7 +2079,7 @@ function main() {
       // The failure envelope always goes to stdout, even under --emit profile:
       // there is no draft to emit, and a consumer piping stdout into a file must
       // get something that is obviously not a profile rather than nothing.
-      process.stdout.write(`${JSON.stringify(initFailure(error), null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify(initFailure(error, mode), null, 2)}\n`);
       process.stderr.write(`error [${error.code}]: ${redact(error.detail ?? error.message)}\n`);
       process.exit(error.exitCode ?? 1);
     }

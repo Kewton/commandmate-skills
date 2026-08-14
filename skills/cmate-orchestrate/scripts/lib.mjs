@@ -18,6 +18,16 @@
 // FIRST, precisely so dispatch and uat cannot drift on how a launcher is read
 // (Issue #37). Divergence there is the bug it exists to prevent.
 //
+// The `scope_companions` section at the bottom is the same kind of entry, arrived
+// at from the other direction: it was HOISTED out of orchestrate.mjs when a
+// second reader appeared (`profile-init.mjs --check`, Issue #197). A rule
+// vocabulary read by two runners is a vocabulary two runners can disagree about,
+// and the disagreement would be silent — `--check` reporting a match the planner
+// does not make is exactly the "a rule that never matches and never says so"
+// failure #197 exists to remove. So the matcher is written once and both callers
+// import it; the extraction is provably behaviour-preserving because every
+// full-text plan golden is byte-unchanged by it.
+//
 // Deliberately NOT hoisted, with the difference that keeps each one local:
 //
 //   parseCli / renderSummary  four different implementations (different flags,
@@ -269,4 +279,463 @@ export function safeWorktreeTarget(pathValue) {
   if (rest.startsWith('../')) rest = rest.slice(3);
   if (rest.split('/').some((segment) => segment === '..')) return null;
   return pathValue;
+}
+
+// =============================================================================
+// The agent harness — deny-by-default (Issue #177)
+// =============================================================================
+//
+// The paths that make up the AGENT'S OWN HARNESS: the Skill packages the worker
+// and its verifier ARE, and the CommandMate configuration that decides what
+// "verified" means. A worker allowed to write there can pass its gate by
+// rewriting the judge, so the planner keeps them out of `scope.allow` by default
+// and a profile may not re-grant them (references/profile-contract.md §9.6). The
+// full argument for hardcoding the set — rather than making it declarable — is
+// at the planner's use site in orchestrate.mjs.
+//
+// Here rather than there because the refusal is part of reading a PROFILE, and
+// two runners now read one: the planner refuses the declaration, and
+// `profile-init.mjs --check` must refuse the same declaration for the same
+// reason. A per-runner copy of a permission boundary is a permission boundary
+// with a second, quieter door.
+export const HARNESS_PATH_PREFIXES = ['.claude/skills/', '.agents/skills/', '.commandmate/'];
+
+// `./`-prefixed forms are stripped first. A repository-relative path filter
+// accepts `./.claude/skills/x.sh` (it escapes nothing), and a prefix test alone
+// would read it as a non-harness path — a one-character bypass of a permission
+// boundary. Every other escape (`..`, absolute, backslash) is already refused
+// before a path reaches here, so this is the only normalisation needed.
+export function isHarnessPath(path) {
+  const normalized = path.replace(/^(?:\.\/)+/, '');
+  return HARNESS_PATH_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+// =============================================================================
+// scope_companions — the rule vocabulary and its evaluation (Issues #149 / #181)
+// =============================================================================
+//
+// Layer L2 of references/adr-scope-derivation.md. L1 (the planner's
+// testScopeDefaultsFor) derives the CONVENTIONAL test path of every declared
+// source file. What it cannot derive is a convention it has never heard of: a
+// `spec/` tree mirroring `app/`, a generated `*_pb.ts` beside every `.proto`, a
+// locale table regenerated from its source. The planner never opens the target
+// repository, and dispatch must not observe the worktree either — a contract that
+// depended on worktree state would stop being byte-identical across worktrees,
+// which is the property dispatch-contract.md:212 rests on. The one place
+// repository knowledge is already allowed to enter is the PROFILE, and the
+// profile is part of the plan, so a declaration there keeps both properties
+// (ADR §3).
+//
+// ---- Why this lives in lib.mjs (Issue #197) ---------------------------------
+//
+// Because a second runner now evaluates the same rules. `profile-init.mjs
+// --check` counts, for each declared rule, how many real files in a repository
+// tree its `when` matches and how many of the paths its `add` produces exist —
+// which is the review question "is this rule doing anything?" that could
+// previously only be answered by writing an issue fixture and reading
+// `scope_defaults` out of a plan.
+//
+// A `--check` with its own reading of `{dir}` / `{base}` would make two truths
+// out of one, and the divergence would be silent in the worst direction: a rule
+// `--check` calls matched while the planner does not is precisely the "rule that
+// never matches and never says so" the field's error handling is built around.
+// So the vocabulary, the compiler and the matcher are written once, here, and
+// both runners import them. The planner keeps only what is PLANNER POLICY —
+// deduplication against paths it already has, the harness-template filter that
+// depends on where a binding came from, and the `MAX_SCOPE_PATTERNS` bound.
+//
+// ---- The shape, and why this one -------------------------------------------
+//
+//   "scope_companions": {
+//     "derive": [
+//       { "when": "app/{dir}{base}.rb", "add": ["spec/{dir}{base}_spec.rb"] }
+//     ],
+//     "require": [
+//       { "when": "scripts/{dir}{base}.mjs", "add": ["scripts/tests/shared-contract.test.mjs"] }
+//     ]
+//   }
+//
+// A `derive` rule is a pair of PATH TEMPLATES over one shared vocabulary. `when` matches a
+// DECLARED path and binds its placeholders; `add` re-emits those bindings into
+// concrete paths. Two placeholders exist, and they are the two pieces a companion
+// convention is ever a function of:
+//
+//   {dir}   zero or more path segments, each with its trailing "/" (so it is ""
+//           at the repository root). This is what makes a MIRROR expressible:
+//           `app/{dir}{base}.rb` -> `spec/{dir}{base}_spec.rb` moves
+//           app/models/user.rb to spec/models/user_spec.rb, prefix stripped.
+//   {base}  exactly one path segment. Normally the file's stem, because the
+//           extension is written literally in the template — which is also why
+//           there is no `{ext}` yet: one rule per extension is more explicit, and
+//           adding `{ext}` later is a compatible widening (§15.2 of the ADR).
+//
+// The three invariants of ADR §2 are structural properties of this shape rather
+// than checks bolted onto it:
+//
+//   1. DERIVED FROM THE DECLARATION. There is no glob syntax at all: `*`, `?` and
+//      `[` are refused in both templates, and the only wildcards are placeholders,
+//      whose captured text is LITERALLY A SUBSTRING OF A DECLARED PATH. An `add`
+//      must carry at least one placeholder bound by its `when`, so no rule can
+//      grant a path that does not contain a piece of a path the issue declared.
+//      `**/*.test.*` and a bare `docs/module-reference.md` are both rejected at
+//      load time. A profile therefore cannot re-open the hole #50 closed, and
+//      |closure| <= (total `add` entries) x |declared| holds by construction.
+//   2. VISIBLE. The derivation returns a list the caller appends to
+//      `scope_defaults` and `suspected_files` in one statement, exactly as L1's
+//      does — the two cannot drift apart.
+//   3. A PURE FUNCTION OF THE PLAN. The input is the profile, which is part of
+//      the plan; nothing is read from disk, nothing is sorted, no Set is walked.
+//
+// Invariant 3 is about the PLANNER's use of these functions. `--check` reads a
+// repository tree by construction — that is what it is for — and it is a separate
+// runner precisely so that reading one never happens on the planner's path
+// (references/profile-contract.md §9.1 is unchanged).
+//
+// ---- `require`: the companion no template can name (Issue #181) -------------
+//
+// ADR §15.2 left the constant companion out of the first cut and named the two
+// things that would bring it in: a real case, and a KEY OF ITS OWN, so that the
+// key name states that the added path is not derived from the declaration. Both
+// arrived.
+//
+// The case is the AGGREGATE test — one file checking several modules against a
+// shared contract, `scripts/tests/shared-contract.test.mjs`. Its name
+// corresponds to no source name BY CONSTRUCTION; that is what makes it
+// aggregate. L1 cannot reach it (L1 derives the conventional test path OF a
+// source file) and neither can `derive` (every `add` there is a function of the
+// declared path), so the only channel left was the issue body — which measured,
+// on a live repository, as a standing instruction to every author of a
+// `scripts/**` issue to write the path out by hand, and a worker losing its run
+// to the scope gate whenever somebody forgot.
+//
+// A `require` rule is the same `{when, add}` pair with the roles of the two
+// halves split: `when` still has to match a DECLARED path, so nothing is granted
+// unconditionally and the closure is still bounded by what the issue declared,
+// while `add` holds LITERAL paths and no placeholders at all.
+//
+// This does NOT loosen `derive`. A placeholder-free `add` is still a load_error
+// there, and each key refuses the other's shape:
+//
+//   derive[].add    must carry >= 1 placeholder, every one bound by its `when`
+//   require[].add   must carry ZERO placeholders, and each entry must be a
+//                   repository-relative path outside the agent harness
+//
+// That pair is what keeps a MISTYPED TEMPLATE from silently becoming a literal —
+// the one degradation this key could otherwise introduce. Braces are never
+// ambiguous to begin with: parseCompanionTemplate tokenizes every `{...}` in
+// both keys and refuses an unknown name or an unbalanced brace, so `{Base}`,
+// `{ext}` and `{base` cannot be re-read as text anywhere. What remains is the
+// typo that DROPS the braces — `spec/dir/base_spec.rb` written for
+// `spec/{dir}{base}_spec.rb` — and that one is caught by the key it sits under:
+// refused in `derive`, and legal only after being MOVED to a key whose name says
+// the path is fixed. The discrimination is the author's stated intent, not a
+// guess about the content.
+//
+// What none of that catches is the rule that is WELL FORMED AND MATCHES NOTHING,
+// which is the gap Issue #197 opened `--check` for. It is not a load error —
+// a declaration written ahead of the files it describes is legitimate — so it is
+// reported, by a runner a human runs, and never adjudicated.
+//
+// Invariant 1 is genuinely weaker for `require` than for `derive`: a literal is
+// not a function of the declared path, only gated on one. That is precisely why
+// it is a separate key and not a widening of `add` — the strong statement holds
+// where it was made, and the weaker one is legible at every use site. The bound
+// is unchanged: |closure| <= (total `add` entries) x |declared|. Invariants 2
+// and 3 hold identically — the literals join the same single list the caller
+// appends to `scope_defaults` and `suspected_files`, and nothing is read from
+// disk.
+//
+// Still out, for the reasons in ADR §15.2 and §18: an `{ext}` placeholder,
+// per-rule exclusions, and any form that lets `when` match something other than
+// a declared path. `require` did not touch that last one, which is what keeps
+// "a profile cannot grant a path no issue asked for" true.
+
+// The wildcard vocabulary. Order matters only for the error message; the regex
+// fragments are what a `when` template compiles to. `{dir}` is greedy so
+// `src/{dir}{base}.ts` reads `src/a/b/c.ts` as dir="a/b/", base="c" — the same
+// split a human makes.
+const COMPANION_PLACEHOLDERS = {
+  dir: '((?:[^/]+/)*)',
+  base: '([^/]+)',
+};
+
+// Anything brace-shaped is a placeholder attempt. Captured loosely on purpose:
+// `{Base}` and `{ext}` must be REFUSED, not silently treated as literal text —
+// a typo that becomes a literal is a rule that never matches and never says so.
+const COMPANION_TOKEN_RE = /\{([^{}]*)\}/g;
+
+// Glob metacharacters, refused in both templates. This is the check that makes
+// "a profile cannot write a bare glob" true rather than merely discouraged.
+const COMPANION_GLOB_RE = /[*?[\]]/;
+
+// Every refusal in this section is `load_error` (exit 6), the same code an
+// unknown profile field gets, and it names the FIELD rather than a runner: a
+// declaration one reader had to repair is a declaration whose author should be
+// told, and both readers must say the same thing about it.
+export function companionError(detail) {
+  return new SkillError('load_error', `profile.scope_companions: ${detail}`, 6);
+}
+
+// Splits a template into literal spans and placeholder names. Throws load_error
+// on anything that is not a well-formed template, so a malformed declaration is
+// refused where the profile is read rather than producing a rule that quietly
+// matches nothing.
+export function parseCompanionTemplate(text, label) {
+  if (typeof text !== 'string' || text.length === 0) {
+    throw companionError(`${label} must be a non-empty string`);
+  }
+  if (COMPANION_GLOB_RE.test(text)) {
+    throw companionError(
+      `${label} "${text}" contains a glob metacharacter; companions are derived from declared paths, ` +
+        'never matched by a pattern of their own (adr-scope-derivation.md §2, invariant 1). ' +
+        // A `when` is where an author reaches for a glob, and the two shapes they
+        // reach for have exact spellings in this vocabulary. Issue #181 proposed
+        // its own rule as `"when": "scripts/**"`, so the message that refuses it
+        // has to carry the translation rather than leave the author guessing
+        // which of `{dir}` / `{base}` covers a whole subtree.
+        'In a "when", write "{dir}{base}" where you would write "**" and "{base}" where you would write "*"',
+    );
+  }
+  if (text.startsWith('/') || text.includes('..') || text.includes('\\')) {
+    throw companionError(`${label} "${text}" must be a relative repository path with no ".." segment`);
+  }
+  const parts = [];
+  const names = [];
+  let cursor = 0;
+  for (const match of text.matchAll(COMPANION_TOKEN_RE)) {
+    const name = match[1];
+    if (!Object.prototype.hasOwnProperty.call(COMPANION_PLACEHOLDERS, name)) {
+      throw companionError(
+        `${label} "${text}" uses unknown placeholder "{${name}}"; the placeholders are ` +
+          Object.keys(COMPANION_PLACEHOLDERS).map((key) => `{${key}}`).join(' / '),
+      );
+    }
+    if (match.index > cursor) parts.push({ literal: text.slice(cursor, match.index) });
+    parts.push({ name });
+    names.push(name);
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < text.length) parts.push({ literal: text.slice(cursor) });
+  // A stray brace left in a literal span means the template was not fully
+  // tokenized (`{dir` , `dir}`), which is a typo, not a path.
+  for (const part of parts) {
+    if (part.literal !== undefined && /[{}]/.test(part.literal)) {
+      throw companionError(`${label} "${text}" has an unbalanced brace`);
+    }
+  }
+  return { parts, names };
+}
+
+// Validates the declaration and returns it in canonical form, or null when the
+// profile does not carry the key.
+//
+// `checkLiteral` is the one refusal this module does not own. It is called for
+// every `require[].add` entry, in written order, at the point the per-template
+// loop reaches it, and the planner passes the predicate that decides whether a
+// literal is repository-relative at all (`users/…`, `C:/…`, `https://…` — a
+// vocabulary whose constant, SYSTEM_ROOTS, is byte-mirrored by
+// cmate-issue-authoring and therefore has to stay declared in orchestrate.mjs;
+// see tests/fixtures/cmate-issue-authoring/mirror-conformance.mjs). A caller that
+// passes nothing — `profile-init.mjs --check`, which grants no permissions —
+// skips exactly that refusal and reports the literal as a path that does not
+// exist in the tree, which is what it is. Everything else, including the harness
+// boundary of §9.6, is enforced for every caller.
+export function normalizeScopeCompanions(raw, { checkLiteral } = {}) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw companionError('must be a JSON object');
+  }
+  // An OBJECT rather than a bare list, so a later layer of this feature arrives
+  // as a sibling KEY instead of overloading the meaning of the list. `require`
+  // (Issue #181) is that mechanism used once, exactly as ADR §15.2 said the
+  // constant companion would have to arrive. Unknown keys are refused for the
+  // reason profile fields are: a newer profile must fail loudly on an older
+  // runner, never have half of itself ignored.
+  for (const key of Object.keys(raw)) {
+    if (key !== 'derive' && key !== 'require') {
+      throw companionError(`unknown key "${key}"; the keys are "derive" and "require"`);
+    }
+  }
+  // Both keys are optional and ABSENCE IS PRESERVED — the canonical form carries
+  // only what the profile wrote, so a `derive`-only declaration echoes into the
+  // plan as the same bytes it did before `require` existed. A key filled in with
+  // an empty list would be a byte in `plan.profile` that was never in the
+  // profile, which is the compatibility property fixture 45 measures one level
+  // up (see the ABSENT-stays-absent note in normalizeProfile).
+  if (raw.derive === undefined && raw.require === undefined) {
+    throw companionError(
+      'must declare "derive" and/or "require"; an empty object states nothing about the repository, ' +
+        'where {"derive": []} states that there is no convention to declare',
+    );
+  }
+  const out = {};
+  if (raw.derive !== undefined) out.derive = normalizeCompanionRules(raw.derive, 'derive', checkLiteral);
+  if (raw.require !== undefined) out.require = normalizeCompanionRules(raw.require, 'require', checkLiteral);
+  return out;
+}
+
+// One validator for both keys, because everything except the `add` side is the
+// same statement: a rule is `{when, add}`, `when` is a template over the shared
+// vocabulary, and `add` is a non-empty list. `kind` decides the two rules that
+// differ, and both are stated as REFUSALS so that neither key can quietly accept
+// what the other's typo produces.
+function normalizeCompanionRules(rawRules, kind, checkLiteral) {
+  if (!Array.isArray(rawRules)) throw companionError(`"${kind}" must be an array of rules`);
+  const rules = [];
+  for (const [index, rule] of rawRules.entries()) {
+    const at = `${kind}[${index}]`;
+    if (rule === null || typeof rule !== 'object' || Array.isArray(rule)) {
+      throw companionError(`${at} must be a JSON object`);
+    }
+    for (const key of Object.keys(rule)) {
+      if (key !== 'when' && key !== 'add') throw companionError(`${at} has an unknown key "${key}"`);
+    }
+    const when = parseCompanionTemplate(rule.when, `${at}.when`);
+    // A `when` that binds nothing is a rule that can only match one fixed path.
+    // In `derive` that is a contradiction — there would be no binding to write
+    // back, so the `add` could not be a function of the declaration and would be
+    // refused below anyway. In `require` it is a COMPLETE rule: "if the issue
+    // declares this file, it may also touch that one", still gated on the
+    // declaration, and the most precise gate an author can write.
+    if (kind === 'derive' && when.names.length === 0) {
+      throw companionError(
+        `${at}.when "${rule.when}" binds no placeholder, so it can only match one fixed path; ` +
+          'a rule that adds nothing derived from the declaration is not a companion rule ' +
+          '(a fixed "when" is legal under "require", whose "add" is a literal path)',
+      );
+    }
+    // Refused in both keys. The compiler gives each placeholder its own capture
+    // group rather than requiring the two to be equal, so a repeat does not mean
+    // what it looks like it means in either key.
+    if (new Set(when.names).size !== when.names.length) {
+      throw companionError(`${at}.when "${rule.when}" repeats a placeholder; each may appear once`);
+    }
+    if (!Array.isArray(rule.add) || rule.add.length === 0) {
+      throw companionError(`${at}.add must be a non-empty array of path templates`);
+    }
+    const bound = new Set(when.names);
+    for (const template of rule.add) {
+      const parsed = parseCompanionTemplate(template, `${at}.add`);
+      if (kind === 'derive') {
+        if (parsed.names.length === 0) {
+          throw companionError(
+            `${at}.add "${template}" contains no placeholder, so it would grant a path unrelated to ` +
+              'anything the issue declared (adr-scope-derivation.md §2, invariant 1). ' +
+              'A companion whose name is genuinely fixed — an aggregate contract test, a required ' +
+              'document — is declared under "require", where the path is literal by definition',
+          );
+        }
+        for (const name of parsed.names) {
+          if (!bound.has(name)) {
+            throw companionError(`${at}.add "${template}" uses {${name}}, which its "when" does not bind`);
+          }
+        }
+      } else {
+        // The inverse refusal, and the reason a dropped-braces typo cannot cross
+        // between the keys: a template written here is a `derive` rule filed
+        // under the wrong key, and emitting it would put the characters
+        // "{base}" into a worker's scope.allow.
+        if (parsed.names.length > 0) {
+          throw companionError(
+            `${at}.add "${template}" must be a literal path: a "require" companion is granted as written, ` +
+              `so it has no binding to expand {${parsed.names[0]}} from. Move the rule to "derive" if the ` +
+              'path is a function of the declared one',
+          );
+        }
+        // A literal is the ONLY companion shape not built out of a path the
+        // extraction already vetted, so it is the only one that could name
+        // something outside the repository. Without this, a profile is a path
+        // traversal: `users/<someone>/…` is repository-relative in form and
+        // absolute in effect. `..`, a leading "/" and a backslash are refused by
+        // the template parser above; a system root, a drive letter and a URL host
+        // are refused only by the caller's predicate.
+        if (checkLiteral !== undefined) checkLiteral(template, at);
+        // Issue #177's boundary, held on the profile side. The harness deny-list
+        // is what protects the judge from the judged, and #177 refused to make it
+        // declarable precisely so that a `scope_companions`-style key could not
+        // become its second, quieter door. Refused at LOAD because a literal is
+        // decidable here, and because a rule silently dropped later is a rule
+        // that never says so. The escape hatch is unchanged and stays in the
+        // issue body, where a warning is attached to using it.
+        if (isHarnessPath(template)) {
+          throw companionError(
+            `${at}.add "${template}" is part of the agent harness ` +
+              `(${HARNESS_PATH_PREFIXES.join(' / ')}) — the Skill packages the worker and its verifier are, ` +
+              'and the config that decides what "verified" means. The planner keeps those out of scope.allow ' +
+              'by default (Issue #177) and a profile may not re-grant them: the issue that really must edit ' +
+              'one names it under a deliverable heading, which is reported as harness_path_in_scope',
+          );
+        }
+      }
+    }
+    rules.push({ when: String(rule.when), add: rule.add.map(String) });
+  }
+  return rules;
+}
+
+// Turns a validated declaration into matchers. Cannot throw: every template here
+// already passed normalizeScopeCompanions.
+//
+// The two keys compile to ONE ordered list, `derive` first, because a rule is a
+// rule once its `add` is a list of template parts: a literal `add` is simply a
+// parts list with no placeholder in it, and the emitter below treats it that way
+// without a branch. Declaration order is preserved so the derivation stays a
+// pure function of (plan, profile).
+//
+// Each compiled rule also carries where it came from — `key`, `index`, and the
+// SOURCE text of `when` and each `add`. The planner ignores all four; they exist
+// so `--check` can report per rule, in the author's own words, without keeping a
+// parallel copy of the declaration and risking the two falling out of step.
+export function compileScopeCompanions(declaration) {
+  if (!declaration) return [];
+  const rules = [
+    ...(declaration.derive ?? []).map((rule, index) => ({ rule, key: 'derive', index })),
+    ...(declaration.require ?? []).map((rule, index) => ({ rule, key: 'require', index })),
+  ];
+  return rules.map(({ rule, key, index }) => {
+    const when = parseCompanionTemplate(rule.when, 'when');
+    const source = when.parts
+      .map((part) => (part.name === undefined
+        ? part.literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        : COMPANION_PLACEHOLDERS[part.name]))
+      .join('');
+    return {
+      key,
+      index,
+      when: rule.when,
+      addTemplates: rule.add.map(String),
+      match: new RegExp(`^${source}$`),
+      names: when.names,
+      add: rule.add.map((template) => parseCompanionTemplate(template, 'add').parts),
+    };
+  });
+}
+
+// THE matcher. Every companion the compiled rules produce for ONE path, rule by
+// rule in declaration order and then `add` by `add` in written order, each paired
+// with the rule that produced it and the index of the template inside that rule.
+//
+// Nothing is filtered, deduplicated, sorted or bounded here, and that is the
+// whole of the division of labour: what a rule SAYS about a path is this
+// function, and what a caller then DOES with the answer is the caller's. The
+// planner drops harness expansions and stops at MAX_SCOPE_PATTERNS; `--check`
+// counts. Neither policy can change what "matches" means for the other.
+export function companionsForPath(rules, path) {
+  const out = [];
+  for (const rule of rules) {
+    const matched = rule.match.exec(path);
+    if (matched === null) continue;
+    const binding = {};
+    rule.names.forEach((name, index) => { binding[name] = matched[index + 1]; });
+    for (const [at, parts] of rule.add.entries()) {
+      out.push({
+        rule,
+        at,
+        companion: parts
+          .map((part) => (part.name === undefined ? part.literal : binding[part.name]))
+          .join(''),
+      });
+    }
+  }
+  return out;
 }

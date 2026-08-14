@@ -19,6 +19,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | 第4節 limitation code | 第3節 |
 | 第5節 停止したとき、人間が何をするか（対処表） | 第4節 |
 | 第5節 無人 run を取り消す | 第5節 |
+| （run の語彙ではない）profile-init `--check` の warning code | 第6節 |
 
 ---
 
@@ -339,3 +340,24 @@ status runner はそちらの hint（conflict の解消 / gh・base の復旧）
 それまで `status.mjs --run` はこれらを「detail と `summary_markdown` を読む」に落として表示する。
 **推測で別の対処を出さない**のが status runner の約束なので、これは劣化ではなく既定の振る舞いである。
 dispatch report の `summary_markdown` には上表と同じ next action が出ている。
+
+
+## 6. profile-init `--check` の warning code（[#197](https://github.com/Kewton/commandmate-skills/issues/197)）
+
+`profile-init.mjs --check <profile.json>` は run artifact ではなく **profile** を読む
+準備 runner なので、上の5節（run の停止と復帰）とは別の語彙を持つ。**この節の code は
+1つも exit code を変えない。**
+
+| code | 意味 | 人間が何をするか |
+|---|---|---|
+| `companion_when_unmatched` | その規則の `when` が `--repo-root` 配下の**実ファイルに1件も一致しなかった** | テンプレートが tree より狭いのか（`{base}` は 1 segment、`{dir}{base}` は subtree 全体）、まだ作っていない file の宣言なのかを決める。**後者なら正しい状態である** |
+| `companion_add_missing` | `when` は一致したが、その `add` が展開した path が**1件も実在しない** | 規則の両側が同じ配置を指しているかを見る。伴走ファイルをこれから作るなら正しい状態である |
+| `tree_scan_truncated` | 走査が上限（20000 file / 4000 directory）に達した | 件数を**下界**として読む。規則が対象にしている subtree へ `--repo-root` を寄せて取り直す |
+
+**3つとも warning であって error ではない。** 0 件一致は「誤り」ではない —— これから作る
+file を見越した宣言はありうる —— ので、`status` は `partial` になるが **exit は 0** である
+（[profile-contract.md](./profile-contract.md) 第9.7節）。宣言が契約に適合しているか自体の
+裁定は planner 側にあり、そちらは `load_error`（exit 6）で止まる。
+
+`--check` は run directory を持たないので、**`status.mjs` はこれらの code を表示しない。**
+profile のレビュー時に envelope（または `summary_markdown`）を直接読むものである。
