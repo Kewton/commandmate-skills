@@ -54,11 +54,16 @@ plan_id = "split-" + sha256(`${repository}\n${source.digest}\n${key1,key2,...}\n
 `issue_key` が入っていなければならない（rule `duplicate_needs_open_question`）。
 重複の疑いを黙って新規 Issue にしないための、機械で効く歯止めである。
 
+`blocks` はもう 1 つの意味を持つ。**その key の Issue 本文には、その question が
+`open-questions` ブロックとして載る**（[open-questions.md](./open-questions.md)）。
+配列が真であり、本文のブロックはその射影である —— 同じことを 2 箇所に書かない。
+
 ## 5. validator
 
 ```bash
 node scripts/validate-plan.mjs <plan.json> [--schema <path>] [--checkout <path>] [--json]
 node scripts/validate-plan.mjs <plan.json> --derive-id
+node scripts/validate-plan.mjs <plan.json> --render-open-questions <issue-key>
 node scripts/validate-plan.mjs --render-acceptance-gates <id,id> --checkout <path>
 ```
 
@@ -105,11 +110,17 @@ schema が validator の実装していない keyword を使っていたら、�
 | `acceptance_gates_block_is_canonical` | 読めるが renderer の出力と byte 一致しない |
 | `acceptance_gates_verify_yaml_read` | ブロックがあるのに `--checkout` 無しで検証した |
 | `acceptance_gates_id_exists` | `require:` の id が checkout の `verify.yaml` に無い |
+| `open_questions_block_is_derived` | 本文の `open-questions` ブロックが `open_questions[]` の射影と違う（**無いことも含む**） |
+| `open_questions_block_is_canonical` | 読めるが renderer の出力と byte 一致しない |
+| `open_questions_block_parses` | planner が読めない `open-questions` ブロック |
+| `open_questions_are_representable` | 射影がブロックとして書けない（重複・予約文字・改行・32 件超） |
 
 `planner_ready` は cmate-orchestrate planner の抽出の写しである
 （[issue-body-contract.md](./issue-body-contract.md) 第 2 節）。planner が変わったら
 写しも変える。`acceptance_gates_*` の 5 rule も同じミラーであり、正本と規律は
-[acceptance-gates.md](./acceptance-gates.md) にある。
+[acceptance-gates.md](./acceptance-gates.md) にある。`open_questions_*` の 4 rule も同様で、
+正本は [open-questions.md](./open-questions.md) である（`--checkout` は要らない。
+突き合わせる相手が対象リポジトリではなく計画の中にあるため）。
 
 `--checkout` を渡したのに `verify.yaml` が読めない・解釈できないときは exit 2 である。
 **「読めなかった」は「ブロックが無かった」ではない。**
@@ -154,7 +165,7 @@ schema が validator の実装していない keyword を使っていたら、�
 
 ## 8. completion check（報告前の自己申告）
 
-計画または登録結果を人間に返す前に、次の 9 件を 1 件ずつ pass / fail で申告する。
+計画または登録結果を人間に返す前に、次の 10 件を 1 件ずつ pass / fail で申告する。
 **fail が 1 件でもあれば、その run は success ではない。** 各 check が何を要求して
 いるかを決めているのは「正本」列の文書であり、この表はその index である。
 
@@ -169,3 +180,4 @@ schema が validator の実装していない keyword を使っていたら、�
 | 7 | Phase 1 で GitHub への mutation を 1 件も実行していない | [safety.md](./safety.md) 第 1 節 |
 | 8 | 次の行動と、それを取るのが誰かを述べた | Phase 1 は要約の末尾、登録後は [register-contract.md](./register-contract.md) 第 6 節 |
 | 9 | 受入ゲートのブロックを出したなら、その id を `verify.yaml` に読んで確かめた。読めていない・測れるか判断できない条件はブロックにせず散文に残した | [acceptance-gates.md](./acceptance-gates.md) 第 3 節、rule `acceptance_gates_id_exists` / `acceptance_gates_verify_yaml_read` |
+| 10 | blocking な open question を持つ Issue の本文に、配列から renderer で組んだ `open-questions` ブロックが載っている（手で写していない） | [open-questions.md](./open-questions.md) 第 2・3 節、rule `open_questions_block_is_derived` |

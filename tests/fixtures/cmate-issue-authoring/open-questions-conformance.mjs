@@ -5,46 +5,53 @@
 //   node tests/fixtures/cmate-issue-authoring/open-questions-conformance.mjs
 //
 // The 正本 is `skills/cmate-orchestrate/references/open-questions-notation.md`.
-// Until Issue #198 the notation had a reader and no writer:
+// Until Issue #198 the notation had a reader and no writer; Issue #209 added the
+// second producer, so three implementations now have to agree with it and with
+// each other:
 //
 // | implementation | role |
 // |---|---|
 // | `cmate-orchestrate/scripts/orchestrate.mjs` | reads the block out of an Issue body and raises one blocking question per item |
 // | `cmate-issue-refinement` | builds the block out of its blocking open questions, as `open_questions_block` |
+// | `cmate-issue-authoring/scripts/validate-plan.mjs` | writes the block INTO the Issue body it drafts, and refuses a body that disagrees with the plan's `open_questions[]` |
 //
-// The producer is a package of INSTRUCTIONS — no `scripts/`, so there is no
-// renderer to import and nothing to compare function bodies against. What holds
-// the two sides together is therefore this file: the rule stated in
-// `skills/cmate-issue-refinement/references/open-questions.md` is transcribed
-// once, here, as `render()` and `blocking()`, and everything it produces is fed
-// to the REAL planner. A rule copied into prose on the producing side would drift
-// from the reader that enforces it; a rule executed against that reader cannot.
-//
-// It lives beside `acceptance-gates-conformance.mjs`, which is where producing-side
-// notation conformance already lives (that file checks blocks shipped by BOTH
-// producing packages, `cmate-issue-refinement` included), and runs from the same
-// suite. `cmate-issue-authoring` does not emit this notation yet — that mirror is
-// a separate Issue, and this file will grow a second producer when it lands.
+// The two producers are held in place differently, because they are different
+// kinds of package. `cmate-issue-refinement` is INSTRUCTIONS — no `scripts/`, so
+// there is no renderer to import and nothing to compare function bodies against;
+// the rule stated in its `references/open-questions.md` is transcribed once, here,
+// as `render()` and `blocking()`, and everything it produces is fed to the REAL
+// planner. `cmate-issue-authoring` ships code, so it is held the way
+// `acceptance-gates-conformance.mjs` holds the other notation: constants byte for
+// byte, function bodies byte for byte modulo the `planner` prefix, behaviour over
+// a corpus. The two producers are then required to emit the same bytes, which is
+// what keeps one document's prose from quietly becoming a second notation.
 //
 // What is proved:
 //
-//  1. **The producer's prose states the values the consumer's code uses.** The
-//     bound and the info string appear as literals in the rule document, so the
+//  1. **Each producer's prose states the values the consumer's code uses.** The
+//     bound and the info string appear as literals in both rule documents, so the
 //     one number that has to be written twice cannot rot.
-//  2. **Every block shipped in the producing package parses, and is the canonical
-//     rendering of its own questions.** A documented example an author copies is
-//     the producer's real output.
+//  2. **Every block shipped in either producing package parses, and is the
+//     canonical rendering of its own questions.** A documented example an author
+//     copies is the producer's real output.
 //  3. **The rule round-trips through the real parser over a corpus** — one
 //     question, the bound exactly, a `#` mid-sentence, backticks, CJK — and comes
-//     back as the same list in the same order.
+//     back as the same list in the same order. The authoring emitter renders the
+//     same corpus and has to produce the same bytes as the transcribed rule.
 //  4. **The constraints the rule names are load-bearing.** Every shape the rule
 //     tells the producer not to emit is fed to the real parser and has to be
 //     refused with `open_question_block_invalid`. A constraint nobody ever saw
 //     stop anything is a sentence, not a constraint.
-//  5. **The block is derived from `open_questions[]`**, by `blocks_required_section`
-//     alone, in array order — and the result schema's own `open_questions_block`
-//     pattern accepts exactly what the rule renders.
-//  6. **End to end through the real planner binary**: a body carrying the block
+//  5. **The block is derived from an array, never written twice** — from
+//     `open_questions[]` by `blocks_required_section` alone in refinement, and by
+//     `blocks` naming the issue key in authoring, both in array order. The
+//     refinement result schema's own `open_questions_block` pattern accepts
+//     exactly what the rule renders.
+//  6. **The authoring mirror is the planner's reader**, constants and function
+//     bodies byte for byte, and identical over the same corpus — so the package
+//     that decides whether a drafted body is acceptable reads it exactly as the
+//     runner that will act on it.
+//  7. **End to end through the real planner binary**: a body carrying the block
 //     comes back with one blocking question per item, verbatim and in order, and
 //     the twin body with the block deleted comes back with none. Both halves, for
 //     the reason the notation's §6 gives — a green-only fixture is not evidence
@@ -68,10 +75,42 @@ const NOTATION = resolve(REPO_ROOT, 'skills/cmate-orchestrate/references/open-qu
 const PRODUCER = resolve(REPO_ROOT, 'skills/cmate-issue-refinement');
 const PRODUCER_RULE = resolve(PRODUCER, 'references/open-questions.md');
 const PRODUCER_SCHEMA = resolve(PRODUCER, 'schemas/refinement-result.v1.json');
+const AUTHORING = resolve(REPO_ROOT, 'skills/cmate-issue-authoring');
+const AUTHORING_RULE = resolve(AUTHORING, 'references/open-questions.md');
+const MIRROR = resolve(AUTHORING, 'scripts/validate-plan.mjs');
 
 const EXIT_SYNCED = 0;
 const EXIT_DRIFTED = 1;
 const EXIT_ERROR = 2;
+
+// =============================================================================
+// What the authoring mirror has to copy
+// =============================================================================
+
+// Same name on both sides, compared as declaration text: these are pattern
+// sources and a bound, and "equivalent" is not a property this test can check.
+const MIRRORED_CONSTANTS = [
+  'OPEN_QUESTIONS_INFO',
+  'OPEN_QUESTIONS_VERSION',
+  'OPEN_QUESTIONS_OPEN_RE',
+  'OPEN_QUESTIONS_BLOCK_RE',
+  'MAX_OPEN_QUESTIONS',
+  'OPEN_QUESTION_RESERVED_RE',
+];
+
+// The only rename the mirror applies, and therefore the only difference allowed
+// in a mirrored function body: the `planner` prefix that marks a copied reader
+// inside a file that also holds this package's own code.
+const RENAMES = [
+  [/\bplanner([A-Z])([A-Za-z0-9_]*)/g, (match, head, tail) => head.toLowerCase() + tail],
+];
+
+const MIRRORED_FUNCTIONS = [
+  ['stripOpenQuestionBlocks', 'plannerStripOpenQuestionBlocks'],
+  ['countOpenQuestionBlocks', 'plannerCountOpenQuestionBlocks'],
+  ['parseOpenQuestionsBlock', 'plannerParseOpenQuestionsBlock'],
+  ['readOpenQuestions', 'plannerReadOpenQuestions'],
+];
 
 // =============================================================================
 // The producing rule, transcribed
@@ -134,6 +173,37 @@ const REFUSALS = [
     name: `a question starting with ${char}`,
     questions: [`${char} reserved by YAML`],
   })),
+];
+
+// The authoring projection: the plan's `open_questions[]` in, one issue's block
+// out. `blocks` naming the key is what decides — the same field
+// `duplicate_needs_open_question` reads — and the array's order is kept.
+const AUTHORING_PROJECTION = [
+  {
+    name: 'only the questions whose blocks name this issue',
+    key: 'reuse-detection-tests',
+    open_questions: [
+      { id: 'q-1', question: 'blocking, and first', blocks: ['reuse-detection-tests'] },
+      { id: 'q-2', question: 'blocks another issue', blocks: ['rotation-metrics'] },
+      { id: 'q-3', question: 'blocking, and second', blocks: ['rotation-metrics', 'reuse-detection-tests'] },
+    ],
+    expected: ['blocking, and first', 'blocking, and second'],
+  },
+  {
+    name: 'an empty blocks list blocks nothing',
+    key: 'reuse-detection-tests',
+    open_questions: [
+      { id: 'q-1', question: 'blocks nothing', blocks: [] },
+      { id: 'q-2', question: 'blocks this one', blocks: ['reuse-detection-tests'] },
+    ],
+    expected: ['blocks this one'],
+  },
+  {
+    name: 'nothing blocking means no block at all',
+    key: 'reuse-detection-tests',
+    open_questions: [{ id: 'q-1', question: 'blocks another issue', blocks: ['rotation-metrics'] }],
+    expected: [],
+  },
 ];
 
 // The projection layer: `open_questions[]` in, block out. `blocks_required_section`
@@ -222,6 +292,26 @@ function region(path, label, startRe, endRe) {
   return { text: lines.slice(start, end).join('\n'), first: start + 1, last: end };
 }
 
+// A top-level `function <name>(...) { ... }`, ended by the first line that is
+// exactly `}` — which holds for every function compared here, all declared at
+// module scope with two-space indentation inside.
+function functionBlock(path, label, name) {
+  const found = region(path, label, new RegExp(`^function ${name}\\(`), /^\}$/);
+  return `${found.text}\n}`;
+}
+
+// Code only: comment-only lines and blank lines are where the mirror is expected
+// to say different things (it explains that it IS a mirror), and where a byte
+// comparison would otherwise turn into a prose comparison.
+function codeOnly(text, renames = []) {
+  let out = text
+    .split('\n')
+    .filter((line) => line.trim() !== '' && !line.trim().startsWith('//'))
+    .join('\n');
+  for (const [pattern, replacement] of renames) out = out.replace(pattern, replacement);
+  return out;
+}
+
 async function loadModule(text, label, where) {
   const url = `data:text/javascript;charset=utf-8;base64,${Buffer.from(text, 'utf8').toString('base64')}`;
   try {
@@ -272,8 +362,21 @@ function same(name, left, right, leftLabel, rightLabel) {
 
 const PLANNER_EXPORT = `
 export function readBlock(body) { return readOpenQuestions(body); }
+export function stripBlocks(text) { return stripOpenQuestionBlocks(text); }
 export function findBlocks(text) {
   return [...String(text).matchAll(OPEN_QUESTIONS_BLOCK_RE)].map((match) => match[0]);
+}
+`;
+
+const MIRROR_EXPORT = `
+export function readBlock(body) { return plannerReadOpenQuestions(body); }
+export function stripBlocks(text) { return plannerStripOpenQuestionBlocks(text); }
+export function findBlocks(text) {
+  return [...String(text).matchAll(OPEN_QUESTIONS_BLOCK_RE)].map((match) => match[0]);
+}
+export function render(questions) { return renderOpenQuestionsBlock(questions); }
+export function blocking(openQuestions, key) {
+  return blockingQuestionsFor({ open_questions: openQuestions }, key);
 }
 `;
 
@@ -317,18 +420,46 @@ function runPlanner(workRoot, runId, body) {
 async function main() {
   const notation = read(NOTATION);
   const rule = read(PRODUCER_RULE);
+  const authoringRule = read(AUTHORING_RULE);
   const schema = JSON.parse(read(PRODUCER_SCHEMA));
 
   const plannerRegion = region(PLANNER, 'planner', /^const OPEN_QUESTIONS_INFO\b/, /^\/\/ Topic tokens power/);
+  const mirrorRegion = region(MIRROR, 'mirror', /^const OPEN_QUESTIONS_INFO\b/, /^\/\/ ---- the block this package emits/);
   const planner = await loadModule(
     [plannerRegion.text, PLANNER_EXPORT].join('\n'),
     'planner',
     `lines ${plannerRegion.first}-${plannerRegion.last}`,
   );
-  process.stdout.write(
-    `     block reader:   ${relative(REPO_ROOT, PLANNER)}:${plannerRegion.first}-${plannerRegion.last}\n` +
-      `     producing rule: ${relative(REPO_ROOT, PRODUCER_RULE)}\n`,
+  const mirror = await loadModule(
+    [
+      mirrorRegion.text,
+      functionBlock(MIRROR, 'mirror', 'renderOpenQuestionsBlock'),
+      functionBlock(MIRROR, 'mirror', 'blockingQuestionsFor'),
+      MIRROR_EXPORT,
+    ].join('\n'),
+    'mirror',
+    `lines ${mirrorRegion.first}-${mirrorRegion.last}`,
   );
+  process.stdout.write(
+    `     block reader:   ${relative(REPO_ROOT, PLANNER)}:${plannerRegion.first}-${plannerRegion.last}` +
+      ` vs ${relative(REPO_ROOT, MIRROR)}:${mirrorRegion.first}-${mirrorRegion.last}\n` +
+      `     producing rules: ${relative(REPO_ROOT, PRODUCER_RULE)}\n` +
+      `                      ${relative(REPO_ROOT, AUTHORING_RULE)}\n`,
+  );
+
+  // ---- layer 0: the authoring mirror is the planner's reader ----------------
+  for (const name of MIRRORED_CONSTANTS) {
+    const theirs = constantDeclaration(PLANNER, 'planner', name);
+    const ours = constantDeclaration(MIRROR, 'mirror', name);
+    same(`constant ${name} is byte-identical to the planner's`, theirs, ours, 'planner', 'mirror');
+  }
+  for (const [theirName, ourName] of MIRRORED_FUNCTIONS) {
+    const left = codeOnly(functionBlock(PLANNER, 'planner', theirName));
+    const right = codeOnly(functionBlock(MIRROR, 'mirror', ourName), RENAMES);
+    const label = `${ourName} is a verbatim copy of the planner's ${theirName}`;
+    if (left === right) pass(label);
+    else fail(label, `planner:\n${left}\n\nmirror (rename applied):\n${right}`);
+  }
 
   const info = constantDeclaration(PLANNER, 'planner', 'OPEN_QUESTIONS_INFO').replace(/^'|'$/g, '');
   const bound = Number(constantDeclaration(PLANNER, 'planner', 'MAX_OPEN_QUESTIONS'));
@@ -336,10 +467,12 @@ async function main() {
     throw new HarnessError(`planner: MAX_OPEN_QUESTIONS is not an integer (${bound})`);
   }
 
-  // ---- layer 1: the producer's prose states what the consumer's code uses ----
+  // ---- layer 1: each producer's prose states what the consumer's code uses ---
   for (const [what, literal, where, text] of [
-    ['the bound', String(bound), 'the producing rule', rule],
-    ['the info string', info, 'the producing rule', rule],
+    ['the bound', String(bound), 'the refinement rule', rule],
+    ['the info string', info, 'the refinement rule', rule],
+    ['the bound', String(bound), 'the authoring rule', authoringRule],
+    ['the info string', info, 'the authoring rule', authoringRule],
     ['the bound', String(bound), 'the 正本', notation],
     ['the info string', info, 'the 正本', notation],
   ]) {
@@ -348,35 +481,39 @@ async function main() {
     else fail(name, `the document does not contain ${JSON.stringify(literal)}; prose and code disagree`);
   }
   const notationName = 'open-questions-notation.md';
-  if (rule.includes(notationName)) pass(`the producing rule names the 正本 (${notationName})`);
-  else {
-    fail(`the producing rule names the 正本 (${notationName})`,
-      'a document that mirrors a notation it does not own has to say where the notation lives, or the ' +
-        'next author will extend it here');
-  }
-
-  // ---- layer 2: every block the producing package ships ---------------------
-  let shipped = 0;
-  for (const file of markdownFiles(PRODUCER)) {
-    const blocks = planner.findBlocks(read(file));
-    for (const [index, block] of blocks.entries()) {
-      shipped += 1;
-      const where = `${relative(REPO_ROOT, file)} block ${index + 1}`;
-      const parsed = planner.readBlock(block);
-      if (parsed.error !== null) {
-        fail(`${where} is read by the planner`, parsed.error.text);
-        continue;
-      }
-      const written = block.endsWith('\n') ? block : `${block}\n`;
-      same(`${where} is the canonical rendering`, written, render(parsed.questions), 'shipped', 'rule');
+  for (const [where, text] of [['the refinement rule', rule], ['the authoring rule', authoringRule]]) {
+    if (text.includes(notationName)) pass(`${where} names the 正本 (${notationName})`);
+    else {
+      fail(`${where} names the 正本 (${notationName})`,
+        'a document that mirrors a notation it does not own has to say where the notation lives, or the ' +
+          'next author will extend it here');
     }
   }
-  if (shipped === 0) {
-    fail(`${relative(REPO_ROOT, PRODUCER)} documents the notation`,
-      'no ```open-questions block is shipped anywhere in this package, so nothing here shows an author ' +
-        'what to emit and this test compared nothing');
-  } else {
-    pass(`${relative(REPO_ROOT, PRODUCER)} ships ${shipped} block(s), all conforming`);
+
+  // ---- layer 2: every block the producing packages ship ---------------------
+  for (const root of [PRODUCER, AUTHORING]) {
+    let shipped = 0;
+    for (const file of markdownFiles(root)) {
+      const blocks = planner.findBlocks(read(file));
+      for (const [index, block] of blocks.entries()) {
+        shipped += 1;
+        const where = `${relative(REPO_ROOT, file)} block ${index + 1}`;
+        const parsed = planner.readBlock(block);
+        if (parsed.error !== null) {
+          fail(`${where} is read by the planner`, parsed.error.text);
+          continue;
+        }
+        const written = block.endsWith('\n') ? block : `${block}\n`;
+        same(`${where} is the canonical rendering`, written, render(parsed.questions), 'shipped', 'rule');
+      }
+    }
+    if (shipped === 0) {
+      fail(`${relative(REPO_ROOT, root)} documents the notation`,
+        'no ```open-questions block is shipped anywhere in this package, so nothing here shows an author ' +
+          'what to emit and this test compared nothing');
+    } else {
+      pass(`${relative(REPO_ROOT, root)} ships ${shipped} block(s), all conforming`);
+    }
   }
 
   // ---- layer 3: the rule round-trips through the real parser -----------------
@@ -391,6 +528,15 @@ async function main() {
 
   for (const item of ROUND_TRIP) {
     const rendered = render(item.questions);
+    // The two producers are one notation or they are two. The authoring emitter
+    // is code and the refinement rule is prose transcribed above; requiring the
+    // same bytes is what stops the prose from drifting into a dialect.
+    if (mirror.render(item.questions) !== rendered) {
+      fail(`round trip: ${item.name}`,
+        `the authoring emitter and the refinement rule render different bytes:\n` +
+          `${JSON.stringify(mirror.render(item.questions))}\n${JSON.stringify(rendered)}`);
+      continue;
+    }
     const parsed = planner.readBlock(rendered);
     if (parsed.error !== null) {
       fail(`round trip: ${item.name}`, `the planner refused what the rule renders: ${parsed.error.text}`);
@@ -399,6 +545,11 @@ async function main() {
     if (JSON.stringify(parsed.questions) !== JSON.stringify(item.questions)) {
       fail(`round trip: ${item.name}`,
         `rendered: ${JSON.stringify(item.questions)}\nplanner read: ${JSON.stringify(parsed.questions)}`);
+      continue;
+    }
+    if (JSON.stringify(mirror.readBlock(rendered)) !== JSON.stringify(parsed)) {
+      fail(`round trip: ${item.name}`,
+        `the authoring mirror read it differently:\n${JSON.stringify(mirror.readBlock(rendered))}`);
       continue;
     }
     if (!blockRe.test(rendered)) {
@@ -411,7 +562,8 @@ async function main() {
 
   // ---- layer 4: the constraints are load-bearing -----------------------------
   for (const item of REFUSALS) {
-    const parsed = planner.readBlock(render(item.questions));
+    const rendered = render(item.questions);
+    const parsed = planner.readBlock(rendered);
     if (parsed.error === null) {
       fail(`refusal: ${item.name}`,
         'the planner accepted a block the producing rule forbids; either the rule is stale or the ' +
@@ -422,10 +574,68 @@ async function main() {
       fail(`refusal: ${item.name}`, `expected open_question_block_invalid, got ${parsed.error.code}`);
       continue;
     }
+    // The authoring package refuses to WRITE what the planner refuses to read, so
+    // its copy of the reader has to answer the same way — down to the reason,
+    // which is what its finding quotes back to the author.
+    if (JSON.stringify(mirror.readBlock(rendered)) !== JSON.stringify(parsed)) {
+      fail(`refusal: ${item.name}`,
+        `the authoring mirror answered differently:\nplanner: ${JSON.stringify(parsed)}\n` +
+          `mirror:  ${JSON.stringify(mirror.readBlock(rendered))}`);
+      continue;
+    }
     pass(`refusal: ${item.name}`);
   }
 
-  // ---- layer 5: the projection, and the schema field ------------------------
+  // ---- layer 4b: the two readers strip the same bytes ------------------------
+  //
+  // The strip is the half that never shows up in a block's contents and decides
+  // everything else the body says: the planner removes the block before every
+  // prose extractor runs, so a mirror that did not would read a `  - …` question
+  // as an acceptance criterion and a backticked path inside one as a file to
+  // WRITE. The bodies below are the two blocks side by side, and prose around them.
+  const STRIP_CORPUS = [
+    'ふつうの本文。\n\n## 受入条件\n\n- [ ] 動く\n',
+    `目的。\n\n## 受入条件\n\n${render(['決めていない一つ目', '`src/legacy/topo.ts` を残すか'])}\n続きの散文。\n`,
+    `目的。\n\n\`\`\`acceptance-gates\nversion: 1\nrequire:\n  - validate\n\`\`\`\n\n${render(['決めていない'])}`,
+    '目的。\n\n```open-questions\nversion: 1\nquestions:\n   - 壊れたブロックは剥がれない\n```\n',
+    `${render(['一つ目'])}\n${render(['二つ目'])}`,
+  ];
+  for (const [index, body] of STRIP_CORPUS.entries()) {
+    same(`strip: corpus body ${index + 1}`,
+      JSON.stringify(planner.stripBlocks(body)), JSON.stringify(mirror.stripBlocks(body)), 'planner', 'mirror');
+  }
+
+  // ---- layer 5a: the authoring projection -----------------------------------
+  //
+  // The plan's `open_questions[]` is the statement and the body's block is its
+  // projection, so `blocks` alone decides membership and the array's order is
+  // kept. Nothing else may: a second place to say "this is undecided" is the
+  // double bookkeeping this Issue exists to remove.
+  for (const item of AUTHORING_PROJECTION) {
+    const questions = mirror.blocking(item.open_questions, item.key);
+    if (JSON.stringify(questions) !== JSON.stringify(item.expected)) {
+      fail(`authoring projection: ${item.name}`,
+        `selected ${JSON.stringify(questions)}, expected ${JSON.stringify(item.expected)}`);
+      continue;
+    }
+    if (questions.length === 0) {
+      // An issue nothing blocks carries no block: the empty one is not a
+      // representable value, and the planner is what says so.
+      const parsed = planner.readBlock(mirror.render(questions));
+      if (parsed.error === null) fail(`authoring projection: ${item.name}`, 'an empty block was accepted');
+      else pass(`authoring projection: ${item.name}`);
+      continue;
+    }
+    const parsed = planner.readBlock(mirror.render(questions));
+    if (parsed.error !== null) {
+      fail(`authoring projection: ${item.name}`, `the planner refused the projection: ${parsed.error.text}`);
+      continue;
+    }
+    same(`authoring projection: ${item.name}`,
+      JSON.stringify(parsed.questions), JSON.stringify(item.expected), 'planner read', 'expected');
+  }
+
+  // ---- layer 5b: the refinement projection, and the schema field ------------
   for (const item of PROJECTION) {
     const questions = blocking(item.open_questions);
     if (JSON.stringify(questions) !== JSON.stringify(item.expected)) {

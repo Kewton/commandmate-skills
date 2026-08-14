@@ -83,7 +83,7 @@
           "ref": "tests/auth/refresh.test.ts:1"
         }
       ],
-      "body": "再利用された refresh token を replay する回帰テストを追加する。\n\n## 対象ファイル\n\n- `tests/auth/refresh.test.ts`\n\n## 受入条件\n\n- [ ] `npm test -- src/auth` が新規ケースを含めて exit 0 で終わる\n\n## 依存\n\n- depends on {{issue:session-store-rotation}}\n\n## 根拠\n\n- tests/auth/refresh.test.ts:1 — 既存ケースは rotation を扱っていない\n"
+      "body": "再利用された refresh token を replay する回帰テストを追加する。\n\n## 対象ファイル\n\n- `tests/auth/refresh.test.ts`\n\n## 受入条件\n\n- [ ] `npm test -- src/auth` が新規ケースを含めて exit 0 で終わる\n\n## 依存\n\n- depends on {{issue:session-store-rotation}}\n\n## 根拠\n\n- tests/auth/refresh.test.ts:1 — 既存ケースは rotation を扱っていない\n\n```open-questions\nversion: 1\nquestions:\n  - PR #1188 の replay ケースで足りるか、rotation 前提の追加ケースが要るか\n  - replay 用の fixture を `tests/auth/fixtures/replay.json` に置くか、テスト内に埋めるか\n```\n"
     }
   ],
   "duplicate_suspicions": [
@@ -108,6 +108,13 @@
       "question": "PR #1188 の replay ケースで足りるか、rotation 前提の追加ケースが要るか",
       "why_blocking": "足りるなら reuse-detection-tests は登録せず取り下げる",
       "options": ["#1188 で足りるので取り下げる", "rotation 前提のケースを追加する"],
+      "blocks": ["reuse-detection-tests"]
+    },
+    {
+      "id": "q-replay-fixture-location",
+      "question": "replay 用の fixture を `tests/auth/fixtures/replay.json` に置くか、テスト内に埋めるか",
+      "why_blocking": "置き場が決まらないと追加ケースの対象 file が決まらない",
+      "options": ["fixture file を足す", "テストコード内に埋める"],
       "blocks": ["reuse-detection-tests"]
     }
   ],

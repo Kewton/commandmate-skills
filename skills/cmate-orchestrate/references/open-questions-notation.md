@@ -6,11 +6,13 @@ YAML subset・違反の扱い・変更規約はそちらの第3節・第7節・�
 ここに書くのは、そこから変わる部分（info string・key・意味）と、
 **なぜ見出しではなくブロックなのか**だけである。
 
-読む側の実装は今のところ 1 つである。
+この記法を運用するのは 3 つである。読んで裁定するのは 1 つだけで、残りは書く側である。
 
 | 実装 | 役割 |
 |---|---|
 | `scripts/orchestrate.mjs`（planner） | ブロックを **構文だけ** parse し、1 件につき 1 件の blocking question を `plan.issues[].questions` に載せる |
+| `cmate-issue-refinement` | blocking な open question からブロックを組み、`open_questions_block` として出力に載せる（貼るのは人間） |
+| `cmate-issue-authoring` | 起案する Issue 本文にブロックを埋め、`open_questions[]` との一致を `validate-plan.mjs` が検査する。同 script は上の reader の逐語の写しを持つ |
 
 dispatch は**この記法を知らない**。question は既存の open question ゲートに乗るので、
 `--allow-questions` 無しにはその Issue を送らない —— 新しい停止経路も新しい緩和フラグも
@@ -120,10 +122,20 @@ question は `plan.issues[].questions` に載り、同じ code の warning が `
    ブロックにはある。`cmate-issue-refinement` が open question を出す →
    著者 / `cmate-issue-authoring` が本文へブロックとして残す → **決めたらブロックを消して
    re-plan する**、という一本の線になる。**ブロックの削除が「決めた」の記録である。**
+   `cmate-issue-authoring` ではこの線に手作業が 1 つも無い —— ブロックは計画の
+   `open_questions[]` から renderer が組み、写す step が存在しないので写し漏れも起こらない。
 
-なお現時点で `cmate-issue-authoring` の `validate-plan.mjs`（planner の抽出領域の写し）は
-この記法を**読まない**。抽出領域の外に在る parse なので mirror の対象外であり、
-生産側へのミラーは後続 Issue である（acceptance-gates 記法 第10節の最終行と同じ扱い）。
+生産側は 2 つとも着地している。`cmate-issue-refinement` が open question を
+`open_questions_block` として**出力に載せ**（[#198](https://github.com/Kewton/commandmate-skills/issues/198)）、
+`cmate-issue-authoring` は起案する**本文そのものに埋める**
+（[#209](https://github.com/Kewton/commandmate-skills/issues/209)）。後者の不変条件は
+「配列が真であり、ブロックはその射影である」で、`validate-plan.mjs` が両方向に検査する ——
+宣言した問いが本文に無いことも、宣言していない問いが本文に在ることも落とす。
+同 script はこの記法の読み取りも planner から逐語で写しており（抽出器へ渡す前の strip を
+含む）、一致は
+`tests/fixtures/cmate-issue-authoring/open-questions-conformance.mjs` が定数・関数本体・
+corpus・実 planner での end-to-end で固定している。**規則はこの文書にだけ在り、
+生産側 2 package は subset を生成するだけである。**
 
 ---
 

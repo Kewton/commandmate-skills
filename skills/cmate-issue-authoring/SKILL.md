@@ -132,6 +132,20 @@ node scripts/validate-plan.mjs --render-acceptance-gates <id,id> --checkout <che
 出してはならない形・rule の一覧は
 [acceptance-gates](./references/acceptance-gates.md) が正本である。
 
+Step 3 で立てた open question が**その Issue を blocking している**なら
+（`open_questions[].blocks` にその `key` が入っているなら）、`open-questions` ブロックを
+本文の末尾に置く。**手で写さない。** 計画そのものから renderer に出させる。
+
+```bash
+node scripts/validate-plan.mjs <plan.json> --render-open-questions <issue-key>
+```
+
+`open_questions` 配列が真であり、ブロックはその射影である。写す作業が無いので写し漏れも
+無い —— 未決のまま登録された Issue が planner に止められずに通ることが、この step の
+無かった頃の失敗である。何もブロックしない key を渡せば何も出力されない（未決の無い
+Issue はブロックを持たない）。規律・32 件を超えたときの扱い・rule の一覧は
+[open-questions](./references/open-questions.md) が正本である。
+
 ### Step 6 — 計画を書き出して機械検証する
 
 `.commandmate/issue-authoring/<plan_id>/plan.json` に
@@ -155,6 +169,10 @@ exit 0 でなければ**計画は未完成である**。findings を直してか
 
 計画の要約（Issue 一覧・依存・重複の疑い・open question）と、validator の結果を提示する。
 open question が残っているなら、**それが解けるまで承認を求めない**。
+
+解けたときにすることも述べる。**`open_questions[]` からその question を外し、本文の
+ブロックを同じ編集で消す。ブロックを消したことが「決めた」の記録である。**
+片方だけを直した計画は validator が落とす。
 
 ## 4. Phase 2 の手順（`--register`）
 
@@ -185,8 +203,8 @@ Phase 2 は receipt（`registration.json`）と、作成された Issue 番号�
 
 ## 7. completion check
 
-報告の前に、completion check の 9 件を 1 件ずつ pass / fail で自己申告する。
-9 件の内容と、各項目が何を要求しているかの正本は
+報告の前に、completion check の 10 件を 1 件ずつ pass / fail で自己申告する。
+10 件の内容と、各項目が何を要求しているかの正本は
 [`references/plan-contract.md`](./references/plan-contract.md) 第 8 節である。
 fail が 1 件でもあれば、その run は success ではない。
 
@@ -202,6 +220,7 @@ fail が 1 件でもあれば、その run は success ではない。
 |---|---|
 | [`references/issue-body-contract.md`](./references/issue-body-contract.md) | Issue 本文の型と、その根拠になった planner の実測 |
 | [`references/acceptance-gates.md`](./references/acceptance-gates.md) | 受入ゲートのブロックを出す条件、出してはならない形、推測禁止の規律 |
+| [`references/open-questions.md`](./references/open-questions.md) | 未決の問いのブロックを `open_questions[]` から組む規則と、消すことが決定の記録であること |
 | [`references/plan-contract.md`](./references/plan-contract.md) | 計画 artifact の読み方、validator の rule と exit code、completion check、語彙対応 |
 | [`references/duplicate-guard.md`](./references/duplicate-guard.md) | 重複検査の手順と、判定を書く形 |
 | [`references/register-contract.md`](./references/register-contract.md) | Phase 2 の承認・順序・相互リンク・部分失敗・二重登録ガード |
