@@ -356,6 +356,79 @@ v2 の `plan.json`（`status.mjs` が読む過去 run の artifact）が schema 
 無い」を**全 plan case に対する harness 不変条件**として固定した —— schema が緩い分を test で締める
 配置であり、放置ではない。
 
+### #196 — dispatch 側だけが着地した field は、宣言すると plan が通らなかった
+
+#180 で入った `profile.dispatch_defaults` は **dispatch 側だけの着地**だった。planner の
+`PROFILE_FIELDS` に無いので、宣言を書いた profile は Issue を読む前に `load_error`（exit 6）で
+止まる。この field が runner に届く道は「**手で patch した plan**」しか無く、profile-contract
+第10.6節がその状態を自認していた。#180 が消しに来たのは `--auto-yes` / `--wait-timeout` の
+付け忘れが「遅い run」ではなく**事故**（phantom edge / 誰も答えない prompt /
+`wait_window_exhausted`）になることだが、置き場は人間の記憶と CLAUDE.md のままだった。
+
+→ `PROFILE_FIELDS` に足し、`publicProfile()` で echo する。第10.2節の型規則（未知 key・型違い・
+0 以下）は planner 側にも持つが、**code / exit は planner の規約**（`load_error` / exit 6）に揃えた ——
+同じ不備が dispatch では「plan ファイルについての事実」（`plan_invalid` / exit 3）、planner では
+「profile ファイルについての事実」であり、**主語が違う**。ここだけ exit 3 にすると planner 側の
+規約が割れる。検証ロジックは**共有しない** —— dispatch は loader を通っていない手書き plan も
+受けるので、自分の検証を planner に降ろせない。
+
+正規化は契約の key 順に組み直す。**profile は field を選ばず丸ごと `run_id` の hash に入る**（#157）
+ので、素通しだと profile 内で key を並べ替えただけで `run_id` が割れる。条件付き echo の追加順は
+`scope_companions` → `dispatch_defaults` → `integration_baseline`（#195）に固定した ——
+**順序が plan のバイト列を決め、全文 golden に効く。**
+
+### #199 — 「明示宣言した」ことの報告で、run 全体が partial に落ちていた
+
+#177 の唯一の出口 —— Issue が `## 対象ファイル` にハーネス path を**明示宣言**する —— を通ると
+`harness_path_in_scope` が付き、run 全体が `partial` になっていた。ハーネスを in-repo で保守する
+リポジトリでは、検証ゲートを足す・skill 定義を直すのは**例外的な事象ではなく定常作業**である。
+実測（2026-08-14、Kewton/BorderFreeKidsMap）では `.commandmate/verify.yaml` /
+`.github/workflows/ci.yml` / `scripts/check-verify-parity.mjs` を宣言した Issue が `partial` で
+返った。`suspected_files` は正しく、**裁定も正しい**。問題は、この形が毎回 `partial` で返ることが
+`partial` の情報量を下げることである —— #177 自身が除外側について同じ力学（「ほぼ全ての実 run が
+`partial` になって、読み手に**読み飛ばし方を教える**」）を論拠にしている。
+
+→ 「**名乗る**」と「**`status` を落とす**」を分けた。`plan.warnings[]` に任意 field `severity` を
+足し、`status` を落とすのは blocking だけにする（`status` は「blocking な warning が 1 件以上ある
+とき `partial`」になった）。誤分類は「静かに `partial` でなくなる」事故を生むので fail-closed に
+倒してある: **既定は blocking**（`severity` を持たない entry は従来どおり `partial` にする）、
+**notice 集合は `{harness_path_in_scope}` の 1 件だけ**である。他の code を notice へ移すのは
+それぞれ独立の判断で、別 Issue になる。**notice が blocking を隠すことはない。**
+
+`severity` は **notice の entry にだけ emit する**。`blocking` を綴らないのは、綴ると notice を
+含まないすべての plan のバイト列が動くからで、schema の `required` に入れていないのは
+`dependencies[].basis` と同じ理由（過去 run の `plan.json` を schema 違反にしない）である。
+**absent は「blocking」であって「未分類」ではない。**
+
+自動化系は壊れない。dispatch を止めるのは `plan.questions` であって `plan.status` ではなく
+（`execution-plan.v2` の `questions` の記述が「this array — not plan.status — is what stops a run」と
+明言している）、`status` は人間向けの色である。**本件はその色の情報量の話である。**
+
+### #200 — offline fixture の形式を知る唯一の方法が、runner を読むことだった
+
+`--issue-json` は 0.28.0 の package 全体で 3 箇所に名前が出るだけで、**何を書けば読めるのか**は
+どこにも無かった。`loadIssuesFromFixture()` を読んで初めて分かる状態で、利用リポジトリでは
+実際にそうなった（2026-08-14、Kewton/BorderFreeKidsMap で 0.28.0 の受け取り検証を fixture で
+行うために runner のソースを読んでいる）。
+
+これは単なる欠落ではない。0.28.0 は「Issue 本文の書き方が plan を変える」経路を 3 つ増やしており
+（#177 の `reference_files` / #178 の ```open-questions / #182 の question 2種）、どれも
+**本文を直して re-plan する**のが正しい対処で、`codes-and-recovery.md` の対処表もそう書いている。
+offline fixture はそのための最良の道具 —— 実際の Issue を編集せずに本文だけ差し替えて plan を
+diff できる —— なので、**推奨している対処法の入り口が塞がっていた。**
+
+→ [plan-contract.md](./plan-contract.md) 第1.1節（`run_id` を述べる第1節の直後）に書いた。
+受け付ける 2 形（素の配列 / `{"issues": […]}`）と要素の field、`labels` の 2 形（`gh` の出力を
+そのまま貼れるように、`gh` 経路と fixture 経路は同じ正規化を通る）、**`number` を整数として
+読めない要素は黙って捨てられる**こと、そして **fixture は plan の入力なので `run_id` に効く**こと
+（本文を変えなければ `run_exists` に阻まれる ＝「本当に本文が変わったか」の検査になる）。
+正準例は散文ではなく、planner の fixture テストが既に読んでいる実在 fixture を指す ——
+**散文の例は形式が変わっても古いまま残るが、テストが読む fixture への参照は腐ると赤くなる。**
+
+**挙動は変えていない。** 非整数 `number` の黙殺は本 package の fail-closed の流儀
+（#175 / #177 / #178 が一貫して「読めないものは absent 扱いにしない」側に倒してきた）と緊張が
+あるが、**docs に挙動変更を同乗させない**ため、`load_error` へ締めるかどうかは別 Issue である。
+
 ---
 
 ## dispatch（`scripts/dispatch.mjs`）
@@ -1165,6 +1238,50 @@ run で wall-clock と barrier のどちらを優先するかという運用判�
 記録も、run の最後に **plan 順**で 1 回だけ回す（完了時点で走らせるのは、下流の ready 判定に必要な
 fallback 検証だけである）。
 
+### #197 — 構文として正しく、何にも一致しない規則は、誰も検出できなかった
+
+profile-contract 第9.3節は、括弧の誤記（`{Base}` / `{base`）を `load_error` で拒否する理由として
+「typo が literal に化けると**一致しない規則が黙って残る**」と書いている。その懸念は正しいが、
+**構文として正しく、何にも一致しない規則**は同じ結果になり、こちらは検出されない ——
+`scripts/{base}.mjs` と `scripts/{dir}{base}.mjs` はどちらも合法で、
+`scripts/adapters/human-review.mjs` に届くのは後者だけである。`require[].add` のリテラルが
+**実在しないファイル**でも load は通る。
+
+気づけるのは plan を回して `scope_defaults` を目視したときだけで、そのためには Issue か fixture が
+要る。実測（2026-08-14、Kewton/BorderFreeKidsMap）では #181 の `require` へ集約テストの宣言を
+移して規則が 6 本になり、**6 本すべてが効いているかを確かめるのに 5 Issue 分の fixture を手書き
+した**。書き間違えた 1 本は plan を成立させたまま導出を 1 件減らすだけなので、実際に分かるのは
+worker が scope ゲートで落ちたときになる —— 契約 scope は send 時 snapshot なので、
+**worker 側からは直せない位置**である。
+
+→ `profile-init.mjs` に read-only の `--check <profile.json>` を足した。起案（draft の生成）とは
+逆向きの、**既にある宣言を tree に突き合わせる**モードで、規則ごとに 1 行、`when` が repo tree の
+実ファイル何件に一致するか、`derive[].add` / `require[].add` が指す path のうち何件が実在するかを
+出す。守っているのは 3 つである。
+
+- **read-only。** tree と profile を読むだけで、profile も plan も書かない。`--out` / `--emit` /
+  `--repo` / `--id` との併用は `invalid_input` で拒否する —— **起案しない mode であることを、
+  flag の無視ではなく拒否で言う。**
+- **裁定しない。** 0 件一致は誤りではない（これから作る file を見越した宣言はありうる）ので、
+  `companion_when_unmatched` / `companion_add_missing` は warning であって error ではない。
+  status は `partial` になるが exit は 0 で、起案 mode と同じ規約に従う。
+- **planner は対象リポジトリを開かない**（第9.1節）は不変である。これは planner ではなく、
+  **人間が profile をレビューするときに使う別 runner** である。
+
+**マッチングの意味論を 2 箇所に持たない。** `--check` が独自の解釈を持てば「`--check` は通るが
+planner は一致しない」という、本件が消しに来た事象の**変種を自分で作る**ことになる。規則評価
+（`{dir}` / `{base}` の展開と一致判定）と宣言の正規化を `lib.mjs` へ抽出し、planner と `--check` が
+**同じ関数**を呼ぶ。#177 の境界（`HARNESS_PATH_PREFIXES` / `isHarnessPath`）も、profile を読む
+両者で共有する。**抽出が純粋であることは golden で示した** —— 全文 golden 9 本を含む全 plan case の
+plan が **1 byte も変わらない。**
+
+例外は 1 つだけで、意図的である。`require[].add` の literal が repo の外を指していないかの拒否は
+planner の path 語彙（`SYSTEM_ROOTS`。cmate-issue-authoring が byte 単位で mirror しているので
+`orchestrate.mjs` に宣言が残る必要がある）に属するので、planner が predicate を loader へ渡す形に
+した。`--check` は同じリテラルを「実在しない path」として warning に出し、planner は profile を
+読んだ時点で `load_error` にする —— **許可を与えるのは planner だけなので、拒否も planner が持つ。**
+fixture がこの分岐を両側から固定している。
+
 ## merge（`scripts/merge.mjs`）
 
 ### #142 — 無人運転の段階 C（`merge --merge-prs`）
@@ -1304,6 +1421,50 @@ green」**まで広がった。dispatch が読むのは `integration_verify.outc
 **merge queue 方式（base 更新 → CI 再走 → merge の直列化）は実装していない。** Issue 本文が「まずは
 合流後検証の 1 段で十分」と判断している。#183（`--schedule dag`）から見たこの検証の位置づけは
 dispatch 節の #183 に書いた。
+
+### #195 — `--integration-verify` が、目的の違う検証集合を流用していた
+
+#175 の `--integration-verify` が実行するのは profile の `baseline` だが、`baseline`（各 worker が
+worktree で回す **proportional な健全性確認**）と「**合流後の統合ブランチが green か**」は
+目的の違う検証集合である。同じ key を共有している限り、どちらか一方は必ず間違う ——
+`baseline` を重くすれば worker の fallback 検証が毎回 build / e2e を回し、軽いままにすれば
+opt-in した統合検証が「**測っていないのに green**」になる。
+
+しかも #175 の fail-closed は**これを検出できない**。埋め忘れ（未宣言）は `preflight_failed` /
+exit 1 で落ちるが、**目的の違う `baseline` が宣言されている状態**は `outcome: "pass"` を返して
+`status: success` になる。実測（Kewton/BorderFreeKidsMap）では、このリポジトリの `baseline` は
+`npm ci` / `lint` / `typecheck` の 3 本で **`unit` を持たない**（重い検証は最後の verify に任せる、
+という運用文書の判断である）。したがって **#175 を起票させた当の #105 × #106 が、
+`--integration-verify` を付けたまますり抜ける** —— この機能が消しに来た当の事象である。
+
+→ 任意 field `integration_baseline` を足し、解決を `integration_baseline` ?? `baseline` にした。
+**`??` が働くのは key が未宣言のときだけ**で、宣言しない profile の run は #175 と同一の集合を測る。
+`"integration_baseline": []` は「**統合検証の定義は無い**」という宣言なので `baseline` へは落とさず、
+`--integration-verify` 下では `preflight_failed` / exit 1 / `integration_verify_unavailable` にする
+（1 件も merge しない）—— 目的の違う集合へ黙って落ちるのは、**本件の論旨そのものに反する**。
+配列でない値を持つ手書き plan も同じ fail-closed 側へ倒す。
+
+**採った側を `integration_verify.source` に記録する。** どちらを測ったのかが report 単体で読めないと、
+この分離は「**静かな 2 つ目の baseline**」になる —— 違う集合を測った 2 つの report が同じに読める。
+何も実行しなかった run でも記録し、2 つある拒否の next action もこれで分岐する。空宣言の author に
+「`baseline` を宣言しろ」と案内するのは、**意図した宣言を取り消せという意味になる**からである。
+
+planner 側（`PROFILE_FIELDS` と `publicProfile()` の echo）を同梱したのは、#180 が踏んだ
+「**読む側だけ先に着地する**」非対称（#196）を繰り返さないためである。`merge.mjs` だけ直しても、
+`integration_baseline` を書いた profile は plan 段階を通らない。echo では**宣言された `[]` を `[]` の
+まま出す** —— merge の解決は key の存在で分岐するので、落とすと未宣言と区別が付かなくなる。
+
+`profile-init` は `integration_baseline` を**起案しない**（#180 / #181 と同じ規律）。何を統合検証に
+すべきかは、**リポジトリが自分について宣言している事実ではなく、運転して分かる結論**である。
+
+「宣言したが読まれていない」緑は**変異で反証した**。`baseline` は合流後 green・`integration_baseline`
+は赤という profile（`m28`）は、宣言を無視する実装 ——すなわち #175 の挙動—— なら緑になる。逆向き
+（`m29`: フォールバックが赤・宣言が緑）の `pass` は、宣言を読んだ実装にしか出せない。
+
+`merge_schema_version` は 1 のまま据え置いた。足したのは `--integration-verify` を渡した run にしか
+現れない object の内側の 1 field で、上げると `status.mjs`（`SUPPORTED_MERGE_SCHEMA_VERSION = 1` を
+pin。#175 と同じくこの Issue の宣言 scope の外）が**フラグを使っていない run の report まで読めなく
+なる**。判断は [merge-contract.md](./merge-contract.md) 第10節に #175 の先例と並べて書いた。
 
 ---
 
@@ -1485,6 +1646,75 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 ---
 
 ## パッケージ
+
+### 0.29.0 — リポジトリの事情を profile が全部宣言でき、宣言が効いているか確かめられる（#195 / #196 / #197 / #199 / #200）
+
+**目的の違う 2 つの検証集合が、1 つの key を共有していた**（#195）。`--integration-verify`（#175）が
+回すのは profile の `baseline` だが、`baseline` は各 worker が worktree で回す proportional な
+健全性確認であり、統合検証は「**合流後の統合ブランチが green か**」である。#175 の fail-closed は
+埋め忘れ（未宣言）しか捕まえられず、**目的の違う `baseline` が宣言されている状態**は
+`outcome: "pass"` を返す。実測（Kewton/BorderFreeKidsMap）ではこのリポジトリの `baseline` に
+`unit` が無いため、**#175 を起票させた当の #105 × #106 が `--integration-verify` を付けたまま
+すり抜ける** —— この機能が消しに来た当の事象である。任意 field `integration_baseline` で分離し、
+採った側を `integration_verify.source` に記録する。
+
+残る 4 件は 3 つの塊になる。
+
+**1. profile が、リポジトリの事情を全部宣言できる（#196 と #195 の planner 側）。** #180 で入った
+`dispatch_defaults` は **dispatch 側だけの着地**で、宣言を書いた profile は plan 段階を
+`load_error`（exit 6）で通らなかった —— この field が runner に届く道は「手で patch した plan」
+しか無く、`--auto-yes` / `--wait-timeout` の置き場は人間の記憶と CLAUDE.md のままだった。planner 側
+（`PROFILE_FIELDS` と `publicProfile()` の echo）を着地させ、#195 の `integration_baseline` は
+**両側同時**に入れた ——「**読む側だけ先に着地する**」非対称を繰り返さない。
+
+**2. 宣言が効いているかを、plan を回す前に確かめられる（#197）。** 構文として正しく、
+**何にも一致しない** `scope_companions` 規則は誰も検出できなかった（`scripts/{base}.mjs` と
+`scripts/{dir}{base}.mjs` はどちらも合法で、`scripts/adapters/human-review.mjs` に届くのは後者
+だけである）。read-only の `profile-init --check` が規則ごとに一致件数を出す。**裁定はしない** ——
+0 件一致は warning であって error ではない。マッチングの意味論を 2 箇所に持たないため、規則評価を
+`lib.mjs` へ抽出し、planner と `--check` が同じ関数を呼ぶ。
+
+**3. 「名乗る」と「止める」を分け、入口を文書化した（#199 / #200）。** #177 の唯一の出口
+（ハーネス path の明示宣言）を通ると run 全体が `partial` に落ちており、ハーネスを in-repo で
+保守するリポジトリでは**検証ゲートを足すのが定常作業**なので `partial` が常態になっていた ——
+#177 自身が除外側について同じ力学（読み手に読み飛ばし方を教える）を論拠にしている。
+`plan.warnings[]` に `severity` を足し、`status` を落とすのは blocking だけにした。そして
+`--issue-json` の fixture 形式は **runner を読まないと分からない**状態だった —— 0.28.0 が増やした
+3 経路（#177 / #178 / #182）の正しい対処が「本文を直して re-plan」である以上、これは
+**推奨した対処法の入り口が塞がっている**状態であり、plan-contract 第1.1節に書いた（#200）。
+
+**破壊的変更は無い。** `plan_schema_version` / `dispatch_schema_version` / `merge_schema_version` は
+すべて据え置きで、`stop_reason` / `worker_state` / `completion_check[].id` の enum にも値を 1 つも
+足していない。plan 側に足した field（`warnings[].severity` / `profile.dispatch_defaults` /
+`profile.integration_baseline`）は**すべて schema 上 optional** で、0.28.0 以前が書いた plan は今も
+valid であり、`status.mjs` は過去 run を読み続けられる。required にしたのは
+`integration_verify.source` の 1 つだけだが、**この object は `--integration-verify` を渡した run に
+しか存在しない** —— 判断は [merge-contract.md](./merge-contract.md) 第10節に #175 の先例と並べて
+書いてある。
+
+**宣言しない profile の plan / report は 1 byte も変わらない。** 条件付き echo の追加順は
+`scope_companions` → `dispatch_defaults` → `integration_baseline` に固定してあり（**順序が plan の
+バイト列を決める**）、`severity` は **notice の entry にだけ** emit する（`blocking` を綴ると notice を
+含まないすべての plan が動く）。#197 の `lib.mjs` 抽出が純粋であることは、**全文 golden 9 本を含む
+全 plan case の plan が 1 byte も変わらない**ことで示した。`m22`（merge）と `d87`（dispatch）は
+0.28.0 と同じく、**その機能が入る前の runner が書いた** golden を byte 比較する非回帰の測定として
+残っている。
+
+**止まり方が 2 つ変わる。** ハーネス path を**明示宣言した** plan は `partial` ではなく `success` に
+なる（#199。`harness_path_in_scope` は `plan.warnings` に残り続け、`codes-and-recovery.md` の対処表にも
+載り続けるので、「名乗る」は失われていない）。逆に `"integration_baseline": []` を宣言して
+`--integration-verify` を渡すと、`baseline` の有無に関わらず `preflight_failed` / exit 1 で
+**1 件も merge せずに止まる**（#195）—— 空配列は「統合検証の定義は無い」という宣言であり、目的の違う
+集合へ黙って落ちるのは本件の論旨そのものに反する。あわせて、`dispatch_defaults` /
+`integration_baseline` を書いた profile が **`load_error` で拒否されなくなる**のもこの release からで
+ある。
+
+同時に **cmate-issue-refinement が 0.4.0** に上がる（#198）。0.28.0 の #178 で入った ```open-questions
+記法には**読む側しか無かった** —— refinement が blocking な open question をそのまま貼れるブロックと
+して出すようになり、「問いを出す → 本文へ残す → **決めたら消して re-plan**」の線が両端で繋がる。
+生成規則はリポジトリ層の conformance テストが**実物の planner に食わせて**固定しており、
+refinement 側に散文のミラーは置いていない（記法の正本は
+[open-questions-notation.md](./open-questions-notation.md) のままである）。
 
 ### 0.28.0 — 推測を推測と名乗らせ、wall-clock を最長経路へ（#174 / #175 / #176 / #177 / #178 / #179 / #180 / #181 / #182 / #183）
 

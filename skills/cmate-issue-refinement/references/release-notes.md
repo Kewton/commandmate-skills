@@ -2,6 +2,55 @@
 
 ## Changelog
 
+### 0.4.0 — emit the blocking open questions as a pasteable block (Issue #198)
+
+- **The `open-questions` notation had a consuming side and no producing side.**
+  `cmate-orchestrate` 0.28.0 (Issue #178) reads an ` ```open-questions ` block out of
+  an Issue body and raises one blocking question per entry, and the notation's own
+  rationale describes the line it exists to complete: *this Skill emits the questions
+  → the author leaves them in the body as a block → deleting the block is the record
+  that they were decided.* The left half did not exist. 0.3.0 emitted open questions
+  but never as a block (the whole package grepped to zero hits), so an author copying
+  them across by hand reintroduces the miss #178 came to remove — measured on
+  Kewton/BorderFreeKidsMap#63, where three undecided questions sat in the body, the
+  plan came back with `questions: []`, and the worker decided them itself.
+- **`open_questions_block` carries the whole block as one string**, fences included,
+  ready to paste unchanged. New optional field in
+  [`refinement-result.v1.json`](../schemas/refinement-result.v1.json), pinned to the
+  canonical form by a pattern. `result_schema_version` stays 1 and a document produced
+  by 0.3.0 is still valid.
+- **What goes into it is decided by the existing classification, not a second one.**
+  Only `open_questions[]` entries with `blocks_required_section: true`, verbatim and in
+  array order. A document that carries the block requires `blocks_required_section` on
+  every question, because the projection has to be recomputable from the array. Absent
+  when nothing is blocking — never present and empty.
+- **The notation is not owned here.** Its source of truth is
+  `cmate-orchestrate`'s `references/open-questions-notation.md`; the new reference
+  [`open-questions.md`](./open-questions.md) says how to build the string and settles
+  nothing about what the notation means. Past 32 questions the block is cut at an item
+  boundary and **the cut is named** in `limitations` and in the summary — the same
+  discipline the consuming side applies.
+- **The read-only boundary is unchanged, and that is again the point.** The block is
+  output, not an edit: `github_writes` stays `[]`, no Issue is touched, no new
+  permission is declared, and whether to paste it is the author's decision. Same
+  boundary the acceptance-gates recommendation of 0.3.0 lives inside.
+- Completion check goes from ten statements to **eleven**; the eleventh is the block,
+  and a run with no blocking open question passes it.
+- **The generation rule is fixed by a test, not by prose.** A prose mirror of a notation
+  owned by another package drifts, which is the failure this Issue is a variant of.
+  `tests/fixtures/cmate-issue-authoring/open-questions-conformance.mjs` transcribes the
+  rule in exactly one place and feeds its output to the **real planner**: the canonical
+  form of every block shipped in this package, a corpus round-trip, the rejection shapes
+  the rule names actually stopping at `open_question_block_invalid`, the projection
+  following `blocks_required_section` alone, a two-point measurement on twin bodies with
+  and without the block, and the 32-item cap checked against the planner's
+  `MAX_OPEN_QUESTIONS`. The repository's CI runs it as the `issue-authoring-fixtures`
+  gate.
+- The mirror into `cmate-issue-authoring` — a block on a newly drafted Issue — is a
+  separate Issue. `validate-plan.mjs` there is a copy of the planner's extraction
+  region, and this parse sits outside that region; the notation document draws the same
+  line.
+
 ### 0.3.0 — recommend the acceptance-gates block, never write it (Issue #124)
 
 - **This Skill now knows the `acceptance-gates` notation** and recommends a block
