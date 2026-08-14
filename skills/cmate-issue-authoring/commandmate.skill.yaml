@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-issue-authoring
 name: cmate-issue-authoring
-version: 0.7.0
+version: 0.8.0
 summary: Feature 記述から実装可能な Issue 群を起案する。read-only の分割計画を schema 準拠 artifact で出し、明示承認の下でだけ依存順に GitHub へ一括登録する 2 phase 手順。
 description: >-
   Feature 記述・仕様断片・epic Issue を入力に、着手できる Issue 群を起案する手順である。
@@ -146,8 +146,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 6cea668cf1600a998bbf5ca81206ac8053f75af4917bc3b3c90a64f85a95788a
-    size: 15947
+    sha256: 11f37aa68b0518c3deb72aa89461819156f818a118b53ba65c9c1e3164a64159
+    size: 21172
     kind: instruction
     executable: false
     script: false

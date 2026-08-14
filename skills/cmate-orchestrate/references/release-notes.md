@@ -1647,6 +1647,80 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 
 ## パッケージ
 
+### 0.30.0 — 壊れた fixture から黙って部分集合を作らず、warning の severity に台帳を持たせる（#208 / #210）
+
+**offline fixture の読めない要素が、黙って捨てられていた**（#208）。`--issue-json` の loader
+（`loadIssuesFromFixture()`）には黙る挙動が3つあった —— object でない要素と `number` が読めない
+要素は `continue` で捨てられ、同一 `number` は `Map.set` の後勝ちで**先行の本文が消える**。さらに
+読み口が `Number.parseInt` で、これは数ではなく**数の PREFIX** を読む: `"123abc"` は 123 に、
+`"12.9"` は 12 になる。つまり読めない要素は捨てられるだけでなく**別の番号として読まれうる** ——
+書き間違いが落ちるのではなく、**別の Issue が計画される**。0.29.0（#200）はこの挙動を
+plan-contract 第1.1節に仕様として書いたうえで、締めるかどうかを別 Issue へ切り出していた。
+本 release がそれである。
+
+fixture は plan の**入力そのもの**であり、壊れた入力から黙って部分集合を作った plan は
+「測っていない Issue を測ったことにして緑で終わる」—— [plan-contract.md](./plan-contract.md)
+第5節が他の構成要素について既に拒否している性質である。全要素を読んでから使うようにし、読めない
+要素（非 object / `number` 不在 / 整数として読めない `number` / 同一 `number` の重複）はすべて
+`load_error` / exit 6 にした。整数判定は `Number.isSafeInteger` と「整数だけからなる文字列」に
+限る。message は**どの要素（0 始まりの index）が・なぜ**読めないかを名指しし、`"12"` と `"12.9"` を
+一目で見分けられるよう読めなかった値そのものを引用する。読めない要素が先に拒否されるので、
+`fixture does not contain issues:` は**文字どおり不在だけ**を意味するようになり、その message は
+fixture が宣言している番号も併せて出す（従来はこれが唯一の観測点で、**FILE が壊れているときに
+読み手を REQUEST の側へ送っていた**）。
+
+**正常な fixture の plan は 1 byte も変わらない。** 既存 plan case のうち成功する 59 件について、
+#208 以前の runner と本 release の runner が書く `plan.json` は byte 一致する（差 0 件）。新規
+case 78–82 は #208 以前の runner では 5 件とも exit 0 で plan が出ていた ——
+**拒否されるようになるのは意図した破壊**である。
+
+**warning の severity に、判断理由つきの台帳ができた**（#210）。#199（0.29.0）は severity の
+仕組みだけを入れて notice 集合を `{harness_path_in_scope}` の1件に固定し、個別の分類を別 Issue へ
+送った。結果として「**検討して blocking に決めた code**」と「**まだ誰も検討していない code**」が
+`severity` 無しの同じ形で並んでいた —— #199 が `status` について消しに来た「2つの違う状態が同じ色で
+出る」の、分類台帳版である。`plan.warnings` の合流点5系統（profile 由来 / 抽出 / 契約 scope /
+open question / 依存）を1つずつ辿って**到達しうる warning code を 16 件に確定**し、
+[codes-and-recovery.md](./codes-and-recovery.md) 第2節を severity 列つきの表に置き換えた。
+**blocking の行にも「blocking が正しい」と理由が書いてある** —— 無言の既定と、検討した結果としての
+blocking は違う。棚卸しは台帳の欠落も2件見つけた（`acceptance_gate_block_invalid` /
+`acceptance_gate_block_unsupported`。どちらも `plan.warnings` に出て `status` を落とすのに表に
+無かった）。以後**新設 warning code は severity を分類してから足す** —— 規約を
+codes-and-recovery.md 冒頭に、規範を plan-contract 第5.6節に置いた。
+
+**`profile_repository_override` が notice へ移る**（#210。1 code = 1 判断であり、まとめて動かして
+いない）。この code は `--repo <other>`（差し替え。これが `verified` を降格させる）と
+`--allow-unverified`（降格の受諾。**無ければ run は `unverified_profile` で exit 3 する**）の
+**2つの明示 flag が揃わないと出ない**ので、operator が既に決めて run の command line に記録した
+事実の報告である。分類原理どおりだから移したのではない —— **blocking 側が2つの実測で壊れていた**。
+同じ受諾を `--profile-json <verified: false> --allow-unverified` と綴ると warning 1件も無しの
+`success` で返り（case 08。risk は同じく high）、`profile_repository_mismatch` の対処表が指示する
+`--repo` を選ぶと**表のとおりに直したのに `partial` のまま**だった —— #177 が denied 側について
+言った「正しい書き方に対して `partial` を出す warning は、読み手に読み飛ばし方を教える」の、
+operator 側から到達した同じ失敗である。**落としたのは色だけである** —— `profile.verified` は
+`false` のまま、`risk.factors` の `unverified_profile`（high）と `risk.level: high` もそのまま
+plan に載り、warning 自身も detail ごと `plan.warnings` に残る。`success` は「読まなくてよい」では
+ない。
+
+**破壊的変更は無い。** `plan_schema_version` / `dispatch_schema_version` / `merge_schema_version` は
+すべて据え置きで、`stop_reason` / `worker_state` / `completion_check[].id` の enum にも値を1つも
+足していない。schema に触れたのは `warnings[].severity` の description（notice 集合が2件になった）
+だけである。**notice を含まない plan は byte 不変**で、#199 の byte 規律（`severity` を emit するのは
+notice の entry にだけ）もそのままである。fixture は case 14 を `success` + `severity: notice` へ
+更新し、case 83 で **notice と blocking が同居したとき `status` が blocking 側に決まる**ことを
+固定した（両方向の測定である）。
+
+**止まり方が2つ変わる。** 読めない要素を持つ fixture は plan が出なくなり（#208。`load_error` /
+exit 6）、`--repo` + `--allow-unverified` の run は `partial` ではなく `success` になる（#210）。
+
+同時に **cmate-issue-authoring が 0.8.0** に上がる（#209）。0.28.0 の #178 で入った ```open-questions
+記法の生産側は、refinement（#198 / 0.29.0 と同時）に続いて**起案側も着地した** —— authoring が
+起案する Issue **本文そのもの**にブロックを埋めるようになり、「問いを出す → 本文へ残す →
+**決めたら消して re-plan**」の線に手作業が1つも残らなくなった（ブロックは計画の `open_questions[]`
+から renderer が組むので、写す step が存在しない）。記法の正本は
+[open-questions-notation.md](./open-questions-notation.md) のままである。**#209 が
+orchestrate 側に加えた変更は同文書だけ**で（「生産側へのミラーは後続 Issue である」を着地後の記述へ
+更新し、実装表に生産側2つを足した）、runner には触れていない。
+
 ### 0.29.0 — リポジトリの事情を profile が全部宣言でき、宣言が効いているか確かめられる（#195 / #196 / #197 / #199 / #200）
 
 **目的の違う 2 つの検証集合が、1 つの key を共有していた**（#195）。`--integration-verify`（#175）が
