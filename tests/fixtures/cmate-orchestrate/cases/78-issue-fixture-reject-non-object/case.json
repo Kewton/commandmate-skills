@@ -1,0 +1,14 @@
+{
+  "description": "Issue #208: object でない fixture 要素は捨てられず、fixture ごと `load_error` / exit 6 になる。要求した 480 は在って読めるのに拒否されるのが要点である —— 壊れているのは要求ではなく file であり、読める分だけで plan を組めば「測っていない Issue を測ったことにした plan」が緑で出る（plan-contract 第5節が他の構成要素について既に拒否している性質）。message は index で要素を指す: 手書きの file を直すのに必要なのは何番目が何であったかである。",
+  "args": ["480", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "--issue-json entry 1 is not an object",
+      "it is a string"
+    ],
+    "plan_null": true
+  }
+}

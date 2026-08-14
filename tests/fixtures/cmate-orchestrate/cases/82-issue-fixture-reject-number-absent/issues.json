@@ -1,0 +1,14 @@
+{
+  "issues": [
+    {
+      "number": 483,
+      "title": "fix: number を書き忘れた要素と同居する",
+      "body": "## 対象ファイル\n- `src/loader.ts`\n\n## Acceptance criteria\n- [ ] 「無い」と「読めない」を区別する\n",
+      "labels": ["bug"]
+    },
+    {
+      "title": "fix: number を書き忘れた要素",
+      "body": "## 対象ファイル\n- `src/forgotten.ts`\n"
+    }
+  ]
+}

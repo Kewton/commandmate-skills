@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": "12.9",
+      "title": "fix: number を小数で書いてしまう",
+      "body": "## 対象ファイル\n- `src/loader.ts`\n\n## Acceptance criteria\n- [ ] 12 として読まれない\n",
+      "labels": ["bug"]
+    }
+  ]
+}

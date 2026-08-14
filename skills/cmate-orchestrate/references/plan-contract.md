@@ -98,22 +98,45 @@ file が読めない場合・JSON として parse できない場合も同じ。
 
 要素の field は `gh issue view --json number,title,body,labels` の出力と同じ4つで、
 **`number` 以外は省略できる**（`title` / `body` は `""`、`labels` は `[]` として読む）。
-`number` を要求した Issue が fixture に無ければ `fixture does not contain issues: <n>` の
-`load_error` になる。
+要求した Issue が fixture に無ければ
+`fixture does not contain issues: <n> — it declares <fixture が持つ番号>` の `load_error`
+になる。ここでの「無い」は**文字どおり無いことだけを意味する** —— 読めない要素は下記の
+とおり先に拒否されるので、この message が「在るが読めなかった」の言い換えになることはない。
 
 `labels` の要素は**文字列でも `{ "name": "…" }` でもよく、混在してもよい**。前者は手書き
 fixture の形、後者は `gh` が返す形である。2形を受けるのは `gh` の出力をそのまま貼れるように
 するためで、`gh` 経路と fixture 経路は同じ正規化を通る。文字列でも `name`（文字列）を持つ
 object でもない要素は、**その label だけ**捨てられる。
 
-**`number` を整数として読めない要素は、黙って捨てられる**（object でない要素も同じ）。
-読み方は `parseInt` 相当なので `200` でも `"200"` でも整数 200 になる。捨てられたことは
-warning にならず、観測できるのは「その番号を `--issues` で要求したときに上の `load_error`
-が出る」形だけである（要求していない番号なら何も起きない）。同じ `number` が2度現れたときは
-**後の要素が勝つ**。なおこの黙殺は 0.28.0 時点の**現状の挙動を仕様として書いたもの**であり、
-`load_error` へ締めるかどうかは別 Issue として切る
-（[#200](https://github.com/Kewton/commandmate-skills/issues/200) の裁定。docs の変更に
-挙動の変更を同乗させない）。
+**読めない要素は捨てられず、fixture ごと拒否される**
+（[#208](https://github.com/Kewton/commandmate-skills/issues/208)）。loader は使う前に
+**全要素を読み**、次のどれかに当たれば `load_error`（exit 6）で止まる。**要求した番号かどうかに
+関係なく** plan は出ない —— 壊れているのは要求ではなく file であり、読める分だけで組んだ plan は
+「測っていない Issue を測ったことにした plan」だからである（第5節の論法がそのまま当てはまる）。
+
+| 不正 | message（`<i>` は 0 始まりの要素番号） |
+| --- | --- |
+| object でない要素 | `--issue-json entry <i> is not an object (it is …)` |
+| `number` が無い | `--issue-json entry <i> has no "number"` |
+| `number` が整数として読めない | `--issue-json entry <i> has a "number" that is not an integer: <値>` |
+| 同じ `number` が2度現れる | `--issue-json entry <i> repeats issue <n>, already declared by entry <j>` |
+
+`number` として読めるのは**整数そのもの（`200`）と、整数だけからなる文字列（`"200"`）に限る**。
+前者は `gh` が返す形、後者は手書き fixture の形で、**2つは同じ入力である**（同じ run_id・
+同じ plan bytes になる）。0.29.0 までの読み口は `parseInt` 相当で、これは数ではなく数の
+**前置部分**を読む —— `"123abc"` が 123 に、`"12.9"` が 12 になった。書き間違いが落ちるのでは
+なく**別の Issue が計画される**ので、落ちるより悪い。今はどちらも `load_error` である。
+
+重複を後勝ちにしないのも同じ理由である。2つの要素は別の本文を書いており、どちらを意図したかは
+planner には決められない。選ばずに拒否する。
+
+この節が形式の文書として書かれたのは
+[#200](https://github.com/Kewton/commandmate-skills/issues/200) であり、そこでは当時の黙殺を
+**現状の挙動**として記述したうえで、締めるかどうかを別 Issue に切ると明示していた。#208 が
+その裁定であり、差し替わったのは**挙動の記述だけ**である（受け付ける形は変わっていない）。
+**正常な fixture の plan は 1 byte も変わらない** —— 既存の全文 golden がその非回帰の測定である。
+拒否されるようになるのは、従来「一部を欠いた plan」が出ていた fixture だけで、これは意図した
+破壊である。refusal は plan case `78`〜`82` が固定している。
 
 **fixture は plan の入力なので、第1節の run_id にそのまま効く。** 要求した Issue の
 title / body を1文字でも変えれば既定 run_id は変わり、別の run directory に出る

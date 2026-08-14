@@ -732,6 +732,45 @@ function loadIssues(inputs, profile) {
   return inputs.issues.map((number) => fetchIssueWithGh(number, profile.repository));
 }
 
+// The only two spellings of an issue number a fixture entry may use: an integer,
+// or a string that is exactly one. `gh issue view --json number` writes `200` and
+// a hand-written fixture usually writes `"200"`, so both shapes arrive here and
+// both mean 200. Nothing else does. This used to be `Number.parseInt`, which does
+// not read the number so much as its PREFIX: `"123abc"` came back as 123 and
+// `"12.9"` as 12, so a mistyped number did not fail — it planned a DIFFERENT
+// issue (Issue #208). Returns null for anything it will not read; the caller
+// turns that into a load_error rather than dropping the entry.
+function fixtureIssueNumber(raw) {
+  if (typeof raw === 'number') return Number.isSafeInteger(raw) ? raw : null;
+  if (typeof raw === 'string' && /^-?[0-9]+$/.test(raw)) {
+    const parsed = Number(raw);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+// What an unusable entry WAS, for the message that names it. Deliberately the
+// shape and not the value: an entry can be arbitrarily large, and the author does
+// not need it echoed back to find index N of a file they wrote.
+function describeFixtureEntry(item) {
+  if (item === null) return 'null';
+  if (Array.isArray(item)) return 'a list';
+  return `a ${typeof item}`;
+}
+
+// A fixture is the plan's INPUT, written by hand, and until Issue #208 every way
+// of writing one wrong was silent: a non-object entry and an unreadable `number`
+// were skipped, and a repeated `number` was overwritten by whichever entry came
+// last. That is the failure §5 of plan-contract.md already refuses elsewhere — a
+// plan assembled from a quiet subset of what the author wrote finishes GREEN over
+// issues nobody measured — and it misattributes on the way out: the only
+// observable trace was `fixture does not contain issues: N`, which sends the
+// reader to fix the REQUEST when the FILE is what is broken.
+//
+// So the whole fixture is read before any of it is used, and anything unreadable
+// is a load_error that names the entry and the reason. This rejects fixtures that
+// used to produce a plan; a fixture that was already well-formed is unaffected,
+// down to the byte (the full-text plan goldens are the measurement).
 function loadIssuesFromFixture(numbers, path) {
   const raw = readJson(path, 'issue fixture');
   const items = Array.isArray(raw) ? raw : Array.isArray(raw?.issues) ? raw.issues : null;
@@ -743,22 +782,62 @@ function loadIssuesFromFixture(numbers, path) {
     );
   }
   const byNumber = new Map();
-  for (const item of items) {
-    if (!item || typeof item !== 'object') continue;
-    const number = Number.parseInt(item.number, 10);
-    if (!Number.isInteger(number)) continue;
+  for (const [index, item] of items.entries()) {
+    const where = `--issue-json entry ${index}`;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new SkillError('load_error',
+        `${where} is not an object (it is ${describeFixtureEntry(item)}). Every entry is shaped like one element of `
+          + '`gh issue view --json number,title,body,labels`, of which only `number` is required', 6);
+    }
+    if (item.number === undefined) {
+      throw new SkillError('load_error',
+        `${where} has no "number". It is the one field an entry cannot omit `
+          + '(`title` and `body` default to "", `labels` to [])', 6);
+    }
+    const number = fixtureIssueNumber(item.number);
+    if (number === null) {
+      // The value IS echoed here (unlike the entry above): it is the thing that
+      // could not be read, it is short in every realistic case, and quoting it is
+      // how "12" and "12.9" are told apart at a glance. Clamped anyway — a
+      // `number` written as a whole object is a legal JSON shape.
+      const written = JSON.stringify(item.number);
+      const quoted = written.length > 60 ? `${written.slice(0, 57)}…` : written;
+      throw new SkillError('load_error',
+        `${where} has a "number" that is not an integer: ${quoted}. Write it as 200 or "200" — `
+          + 'a value with a numeric prefix ("200abc") or a fractional part ("12.9") is refused rather than read as '
+          + '200 or 12', 6);
+    }
+    if (byNumber.has(number)) {
+      throw new SkillError('load_error',
+        `${where} repeats issue ${number}, already declared by entry ${byNumber.get(number).index}. Remove one: `
+          + 'the planner will not choose between two bodies for the same issue, and the body it reads decides both '
+          + 'the plan and the run id', 6);
+    }
     byNumber.set(number, {
-      number,
-      title: String(item.title ?? ''),
-      body: String(item.body ?? ''),
-      labels: normalizeLabels(item.labels),
+      index,
+      issue: {
+        number,
+        title: String(item.title ?? ''),
+        body: String(item.body ?? ''),
+        labels: normalizeLabels(item.labels),
+      },
     });
   }
   const missing = numbers.filter((n) => !byNumber.has(n));
   if (missing.length > 0) {
-    throw new SkillError('load_error', `fixture does not contain issues: ${missing.join(', ')}`, 6);
+    // Reached only once every entry has been read, so "does not contain" now
+    // means absent and nothing else. The declared set is echoed because the
+    // author's next question is always which numbers the file does hold.
+    const declared = [...byNumber.keys()];
+    const shown = declared.length === 0
+      ? 'no issues at all'
+      : declared.length > 20
+        ? `${declared.slice(0, 20).join(', ')}, … (${declared.length} entries)`
+        : declared.join(', ');
+    throw new SkillError('load_error',
+      `fixture does not contain issues: ${missing.join(', ')} — it declares ${shown}`, 6);
   }
-  return numbers.map((n) => byNumber.get(n));
+  return numbers.map((n) => byNumber.get(n).issue);
 }
 
 function fetchIssueWithGh(number, repo) {

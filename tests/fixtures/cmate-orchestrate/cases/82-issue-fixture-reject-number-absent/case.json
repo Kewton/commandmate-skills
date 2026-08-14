@@ -1,0 +1,14 @@
+{
+  "description": "Issue #208: `number` が **無い** 要素と、`number` が **読めない** 要素は別の message になる。同じ `load_error` に丸めると、著者は key を書き忘れたのか値を書き損ねたのかを file を読み直して判別することになる。要求した 483 は在って読めるのに拒否されるのは 78 と同じ理由である（fixture は全要素を読んでから使う）。",
+  "args": ["483", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "--issue-json entry 1 has no \"number\"",
+      "It is the one field an entry cannot omit"
+    ],
+    "plan_null": true
+  }
+}

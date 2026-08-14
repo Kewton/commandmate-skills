@@ -1,0 +1,11 @@
+{
+  "issues": [
+    {
+      "number": 480,
+      "title": "fix: fixture の要素を1つ書き損ねる",
+      "body": "## 対象ファイル\n- `src/loader.ts`\n\n## Acceptance criteria\n- [ ] 壊れた fixture から plan が出ない\n",
+      "labels": ["bug"]
+    },
+    "480 の続き（object にし忘れた）"
+  ]
+}

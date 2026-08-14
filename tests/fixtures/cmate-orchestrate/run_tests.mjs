@@ -5124,6 +5124,53 @@ function rerunSemanticsTest() {
   }
 }
 
+// The `--issue-json` loader is fail-closed as of Issue #208: an entry the planner
+// cannot read is a load_error, never a dropped entry. The five refusals are
+// pinned as plan cases (78-82). What a refusal case cannot measure is the other
+// half of that change — that tightening the READ did not narrow which well-formed
+// spellings a fixture may use.
+//
+// `200` and `"200"` are both contract (plan-contract.md §1.1): `gh issue view
+// --json number` writes the first and a hand-written fixture usually writes the
+// second, and the loader has always meant the same issue by both. So they must
+// stay not merely both-accepted but INDISTINGUISHABLE — same run id, same plan
+// bytes — because the alternative (a string spelling that plans into its own run
+// directory) is the same defect class #208 closed: a plan whose identity depends
+// on something the author did not think they were saying.
+function issueFixtureSpellingTest() {
+  log('  issue fixture: `200` and "200" are one input (#208)');
+  const dir = mkdtempSync(join(tmpdir(), 'cmate-orch-fixture-'));
+  const base = JSON.parse(readFileSync(join(CASES_DIR, '01-independent', 'issues.json'), 'utf8'));
+  const numbers = base.issues.map((issue) => String(issue.number));
+
+  const asNumbers = join(dir, 'numbers.json');
+  writeFileSync(asNumbers, JSON.stringify(base));
+  const asStrings = join(dir, 'strings.json');
+  writeFileSync(asStrings, JSON.stringify({
+    issues: base.issues.map((issue) => ({ ...issue, number: String(issue.number) })),
+  }));
+
+  const planFrom = (issuesPath) => {
+    const runsDir = mkdtempSync(join(tmpdir(), 'cmate-orch-fixture-runs-'));
+    const args = [...numbers, '--profile', 'node-commandmate', '--issue-json', issuesPath, '--runs-dir', runsDir];
+    const { exit, stdout } = runRunner(args);
+    return { exit, runsDir, result: stdout ? JSON.parse(stdout) : null };
+  };
+
+  const integers = planFrom(asNumbers);
+  const strings = planFrom(asStrings);
+  check(integers.exit === 0, `a fixture spelling its numbers as integers should plan, exited ${integers.exit}`);
+  check(strings.exit === 0, `a fixture spelling its numbers as strings should plan, exited ${strings.exit}`);
+  if (integers.exit !== 0 || strings.exit !== 0) return;
+
+  check(
+    integers.result.run_id === strings.result.run_id,
+    `the two spellings derived different run ids: ${integers.result.run_id} vs ${strings.result.run_id}`,
+  );
+  const bytesOf = (planned) => readFileSync(join(planned.runsDir, planned.result.run_id, 'plan.json'), 'utf8');
+  check(bytesOf(integers) === bytesOf(strings), 'the two spellings produced different plan bytes');
+}
+
 // =============================================================================
 // run_id covers the WHOLE resolved profile (Issue #157)
 // =============================================================================
@@ -5947,6 +5994,7 @@ function main() {
   const caseIds = readdirSync(CASES_DIR).filter((name) => existsSync(join(CASES_DIR, name, 'case.json'))).sort();
   for (const caseId of caseIds) runCase(caseId);
   rerunSemanticsTest();
+  issueFixtureSpellingTest();
 
   log('  -- run id --');
   runIdCoversProfileTest();

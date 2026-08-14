@@ -1,0 +1,13 @@
+{
+  "description": "Issue #208: `\"12.9\"` は 12 として読まれない。0.29.0 までの読み口は `Number.parseInt` で、これは数を読むのではなく数の PREFIX を読む —— この fixture を `--issues 12` で回すと exit 0 で plan が出ていた。書き間違いが落ちるのではなく **別の Issue が計画される**のがこの経路の害であり、落ちるより悪い。今は `load_error` / exit 6 で、message は読めなかった値そのものを引用する。",
+  "args": ["12", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "--issue-json entry 0 has a \"number\" that is not an integer: \"12.9\""
+    ],
+    "plan_null": true
+  }
+}

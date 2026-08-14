@@ -1,0 +1,13 @@
+{
+  "description": "Issue #208: `\"482abc\"` は 482 として読まれない。79 と同じ誤読経路のもう一方の形（末尾のゴミ）で、両方を固定するのは `parseInt` の寛容さが「小数を切る」ことと「前置詞だけ読む」ことの2つだからである。整数として読めるのは整数そのもの（`482`）と整数だけからなる文字列（`\"482\"`）に限る。",
+  "args": ["482", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "--issue-json entry 0 has a \"number\" that is not an integer: \"482abc\""
+    ],
+    "plan_null": true
+  }
+}

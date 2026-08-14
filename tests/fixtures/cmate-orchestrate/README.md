@@ -132,6 +132,11 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 | `75-integration-baseline-declared-empty` | **宣言された `[]` が `[]` のまま plan に載るか**（#195 の固定事項2）。merge の解決は key の**存在**で分岐するので、空宣言を落とす loader は「統合検証は無い」を「未宣言」と同じにしてしまい、merge から見て**区別が付かなくなる**（merge 側の測定は `m30`） |
 | `76-integration-baseline-reject-not-array` | 配列でない（素の文字列）宣言を拒否するか。1要素の配列に丸める実装は `"npm run lint && npm test"` を whitespace 分割で1 command として回す（runner は shell を経由しない）ので、**違う argv を測って緑にする** |
 | `77-integration-baseline-reject-item-type` | 要素が文字列でない（入れ子配列）宣言を、要素単位でなく**丸ごと**拒否するか。`String(["bin/verify-all"])` は文字列として通ってしまうので、強制変換する loader は2要素になった瞬間に comma 連結の command を黙って作る。**検証集合の1本だけが走らない**のは本 Issue が消しに来た緑の形である |
+| `78-issue-fixture-reject-non-object` | object でない `--issue-json` 要素を捨てず、fixture ごと拒否するか（#208）。要求した番号は在って読めるのに止まるのが要点 —— 読める分だけで組んだ plan は「測っていない Issue を測ったことにした plan」である。5件とも #208 以前の runner では **exit 0 で plan が出ていた** |
+| `79-issue-fixture-reject-fractional-number` | `"12.9"` が 12 として読まれないか。`parseInt` は数ではなく数の前置部分を読むので、この fixture を `--issues 12` で回すと plan が出ていた。**書き間違いが落ちるのではなく別の Issue が計画される**のがこの経路の害である |
+| `80-issue-fixture-reject-duplicate-number` | 同じ `number` の重複を後勝ちにせず拒否するか。2要素は別の対象ファイル・別の受入条件を書いており、どちらを意図したかは planner に決められない。message が衝突した2要素の index を両方名指しすることも固定する |
+| `81-issue-fixture-reject-number-prefix` | `"482abc"` が 482 として読まれないか（79 と対の誤読形）。整数として読めるのは整数そのものと整数だけからなる文字列に限る |
+| `82-issue-fixture-reject-number-absent` | `number` が**無い**要素と**読めない**要素が別の message になるか。同じ文言に丸めると、著者は key の書き忘れと値の書き損ねを file を読み直して判別することになる |
 
 ## dispatch case 一覧
 
@@ -434,6 +439,7 @@ plan は入力の純粋関数なので、Agent の種類によらず同じ plan 
 
 | suite | 何を見るための suite か |
 |---|---|
+| **issue fixture の綴り**（#208） | `--issue-json` の `number` を `200` と書いた fixture と `"200"` と書いた fixture が、**同じ run_id・同じ plan bytes** を出すか。#208 は読めない要素を `load_error` へ締めた（refusal は case `78`〜`82`）が、締めた副作用として**受理する綴りが狭まっていない**ことは refusal case では測れない。2形は `gh` が返す形と手書き fixture の形であり、plan-contract 第1.1節はこれを同じ入力だと約束している —— 片方が別の run directory に落ちる実装は、#208 が閉じたのと同じ欠陥（著者が言ったつもりのない差で plan の同一性が変わる）である |
 | **run id vs profile**（#157 / #180 / #196 / #195） | profile を1 field だけ変えた2つの plan が**別の run_id になる**か（かつ、その field が本当に plan を動かしているか）。key の並べ替えでは id が割れないこと、同一入力の再実行は同じ id で `run_exists` に落ちること。variants 表の7件目が `dispatch_defaults` で、これは #180 が求めた性質が**追加の実装なしに**付いてきたことの測定である（署名は field を列挙しないので、loader が受理した瞬間に成立する）。並べ替えの assert は**宣言の内側の key 順**についても1件持つ —— 本 field は値が複数 key の object である最初の profile field なので、組み直しを省いた loader は「profile の2行を入れ替えただけ」で run_id を割る。8件目が `integration_baseline`（#195）で、ここでは性質の意味が1段強い —— **書き換えたのは「合格の定義」そのもの**なので、id を共有して既存 run directory を再利用すれば、差し替える前の定義で merge して「検証した」と報告することになる |
 | contract parity | runner が叩く `commandmate` の subcommand と flag が `commandmate-cli-contract.json` の範囲内か（実 CLI が在れば実物とも突き合わせる） |
 | launcher resolution | `--cli` の多トークン展開・`$CM` へのフォールバック・起動不能な launcher の拒否（#37） |

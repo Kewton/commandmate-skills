@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": "482abc",
+      "title": "fix: number に余分な文字が混じる",
+      "body": "## 対象ファイル\n- `src/loader.ts`\n\n## Acceptance criteria\n- [ ] 482 として読まれない\n",
+      "labels": ["bug"]
+    }
+  ]
+}
