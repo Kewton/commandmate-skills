@@ -3,7 +3,7 @@
 #
 #   bash tests/fixtures/cmate-issue-authoring/run_tests.sh
 #
-# Five things are proved here, in this order:
+# Six things are proved here, in this order:
 #
 #  1. **The validator is not a rubber stamp.** Every rule it claims to enforce is
 #     exercised by injecting one mutation into a conforming plan and requiring
@@ -15,7 +15,9 @@
 #     mutating verbs.
 #  3. **The output reaches the target quality.** The conforming plan is rendered
 #     the way Phase 2 renders it and fed to the real cmate-orchestrate planner,
-#     which must produce a plan with zero blocking questions.
+#     which must raise no blocking question the plan had not already declared as
+#     an open question — and must raise every one that it had, verbatim and in
+#     order.
 #  4. **The planner mirror has not drifted.** `mirror-conformance.mjs` compares
 #     the mirrored extraction constants byte for byte and runs both copies over a
 #     corpus, so the validator cannot go on telling an author their body is ready
@@ -26,13 +28,16 @@
 #     read back by the actual planner, and held byte-identical to the 正本 by
 #     `acceptance-gates-conformance.mjs`.
 #  6. **The open-questions notation the producing side writes is the one the
-#     planner reads** (Issue #198). That producer is `cmate-issue-refinement`,
-#     which ships instructions and no scripts, so the rule lives as prose there
-#     and as `render()`/`blocking()` in `open-questions-conformance.mjs` — which
-#     feeds everything it renders to the real planner rather than to a second
-#     description of it. Producing-side notation conformance already lived in this
-#     suite (item 5 checks blocks shipped by both producing packages), so this one
-#     runs here too; the `cmate-issue-authoring` mirror of it is a separate Issue.
+#     planner reads** (Issues #198 and #209). There are two producers and they are
+#     held differently: `cmate-issue-refinement` ships instructions and no scripts,
+#     so its rule lives as prose there and as `render()`/`blocking()` in
+#     `open-questions-conformance.mjs`; `cmate-issue-authoring` ships code, so its
+#     copy of the planner's reader is compared byte for byte. Both are then
+#     required to emit the same bytes. The suite additionally pins the projection
+#     itself: `open_questions[]` is the statement and the body's block is derived
+#     from it, checked in BOTH directions — a declared question missing from a body
+#     is the omission this notation exists to remove, and before #209 the fixture
+#     that has one validated clean.
 #
 # Requires bash, node and the standard POSIX tools. No network: the planner runs
 # from a fixture, and the `gh` on PATH is a shim that only writes a log.
@@ -192,7 +197,12 @@ mutant known_dependency "$FULL" set /issues/1/depends_on '["rotation-metrics"]'
 mutant acyclic_dependencies "$FULL" set /issues/0/depends_on '["rotation-metrics"]'
 mutant dry_run_has_no_mutating_command "$FULL" set /commands/0/mutating true
 mutant duplicate_needs_open_question "$FULL" set /open_questions '[]'
-mutant duplicate_needs_open_question "$FULL" set /open_questions/0/blocks '[]'
+# The other direction: a suspicion promoted to `duplicate` with nothing blocking
+# it. Clearing one question's `blocks` used to be the second case here and no
+# longer reaches the rule — valid-full declares two questions on that key since
+# Issue #209, so the remaining one still blocks it. Making a DIFFERENT suspicion
+# a duplicate is the mutation that isolates the rule again.
+mutant duplicate_needs_open_question "$FULL" set /duplicate_suspicions/0/verdict '"duplicate"'
 mutant known_duplicate_target "$FULL" set /duplicate_suspicions/0/issue_key '"no-such-issue"'
 mutant known_question_target "$FULL" set /open_questions/0/blocks '["no-such-issue"]'
 mutant unique_question_id "$FULL" set /open_questions '[{"id":"q-dup","question":"a","why_blocking":"b","options":[],"blocks":["reuse-detection-tests"]},{"id":"q-dup","question":"c","why_blocking":"d","options":[],"blocks":[]}]'
@@ -307,6 +317,102 @@ else
     "the emitter printed:\n$(cat "$WORK/rendered-block.txt")"
 fi
 
+# The open-questions notation (Issue #209). `open_questions[]` is the statement
+# and the block is its projection, so every case here mutates ONE of the two and
+# requires the disagreement to be found. valid-full carries two blocking questions
+# on `reuse-detection-tests`, which is what makes the projection non-trivial:
+# order, membership and the exact bytes are all observable.
+printf '\n== open questions: the body states what the plan says is undecided ==\n'
+
+OQ_BODY_HEAD='再利用された refresh token を replay する回帰テストを追加する。\n\n## 対象ファイル\n\n- `tests/auth/refresh.test.ts`\n\n'
+OQ_ITEMS='  - PR #1188 の replay ケースで足りるか、rotation 前提の追加ケースが要るか\n  - replay 用の fixture を `tests/auth/fixtures/replay.json` に置くか、テスト内に埋めるか\n'
+OQ_CRITERIA='## 受入条件\n\n- [ ] `npm test -- src/auth` が新規ケースを含めて exit 0 で終わる\n\n'
+OQ_TAIL='## 依存\n\n- depends on {{issue:session-store-rotation}}\n'
+
+# The array moved and the body did not.
+mutant open_questions_block_is_derived "$FULL" set /open_questions/0/question '"別の問いに差し替えた文"'
+mutant open_questions_block_is_derived "$FULL" set /open_questions/1/blocks '[]'
+# The body dropped the block: the exact omission this rule exists for. Before
+# Issue #209 this plan was VALID and the Issue reached dispatch with nothing
+# undecided written down.
+mutant open_questions_block_is_derived "$FULL" set /issues/2/body \
+  "\"$OQ_BODY_HEAD$OQ_CRITERIA$OQ_TAIL\""
+# ... and a body that carries a block for an issue nothing blocks. A stop nobody
+# can answer from the artifact is not better than no stop.
+mutant open_questions_block_is_derived "$FULL" set /issues/1/body \
+  "\"rotate 回数と再利用検知回数を metrics endpoint から取得できるようにする。\\n\\n## 対象ファイル\\n\\n- \`src/metrics/auth.ts\`\\n\\n## 受入条件\\n\\n- [ ] \`npm test -- src/metrics\` が exit 0 で終わる\\n\\n## 依存\\n\\n- depends on {{issue:session-store-rotation}}\\n\\n\`\`\`open-questions\\nversion: 1\\nquestions:\\n  - 誰も宣言していない問い\\n\`\`\`\\n\""
+
+# Readable, same questions, not the bytes the emitter writes.
+mutant open_questions_block_is_canonical "$FULL" set /issues/2/body \
+  "\"$OQ_BODY_HEAD$OQ_CRITERIA$OQ_TAIL\\n\`\`\`open-questions\\n# 未決\\nversion: 1\\nquestions:\\n$OQ_ITEMS\`\`\`\\n\""
+
+# Not readable at all. "Broken" and "absent" are different states and the planner
+# refuses the first with open_question_block_invalid rather than rounding it down.
+mutant open_questions_block_parses "$FULL" set /issues/2/body \
+  "\"$OQ_BODY_HEAD$OQ_CRITERIA$OQ_TAIL\\n\`\`\`open-questions\\nversion: 2\\nquestions:\\n$OQ_ITEMS\`\`\`\\n\""
+mutant open_questions_block_parses "$FULL" set /issues/2/body \
+  "\"$OQ_BODY_HEAD$OQ_CRITERIA$OQ_TAIL\\n\`\`\`open-questions\\nversion: 1\\nquestions:\\n   - 3 スペースは 2 スペースではない\\n\`\`\`\\n\""
+
+# The projection is not writable as a block at all. Neither is repaired: a
+# question rewritten to fit a serializer stops meaning what the plan meant.
+mutant open_questions_are_representable "$FULL" set /open_questions \
+  '[{"id":"q-a","question":"同じ文","why_blocking":"a","options":[],"blocks":["reuse-detection-tests"]},{"id":"q-b","question":"同じ文","why_blocking":"b","options":[],"blocks":["reuse-detection-tests"]}]'
+mutant open_questions_are_representable "$FULL" set /open_questions \
+  '[{"id":"q-a","question":"& で始まる問いは YAML の予約文字","why_blocking":"a","options":[],"blocks":["reuse-detection-tests"]}]'
+# 33 on one issue. The list is NOT cut to fit — a cut block would claim the Issue
+# has fewer undecidables than it has, which is the silent drop this whole notation
+# exists to remove. The finding says to split the Issue instead.
+OQ_OVER_BOUND=$(node -e 'process.stdout.write(JSON.stringify(Array.from({length: 33}, (_, index) => ({
+  id: `q-${index}`, question: `question number ${index + 1}`, why_blocking: "b", options: [],
+  blocks: ["reuse-detection-tests"],
+}))))')
+mutant open_questions_are_representable "$FULL" set /open_questions "$OQ_OVER_BOUND"
+
+# The strip, measured. The planner removes the block before every prose extractor
+# runs, so a mirror that forgot to would read `  - PR #1188 …` as an acceptance
+# criterion and report this body ready while the real planner asks its blocking
+# question — and would call a path named inside a question a file the worker may
+# write. Both halves are one mutation each, and each fires only if the strip is
+# there.
+mutant planner_ready "$FULL" set /issues/2/body \
+  "\"$OQ_BODY_HEAD## 受入条件\\n\\n\`\`\`open-questions\\nversion: 1\\nquestions:\\n$OQ_ITEMS\`\`\`\\n\\n$OQ_TAIL\""
+mutant body_lists_target_files "$FULL" set /issues/2/target_files \
+  '["tests/auth/refresh.test.ts","tests/auth/fixtures/replay.json"]'
+
+printf '\n== open questions: the emitter cannot invent a block ==\n'
+expect_exit 'the emitter refuses a key the plan does not declare' 2 \
+  "$FULL" --render-open-questions no-such-issue
+expect_exit 'the emitter refuses to render two different blocks at once' 2 \
+  "$FULL" --render-open-questions reuse-detection-tests --render-acceptance-gates validate
+expect_exit 'the emitter needs a plan to project from' 2 --render-open-questions reuse-detection-tests
+expect_exit 'the emitter accepts a key the plan declares' 0 \
+  "$FULL" --render-open-questions reuse-detection-tests
+# An issue nothing blocks gets no block, not an empty one: the planner refuses a
+# block that asks nothing, so "" is the only correct output here.
+expect_exit 'an issue nothing blocks renders no block' 0 "$FULL" --render-open-questions rotation-metrics
+if [ -z "$(node "$VALIDATOR" "$FULL" --render-open-questions rotation-metrics 2>/dev/null)" ]; then
+  pass 'an issue nothing blocks prints nothing on stdout'
+else
+  fail 'an issue nothing blocks prints nothing on stdout' 'the emitter wrote a block for an issue with no open question'
+fi
+
+# The fixture body was not typed by hand either: it is what the emitter prints
+# from the plan's own open_questions[]. A body and an emitter that drift apart
+# would make every case above test the fixture rather than the package.
+node "$VALIDATOR" "$FULL" --render-open-questions reuse-detection-tests > "$WORK/rendered-questions.txt" 2>/dev/null
+if node -e '
+const { readFileSync } = require("node:fs");
+const plan = JSON.parse(readFileSync(process.argv[1], "utf8"));
+const block = readFileSync(process.argv[2], "utf8");
+const issue = plan.issues.find((entry) => entry.key === "reuse-detection-tests");
+process.exit(issue.body.includes(block) ? 0 : 1);
+' "$FULL" "$WORK/rendered-questions.txt"; then
+  pass 'the fixture body carries exactly what the open-questions emitter prints'
+else
+  fail 'the fixture body carries exactly what the open-questions emitter prints' \
+    "the emitter printed:\n$(cat "$WORK/rendered-questions.txt")"
+fi
+
 printf '\n== the run itself failing is not the plan failing ==\n'
 expect_exit 'no argument is a usage error' 2
 expect_exit 'a missing plan file is an I/O error' 2 "$WORK/does-not-exist.json"
@@ -371,11 +477,12 @@ else
   fail 'the planner produced a plan with zero blocking questions' "the planner failed: $(cat "$WORK/orchestrate.out")"
 fi
 
-if grep -q '"code": "open_questions"' "$WORK/runs/dogfood/plan.json" 2>/dev/null; then
-  fail 'the plan carries no open_questions risk factor' 'the planner recorded an open_questions risk factor'
-else
-  pass 'the plan carries no open_questions risk factor'
-fi
+# The open_questions risk factor is asserted inside assert-planner-clean.mjs,
+# against the split plan's own open_questions[] rather than against a constant:
+# valid-full declares one blocking question, so the factor MUST be there and must
+# count one. Before Issue #209 that question reached no body, the factor was
+# absent, and this suite asserted the absence — which was the defect, stated as a
+# passing test.
 
 # The same dogfood for the notation: the block goes through the real planner and
 # has to come back as the same ids in the same order, and the plan that declares

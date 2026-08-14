@@ -173,8 +173,8 @@ files:
     executable: false
     script: false
   - path: references/open-questions-notation.md
-    sha256: 74588f8e41c92f85d938b6ebf0ef1baed57d9df2cbb41e0c1628c20bb7b6be59
-    size: 8220
+    sha256: 42ca72f7c0980ab1c47d01911f6e579d87c4cf39d62a1a5f009dbd9e4b3b17de
+    size: 9597
     kind: instruction
     executable: false
     script: false

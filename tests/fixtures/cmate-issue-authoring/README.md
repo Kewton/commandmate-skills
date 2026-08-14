@@ -43,11 +43,14 @@ exit code は 3 値である。`1`（計画が invalid）と `2`（run 自体の
 （`{{issue:<key>}}` → `#<番号>`）、**実物の `skills/cmate-orchestrate/scripts/orchestrate.mjs`**
 に食わせる。`assert-planner-clean.mjs` が、生成された execution plan について
 
-- どの Issue にも blocking question が無い
+- 計画が宣言した open question **以外の** blocking question が無い（宣言したものは
+  逐語・順序どおりに立っていること。#209 以前は「1 件も無いこと」だったが、それは
+  未決が本文に載っていなかったという欠陥の裏返しだった）
 - objective・受入条件・対象 file が planner に読み取れている
 - 依存が計画どおり復元されている（多くも少なくもない）
 
-ことを確かめ、plan に `open_questions` risk factor が載っていないことも確認する。
+ことを確かめ、`open_questions` risk factor が計画の宣言どおりの件数で載っていることも
+確認する。
 
 planner の抽出が変われば、ここが落ちる。落ちたら
 `skills/cmate-issue-authoring/references/issue-body-contract.md` と validator の
@@ -115,40 +118,65 @@ suite 側では、これに加えて次を測っている。
 注入**する。そこの差分がミラーの乖離を隠したり、逆に無いものを作ったりしないためである
 （`SYSTEM_ROOTS` は各 file 自身のものを読むので、この集合の乖離は捕まる）。
 
-### 6. 未決の問い記法の生産側が正本と一致していること（Issue #198）
+### 6. 未決の問い記法の生産側が正本と一致していること（Issue #198 / #209）
 
 ` ```open-questions ` 記法（[#178](https://github.com/Kewton/commandmate-skills/issues/178)）は
 **読む側から先に**入った。planner は 0.28.0 からブロックを読むが、書く側が無かった。
-書く側は `cmate-issue-refinement` で、そこは `scripts/` を持たない指示駆動の package である
-——つまり突き合わせる関数本体が無い。
+#198 で `cmate-issue-refinement` が、#209 で `cmate-issue-authoring` が繋がり、
+生産側は 2 つになった。**種類が違うので、押さえ方も違う。**
 
-したがって `open-questions-conformance.mjs` は、生成規則
-（`skills/cmate-issue-refinement/references/open-questions.md`）を `render()` と `blocking()`
-として**この file に 1 つだけ**転写し、その出力を**実物の planner** に食わせる。
-散文の写しを 2 つ置いて見比べるのではなく、片方を実行して読ませるのがこの file の形である。
+- `cmate-issue-refinement` は `scripts/` を持たない指示駆動の package である ——
+  突き合わせる関数本体が無い。したがって生成規則
+  （`references/open-questions.md`）を `render()` と `blocking()` として
+  **この file に 1 つだけ**転写し、その出力を**実物の planner** に食わせる。
+  散文の写しを 2 つ置いて見比べるのではなく、片方を実行して読ませるのがこの形である。
+- `cmate-issue-authoring` は code を出す。したがって
+  `acceptance-gates-conformance.mjs` と同じ押さえ方 —— 定数の byte 一致、関数本体の
+  byte 一致（`planner` prefix と comment だけ正規化）、corpus での挙動一致 —— を当てる。
+- そのうえで**2 つの生産側が同じ bytes を出すこと**を要求する。生産側が 2 つあるのに
+  形が 2 つあってはならない。
 
 固定しているもの。
 
 1. **生産側の散文が、消費側の code の値を書いている**こと（上限 `32` と info string
-   `open-questions` が literal として在ること、正本の file 名を名指していること）。
-   二重に書くしかない 1 個の数値が腐らないようにする層である。
-2. **package が同梱するブロックが、そのまま planner に読める**こと、かつ
+   `open-questions` が literal として在ること、正本の file 名を名指していること）を
+   **両方の規則文書について**。二重に書くしかない 1 個の数値が腐らないようにする層である。
+2. **両 package が同梱するブロックが、そのまま planner に読める**こと、かつ
    **自分の questions から描き直した形と byte 一致**すること。例が 1 つも無ければ **fail**。
 3. **corpus が実 parser を往復する**こと（1 件・上限ちょうど 32 件・文中の `#`・backtick・
-   CJK・先頭のハイフン）。読み返した list が順序ごと一致する。
+   CJK・先頭のハイフン）。読み返した list が順序ごと一致し、authoring の renderer が
+   同じ bytes を出す。
 4. **規則が挙げる制約が実際に効いている**こと。規則が「出すな」と言う形
    （0 件・空文字・完全一致の重複・改行を含む問い・33 件・YAML 予約文字始まり）を実 parser に
-   食わせ、**`open_question_block_invalid` で拒否されること**まで確認する。
-   一度も止めたことのない制約は制約ではない。
-5. **ブロックが `open_questions[]` の射影である**こと（`blocks_required_section` だけが
-   決める・配列順のまま）、および result schema の `open_questions_block` pattern が
+   食わせ、**`open_question_block_invalid` で拒否されること**、および authoring の写しが
+   **同じ理由で**拒否することまで確認する。一度も止めたことのない制約は制約ではない。
+5. **strip が一致している**こと。planner は抽出器を走らせる前にブロックを剥がす。
+   剥がし忘れた写しは、問いの `  - ` 行を受入条件と読み、問いの中の backtick path を
+   「worker が書いてよい file」と読む。両者の剥がし結果を corpus で byte 比較する。
+6. **ブロックが配列の射影である**こと —— refinement は `blocks_required_section` だけが
+   決め、authoring は `blocks` がその Issue の `key` を名指すことだけが決める。どちらも
+   配列順のまま。加えて refinement の result schema の `open_questions_block` pattern が
    規則の出力を受け取り、人が手で直さないと貼れない形を拒むこと。
-6. **実物の planner binary で end-to-end**。ブロックを載せた本文は 1 件につき 1 件の
+7. **実物の planner binary で end-to-end**。ブロックを載せた本文は 1 件につき 1 件の
    blocking question を逐語・順序どおりに返し、**ブロックだけ消した双子の本文**は 1 件も返さない。
    緑だけの fixture は証拠にしない（正本 第6節と同じ二点測定）。
 
-`cmate-issue-authoring` 側のミラーは本 Issue の範囲外であり、入ったらこの file に
-2 つ目の生産側が増える。
+suite 側では、これに加えて次を測っている。
+
+- `cases/valid-full.json` の `reuse-detection-tests` は blocking な open question を
+  2 件持ち、その本文は **renderer の出力そのもの**である（byte 比較で固定）。
+- 配列と本文が食い違う 4 形（問いを差し替えた・`blocks` を空にした・本文からブロックを
+  消した・宣言していない問いを本文に書いた）が `open_questions_block_is_derived` で落ちること。
+  **3 つ目が本題である** —— #209 以前、その計画は VALID だった。
+- 射影が書けない 3 形（完全一致の重複・YAML 予約文字始まり・33 件）が
+  `open_questions_are_representable` で落ちること。**33 件は切らない**。
+- **strip が効いていること**を計画側から 1 変異ずつ測る。受入条件をブロックの中にしか
+  置かない本文は `planner_ready` で落ち、ブロックの中にしか現れない path を
+  `target_files` に書いた計画は `body_lists_target_files` で落ちる。
+  剥がし忘れた写しでは**どちらも通ってしまう**（実測済み）。
+- `assert-planner-clean.mjs` が、実物の planner に食わせた結果について
+  「計画が宣言した open question**だけ**を逐語・順序どおりに立てたこと」と
+  「問いの中にしか現れない path が `suspected_files` に入っていないこと」を確かめる。
 
 どの conformance テストも単体で実行できる。
 
@@ -163,7 +191,7 @@ node tests/fixtures/cmate-issue-authoring/open-questions-conformance.mjs
 | File | 役割 |
 |---|---|
 | `run_tests.sh` | suite 本体 |
-| `cases/valid-full.json` | 依存・重複疑い・open question を含む適合計画 |
+| `cases/valid-full.json` | 依存・重複疑い・open question（本文に `open-questions` ブロック 1 個）を含む適合計画 |
 | `cases/valid-minimal.json` | 最小の適合計画（Issue 1 件） |
 | `cases/valid-acceptance-gates.json` | 実在するゲートを `require:` した適合計画 |
 | `cases/valid-unmeasurable.json` | 測れない受入条件をブロックにしなかった適合計画 |
@@ -173,4 +201,4 @@ node tests/fixtures/cmate-issue-authoring/open-questions-conformance.mjs
 | `assert-planner-gates.mjs` | 本文のブロックと planner が読んだ `acceptance_gates` の突き合わせ |
 | `mirror-conformance.mjs` | planner mirror の定数一致と挙動一致（単体実行可） |
 | `acceptance-gates-conformance.mjs` | 受入ゲート記法の一致（定数・関数本体・corpus・正本の例。単体実行可） |
-| `open-questions-conformance.mjs` | 未決の問い記法の生産側一致（生成規則の転写・corpus・拒否形・実 planner での end-to-end。単体実行可） |
+| `open-questions-conformance.mjs` | 未決の問い記法の生産側 2 つの一致（refinement は生成規則の転写、authoring は定数・関数本体の byte 一致。corpus・拒否形・strip・実 planner での end-to-end。単体実行可） |

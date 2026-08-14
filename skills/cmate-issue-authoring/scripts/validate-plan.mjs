@@ -3,6 +3,7 @@
 //   node scripts/validate-plan.mjs <plan.json> [--schema <path>] [--json]
 //   node scripts/validate-plan.mjs <plan.json> --checkout <path>
 //   node scripts/validate-plan.mjs <plan.json> --derive-id
+//   node scripts/validate-plan.mjs <plan.json> --render-open-questions <issue-key>
 //   node scripts/validate-plan.mjs --render-acceptance-gates <id,id> --checkout <path>
 //
 // Two layers, because one of them is not enough:
@@ -13,9 +14,11 @@
 //  2. The rules a JSON Schema cannot state: keys are unique, dependencies form a
 //     DAG, a dry-run plan records no mutating command, a suspected duplicate is
 //     blocked by an open question, an `acceptance-gates` block names only gate
-//     ids that exist in a `.commandmate/verify.yaml` this run actually read, and
-//     — the one that decides whether this Skill did its job — every rendered body
-//     survives the cmate-orchestrate planner with zero blocking questions.
+//     ids that exist in a `.commandmate/verify.yaml` this run actually read, every
+//     body states the open questions the plan says block it, and — the one that
+//     decides whether this Skill did its job — every rendered body survives the
+//     cmate-orchestrate planner with no blocking question the plan did not
+//     already declare.
 //
 // Exit status: 0 the plan is valid, 1 the plan is invalid, 2 the run itself
 // failed (bad usage, unreadable file). A validator that cannot distinguish "your
@@ -46,6 +49,10 @@ const USAGE = `cmate-issue-authoring split-plan validator
   --render-acceptance-gates <id,id>
                       Print the canonical block for those gate ids and exit. Needs
                       --checkout, and every id must exist there.
+  --render-open-questions <issue-key>
+                      Print the canonical \`open-questions\` block for that issue —
+                      the plan's own open_questions[] whose \`blocks\` names the key,
+                      in array order — then exit. Prints nothing when none does.
   --derive-id         Print the plan_id the plan's own inputs imply, then exit.
   --json              Emit findings as JSON instead of one line each.
   --help              Show this help.
@@ -196,12 +203,220 @@ function validateAgainstSchema(value, schema, root, pointer, out) {
 }
 
 // =============================================================================
+// Open questions mirror
+// =============================================================================
+//
+// The second machine-readable block an Issue body carries. The notation's 正本 is
+// `skills/cmate-orchestrate/references/open-questions-notation.md`; this package
+// is a MIRROR of it and never extends it
+// ([open-questions.md](../references/open-questions.md)).
+//
+// It went in reader-first: the planner has parsed the block since 0.28.0 and
+// nothing wrote one, so an author who left something undecided had to transcribe
+// it by hand — and a transcription that is skipped is an undecided thing that
+// reaches a worker as a free choice, which is Issue #178 pointed at the authoring
+// path instead of the refinement one.
+//
+// One reader is mirrored here, verbatim, comments included: the planner's block
+// reader, so a body can be told before the Issue exists whether the block it
+// carries will be read or will stop the run. The two halves of that reader are
+// both load-bearing here:
+//
+//  1. `plannerReadOpenQuestions` decides whether the block PARSES, which is what
+//     lets this package refuse to write one the planner would refuse to read;
+//  2. `plannerStripOpenQuestionBlocks` is applied to the body before every prose
+//     extractor below, exactly as `analyzeIssue` applies it. Without the strip
+//     this mirror would read a `  - …` question as an acceptance criterion and a
+//     backticked path inside a question as a file to WRITE, and would therefore
+//     call a body ready that the planner calls unready.
+//
+// As with the mirrors below, no version number is written here: the invariant is
+// that this mirror changes in the same commit as the code it copies, and the
+// repository's conformance test
+// (`tests/fixtures/cmate-issue-authoring/open-questions-conformance.mjs`) holds
+// the two together — constants byte for byte, function bodies modulo the
+// documented rename, and behaviour over a corpus.
+
+// ---- the block as the planner reads it (verbatim mirror) --------------------
+
+const OPEN_QUESTIONS_INFO = 'open-questions';
+const OPEN_QUESTIONS_VERSION = 1;
+
+// Counted on its own so "two blocks" is detected even when the second one is
+// malformed; `m` makes `^`/`$` line anchors and the info string must be the whole
+// word, so ```open-questions-v2 is not this block. Same shape as
+// ACCEPTANCE_GATES_OPEN_RE / ACCEPTANCE_GATES_BLOCK_RE below, on purpose.
+const OPEN_QUESTIONS_OPEN_RE = /^```open-questions[ \t]*$/gm;
+const OPEN_QUESTIONS_BLOCK_RE = /^```open-questions[ \t]*\r?\n([\s\S]*?)^```[ \t]*(?:\r?\n|$)/gm;
+
+// Same bound as the acceptance block's id list. An issue that cannot state what
+// it is doing in 32 undecidables is not an issue, it is a design phase.
+const MAX_OPEN_QUESTIONS = 32;
+
+// A question's value is free text, so the id regex that rejects YAML's reserved
+// leading characters for gate ids cannot do it here. These are the shapes
+// acceptance-gates-notation.md §3 forbids outright (anchor / alias / flow
+// collection / block scalar) and they are refused for the same reason: read as
+// plain text they would silently mean something other than what a YAML reader
+// would make of them.
+const OPEN_QUESTION_RESERVED_RE = /^[&*[{|>]/;
+
+// Stripped from the prose extractors' input for the same two measured reasons the
+// acceptance block is (see stripAcceptanceGateBlocks): the fence pattern in
+// `extractTestExpectations` cannot match `open-questions` as an INFO STRING (the
+// hyphen is outside [a-zA-Z]) but does match this block's CLOSING fence as an
+// opening one, swallowing the following ```bash block whole — measured on fixture
+// 59-open-questions-declared, where 3 test_expectations drop to 1 — and a
+// `  - …` line inside the block is shaped like a bullet, so an unstripped body
+// reads the author's questions as acceptance criteria and any path inside one as
+// a file to WRITE. The second half is not hypothetical either: the same fixture's
+// `src/legacy/topo.ts`, named inside a question, reaches scope.allow with its
+// four derived test companions behind it.
+function plannerStripOpenQuestionBlocks(text) {
+  return String(text).replace(OPEN_QUESTIONS_BLOCK_RE, '');
+}
+
+function plannerCountOpenQuestionBlocks(text) {
+  return [...String(text).matchAll(OPEN_QUESTIONS_OPEN_RE)].length;
+}
+
+// The same YAML subset `parseAcceptanceGatesBlock` reads, with `questions:` in
+// place of `require:`. Kept as a separate function rather than parameterising the
+// gates parser: the two notations are allowed to diverge (they are separate
+// documents with separate versions), and a shared parser would make a change to
+// one silently a change to the other. Returns {ok, value} or {ok:false, reason}.
+function plannerParseOpenQuestionsBlock(raw) {
+  const bad = (reason) => ({ ok: false, reason });
+  const lines = String(raw).split(/\r?\n/);
+  const value = { version: OPEN_QUESTIONS_VERSION, questions: [] };
+  const seenKeys = new Set();
+  let sawVersion = false;
+  let section = null; // null | 'questions'
+
+  for (const line of lines) {
+    if (line.includes('\t')) return bad('a tab character is not allowed; the block is indented with 2 spaces');
+    if (line.trim() === '') continue;
+    // 行頭 `#` のみコメント: a `#` anywhere else is part of the value. Here that
+    // rule earns its keep twice over — a question ending in "…, or #63?" keeps
+    // its issue reference instead of losing half the sentence.
+    if (line.startsWith('#')) continue;
+    if (line === '---' || line === '...') return bad('YAML document markers are not part of the subset');
+
+    const indent = line.length - line.trimStart().length;
+    const content = line.slice(indent);
+
+    if (indent === 0) {
+      section = null;
+      const match = /^([a-zA-Z][a-zA-Z0-9_]*):[ \t]*(.*)$/.exec(content);
+      if (match === null) return bad(`"${content}" is not a "key: value" line at the top level`);
+      const [, key, rest] = match;
+      if (seenKeys.has(key)) return bad(`duplicate key "${key}"`);
+      seenKeys.add(key);
+      if (!sawVersion && key !== 'version') {
+        return bad('"version: 1" must be the first key of the block');
+      }
+      if (key === 'version') {
+        sawVersion = true;
+        if (rest !== String(OPEN_QUESTIONS_VERSION)) {
+          // Not rounded forward, for the reason the gates parser gives: an
+          // unknown version means the block was written against a notation this
+          // runner does not implement.
+          return bad(`version must be exactly ${OPEN_QUESTIONS_VERSION} (got "${rest}")`);
+        }
+        continue;
+      }
+      if (key === 'questions') {
+        if (rest !== '') return bad('"questions:" takes a block sequence on the following lines, not an inline value');
+        section = 'questions';
+        continue;
+      }
+      return bad(`unknown key "${key}" (the v1 block accepts only version, questions)`);
+    }
+
+    if (indent !== 2) return bad(`unexpected indentation of ${indent} space(s); list items are indented by exactly 2`);
+    if (section !== 'questions') return bad(`"${content}" is indented but no list is open above it`);
+    const item = /^-[ \t]+(.*)$/.exec(content);
+    if (item === null) return bad(`"${content}" is not a "- <question>" list item`);
+    const question = item[1];
+    if (question === '') return bad('an empty question; write the undecided thing, or delete the item');
+    if (OPEN_QUESTION_RESERVED_RE.test(question)) {
+      return bad(`"${question}" starts with a character YAML reserves (${OPEN_QUESTION_RESERVED_RE.source}); anchors, flow collections and block scalars are not part of the subset`);
+    }
+    if (value.questions.includes(question)) return bad(`duplicate question "${question}"`);
+    value.questions.push(question);
+    if (value.questions.length > MAX_OPEN_QUESTIONS) {
+      return bad(`at most ${MAX_OPEN_QUESTIONS} open questions may be declared`);
+    }
+  }
+
+  if (!sawVersion) return bad('the block declares no "version: 1"');
+  // The empty block is the same contract error `require: []` is: it announces
+  // that something is undecided and then names nothing, exactly where the author
+  // meant to state it.
+  if (value.questions.length === 0) return bad('the block asks nothing; remove it, or write at least one question under "questions:"');
+  return { ok: true, value };
+}
+
+// The whole block reading for one issue body. Returns {questions, error} —
+// `questions` is the author's list in the author's order (empty when there is no
+// block), `error` is the open question describing an unreadable block (null when
+// there is nothing to say). The two are never both set: "no block" and "broken
+// block" are different states and the second must never be rounded to the first
+// (acceptance-gates-notation.md §7, applied unchanged).
+function plannerReadOpenQuestions(body) {
+  const text = String(body ?? '');
+  const opens = plannerCountOpenQuestionBlocks(text);
+  if (opens === 0) return { questions: [], error: null };
+  const invalid = (reason) => ({
+    questions: [],
+    error: {
+      code: 'open_question_block_invalid',
+      text: `The \`${OPEN_QUESTIONS_INFO}\` block could not be read: ${reason}. `
+        + 'It is NOT treated as absent: fix the block or remove it, then re-plan. '
+        + 'The planner never reads an open question out of prose.',
+    },
+  });
+  if (opens > 1) {
+    return invalid(`the body carries ${opens} blocks and exactly one is allowed (they are not merged, and the first does not win)`);
+  }
+  const blocks = [...text.matchAll(OPEN_QUESTIONS_BLOCK_RE)];
+  if (blocks.length !== 1) return invalid('the block is never closed by a ``` fence at the start of a line');
+  const parsed = plannerParseOpenQuestionsBlock(blocks[0][1]);
+  if (!parsed.ok) return invalid(parsed.reason);
+  return { questions: parsed.value.questions, error: null };
+}
+
+// ---- the block this package emits -------------------------------------------
+//
+// The one rendering this package produces, for the reason the gates emitter
+// gives: the notation is emitted by code rather than recalled from a document.
+// The questions come from `open_questions[]` and nowhere else — this function
+// receives them already projected, so there is no second place where "which
+// questions are undecided" could be decided.
+function renderOpenQuestionsBlock(questions) {
+  const lines = ['```' + OPEN_QUESTIONS_INFO, `version: ${OPEN_QUESTIONS_VERSION}`, 'questions:'];
+  for (const question of questions) lines.push(`  - ${question}`);
+  lines.push('```');
+  return `${lines.join('\n')}\n`;
+}
+
+//: The blocking questions of one planned issue, in `open_questions[]` order.
+//: Membership is decided by `blocks` alone — the same field `duplicate_needs_open_question`
+//: reads — so the array stays the single statement of what is undecided and the
+//: block is a projection of it rather than a second copy.
+function blockingQuestionsFor(plan, key) {
+  return (plan.open_questions ?? [])
+    .filter((question) => (question?.blocks ?? []).includes(key))
+    .map((question) => String(question?.question ?? ''));
+}
+
+// =============================================================================
 // Acceptance gates mirror
 // =============================================================================
 //
-// The `acceptance-gates` block is the one machine-readable thing an Issue body
-// carries: cmate-orchestrate's planner parses it and its dispatch runner turns
-// it into the execution contract's verdict. The notation's 正本 is
+// The other machine-readable block an Issue body carries, and the one that
+// decides a verdict: cmate-orchestrate's planner parses it and its dispatch
+// runner turns it into the execution contract's verdict. The notation's 正本 is
 // `skills/cmate-orchestrate/references/acceptance-gates-notation.md`; this
 // package is a MIRROR of it and never extends it
 // ([acceptance-gates.md](../references/acceptance-gates.md)).
@@ -849,13 +1064,18 @@ const DEPENDENCY_PLACEHOLDER_RE = /\{\{issue:([a-z0-9-]+)\}\}/g;
 function checkBodies(plan, keys, out) {
   plan.issues.forEach((issue, index) => {
     // Every check below reads the body the PLANNER reads, which is the body with
-    // the acceptance-gates block removed (`analyzeIssue` strips it before every
-    // prose extractor). Reading the raw body here would make this mirror disagree
-    // with the planner exactly where it matters: a block sitting under the 受入条件
-    // heading would make `  - orchestrate-fixtures` look like an acceptance
-    // criterion, and an Issue with no prose criteria at all would be reported
-    // ready while the planner asks its blocking question.
-    const body = plannerStripAcceptanceGateBlocks(String(issue.body ?? ''));
+    // BOTH machine-readable blocks removed, in the planner's own order
+    // (`analyzeIssue` strips them before every prose extractor). Reading the raw
+    // body here would make this mirror disagree with the planner exactly where it
+    // matters: a block sitting under the 受入条件 heading would make
+    // `  - orchestrate-fixtures` look like an acceptance criterion, and an Issue
+    // with no prose criteria at all would be reported ready while the planner asks
+    // its blocking question. The open-questions block is worse in the same
+    // direction — its items are free text, so a question naming
+    // `` `src/legacy/topo.ts` `` would put a path in `suspected_files` here that
+    // the planner never sees, and this validator would call a body planner-ready
+    // whose only declared file is one nobody asked to change.
+    const body = plannerStripOpenQuestionBlocks(plannerStripAcceptanceGateBlocks(String(issue.body ?? '')));
     const pointer = `/issues/${index}`;
 
     if (firstNonEmptyLine(body) !== issue.objective) {
@@ -921,6 +1141,140 @@ function checkBodies(plan, keys, out) {
       }
     });
   });
+}
+
+// =============================================================================
+// Open questions — the rules (references/open-questions.md)
+// =============================================================================
+//
+// One sentence: **`open_questions[]` is the statement, the block is its
+// projection.** The array already records what the author refused to decide on
+// the user's behalf; before this rule existed the body said nothing about it, so
+// an Issue registered with the question still open reached dispatch as an Issue
+// with nothing undecided — and the worker decided it. That is Issue #178 on the
+// authoring path, and it is not fixed by asking authors to copy the questions
+// across by hand: a transcription that is skipped looks exactly like a plan that
+// had nothing to transcribe.
+//
+// So the projection is checked in both directions. A question that blocks an
+// issue must appear in that issue's body, and a block in a body must be exactly
+// the questions the plan says block it, in the plan's order. Neither half alone
+// is enough: checking only what is written leaves the omission (the actual
+// failure) unmeasured, and checking only what is declared would let a body carry
+// a question the plan never recorded — a stop nobody can answer from the artifact.
+//
+// Deleting the block is what records the decision (正本 §5), so a resolved
+// question leaves `open_questions[]` and the block leaves the body in the same
+// edit. The two can never disagree, because this rule re-derives one from the
+// other rather than comparing two hand-written copies.
+
+function checkOpenQuestions(plan, out) {
+  plan.issues.forEach((issue, index) => {
+    const body = String(issue.body ?? '');
+    const pointer = `/issues/${index}/body`;
+    const read = plannerReadOpenQuestions(body);
+
+    if (read.error !== null) {
+      out.add(
+        'open_questions_block_parses',
+        pointer,
+        `the planner would not read this block and would raise ${read.error.code}: ${read.error.text} ` +
+          'Render it with `--render-open-questions ' + issue.key + '` instead of writing it by hand',
+      );
+      return;
+    }
+
+    const declared = blockingQuestionsFor(plan, issue.key);
+
+    // Can the projection be written down at all? The reader itself answers, so a
+    // constraint of the notation cannot be restated (and mis-stated) here. A
+    // question that cannot be an item is not repaired: rewriting an author-facing
+    // sentence to fit a serializer is how the sentence stops meaning what the plan
+    // meant (references/open-questions.md).
+    if (declared.length > 0) {
+      const reread = plannerReadOpenQuestions(renderOpenQuestionsBlock(declared));
+      if (reread.error !== null) {
+        const ids = (plan.open_questions ?? [])
+          .filter((question) => (question?.blocks ?? []).includes(issue.key))
+          .map((question) => question?.id);
+        out.add(
+          'open_questions_are_representable',
+          pointer,
+          `the ${declared.length} open question(s) blocking "${issue.key}" (${ids.join(', ')}) cannot be ` +
+            `written as a block the planner reads: ${reread.error.text} ` +
+            (declared.length > MAX_OPEN_QUESTIONS
+              ? `${declared.length} exceeds the notation's bound of ${MAX_OPEN_QUESTIONS}. Do not cut the ` +
+                'list to fit — a cut block would claim this issue has fewer undecidables than it has. An ' +
+                'issue with more undecidables than the notation carries is one Step 4 has not finished ' +
+                'splitting, so split it'
+              : 'Rewrite the question field itself so it is one answerable sentence, and let the block ' +
+                'carry that same text'),
+        );
+        return;
+      }
+    }
+
+    if (read.questions.length > 0) {
+      const match = [...body.matchAll(OPEN_QUESTIONS_BLOCK_RE)][0];
+      const written = match[0].endsWith('\n') ? match[0] : `${match[0]}\n`;
+      const canonical = renderOpenQuestionsBlock(read.questions);
+      if (written !== canonical) {
+        out.add(
+          'open_questions_block_is_canonical',
+          pointer,
+          'the block is readable but is not the shape this package emits; render it with ' +
+            `\`--render-open-questions ${issue.key}\` and paste the result verbatim`,
+        );
+      }
+    }
+
+    if (JSON.stringify(read.questions) !== JSON.stringify(declared)) {
+      out.add(
+        'open_questions_block_is_derived',
+        pointer,
+        `the body's open-questions block is ${JSON.stringify(read.questions)} but ${JSON.stringify(declared)} ` +
+          `is what open_questions[] says blocks "${issue.key}". The array is the statement and the block is ` +
+          'its projection: ' +
+          (declared.length === 0
+            ? 'nothing in the plan blocks this issue, so its body must carry no block. Delete the block, or — ' +
+              'if the question is real — record it in open_questions[] with this key in its `blocks`, where a ' +
+              'reviewer can read it alongside its options'
+            : read.questions.length === 0
+              ? 'the body says nothing about it, so the Issue would be registered with the question still open ' +
+                'and dispatch would not stop. Render the block with ' +
+                `\`--render-open-questions ${issue.key}\` and put it in the body`
+              : `re-render it with \`--render-open-questions ${issue.key}\``),
+      );
+    }
+  });
+}
+
+//: The block a `--render-open-questions` request asks for, refused rather than
+//: repaired — the emitter is the last place a block that does not match the plan
+//: could enter a body, so it is the place that has to be unable to produce one.
+function openQuestionsBlockFromCli(plan, key) {
+  const issues = Array.isArray(plan.issues) ? plan.issues : [];
+  const keys = issues.map((issue) => issue?.key);
+  if (!keys.includes(key)) {
+    throw new Error(
+      `"${key}" is not an issue in this plan (keys: ${keys.filter((entry) => typeof entry === 'string').join(', ')})`,
+    );
+  }
+  const declared = blockingQuestionsFor(plan, key);
+  if (declared.length === 0) return '';
+  const block = renderOpenQuestionsBlock(declared);
+  const read = plannerReadOpenQuestions(block);
+  if (read.error !== null) {
+    throw new Error(
+      `the ${declared.length} open question(s) blocking "${key}" cannot be written as a block the planner ` +
+        `reads: ${read.error.text}` +
+        (declared.length > MAX_OPEN_QUESTIONS
+          ? ` The notation's bound is ${MAX_OPEN_QUESTIONS}; the list is not cut to fit, because a cut block ` +
+            'would claim the issue has fewer undecidables than it has. Split the issue instead'
+          : ''),
+    );
+  }
+  return block;
 }
 
 // =============================================================================
@@ -1072,6 +1426,7 @@ function parseArgs(argv) {
     schema: DEFAULT_SCHEMA,
     checkout: null,
     render: null,
+    renderQuestions: null,
     json: false,
     deriveId: false,
     help: false,
@@ -1096,6 +1451,10 @@ function parseArgs(argv) {
       index += 1;
       if (index >= argv.length) throw new Error('--render-acceptance-gates needs a gate id list');
       options.render = argv[index];
+    } else if (arg === '--render-open-questions') {
+      index += 1;
+      if (index >= argv.length) throw new Error('--render-open-questions needs an issue key');
+      options.renderQuestions = argv[index];
     } else if (arg.startsWith('-')) {
       throw new Error(`unknown option: ${arg}`);
     } else if (options.plan === null) {
@@ -1104,9 +1463,16 @@ function parseArgs(argv) {
       throw new Error('exactly one plan file is accepted');
     }
   }
+  if (options.render !== null && options.renderQuestions !== null) {
+    throw new Error('the two renderers print two different blocks; ask for one of them');
+  }
   if (options.render !== null && options.plan !== null) {
     throw new Error('--render-acceptance-gates prints a block; it does not validate a plan');
   }
+  // The open-questions block is derived from the plan itself, so unlike the gates
+  // renderer this one NEEDS the plan file. It still refuses to validate at the
+  // same time: a run that printed findings and a block together would leave the
+  // author reading a block whose plan had just been called invalid.
   if (!options.help && options.render === null && options.plan === null) {
     throw new Error('a plan file is required');
   }
@@ -1172,6 +1538,30 @@ function main(argv) {
     return EXIT_VALID;
   }
 
+  if (options.renderQuestions !== null) {
+    let block;
+    try {
+      block = openQuestionsBlockFromCli(plan, options.renderQuestions);
+    } catch (error) {
+      process.stderr.write(`error: ${error.message}\n`);
+      return EXIT_ERROR;
+    }
+    // Nothing on stdout when nothing blocks the issue, and the reason on stderr.
+    // An empty block is not a representable value (the planner refuses it), so
+    // "no block" is the correct body for an issue with nothing undecided — and a
+    // caller redirecting stdout to a file gets an empty file, which is what it
+    // should paste.
+    if (block === '') {
+      process.stderr.write(
+        `note: no open question in this plan blocks "${options.renderQuestions}", so there is no block to ` +
+          'write. An issue nothing is undecided about carries none\n',
+      );
+    } else {
+      process.stdout.write(block);
+    }
+    return EXIT_VALID;
+  }
+
   const findings = new Findings();
   try {
     validateAgainstSchema(plan, schema, schema, '', findings);
@@ -1191,6 +1581,7 @@ function main(argv) {
     checkDuplicateGuard(plan, keys, findings);
     checkEvidence(plan, findings);
     checkBodies(plan, keys, findings);
+    checkOpenQuestions(plan, findings);
     try {
       checkAcceptanceGates(plan, options, findings);
     } catch (error) {

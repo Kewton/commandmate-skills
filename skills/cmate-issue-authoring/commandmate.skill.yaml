@@ -98,8 +98,8 @@ risk_rationale: >-
   既存 Issue の本文編集・クローズ・ラベル張り替えは手順として禁止している。
 files:
   - path: SKILL.md
-    sha256: 215afc2ba43fa0b9e1ef443deef999bc128d32d9701dfbfc5b3364f825039cd6
-    size: 13292
+    sha256: be48233a161ce2e843f795de9912a738f635230aaaf2fdf762893f32b8fe286f
+    size: 14704
     kind: skill_md
     executable: false
     script: false
@@ -122,14 +122,20 @@ files:
     executable: false
     script: false
   - path: references/issue-body-contract.md
-    sha256: 75331b44aa85b61f70fc0e0eda637890a2f6fbbb41e16d7eca6811bcaf40f9f9
-    size: 11897
+    sha256: 9a7e3d5e1c62799f5a87840eb7de25e30b3b65779d60abf86a078a419bb727ba
+    size: 13261
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/open-questions.md
+    sha256: d4600f2c3f53caae490817a7ef14382dae3106a4849a6a6a72e51d97bca6e990
+    size: 8561
     kind: instruction
     executable: false
     script: false
   - path: references/plan-contract.md
-    sha256: 3e61db38ea4b8bf1c98f1baceb455bea2fffd2a227478371613320562ecc19f5
-    size: 11874
+    sha256: 624e4d57936f6c7a398b545811e2a75d3ea3f609f07cecb171210631225b689e
+    size: 13258
     kind: instruction
     executable: false
     script: false
@@ -158,8 +164,8 @@ files:
     executable: false
     script: false
   - path: scripts/validate-plan.mjs
-    sha256: d2bff72649af5039fe7cf677ac66402162bf0882805b270fa8942b0cd8bd055d
-    size: 52958
+    sha256: 1972f3db2af59557f1aa5b5491c828c67cb0be794ecb95c1918519f1a52a5764
+    size: 73482
     kind: script
     executable: false
     script: true

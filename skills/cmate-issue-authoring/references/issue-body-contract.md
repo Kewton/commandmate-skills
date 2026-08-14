@@ -29,12 +29,14 @@
 - src/auth/session-store.ts:118 — 現在の実装は token を再発行せず同じ値を返す
 ```
 
-節の順序は自由だが、**次の 4 つは外せない**。
+節の順序は自由だが、**次の 5 つは外せない**。
 
 1. 最初の非空行が objective であること。
 2. 受入条件の見出しと、その下の箇条書き。
 3. 対象ファイルのうち **1 つ以上が非 documentation path** であること。
 4. 依存があるなら `{{issue:<key>}}` の placeholder。
+5. この Issue を blocking する open question があるなら、末尾に `open-questions` ブロック
+   （[open-questions.md](./open-questions.md)）。無いなら置かない。
 
 ## 2. なぜこの型なのか（実測）
 
@@ -170,7 +172,23 @@ scope gate に弾かれて構造的に解決不能だった）。
 validator の写しも同じ順で動く。ブロックを出す条件と規律は
 [acceptance-gates.md](./acceptance-gates.md) が正本である。
 
-### 2.6 検証コマンド
+### 2.6 未決の問いのブロック
+
+`open-questions` ブロックも**同じ扱い**である。planner は本文から取り除いてから抽出器を
+走らせる（`analyzeIssue` は acceptance-gates → open-questions の順に剥がす）。したがって
+
+- ブロックの位置は objective・受入条件・path の抽出結果を変えない。
+- **ブロックの中身は受入条件として読まれない。** 問いは `  - ` 始まりで箇条書きに見えるが、
+  剥がされた後に読まれるので拾われない。
+- **問いの中に書いた path は `suspected_files` に入らない。** 未決の問いに現れる path は
+  「変えると決めた file」ではないので、worker の `scope.allow` にならないのが正しい。
+  変える対象なら対象ファイルの見出しに書くこと。
+
+読まれるのは 1 件につき 1 件の blocking question（`open_question_declared`）としてであり、
+それが本記法の全部である。出す条件と、`open_questions[]` から組む規則は
+[open-questions.md](./open-questions.md) が正本である。
+
+### 2.7 検証コマンド
 
 backtick か code fence の中にあり、先頭語が `make` `bash` `sh` `pytest` `go` `node`
 `python3` `python` か、対象 profile の baseline command の先頭語であるものが
@@ -185,7 +203,8 @@ backtick か code fence の中にあり、先頭語が `make` `bash` `sh` `pytes
 この型を守っているかは、計画 artifact を validator に通せば分かる。
 `planner_ready` と `body_states_objective` と `dependency_link_in_body` の 3 rule が
 上の条件をそのまま実装している（planner の抽出コードの写しである）。ブロックを持つ
-本文については `acceptance_gates_*` の 5 rule が加わる（`--checkout` が要る）。
+本文については `acceptance_gates_*` の 5 rule（`--checkout` が要る）と
+`open_questions_*` の 4 rule（要らない）が加わる。
 
 planner 側の抽出が変われば、この文書と validator の写しも**同じ commit で**変える。
 一致はリポジトリの CI が検証する。計画から本文を描画して実物の planner に食わせ
