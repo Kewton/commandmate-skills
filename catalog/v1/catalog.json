@@ -750,7 +750,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.28.0",
+      "latest": "0.29.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -1690,6 +1690,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.28.0/cmate-orchestrate-0.28.0.tar.gz",
             "sha256": "1abc52d0415060b2eef379f9872a5fdb15e1e8a3de099e568c5962f872f84882",
             "size": 605469,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.29.0",
+          "changelog": "0.28.0 以降の 5 件（#195 / #196 / #197 / #199 / #200）を公開する。\n\n主題は **0.28.0 が置いた宣言の受け皿を完成させること**である。読む側だけが先に着地していた field に書く側を足し、同じ key に同居していた目的の違う検証集合を分け、正しく書いた宣言が正しく罰されない形に揃える。\n\n- **#196**: `profile.dispatch_defaults` は dispatch 側だけが着地しており、書いた profile は plan 段階で `load_error` に落ちていた（第10.6節が自認していた非対称）。planner が受理し `publicProfile()` で `plan.profile` へ echo する。型検証（未知 key・型違い・0 以下）は planner 規約の `load_error` / exit 6 —— dispatch の `plan_invalid` / exit 3 は「plan ファイルについての事実」であり、planner にとって同じ事実は「profile ファイルについての事実」だからである。宣言しない profile の plan は 1 byte も変わらない。\n- **#195**: `--integration-verify`（#175）が profile の `baseline` を流用しており、worker の proportional な健全性確認と「合流後の統合ブランチの合格の定義」という**目的の違う検証集合が同じ key を共有していた**。baseline を軽く保つ運用では、#175 が消しに来た当の意味的衝突がすり抜ける。任意 field `integration_baseline` を分離。解決順は `integration_baseline ?? baseline` で、`??` が働くのは未宣言だけ —— **宣言済みの `[]` は fallback せず refuse する**。採った側は `merge-report.json` の `integration_verify.source` に記録し、「どちらを測ったのか」が report から読める。profile-init は起案しない。\n- **#199**: 明示宣言した harness path に付く `harness_path_in_scope` warning が run 全体を `partial` に落とし、ハーネスを成果物とする Issue が定常的にあるリポジトリでは `partial` の情報量を下げていた。warning に `severity` を導入し、**notice は status を落とさない**。既定は blocking（fail-closed）で、notice 集合は当面この 1 code のみ。severity は notice の entry にだけ書くので、notice を含まない plan は 1 byte も変わらない。「名乗る」は維持する —— 落とすのは status だけである。\n- **#197**: `scope_companions` の規則が**実際に何かに一致するか**を plan の前に確かめる手段が無かった（構文として正しく何にも一致しない規則は `load_error` でも捕まらない）。`profile-init --check <profile.json>` を追加 —— read-only で、規則ごとに一致件数と実在を報告し、0 件一致は warning に留める（裁定しない）。規則評価は `lib.mjs` へ抽出し、planner と `--check` が**同じ関数**を呼ぶ。抽出は純粋で、既存 plan は 1 byte も変わらない。\n- **#200**: `--issue-json` の fixture 形式（受け付ける 2 つの形・`labels` の 2 形・非整数 `number` の黙殺・run_id に効くこと）を plan-contract に文書化し、正準例として実在の fixture を指した。形を知るために runner のソースを読む必要はもう無い。",
+          "published_at": "2026-08-14T12:03:01Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.29.0",
+            "commit": "1bd4452d7b670b024523f5f50fbbff394123de3b"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.29.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.29.0/cmate-orchestrate-0.29.0.tar.gz",
+            "sha256": "2ddfa10688036d63d6439b133ccf9e24d508df1b13942c176cddc94e67686306",
+            "size": 643443,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
