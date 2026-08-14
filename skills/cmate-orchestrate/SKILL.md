@@ -36,9 +36,9 @@ runner は決定的なので、この文書が述べるのは「いつ使うか�
 | status | `scripts/status.mjs` | run directory の artifact を突き合わせ、phase × Issue のマトリクスを出す | **なし（read-only）** |
 
 `scripts/lib.mjs` は共有ヘルパーで、単体では起動しない。
-`scripts/profile-init.mjs` は phase ではなく、**最初に1回だけ使う準備 runner** である
-（内蔵 profile 以外のリポジトリ向けに profile draft を起案する。第3.5節・
-[profile-contract.md](./references/profile-contract.md) 第7節）。
+`scripts/profile-init.mjs` は phase ではなく、**read-only の準備 runner** である
+（profile draft の起案と、`--check` による `scope_companions` の点検。第3.5節・
+[profile-contract.md](./references/profile-contract.md) 第7節・第9.7節）。
 
 ## 1. いつ使うか / 使わないか
 
@@ -416,40 +416,41 @@ dispatch / merge の同名フラグと**同じ宣言**である。**mutation の
 正本は [uat-contract.md](./references/uat-contract.md) 第5.1〜5.2節、裁定は
 [adr-unattended-mode.md](./references/adr-unattended-mode.md) 第8節・第14.3節（実装で変えた点は第17節）。
 
-### 3.5 profile-init（profile draft の起案。plan の前に1回だけ）
+### 3.5 profile-init（profile の起案と点検。plan の前。read-only）
 
 ```
 profile-init.mjs [--repo-root <path>] [--out <path>] [--emit envelope|profile] [--repo <owner/name>] [--id <id>]
+profile-init.mjs --check <profile.json> [--repo-root <path>]
 ```
 
-内蔵 profile 以外のリポジトリで使うときの **最初の一歩**である。対象リポジトリの
-`package.json` / `Cargo.toml` / `pyproject.toml` / `go.mod` / `Makefile` /
-`.github/workflows/*.yml` / CONTRIBUTING 等 / git config を読み、profile JSON の
-**draft** を起案する。read-only で、**network も subprocess も clock も使わない**ので、
-同じ tree からは byte 単位で同じ draft が出る。
+内蔵 profile 以外のリポジトリで使うときの **最初の一歩**である。toolchain manifest・lockfile・
+workflow・CONTRIBUTING 等・git config を読み（一覧は第7.1節）、profile JSON の **draft** を
+起案する。**network も subprocess も clock も使わない**ので、同じ tree からは byte 単位で
+同じ draft が出る。
 
 | flag | 既定 | 効果 |
 |---|---|---|
 | `--repo-root <path>` | cwd | 調べるリポジトリ |
-| `--out <path>` | — | draft profile JSON の書き出し先。**既存なら `out_exists`（exit 4）** |
-| `--emit <mode>` | `envelope` | stdout に出すもの。`profile` なら draft JSON そのもの |
+| `--out <path>` | — | draft の書き出し先。**既存なら `out_exists`（exit 4）** |
+| `--emit <mode>` | `envelope` | stdout に出すもの。`profile` なら draft JSON |
 | `--repo <owner/name>` / `--id <id>` | 推定 / 導出 | 推定させずに宣言する |
+| `--check <path>` | — | **起案しない別 mode**（第9.7節）。上の flag と併用不可 |
 
-```bash
-node scripts/profile-init.mjs --repo-root . --out .commandmate/profile.json
-# draft を読んで TODO を埋めてから
-node scripts/orchestrate.mjs 123 --profile-json .commandmate/profile.json --allow-unverified
-```
+押さえるべき点は3つ。**出力は draft であって profile ではない**（`verified` は常に `false`。
+plan に渡すには `--allow-unverified` が要る）。
+**「読み取った」と「材料が無かった」が出力上で区別される**（`provenance[]` / `todos[]`）。
+**推定できなかった baseline は fail-closed の placeholder になる**（埋めずに dispatch
+すれば止まる、が正しい壊れ方）。
 
-押さえるべき点は3つである。**出力は draft であって profile ではない**（`verified` は常に `false`。
-plan に渡すには `--allow-unverified` が要り、risk に `unverified_profile` が載る）。
-**「読み取った」と「材料が無かった」が出力上で区別される**（`provenance[]` と `todos[]`。
-**黙って埋めない**）。**推定できなかった baseline は fail-closed の placeholder になる**
-（**埋めずに dispatch すれば止まる**、が正しい壊れ方である）。
+**`--check` は起案の逆向き**で、既にある profile の `scope_companions` を tree に突き合わせ、
+規則ごとに `when` の一致件数と `add` の実在件数を出す（**構文として正しいまま何にも一致
+しない規則**を plan の前に見るため）。**0 件一致は warning であって error では
+ない**（exit 0。**裁定しない**）。何も書かず、一致判定は planner と**同じ関数**（`lib.mjs`）で、
+**planner はリポジトリを開かない**（第9.1節）も不変である。
 
-3点の全文は [references/runner-operations.md](./references/runner-operations.md) 第13節、
-正本は [profile-contract.md](./references/profile-contract.md) 第7節（この runner）・
-第8節（何を確認したら `verified: true` にしてよいか）。
+全文は [runner-operations.md](./references/runner-operations.md) 第13節、正本は
+[profile-contract.md](./references/profile-contract.md) 第7節（起案）・第8節
+（`verified: true` の条件）・第9.7節（`--check`）。
 
 ### 3.6 status（run の横断ビュー。read-only）
 
@@ -487,10 +488,10 @@ Issue ごとに出す4欄と「次にやること」の作り方、`--json` の 
 
 4 runner とも、機械可読な envelope / report を **stdout** に、進捗 notice を **stderr** に出す。
 mutating runner は `<out>/` にも report と summary markdown を書く。準備 runner の
-profile-init も同じ規約で、status は `success`（全 field に根拠がある）/ `partial`
-（雛形か warning がある）/ `failure`、exit は成功時 0、`invalid_input` 3 /
-`out_exists` 4 / `load_error` 6 である（`--emit profile` のときだけ stdout は
-draft JSON そのものになる。失敗時は常に envelope が出る）。
+profile-init も同じ規約で、status は `success` / `partial`（雛形か warning がある）/
+`failure`、exit は 0 / `invalid_input` 3 / `out_exists` 4 / `load_error` 6 である
+（`--emit profile` のときだけ stdout は draft JSON。失敗時は常に envelope が出る）。
+envelope の `mode` が `draft` / `check` を名乗り、**`--check` も同じ規約**である。
 
 **まず run 全体を見るなら `status.mjs --run <run-dir>`**（第3.6節）。以下の status / code /
 limitation は個々の report の語彙で、status runner はそれらを phase × Issue のマトリクスに

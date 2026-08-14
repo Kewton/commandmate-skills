@@ -400,6 +400,29 @@ checked-in artifact が古い形のまま緑になり続けることを防ぐた
 それぞれ machine code つきの failure envelope になること。`--repo` / `--id` を渡したときは
 推定を上書きし、その事実が provenance に `source: flag` として残ること。
 
+## profile-init `--check`（[#197](https://github.com/Kewton/commandmate-skills/issues/197)）
+
+起案の逆向き —— 既にある profile の `scope_companions` 規則を repo tree に突き合わせるモードは、
+`profile-init --check reports what a declaration matches (#197)` が見る。case directory を持たず、
+**tree を実行時に組み立てる**: 走査の skip 集合を測るには `node_modules/` の subtree が要り、
+このリポジトリはその名前を gitignore しているためである。
+
+- **件数** —— Issue #197 が挙げた実測そのもの。`scripts/{base}.mjs` は `scripts/util.mjs` だけに、
+  `scripts/{dir}{base}.mjs` は `scripts/` 配下の `.mjs` 全部に一致する。**どちらも合法**で
+  4 文字しか違わないので、`--check` が無ければ plan を回す以外に区別する方法が無かった
+- **skip 集合** —— tree 全体に一致する規則（`{dir}{base}.mjs`）が `node_modules/` の 1 件に
+  届かないこと。report が skip した directory を名指すこと
+- **0 件一致は warning** —— `companion_when_unmatched` / `companion_add_missing` が出て、
+  **exit は 0・`errors` は空・`status` は partial** であること。これから作る file を見越した
+  宣言はありうるので、**裁定しない**のがこのモードの前提である
+- **read-only** —— tree も profile も byte 一致のまま、`artifacts` が空であること。
+  2 回実行して stdout が byte 一致すること
+- **一致判定が1つであること** —— (a) `--check` が「一致した」と言う file を planner が同じ
+  profile で導出すること、(b) `--check` が拒否する宣言を planner も拒否し、**detail 文字列が
+  一致する**こと。ローダを2つ持ったら最初に落ちるのがこの 2 本である
+- **`--check` は mode である** —— `--out` / `--emit` / `--repo` / `--id` と併用すると
+  `invalid_input`（exit 3）で、`--out` の file は作られないこと
+
 ## Claude/Codex parity の確認
 
 plan は入力の純粋関数なので、Agent の種類によらず同じ plan が出る。

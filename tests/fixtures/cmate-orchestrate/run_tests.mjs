@@ -12,7 +12,7 @@
 // Node stdlib only. Not part of the release pipeline; run on demand.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -4768,6 +4768,311 @@ function profileInitInputTest() {
 }
 
 // =============================================================================
+// profile-init --check: a declaration against a real tree (Issue #197)
+// =============================================================================
+//
+// The drafting runner's second mode runs BACKWARD: it reads a profile somebody
+// already wrote and reports, per `scope_companions` rule, how many real files
+// the `when` matches and how many of the paths the `add` produces exist. The
+// four things it is worth having are the four things asserted here:
+//
+//   the counts        the two templates the Issue is about — `scripts/{base}.mjs`
+//                     and `scripts/{dir}{base}.mjs` — are both legal and match
+//                     different sets, and the report tells them apart
+//   the warnings      a rule matching nothing is reported and NEVER promoted to
+//                     an error; exit stays 0 and `errors` stays empty
+//   read-only         the tree and the profile are byte-identical afterwards, and
+//                     no artifact is claimed
+//   one matcher       what `--check` calls a match is what the PLANNER derives
+//                     from, and a declaration `--check` refuses is refused by the
+//                     planner with the same message
+
+// The fixture tree, built rather than checked in: it needs a `node_modules/`
+// subtree to measure the scan's skip list, and this repository gitignores that
+// name. Written from a literal so the shape a count is read against is visible
+// beside the count.
+const CHECK_TREE = [
+  'scripts/util.mjs',
+  'scripts/adapters/human-review.mjs',
+  'scripts/tests/shared-contract.test.mjs',
+  'web/src/shared/format.mjs',
+  'src/session/retry.ts',
+  'test/session/retry.test.ts',
+  'docs/overview.md',
+  // Never scanned: a companion rule is about the repository, not its dependencies.
+  'node_modules/vendor/scripts/bundled.mjs',
+];
+
+function buildCheckTree() {
+  const root = mkdtempSync(join(tmpdir(), 'cmate-check-repo-'));
+  for (const path of CHECK_TREE) {
+    const full = join(root, path);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, `// ${path}\n`);
+  }
+  return root;
+}
+
+// Every file under `root` with its bytes, so "read-only" is measured rather than
+// asserted. Sorted, so a directory-order difference cannot read as a change.
+function treeSnapshot(root) {
+  const out = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir).slice().sort()) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) walk(full);
+      else out.push(`${full} ${readFileSync(full, 'utf8')}`);
+    }
+  };
+  walk(root);
+  return out.join('');
+}
+
+function runCheck(profilePath, repoRoot, extra = []) {
+  const run = runProfileInit(['--check', profilePath, '--repo-root', repoRoot, ...extra]);
+  let result = null;
+  try {
+    result = JSON.parse(run.stdout);
+  } catch {
+    result = null;
+  }
+  return { ...run, result };
+}
+
+function ruleAt(result, key, index) {
+  return result.check.rules.find((rule) => rule.key === key && rule.index === index);
+}
+
+function profileInitCheckTest() {
+  log('  profile-init --check reports what a declaration matches (#197)');
+  const dir = mkdtempSync(join(tmpdir(), 'cmate-check-'));
+  const repoRoot = buildCheckTree();
+
+  // ---- the counts ----------------------------------------------------------
+  //
+  // The measurement Issue #197 opens with, on a tree built to make it concrete:
+  // `scripts/{base}.mjs` reaches `scripts/util.mjs` and nothing else, while
+  // `scripts/{dir}{base}.mjs` reaches every `.mjs` under `scripts/`. Both are
+  // legal declarations, they differ by four characters, and before `--check` the
+  // only way to tell which one an author wrote was to run a plan.
+  const narrow = writeProfile(dir, 'narrow.json', {
+    derive: [
+      { when: 'scripts/{base}.mjs', add: ['scripts/tests/{base}.check.mjs'] },
+      { when: 'scripts/{dir}{base}.mjs', add: ['scripts/tests/{dir}{base}.check.mjs'] },
+    ],
+  });
+  const narrowRun = runCheck(narrow, repoRoot);
+  if (!check(narrowRun.exit === 0, `--check should exit 0, exited ${narrowRun.exit}: ${narrowRun.stdout.slice(0, 300)}`)) return;
+  check(narrowRun.result.mode === 'check', 'the envelope must declare itself a check');
+  check(narrowRun.result.draft === false, 'a check drafts nothing');
+  check(narrowRun.result.profile === null, 'a check envelope must not carry a profile');
+  check(
+    ruleAt(narrowRun.result, 'derive', 0).when_matches === 1,
+    `"scripts/{base}.mjs" matched ${ruleAt(narrowRun.result, 'derive', 0).when_matches} files, expected 1 (scripts/util.mjs)`,
+  );
+  check(
+    deepEqual(ruleAt(narrowRun.result, 'derive', 0).when_examples, ['scripts/util.mjs']),
+    `"scripts/{base}.mjs" matched ${JSON.stringify(ruleAt(narrowRun.result, 'derive', 0).when_examples)}`,
+  );
+  check(
+    ruleAt(narrowRun.result, 'derive', 1).when_matches === 3,
+    `"scripts/{dir}{base}.mjs" matched ${ruleAt(narrowRun.result, 'derive', 1).when_matches} files, expected 3`,
+  );
+  // The skip list is measured, not merely configured: a rule that matches every
+  // `.mjs` in the tree must not reach the one inside node_modules/.
+  const everywhere = writeProfile(dir, 'everywhere.json', {
+    derive: [{ when: '{dir}{base}.mjs', add: ['tests/{dir}{base}.check.mjs'] }],
+  });
+  const everywhereRun = runCheck(everywhere, repoRoot);
+  check(
+    ruleAt(everywhereRun.result, 'derive', 0).when_matches === 4,
+    `a tree-wide rule matched ${ruleAt(everywhereRun.result, 'derive', 0).when_matches} files, expected 4 ` +
+      '(the fifth .mjs is under node_modules/, which the scan skips)',
+  );
+  check(
+    deepEqual(everywhereRun.result.check.skipped_directories, ['.git', 'node_modules', '.venv', '__pycache__']),
+    `the report does not name what it skipped: ${JSON.stringify(everywhereRun.result.check.skipped_directories)}`,
+  );
+
+  // ---- the add side --------------------------------------------------------
+  //
+  // A `require` literal is reported as existing or not; a `derive` template is
+  // reported as "expanded to N, of which M exist". Both halves matter: a rule
+  // whose `when` fires and whose `add` names nothing real is exactly as inert as
+  // one whose `when` never fires.
+  const matching = writeProfile(dir, 'matching.json', {
+    derive: [{ when: 'src/{dir}{base}.ts', add: ['test/{dir}{base}.test.ts'] }],
+    require: [
+      { when: 'scripts/{dir}{base}.mjs', add: ['scripts/tests/shared-contract.test.mjs'] },
+      { when: 'web/src/shared/{base}.mjs', add: ['scripts/tests/shared-contract.test.mjs'] },
+    ],
+  });
+  const matchingRun = runCheck(matching, repoRoot);
+  check(matchingRun.exit === 0, `a fully matching profile should exit 0, exited ${matchingRun.exit}`);
+  check(
+    matchingRun.result.status === 'success',
+    `a declaration whose every rule fires should be success, got ${matchingRun.result.status} ` +
+      `(${JSON.stringify(matchingRun.result.warnings)})`,
+  );
+  check(matchingRun.result.warnings.length === 0, 'a fully matching declaration must raise no warning');
+  check(
+    deepEqual(ruleAt(matchingRun.result, 'derive', 0).add, [
+      { template: 'test/{dir}{base}.test.ts', expands_to: 1, existing: 1, missing_examples: [] },
+    ]),
+    `the derive add report is ${JSON.stringify(ruleAt(matchingRun.result, 'derive', 0).add)}`,
+  );
+  check(
+    deepEqual(ruleAt(matchingRun.result, 'require', 1).add, [
+      { template: 'scripts/tests/shared-contract.test.mjs', expands_to: 1, existing: 1, missing_examples: [] },
+    ]),
+    `the require add report is ${JSON.stringify(ruleAt(matchingRun.result, 'require', 1).add)}`,
+  );
+  // One line per rule, in the order the planner applies them (derive, then
+  // require) — so a reader diffing the report against the profile reads the two
+  // in the same order.
+  check(
+    deepEqual(matchingRun.result.check.rules.map((rule) => `${rule.key}[${rule.index}]`),
+      ['derive[0]', 'require[0]', 'require[1]']),
+    `the report is not one line per rule in declaration order: ${JSON.stringify(matchingRun.result.check.rules.map((r) => `${r.key}[${r.index}]`))}`,
+  );
+
+  // ---- zero matches are a WARNING, never an error --------------------------
+  //
+  // The property the whole mode rests on. Declaring a companion for files that do
+  // not exist yet is legitimate — a profile is normally written before the tree
+  // it describes is finished — so a check that called it wrong would teach
+  // authors to declare last. It is reported, and the run still succeeds.
+  const unmatched = writeProfile(dir, 'unmatched.json', {
+    derive: [{ when: 'app/{dir}{base}.rb', add: ['spec/{dir}{base}_spec.rb'] }],
+    require: [{ when: 'src/{dir}{base}.ts', add: ['docs/data-contract.md'] }],
+  });
+  const unmatchedRun = runCheck(unmatched, repoRoot);
+  check(unmatchedRun.exit === 0, `a zero-match rule must not change the exit code, exited ${unmatchedRun.exit}`);
+  check(unmatchedRun.result.status === 'partial', `a zero-match rule should report partial, got ${unmatchedRun.result.status}`);
+  check(unmatchedRun.result.errors.length === 0, `a zero-match rule must raise no error: ${JSON.stringify(unmatchedRun.result.errors)}`);
+  check(
+    deepEqual(unmatchedRun.result.warnings.map((warning) => warning.code),
+      ['companion_when_unmatched', 'companion_add_missing']),
+    `warning codes ${JSON.stringify(unmatchedRun.result.warnings.map((w) => w.code))}`,
+  );
+  check(
+    ruleAt(unmatchedRun.result, 'require', 0).add[0].existing === 0
+      && ruleAt(unmatchedRun.result, 'require', 0).when_matches === 1,
+    'a literal that does not exist should be reported as matched-but-missing, not as unmatched',
+  );
+  check(unmatchedRun.result.completion_check.passed === true, 'the check completion check should pass on a zero-match declaration');
+
+  // ---- read-only -----------------------------------------------------------
+  const beforeTree = treeSnapshot(repoRoot);
+  const beforeProfile = readFileSync(unmatched, 'utf8');
+  const repeated = runCheck(unmatched, repoRoot);
+  check(treeSnapshot(repoRoot) === beforeTree, '--check modified the repository it was pointed at');
+  check(readFileSync(unmatched, 'utf8') === beforeProfile, '--check modified the profile it was given');
+  check(deepEqual(repeated.result.artifacts, []), '--check claimed an artifact');
+  // Determinism, the property that makes the report reviewable at all.
+  check(repeated.stdout === unmatchedRun.stdout, 'two checks over the same tree produced different output');
+
+  // ---- one matcher, not two ------------------------------------------------
+  //
+  // The constraint Issue #197 fixed before anything was written: `--check` must
+  // not have its own reading of `{dir}` / `{base}`. Measured from both ends.
+  //
+  // (a) a rule `--check` reports as matching a file is a rule the PLANNER derives
+  //     from that same file, in a plan built from the same profile.
+  const issuesPath = join(dir, 'issues.json');
+  writeFileSync(issuesPath, JSON.stringify({
+    issues: [{
+      number: 971,
+      title: 'feat: human review アダプタを足す',
+      body: '## 対象ファイル\n- `scripts/adapters/human-review.mjs`\n\n'
+        + '## Acceptance criteria\n- [ ] 契約テストが通る\n',
+      labels: ['feature'],
+    }],
+  }));
+  const planned = runRunner(buildArgs(['971', '--profile-json', matching], issuesPath, join(dir, 'runs')));
+  if (check(planned.exit === 0, `the planner should succeed on the checked profile, exited ${planned.exit}`)) {
+    const issue = JSON.parse(planned.stdout).plan.issues[0];
+    check(
+      ruleAt(matchingRun.result, 'require', 0).when_examples.includes('scripts/adapters/human-review.mjs'),
+      '--check does not report the declared file as matching the rule the planner used',
+    );
+    check(
+      issue.scope_defaults.includes('scripts/tests/shared-contract.test.mjs'),
+      `the planner did not derive the companion --check reported: ${JSON.stringify(issue.scope_defaults)}`,
+    );
+  }
+
+  // (b) a declaration `--check` refuses is refused by the planner, with the SAME
+  //     message. This is the assertion that would fail first if the two runners
+  //     ever grew separate copies of the loader.
+  const brokenPath = join(dir, 'broken.json');
+  writeFileSync(brokenPath, `${JSON.stringify({
+    ...JSON.parse(readFileSync(matching, 'utf8')),
+    scope_companions: { derive: [{ when: 'src/{dir}{base}.ts', add: ['docs/module-reference.md'] }] },
+  }, null, 2)}\n`);
+  const brokenCheck = runCheck(brokenPath, repoRoot);
+  const brokenPlan = runRunner(buildArgs(['971', '--profile-json', brokenPath], issuesPath, join(dir, 'broken-runs')));
+  check(brokenCheck.exit === 6, `--check on a refused declaration should exit 6, exited ${brokenCheck.exit}`);
+  check(brokenPlan.exit === 6, `the planner on the same declaration should exit 6, exited ${brokenPlan.exit}`);
+  check(brokenCheck.result.mode === 'check', 'a --check failure envelope must still name the mode it ran in');
+  check(
+    brokenCheck.result.errors[0].detail === JSON.parse(brokenPlan.stdout).errors[0].detail,
+    `the two runners disagree about a refused declaration:\n  check:   ${brokenCheck.result.errors[0].detail}\n  planner: ${JSON.parse(brokenPlan.stdout).errors[0].detail}`,
+  );
+
+  // (c) the ONE refusal the two do not share, pinned so it stays deliberate. A
+  //     `require` literal naming a system root is a PERMISSION question, decided
+  //     with the planner's own path vocabulary (SYSTEM_ROOTS, which
+  //     cmate-issue-authoring mirrors byte for byte and which therefore stays
+  //     declared in orchestrate.mjs). `--check` grants nothing, so it does not
+  //     refuse: it reports the literal as a path that does not exist under
+  //     --repo-root, which is true and is the warning an author needs. The
+  //     planner still refuses the profile outright.
+  const escapePath = join(dir, 'escape.json');
+  writeFileSync(escapePath, `${JSON.stringify({
+    ...JSON.parse(readFileSync(matching, 'utf8')),
+    scope_companions: { require: [{ when: 'src/{dir}{base}.ts', add: ['users/someone/notes.md'] }] },
+  }, null, 2)}\n`);
+  const escapeCheck = runCheck(escapePath, repoRoot);
+  const escapePlan = runRunner(buildArgs(['971', '--profile-json', escapePath], issuesPath, join(dir, 'escape-runs')));
+  check(escapeCheck.exit === 0, `--check on an out-of-repo literal should still report, exited ${escapeCheck.exit}`);
+  check(
+    ruleAt(escapeCheck.result, 'require', 0).add[0].existing === 0,
+    'an out-of-repo literal should be reported as not existing',
+  );
+  check(escapePlan.exit === 6, `the planner must refuse an out-of-repo literal, exited ${escapePlan.exit}`);
+
+  // ---- a profile with nothing to check -------------------------------------
+  const silent = writeProfile(dir, 'silent.json');
+  const silentRun = runCheck(silent, repoRoot);
+  check(silentRun.exit === 0, `a profile without scope_companions should exit 0, exited ${silentRun.exit}`);
+  check(silentRun.result.status === 'success', `a profile without scope_companions should be success, got ${silentRun.result.status}`);
+  check(deepEqual(silentRun.result.check.rules, []), 'a profile without scope_companions should report no rule');
+
+  // ---- --check is a MODE ---------------------------------------------------
+  //
+  // Every flag that shapes or writes a draft is refused beside it rather than
+  // ignored: a flag silently ignored is a flag whose author believed it did
+  // something, and the one belief this mode must not permit is that it wrote.
+  const outPath = join(dir, 'never-written.json');
+  for (const extra of [['--out', outPath], ['--emit', 'profile'], ['--repo', 'Other/name'], ['--id', 'x']]) {
+    const conflicted = runCheck(matching, repoRoot, extra);
+    check(conflicted.exit === 3, `--check with ${extra[0]} should exit 3, exited ${conflicted.exit}`);
+    check(
+      conflicted.result.errors.some((error) => error.code === 'invalid_input'),
+      `--check with ${extra[0]} should fail with invalid_input: ${JSON.stringify(conflicted.result.errors)}`,
+    );
+  }
+  check(!existsSync(outPath), '--check wrote the --out it was supposed to refuse');
+  const missing = runCheck(join(dir, 'does-not-exist.json'), repoRoot);
+  check(missing.exit === 6, `--check on a missing profile should exit 6, exited ${missing.exit}`);
+  check(
+    missing.result.errors.some((error) => error.code === 'load_error'),
+    `--check on a missing profile should fail with load_error: ${JSON.stringify(missing.result.errors)}`,
+  );
+}
+
+// =============================================================================
 // Self-test of the validator: it must reject a broken plan, not wave it through.
 // =============================================================================
 
@@ -5681,6 +5986,7 @@ function main() {
     : [];
   for (const caseId of profileInitIds) runProfileInitCase(caseId);
   profileInitInputTest();
+  profileInitCheckTest();
 
   log('  -- contract parity --');
   parityTest();
@@ -5721,7 +6027,7 @@ function main() {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases, run id vs profile, contract parity, launcher resolution, worktree-setup input, reverify input, auto-yes arming, unattended input + exclusivity + merge, unattended stage C (gates + merge-prs + uat)`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases + --check, run id vs profile, contract parity, launcher resolution, worktree-setup input, reverify input, auto-yes arming, unattended input + exclusivity + merge, unattended stage C (gates + merge-prs + uat)`);
 }
 
 main();

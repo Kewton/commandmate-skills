@@ -124,6 +124,7 @@ dispatch 時に解決する。現状 CLI に sync は無いため、plan 段階�
 ```
 profile-init.mjs [--repo-root <path>] [--out <path>] [--emit envelope|profile]
                  [--repo <owner/name>] [--id <id>]
+profile-init.mjs --check <profile.json> [--repo-root <path>]
 ```
 
 | flag | 既定 | 効果 |
@@ -133,6 +134,7 @@ profile-init.mjs [--repo-root <path>] [--out <path>] [--emit envelope|profile]
 | `--emit <mode>` | `envelope` | stdout に出すもの。`profile` なら draft JSON そのもの（`> profile.json` 用） |
 | `--repo <owner/name>` | 推定 | GitHub slug を宣言する |
 | `--id <id>` | 導出 | profile id を宣言する |
+| `--check <path>` | — | **起案しない別 mode。** 既にある profile の `scope_companions` を tree に突き合わせて報告する（第9.7節）。上の4 flag とは併用できない（`invalid_input`） |
 
 ```bash
 # draft を書き出して確認し、そのまま plan に食わせる
@@ -269,6 +271,10 @@ repo には planner が知りようのない規約がある。
 `dispatch-contract.md` の byte-identical 性が壊れる）。repo 知識の正しい入口は profile
 だけであり、profile は plan の一部なので、そこに置けば両方の性質が保たれる。
 
+この原則は第9.7節の `--check` でも**変わらない**。tree を開くのは planner ではなく、
+**人間が profile をレビューするときに叩く別 runner**（`profile-init.mjs`）であり、
+plan 経路は1 byte も tree を読まない。
+
 ### 9.2 形
 
 key は2つある。**`derive` は宣言済み path の関数**を、**`require` は名前が固定された
@@ -347,7 +353,7 @@ Issue を読む前、profile を読んだ時点で止まる。
 | `require[].add` が placeholder を含む | literal として書かれた path はそのまま許可される。展開する束縛が無い以上、`{base}` の6文字が scope へ入るだけである |
 | `require[].add` が repo の外を指す（`users/…` `C:/…` `https://…`、制御文字） | **literal だけは宣言済み path から作られない**ので、ここを通さないと profile 経由の path traversal になる。`..` / 先頭 `/` / `\` はテンプレート parser が先に落とす |
 | `require[].add` が harness path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`） | 第9.6節 |
-| `{ext}` など未知の placeholder、`{base` のような括弧の不整合 | typo が literal に化けると「一致しない規則」が黙って残る。**両方の key で拒否する** |
+| `{ext}` など未知の placeholder、`{base` のような括弧の不整合 | typo が literal に化けると「一致しない規則」が黙って残る。**両方の key で拒否する**（構文として正しいまま何にも一致しない規則はここでは捕まらない。それを見るのが第9.7節の `--check` である） |
 | `..` を含む / 絶対 path | 対象リポジトリの外を指す |
 | `derive` / `require` 以外の key、規則の `when` / `add` 以外の key | 未知 field を持つ profile を拒否するのと同じ（第1節）。**新しい runner 向けの profile は古い runner で黙って半分無視されるのではなく、はっきり落ちなければならない** |
 | `add: []`、`derive` / `require` が配列でない、`scope_companions` が object でない | 形が違う |
@@ -387,6 +393,10 @@ literal 伴走とソースの関係は**意味の関係**であって配置の�
   `--run-id` か `--runs-dir` を使う。エラー文がその2つを名指しする。
 - **当たらない規則は無害である。** `scope.allow` は指示ではなく権限なので、使われなかった
   許可は何も起こさない。一方、宣言しなければ worker 1人分の run が失われる。
+  ただし「当たらない」ことに**気づけない**のは無害ではない ——
+  書き間違えた1本は plan を成立させたまま `scope_defaults` を1件減らすだけなので、
+  Issue 側で気づくのは worker が scope ゲートで落ちたときになる。
+  宣言を書いたら `profile-init.mjs --check` で一致件数を見る（第9.7節）。
 - **書きすぎは無害ではない。** dispatch は `scope.allow` を sort してから 200 件に切り詰めるので、
   導出が増えすぎると宣言済みファイルが押し出される。planner は合計が 200 に達する手前で
   宣言済みファイル単位に打ち切るが、規則を増やすほど1 Issue あたりの導出は増える。
@@ -409,6 +419,60 @@ package と、「verified とは何か」を決める設定 —— は、planner
   唯一の許可であり、L1 も同じ宣言から慣習テスト path を導出している
 
 出口は今までどおり Issue 本文の成果物見出し1つだけで、そこには warning が付く。
+
+### 9.7 宣言を tree に突き合わせる（`profile-init.mjs --check`、[#197](https://github.com/Kewton/commandmate-skills/issues/197)）
+
+第9.3節は括弧の誤記を `load_error` で拒否する理由として「typo が literal に化けると
+**一致しない規則が黙って残る**」と書いている。その懸念は正しいが、**構文として正しく、
+何にも一致しない規則**は同じ結果になり、そちらは拒否では捕まらない。
+
+- `when: "scripts/{dir}{base}.mjs"` と `when: "scripts/{base}.mjs"` は**どちらも合法**だが、
+  `scripts/adapters/human-review.mjs` に一致するのは前者だけである
+- `require[].add` のリテラルが**実在しない file** でも load は通る
+
+気づけるのは plan を回して `scope_defaults` を目視したときだけで、そのためには Issue
+（または fixture）が要った。`--check` はその突き合わせを **plan の前に**行う。
+
+```bash
+node scripts/profile-init.mjs --check .commandmate/profile.json --repo-root .
+```
+
+**規則ごとに1行**、次を出す（`check.rules[]`、および `summary_markdown` の表）。
+
+| 出るもの | 意味 |
+|---|---|
+| `when_matches` | その `when` が `--repo-root` 配下の**実ファイル何件に一致したか**。`when_examples` に先頭 3 件 |
+| `add[].expands_to` | その `add` テンプレートが展開した**相異なる path の件数**（`require` の literal は常に 1） |
+| `add[].existing` | そのうち**実在するものの件数**。`missing_examples` に実在しなかった先頭 3 件 |
+
+守っている性質は4つである。
+
+- **read-only。** tree と profile を読むだけで、profile も plan も書かない。subprocess も
+  network も使わない。`--out` / `--emit` / `--repo` / `--id` は併用できず `invalid_input` になる
+  —— 「起案しない mode」であることを、無視ではなく拒否で言う
+- **裁定しない。** 0 件一致は**誤りではない**（これから作る file を見越した宣言はありうる）ので
+  **warning であって error ではない**。`companion_when_unmatched`（`when` が何にも当たらない）と
+  `companion_add_missing`（`when` は当たったが `add` の展開先が1つも実在しない）が出て
+  status は `partial` になるが、**exit は 0** である（第7節と同じ規約）
+- **planner は対象リポジトリを開かない**（第9.1節）は**不変**である。`--check` は planner では
+  なく、**人間が profile をレビューするときに使う別 runner** であり、plan の純関数性には
+  一切触れない
+- **一致判定を2箇所に持たない。** `{dir}` / `{base}` の展開と一致判定、および宣言の正規化は
+  `scripts/lib.mjs` にあり、**planner と `--check` は同じ関数を呼ぶ**。`--check` が独自の解釈を
+  持てば「`--check` は通るが planner は一致しない」という、この節が消しに来た事象の変種を
+  自分で作ることになる
+
+**`--check` は profile を承認しない。** 契約適合の裁定は planner 側にある。ひとつだけ
+`--check` が判定しないのは `require[].add` のリテラルが repo の外を指していないか
+（第9.3節の `users/…` `C:/…` `https://…`）で、これは planner の path 語彙に属する拒否である。
+`--check` はそのリテラルを**「実在しない path」として warning に出す**（実際そうである）一方、
+planner は profile を読んだ時点で `load_error` にする。**許可を与えるのは planner だけ**なので、
+拒否も planner が持つ。
+
+走査から外す directory は `.git` / `node_modules` / `.venv` / `__pycache__` の4つで、report が
+その一覧を `check.skipped_directories` に載せる。生成物置き場（`dist` / `build` / `target`）は
+**外さない** —— 生成ファイルはまさに `derive` が宣言する対象だからである。tree が大きく走査上限に
+達した場合は warning `tree_scan_truncated` が出て、件数は**下界**として読む。
 
 ## 10. `dispatch_defaults` — repo 固有の運転既定（任意）
 
