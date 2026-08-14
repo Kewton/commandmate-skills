@@ -625,17 +625,34 @@ Kewton/BorderFreeKidsMap#63）: 「未決の問い」3件を本文に残した�
 | 項目 | 規範 |
 |---|---|
 | **既定** | `blocking`。`severity` を持たない entry は blocking である |
-| **notice 集合** | `harness_path_in_scope` の **1件だけ** |
+| **notice 集合** | `harness_path_in_scope`（#199）と `profile_repository_override`（#210）の **2件** |
 | **emit 規則** | planner は **notice の entry にだけ** `severity` を書く。blocking は暗黙のまま |
 | **required か** | **いいえ。** `note_entry` の `required` には入れない |
 | **envelope** | `orchestrate-result.v1` の `warnings` は code と detail だけを運ぶ（`severity` は載せない） |
+
+**分類の原理**（#199 が言語化し、[#210](https://github.com/Kewton/commandmate-skills/issues/210) が
+全 code に適用した）:
+
+- **「著者（または operator）が既に決めて宣言したことの報告」は notice**
+- **「planner が読めなかった／著者が決めていないことの報告」は blocking**
+
+分けるのは「宣言されたか」ではなく「**何が**宣言されたか」である。`open_question_declared` は
+著者自身の宣言だが、宣言している内容が「まだ決めていない」なので blocking である。
+notice 集合の2件は、片方が**著者**の宣言（成果物見出しに書いたハーネス path）の報告、
+もう片方が **operator** の宣言（`--repo` と `--allow-unverified` の2 flag）の報告であり、
+同じ原理の同じ側にある。
 
 **なぜ fail-closed か。** 誤分類の事故は2方向に起こりうるが、対称ではない。
 blocking を notice と誤れば **run が黙って `partial` でなくなる**（読み手は気づかない）。
 notice を blocking と誤れば **色が1つ余分に付く**（読み手は気づく）。前者だけを構造的に
 起こらなくする —— **知らない code は blocking** なので、後から warning code を足した変更が
 分類を忘れても、その code は `status` を落とし続ける。notice 集合を広げるのは
-**code ごとの独立した判断**であり、それぞれ別 Issue で行う。
+**code ごとの独立した判断**であり、まとめて行わない。
+
+**分類は台帳に書く。** #210 以降、`plan.warnings` に入りうる全 code の severity と判断理由は
+[codes-and-recovery.md](./codes-and-recovery.md) 第2節に 1 code 1 行で在る。**blocking の行にも
+「blocking が正しい」と理由が書いてある** —— 既定に落ちただけの code と、検討して blocking に
+決めた code を、同じ形で残さないためである。**新設 code は分類してから足す**（同書 冒頭の規約）。
 
 **なぜ `required` に入れないか。** `dependencies[].basis`（第3節）と同じ理由である。
 `status.mjs` が読む `plan.json` は**過去の run が書いたもの**なので、必須にすると
@@ -643,7 +660,7 @@ notice を blocking と誤れば **色が1つ余分に付く**（読み手は気
 古い plan は「`severity` 無し ＝ blocking」として**当時と同じ意味のまま**読める。
 
 **なぜ notice にだけ書くか（byte 安定性）。** blocking を明示すると、warning を持つ既存の
-plan がすべて 1 byte 変わる。notice にだけ書けば、`harness_path_in_scope` を含まない plan は
+plan がすべて 1 byte 変わる。notice にだけ書けば、**notice を1件も含まない plan** は
 **#199 以前の runner が出したものと byte 一致する** —— checked-in の全文 golden も、
 既にディスクに在る `plan.json` も、そのまま生き残る。副作用として
 「`severity` が無い」が fail-closed 既定そのものを表すので、読み手は欠落を解釈しなくてよい。

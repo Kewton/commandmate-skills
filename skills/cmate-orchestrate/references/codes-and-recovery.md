@@ -12,6 +12,13 @@ SKILL.md 側には「読み方」（status と exit の写像、まず `status.m
 `status.mjs --run <run-dir>` は第4節の対処表を機械的に引いて表示する。表がその正本であり、
 status runner はそれを引くだけなので、**ここに無い code は status runner も推測しない。**
 
+> **新設規約（[#210](https://github.com/Kewton/commandmate-skills/issues/210)）: plan の warning code
+> を新しく足すときは、`blocking` か `notice` かを分類し、その理由を第2節の表に1行書いてから足す。**
+> 分類を忘れても既定は `blocking` なので run は fail-closed のまま止まる —— しかしそれでは
+> 「**検討して blocking に決めた**」と「**検討していない**」が同じ形で残る。第2節の表はどの code に
+> ついても理由を1行持っており、blocking の行にも「blocking が正しい」と書いてある。
+> 分類の規範は [plan-contract.md](./plan-contract.md) 第5.6節。
+
 | SKILL.md での位置 | ここでの節 |
 |---|---|
 | 第4節 plan の失敗 code と exit | 第1節 |
@@ -42,11 +49,25 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 
 **warning には severity がある**（[#199](https://github.com/Kewton/commandmate-skills/issues/199)）。
 `plan.status` を落とすのは **blocking** な warning だけで、**notice** は落とさない。
-既定は blocking であり、**下表のうち `severity` を明記していない code はすべて blocking である** ——
-新しい code が増えたときも、誰かが明示的に notice と判断するまで blocking のままになる
-（fail-closed。「黙って `partial` でなくなる」向きには倒れない）。**notice は現時点で
-`harness_path_in_scope` の1件だけ**で、他の code を notice へ移すのは code ごとの独立した判断として
-別 Issue で行う。notice が blocking を隠すことはない —— blocking が1件でも在れば `partial` である。
+既定は blocking であり、**新しい code は誰かが明示的に notice と判断するまで blocking のままになる**
+（fail-closed。「黙って `partial` でなくなる」向きには倒れない）。notice が blocking を隠すことは
+ない —— blocking が1件でも在れば `partial` である。
+
+**下表は `plan.warnings` に入りうる warning code の全一覧であり、1 code につき severity と
+その判断理由を1行持つ**（[#210](https://github.com/Kewton/commandmate-skills/issues/210)）。
+#199 は severity の仕組みだけを入れて notice 集合を1件に固定し、個別の分類を後回しにしたので、
+「検討して blocking に決めた code」と「まだ誰も検討していない code」が同じ形（`severity` 無し）で
+並んでいた。#210 が runner を1 code ずつ裏取りして棚卸しした結果がこの表である。**blocking の行にも
+「blocking が正しい」と理由が書いてある** —— 無言の既定と、検討した結果としての blocking は違う。
+
+分類の原理は #199 が言語化したものをそのまま使う:
+
+- **「著者（または operator）が既に決めて宣言したことの報告」は notice**
+- **「planner が読めなかった／著者が決めていないことの報告」は blocking**
+
+**分けるのは「宣言されたか」ではなく「何が宣言されたか」である。** `open_question_declared` は
+著者自身の宣言だが、宣言している内容が「**まだ決めていない**」なので blocking であり、しかも
+最も強い blocking である（本節の後半）。
 
 `severity` は plan（`plan.warnings[].severity`）にだけ載り、notice の entry にだけ書かれる
 （blocking は暗黙の既定。書かれていない＝blocking と読む）。result envelope
@@ -59,22 +80,31 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 「this array — not plan.status — is what stops a run」と明言している）、`status` ではない。
 したがって notice を `success` に含めても**自動化系の振る舞いは1つも変わらない**。
 
-| code | 意味 |
-|---|---|
-| `profile_repository_mismatch` | 既定 profile の対象リポジトリが cwd の `origin` と一致しない |
-| `profile_repository_override` | `--repo` でリポジトリを差し替えたため profile の検証が対象を失った |
-| `external_dependency` | この plan に含まれない Issue への依存を宣言している |
-| `ambiguous_dependency_direction` | 1行に順方向と逆方向の方向語が同居し、依存の向きを一意に読めない |
-| `no_acceptance_criteria` | 受入条件を1件も読み取れない。何をもって完了かが宣言されていない |
-| `no_suspected_files` | 対象 file を1件も読み取れない。worker に与える scope が空になる |
-| `unrecognized_file_extension` | 既知拡張子外の backtick path が抽出から落ちた |
-| `ambiguous_file_candidate` | 同じ file の2つの綴り（一方が他方の path 境界つき suffix）が本文に在り、どちらを意図したか決められない。**どちらも落とさず**両方 scope に入れたうえで訊いている |
-| `unconfirmed_lexical_dependency` | 生産者/消費者の推論が**共有 topic token だけ**を根拠にしていたので、依存 edge にしなかった。順序が要るなら人間が述べる |
-| `harness_path_in_scope` | agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を、Issue が**成果物見出しで明示的に宣言した**ので scope に入れた。既定は「入れない」である。**唯一 `severity: notice` の code であり、これだけでは `status` は `partial` にならない**（#199） |
-| `open_question_declared` | Issue 本文の ```open-questions ブロックが「これはまだ決めていない」と宣言している。**planner の推論ではなく、著者自身の申告**である。1件につき1件 |
-| `open_question_block_invalid` | ```open-questions ブロックが読めない（2個以上・未知 version・未知 key・空・重複・subset 違反）。**「ブロックが無かった」に丸めない** |
-| `acceptance_requires_tests_but_scope_has_none` | 受入条件がテストの**作成**を能動的に要求しているのに、対象 file（**段1 の導出結果を含めて**）にテストらしき path が1件も無い |
-| `contract_scope_dropped` | 宣言された対象 file の一部が、dispatch の実行契約の `scope.allow` に**入らない**（件数上限 200 超過、または契約が扱えない形の path）。detail に**落ちた件数・落ちた path（先頭3件）・落ちた理由**が入る |
+| code | severity | 意味と、その severity にした理由 |
+|---|---|---|
+| `profile_repository_mismatch` | blocking | 既定 profile の対象リポジトリが cwd の `origin` と一致しない。**blocking が正しい。** この warning が出る条件は「`--profile` も `--profile-json` も渡されなかった」こと（runner の `defaultResolved`）そのものである —— operator は対象リポジトリを1度も宣言しておらず、runner が仮定した。宣言済みの報告ではなく**未宣言の報告**である |
+| `profile_repository_override` | **notice** | `--repo` でリポジトリを差し替えたため profile の検証が対象を失った。**notice**（#210 で blocking から移した）。この code は `--repo <other>`（差し替え。これが `verified` を降格させる）と `--allow-unverified`（降格の受諾。**これが無ければ run は `unverified_profile` で exit 3 する**）の**2つの明示 flag が揃わないと出ない**ので、operator が既に決めて run の command line に記録した事実の報告である。**risk は落ちていない** —— `risk.factors` の `unverified_profile`（high）と `profile.verified: false` はそのまま plan に載る（後述） |
+| `external_dependency` | blocking | この plan に含まれない Issue への依存を宣言している。**blocking が正しい。** 依存を宣言したのは著者だが、この warning が報告しているのは「その `#N` が既に merge 済みかを planner は知らない」という**未決の状態**である。順序は担保できていない |
+| `ambiguous_dependency_direction` | blocking | 1行に順方向と逆方向の方向語が同居し、依存の向きを一意に読めない。**blocking が正しい。** 「planner が読めなかった」の報告そのものである。しかも planner は片方の読みで edge を作っているので、読み違えていれば wave 順が違う |
+| `no_acceptance_criteria` | blocking | 受入条件を1件も読み取れない。**blocking が正しい。** 何をもって完了かが宣言されていない |
+| `no_suspected_files` | blocking | 対象 file を1件も読み取れない。**blocking が正しい。** worker に与える scope が空になる（＝書き込み権限が空）。dispatch 側では同じ事実が `contract_scope_unknown` になり、その wave は advance しない |
+| `unrecognized_file_extension` | blocking | 既知拡張子外の backtick path が抽出から落ちた。**blocking が正しい。** 著者は宣言したが planner が**運べなかった**ので、`harness_path_in_scope`（宣言を honour した報告）とは向きが逆である。scope が宣言より狭いまま dispatch される |
+| `ambiguous_file_candidate` | blocking | 同じ file の2つの綴り（一方が他方の path 境界つき suffix）が本文に在り、どちらを意図したか決められない。**どちらも落とさず**両方 scope に入れたうえで訊いている。**blocking が正しい。** どちらが対象かを著者が決めていない |
+| `unconfirmed_lexical_dependency` | blocking | 生産者/消費者の推論が**共有 topic token だけ**を根拠にしていたので、依存 edge にしなかった。順序が要るなら人間が述べる。**blocking が正しい。** 2 Issue が独立かどうかを、それを決められる人間がまだ決めていない |
+| `harness_path_in_scope` | **notice** | agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を、Issue が**成果物見出しで明示的に宣言した**ので scope に入れた。既定は「入れない」である。**notice**（#199）。著者が本文に書いて決めたことを honour した記録であり、ハーネスを in-repo で保守しているリポジトリでは**正しい書き方に対して毎回出る**（後述） |
+| `open_question_declared` | blocking | Issue 本文の ```open-questions ブロックが「これはまだ決めていない」と宣言している。**planner の推論ではなく、著者自身の申告**である。1件につき1件。**blocking が正しい。著者の宣言だから notice、ではない** —— 分けるのは「何が宣言されたか」であり、これが宣言しているのは**未決そのもの**なので、この表で最も強い blocking である |
+| `open_question_block_invalid` | blocking | ```open-questions ブロックが読めない（2個以上・未閉・未知 version・未知 key・空・重複・subset 違反）。**「ブロックが無かった」に丸めない**。**blocking が正しい。** 「planner が読めなかった」の報告である |
+| `acceptance_gate_block_invalid` | blocking | ```acceptance-gates ブロックが読めない（2個以上・未閉・tab・未知 version・未知 key・不正な gate id・重複・空・上限超過）。**「ブロックが無かった」に丸めない**（[acceptance-gates-notation.md](./acceptance-gates-notation.md) 第4節）。**blocking が正しい。** 「planner が読めなかった」の報告であり、丸めれば著者が書いたはずの受入ゲートが黙って消えた run が緑で終わる |
+| `acceptance_gate_block_unsupported` | blocking | ```acceptance-gates ブロックが `gates:`（新規 command gate の定義）を含む。**記法としては正しいが本 release は強制できない**ので、黙って無視せず止める（同記法 第6節）。**blocking が正しい。** 読めてはいるが**強制できない**ので、宣言された受入条件の一部が誰にも測られないまま run が緑になるのを防ぐ。`require:` に既存 gate id で書き直すか、条件をブロックの外に出して UAT で述べる |
+| `acceptance_requires_tests_but_scope_has_none` | blocking | 受入条件がテストの**作成**を能動的に要求しているのに、対象 file（**段1 の導出結果を含めて**）にテストらしき path が1件も無い。**blocking が正しい。** 「テストを足すのか、足さないのか」を著者が決めていない（判定は推論なので偽陽性がありうる。detail に原文が入っている） |
+| `contract_scope_dropped` | blocking | 宣言された対象 file の一部が、dispatch の実行契約の `scope.allow` に**入らない**（件数上限 200 超過、または契約が扱えない形の path）。detail に**落ちた件数・落ちた path（先頭3件）・落ちた理由**が入る。**blocking が正しい。** worker の権限が Issue の宣言より**狭く**なるという予告であり、`--unattended` では dispatch 側で blocking reason になって run ごと止まる |
+
+**この表に無い code が `plan.warnings` に出ることはない。** #210 は runner の
+`plan.warnings` 合流点（profile 由来 / 抽出 / 契約 scope / open question / 依存の5系統）を
+1つずつ辿って上表を作った。以前の表には ```acceptance-gates ブロック由来の2 code
+（`acceptance_gate_block_invalid` / `acceptance_gate_block_unsupported`）が**載っていなかった** ——
+どちらも `plan.warnings` に出て `status` を落とすのに、台帳の側から見えていなかった。
+新設 code をここへ書き足す規約は本書の冒頭に在る。
 
 `open_question_declared` / `open_question_block_invalid` /
 `no_acceptance_criteria` / `no_suspected_files` / `acceptance_requires_tests_but_scope_has_none` /
@@ -148,6 +178,38 @@ Issue が `## 対象ファイル`（成果物見出し）に書いた場合だ�
 返っていた**（実測 2026-08-14、Kewton/BorderFreeKidsMap）。その `partial` も異常ではなかったが、
 正しい書き方に対して常時出る色は色として機能しないので、#199 でこの code を
 `severity: notice` に分類し、`status` を落とすのをやめた。**warning 自体は残り続ける。**
+
+`profile_repository_override` は notice 集合の2件目である（[#210](https://github.com/Kewton/commandmate-skills/issues/210)）。
+`harness_path_in_scope` が**著者**の宣言の報告であるのに対し、これは **operator** の宣言の報告である
+—— 同じ分類原理の、同じ側である。判断の裏取りは runner の発生条件そのものにある:
+
+- `--repo <other>` が profile の `repository` と違う値を指したときだけ `verified` が降格し、
+  この降格が `verified_downgraded` を立てる。これが warning の唯一の発生源である
+- 降格した profile は `--allow-unverified` **無しでは run が `unverified_profile` で exit 3 する**
+  （fixture case 13）。したがって**この warning が plan に載っている run は、必ず
+  `--repo` と `--allow-unverified` の両方を明示的に受け取っている**
+- `--allow-unverified` を求める側のメッセージは
+  「`branch/base/worktree/baseline` が正しいことを確認してから付け直せ」と書いている。
+  フラグはその確認の記録であり、**run の command line に残る**
+
+**「原理どおりだから」だけで移したのではない。2つの実測が blocking 側を壊していた。**
+
+1. **同じ受諾が、綴りによって色分けされていた。** `--profile-json <verified: false>
+   --allow-unverified` は「検証されていない profile を承知で使う」というまったく同じ判断だが、
+   warning は1件も出ず `status: success` で返る（fixture case 08。risk は同じく high）。
+   `--repo` 経由の同じ判断だけが `partial` だった
+2. **第4節の対処表が指示した直し方が、色を動かさなかった。** `profile_repository_mismatch`
+   （cwd の origin と既定 profile が食い違う）の対処は
+   「`--profile` / `--profile-json` / `--repo` のどれかを渡して意図を明示する」である。
+   `--repo` を選ぶと `profile_repository_override` が出て、run は `partial` のままになる。
+   **表のとおりに直したのに色が変わらない** —— これは #177 が denied 側について言った
+   「正しい書き方に対して `partial` を出す warning は、読み手に読み飛ばし方を教える」の、
+   operator 側から到達した同じ失敗である
+
+**落としたのは色だけである。** `profile.verified` は plan の中で `false` のままだし、
+`risk.factors` には `unverified_profile`（severity `high`）が載り続け、`risk.level` も `high` の
+ままである。warning 自身も detail ごと `plan.warnings` に残り、`dependency-plan.md` にも
+`(notice)` の印つきで出る。**`success` は「読まなくてよい」ではない。**
 
 
 ## 3. limitation code（停止はしていないが、後から効いてくる制約）
@@ -237,7 +299,8 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | plan `harness_path_in_scope`（`severity: notice`。**`status` は落ちない** —— 他に blocking が無ければ `success` である） | Issue が `## 対象ファイル`（成果物見出し）に agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を書いたので、**worker がそれを書き換えられる状態で dispatch される**。既定では入らない path が、明示宣言によって入っている。**ハーネスを成果物とする Issue では正常に出る**（第2節） | **その Issue の成果物が本当にハーネスなのかを読んで決める。** そうなら（このリポジトリ自身の Issue のように）そのまま進めてよい —— warning は宣言の記録であって停止ではない。そうでない（ただ「その runner を実行して通ること」を言いたいだけの）なら、**成果物見出しから path を消して散文か参考見出し（`根拠` / `参考`）へ移し、re-plan する**。移しても worker はその path を読める（`reference_files` に出る）。**審判を書き換えられる worker を「たぶん大丈夫」で送らない。`success` は「読まなくてよい」ではない** —— この行を読ませるために warning は残してある（#199） |
 | plan `cycle_detected` / `override_incomplete` / `dependency_order_violation` | 依存グラフが実行不能 | `dependency-plan.md` の edge `reason`（どの方向語をどの行から読んだか）を見て、Issue 本文か `--depends` を直す |
 | plan `run_exists` | **同じ既定 run_id に hash された run が既にある**（Issue 集合・Issue 内容・**profile 全体**・CLI option がすべて同じ、が典型）。「何も変えていない」とまでは断定できない —— 既定 profile の cwd `origin` 判定は hash の外にある（Issue #157） | エラーが指す既存の `plan.json` と突き合わせて、意図した plan かを確かめる。違うなら Issue 本文か profile を直す（**profile はどの field を編集しても別 run_id になる**）。同じでよいなら `--run-id <new-id>` / `--runs-dir <dir>` を渡す |
-| plan `profile_repository_mismatch` | cwd の origin と profile の対象リポジトリが違う | `--profile` / `--profile-json` / `--repo` のどれかを渡して意図を明示する |
+| plan `profile_repository_mismatch` | cwd の origin と profile の対象リポジトリが違う | `--profile` / `--profile-json` / `--repo` のどれかを渡して意図を明示する。**`--repo` を選ぶと `verified` が降格するので `--allow-unverified` も要り、次の行の notice が出る**（#210 以降、それで `status` は落ちない） |
+| plan `profile_repository_override`（`severity: notice`。**`status` は落ちない** —— 他に blocking が無ければ `success` である） | `--repo` で profile の対象リポジトリを差し替え、`--allow-unverified` でその降格を受諾した run である。**`branch_template` / `worktree_template` / `base` / `baseline` は別のリポジトリで確認された値のまま**であり、この plan はそれらを検証なしで使う。`risk.level` は `high`、`profile.verified` は `false` | **その4項目がこのリポジトリで正しいかを確かめる。** 正しいなら進めてよい —— 2つの flag がその判断の記録であり、warning は記録の側である。恒常的にこのリポジトリを対象にするなら **`profile-init.mjs` で専用 profile を作って検証し、`--profile-json` で渡す**（[profile-contract.md](./profile-contract.md) 第7節・第8節）。そうすれば降格そのものが起きない。**`success` は「読まなくてよい」ではない** —— この行を読ませるために warning は残してある（#210） |
 | dispatch `open_questions` + `human_required` | 未回答の question を持つ Issue がある | blocking reason に**質問の本文**が出ている。Issue 本文に回答を書いて re-plan する |
 | dispatch `drift` | plan 承認後に branch / HEAD / 権限が動いた | drift の内容を確認し、必要なら re-plan する。**drift の上に dispatch しない** |
 | dispatch `worktree_unresolved`（`stop_reason: drift`） | 対象 Issue の worktree が `commandmate ls` で解決できない（runner は `commandmate sync` を1度試したうえでの結論。`limitations` の `worktree_sync_ran` / `worktree_sync_unavailable` を見る）。**worker は1人も起動していない**（`task_id: null`・worker ログ無し） | **`cmate-worktree-setup` で worktree を作成し、同じコマンドで再実行する**（最初の Wave 前で止まった場合、`--out` は消費されていない）。plan と同じ profile（同じ `branch_template`）を使う。**Issue の分割や re-plan は不要** |

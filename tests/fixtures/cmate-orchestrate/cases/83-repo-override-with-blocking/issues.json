@@ -1,0 +1,12 @@
+{
+  "issues": [
+    {
+      "number": 419,
+      "title": "feat: add a CLI verbosity flag",
+      "body": "Add a verbosity flag to the command line entry point in `src/cli.ts`.\n",
+      "labels": [
+        "feature"
+      ]
+    }
+  ]
+}
