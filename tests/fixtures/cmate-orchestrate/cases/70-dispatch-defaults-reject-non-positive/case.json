@@ -1,0 +1,13 @@
+{
+  "description": "Issue #196, profile-contract.md §10.2: a count of 0 is refused. Zero is the value that reads as \"no limit\" to a human and means \"time out immediately\" to `commandmate wait`, so accepting it would turn a declaration written to STOP timeouts into one that guarantees them. The bound is >= 1 and it is checked where the profile is read, not where the value is used. `load_error` / exit 6.",
+  "args": ["461", "--profile-json", "PROFILE:dispatch-defaults-invalid-non-positive.json"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "profile.dispatch_defaults.wait_timeout must be a positive integer, got 0"
+    ],
+    "plan_null": true
+  }
+}

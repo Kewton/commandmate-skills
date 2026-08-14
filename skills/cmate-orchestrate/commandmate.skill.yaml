@@ -185,8 +185,8 @@ files:
     executable: false
     script: false
   - path: references/profile-contract.md
-    sha256: 164bee38b25ed1418be5abf108110284a0668e1402e6287ad058adb839dee911
-    size: 36093
+    sha256: e0beb160dee125a89769df0f223b009b9779b8d900a52f2943690afebd8e1c9c
+    size: 39569
     kind: instruction
     executable: false
     script: false
@@ -263,8 +263,8 @@ files:
     executable: true
     script: true
   - path: scripts/orchestrate.mjs
-    sha256: ad08397f50fa4ff1c13ceefd6931e927f15e746a30b544ff440aae6492d545b7
-    size: 167988
+    sha256: 8987d3438006e434860027784036d3cd2b323d03dbaff17f16b7b84a515ed263
+    size: 174458
     kind: script
     executable: true
     script: true

@@ -1,0 +1,13 @@
+{
+  "description": "Issue #196, profile-contract.md §10.2: the field itself must be a JSON object. An array of one object is the shape an author reaches for when they read the key name as plural, and `typeof [] === 'object'` is what lets it through a loader that only checks the typeof — at which point Object.keys() yields \"0\" and the refusal would name a key nobody wrote. Refused as the wrong shape instead, with the four legal keys named. `load_error` / exit 6.",
+  "args": ["461", "--profile-json", "PROFILE:dispatch-defaults-invalid-not-object.json"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "profile.dispatch_defaults must be a JSON object of no_infer / auto_yes / wait_timeout / max_turns"
+    ],
+    "plan_null": true
+  }
+}

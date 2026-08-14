@@ -1,0 +1,13 @@
+{
+  "description": "Issue #196, profile-contract.md §10.2: a boolean key declared as the STRING \"true\" is refused. This is the shape a type check must catch rather than coerce — `Boolean(\"false\")` is true, so a coercing loader would read a profile that says off as a profile that says on, and arm every worker this run sends. `load_error` / exit 6, at profile load.",
+  "args": ["461", "--profile-json", "PROFILE:dispatch-defaults-invalid-type.json"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "profile.dispatch_defaults.auto_yes must be true or false, got \"true\""
+    ],
+    "plan_null": true
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 461,
+      "title": "fix: user モデルの validation を直す",
+      "body": "`app/models/user.rb` の email validation が空文字を通してしまう。\n\n## 対象ファイル\n- `app/models/user.rb`\n\n## Acceptance criteria\n- [ ] 空の email を弾く\n- [ ] 既存の spec が緑のままである\n",
+      "labels": ["bug"]
+    }
+  ]
+}

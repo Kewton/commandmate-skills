@@ -1,0 +1,15 @@
+{
+  "id": "dispatch-defaults-declared",
+  "repository": "Kewton/CommandMate",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": ["bundle exec rspec"],
+  "verified": true,
+  "dispatch_defaults": {
+    "max_turns": 10,
+    "auto_yes": true,
+    "wait_timeout": 3600,
+    "no_infer": true
+  }
+}

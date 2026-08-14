@@ -9,8 +9,10 @@ cases/<case-id>/case.json       引数と、機械で判定できる期待値
 cases/<case-id>/expected-plan.json  （任意）golden な plan。byte 一致で照合
 dispatch-cases/<id>/case.json   plan 生成引数・scenario・dispatch 期待値。`plan_patch` は
                                 生成された plan を dispatch に渡す前に書き換える（merge-case と
-                                同じ理由。profile の `dispatch_defaults` は planner がまだ受け取らない
-                                field なので、この経路でしか plan に載せられない。#180）
+                                同じ理由。`dispatch_defaults` の case は #180 当時は planner が本 field を
+                                拒否していたのでこの経路しか無かったが、#196 の着地後は
+                                **dispatch が「自分が作っていない plan」も受けること**を測るための選択である。
+                                planner 側の echo は plan case 66/67 と `d93` が本物の profile で測る）
 dispatch-cases/<id>/scenario.json  fake CLI に注入する worker/verify/drift の挙動
 dispatch-cases/<id>/contracts/  （契約 case のみ）生成された実行契約の golden。byte 一致で照合
 dispatch-cases/issues-multifile.json  複数 file を保有する Issue fixture（契約決定性の case 用）
@@ -112,6 +114,12 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 | `63-scope-companions-literal-not-matched` | 逆向き: 同じ profile で、どの `when` にも一致しない Issue には literal が出ないか。literal も**宣言に gate されている**ことの測定（#181） |
 | `64-scope-companions-reject-literal-escape` | literal は宣言済み path から作られないので、`isSafeRepoPath` を通していなければ profile 経由の path traversal になる。`users/…`（`..` でも絶対 path でもなく、**この述語だけが落とせる**形）が load 時に拒否されるか（#181） |
 | `65-scope-companions-reject-literal-harness` | #177 の既定除外（`.claude/skills/` 等）を profile が literal で開け直せないか。**静かな2つ目の扉**を作らないことの測定（#181） |
+| `66-dispatch-defaults-declared` | `dispatch_defaults` を宣言した profile が**plan 段階を通り**、宣言が `plan.profile` に echo されるか（#196）。profile は4 key を契約と違う順で書いており、plan は**契約の順**で載せる —— profile は丸ごと run_id の hash に入るので、組み直さないと key の並べ替えで id が割れる。golden は 45 と `run_id` / `profile.id` / この field 以外**完全に同一**である |
+| `67-dispatch-defaults-with-companions` | **任意 field の echo 順の固定**（#196）。`scope_companions` → `dispatch_defaults` の順で、#195 の `integration_baseline` はさらに後ろに付く。順序が plan のバイト列を決めるので、間に差し込む実装は内容の変わっていない plan の golden を壊す。`profile_keys` が順序付きの field 一覧をそのまま述べる |
+| `68-dispatch-defaults-reject-unknown-key` | 未知 key（`schedule` —— #180 が意図的に**外した**もの）を読み飛ばさず拒否するか。新しい runner 向けの profile が古い runner で半分だけ効く状態を作らない（第10.2節） |
+| `69-dispatch-defaults-reject-type` | boolean key に文字列 `"true"` を書いた profile を拒否するか。`Boolean("false")` は true なので、強制変換する loader は **off と書いた profile を on と読む** |
+| `70-dispatch-defaults-reject-non-positive` | `wait_timeout: 0` を拒否するか。0 は人には「無制限」に読め、`commandmate wait` には「即 timeout」を意味する |
+| `71-dispatch-defaults-reject-not-object` | field 自体が object でない（`[{…}]`）ものを拒否するか。`typeof [] === 'object'` を素通しすると、誰も書いていない key `"0"` を名指す refusal になる |
 
 ## dispatch case 一覧
 
@@ -226,6 +234,7 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 | `d90-schedule-dag-unattended-halts-all` | **d89 の双子（安全側）。** 世界も plan も scenario も同一で、違いは `--unattended`（と必須の `--wall-clock-budget`）だけ。無人では**従来どおり全停止**し、上流 #311 が green になっても #313 は1度も send されない。止めた理由は Issue ごとに正確に分ける —— #312 は本当に上流が壊れているので `blocked_by_upstream_failure`、#313 は依存が pass しているので `schedule_halted_unattended`（対処が違うので丸めない） |
 | `d91-schedule-dag-max-parallel-bound` | **`--max-parallel` は同時実行数の上限のまま（#183 受入条件3）。** 依存ゼロ3件を `--max-parallel 2` の DAG で回すと、3件とも ready なのに round 0 は2件だけで、3件目は枠が空いてから入る（`waves_dispatched: [[400,401],[402]]`）。ready を全部投入する実装は `dispatched.length 3 > max_parallel 2` を書き、全 dispatch case にかかる上限 assert で落ちる |
 | `d92-schedule-dag-timeout-liveness` | **#183 × #179。** DAG では worker の終了順が投入順と一致しないので、timeout の生死の見分け（`wait_window_exhausted` / `worker_stalled`）が壊れていないことをここで測る。#402 は timeout しないので `worker_liveness` を**持たない**。生死の blocking reason を完了順に push した実装は run ごとに並びが変わるので、`blocking_order` が plan 順（#400 → #401）を固定している |
+| `d93-dispatch-defaults-real-profile` | **d81 の相方（#196）。宣言が profile から run まで通ることの端から端までの測定。** 世界も期待値も d81 と同一で、`plan_patch` を使わず**本物の profile を planner に渡して plan を作る**。したがって測っているのは planner の echo であり、`publicProfile()` が宣言を落とせば `wait` の argv は 300 に、`send` の窓は 1h に戻って赤くなる |
 
 ## merge case 一覧
 
@@ -381,7 +390,7 @@ plan は入力の純粋関数なので、Agent の種類によらず同じ plan 
 
 | suite | 何を見るための suite か |
 |---|---|
-| **run id vs profile**（#157 / #180） | profile を1 field だけ変えた2つの plan が**別の run_id になる**か（かつ、その field が本当に plan を動かしているか）。key の並べ替えでは id が割れないこと、同一入力の再実行は同じ id で `run_exists` に落ちること。末尾の1件は #180 の**分割の現状を pin する**もので、`dispatch_defaults` を持つ profile を planner が今なお `load_error` で拒否することを固定する —— planner 側が着地したとき最初に赤くなるのがここであり、直し方は上の variants 表へ `project: (plan) => plan.profile.dispatch_defaults` として1行足すことである（hash は field を列挙しないので、受理された瞬間に性質は付いてくる） |
+| **run id vs profile**（#157 / #180 / #196） | profile を1 field だけ変えた2つの plan が**別の run_id になる**か（かつ、その field が本当に plan を動かしているか）。key の並べ替えでは id が割れないこと、同一入力の再実行は同じ id で `run_exists` に落ちること。variants 表の7件目が `dispatch_defaults` で、これは #180 が求めた性質が**追加の実装なしに**付いてきたことの測定である（署名は field を列挙しないので、loader が受理した瞬間に成立する）。並べ替えの assert は**宣言の内側の key 順**についても1件持つ —— 本 field は値が複数 key の object である最初の profile field なので、組み直しを省いた loader は「profile の2行を入れ替えただけ」で run_id を割る |
 | contract parity | runner が叩く `commandmate` の subcommand と flag が `commandmate-cli-contract.json` の範囲内か（実 CLI が在れば実物とも突き合わせる） |
 | launcher resolution | `--cli` の多トークン展開・`$CM` へのフォールバック・起動不能な launcher の拒否（#37） |
 | worktree-setup input | `--worktree-setup` の二重指定・shell 構文を、世界に触れる前に `invalid_input` で拒否するか（#93） |
