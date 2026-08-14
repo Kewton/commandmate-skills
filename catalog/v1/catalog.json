@@ -507,7 +507,7 @@
         "review",
         "github"
       ],
-      "latest": "0.3.0",
+      "latest": "0.4.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -699,6 +699,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-refinement-v0.3.0/cmate-issue-refinement-0.3.0.tar.gz",
             "sha256": "039a5e7eb97d68f3f2b2bd40a20a2e4be029f036cc1e5ac95ca1c0d4c7133d90",
             "size": 27204,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. No rubric evaluation recorded yet.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not evaluated",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not evaluated",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.4.0",
+          "changelog": "0.3.0 以降の 1 件（#198）を公開する。\n\n主題は **open-questions 記法（cmate-orchestrate #178）の生産側を繋ぐこと**である。記法には消費側（planner がブロックを読み、1 件につき blocking question を立てる）しか無く、refinement が出した open question を著者が手でブロックへ写している限り、写し漏れがそのまま「決めていないのに dispatch が通る」に戻っていた。\n\n- **#198**: blocking な open question から、そのまま Issue 本文へ貼れる ```open-questions fenced block を組み立てて出力に含める。記法の正本は cmate-orchestrate 側の `open-questions-notation.md` のまま —— refinement はその subset を生成するだけで、規則を 2 箇所に持たない。制約は記法どおり（`version: 1` が先頭 key・list item は厳密に 2 スペース・最大 32 件・完全一致の重複不可）で、32 件を超えるときは切らずに切ったことを名乗る。`refinement-result.v1.json` に field を追加し、貼る側が加工せず使える 1 つの文字列として持つ。**「Issue を書き換えない」という不変条件は変えない** —— 出力に載せるだけで、貼るかどうかは著者が決める。生成規則の正しさは、生成した形のブロックを cmate-orchestrate の実 parser（`orchestrate.mjs`）に食わせるリポジトリ層の conformance テストで担保する —— 散文のミラーはドリフトするからである。cmate-issue-authoring 側へのミラーは別 Issue。",
+          "published_at": "2026-08-14T12:04:17Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-refinement-v0.4.0",
+            "commit": "1bd4452d7b670b024523f5f50fbbff394123de3b"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-refinement-0.4.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-refinement-v0.4.0/cmate-issue-refinement-0.4.0.tar.gz",
+            "sha256": "9858431b03ddcd4618cd19ef70b0ccec4d224d3f4042923905b33b7151448681",
+            "size": 32037,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
