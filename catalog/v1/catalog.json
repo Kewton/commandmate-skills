@@ -177,7 +177,7 @@
         "schema",
         "dry-run"
       ],
-      "latest": "0.7.0",
+      "latest": "0.8.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -457,6 +457,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.7.0/cmate-issue-authoring-0.7.0.tar.gz",
             "sha256": "b2492c0e69c559b086a389a3fe6eae61bfa7f6189532dfe99bd3fb93ae64186f",
             "size": 46592,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.8.0",
+          "changelog": "0.7.0 以降の 1 件（#209）を公開する。\n\n主題は **open-questions 記法の線を起案側まで繋ぐこと**である。cmate-issue-refinement 0.4.0（#198）が既存 Issue の refinement 側を繋いだが、**新規 Issue を起案する側は依然この記法を書かなかった** —— 著者が手で写す限り、写し漏れがそのまま「決めていないのに dispatch が通る」に戻る。\n\n- **#209**: 起案する Issue 本文に、blocking な open question の ```open-questions ブロックを**直接埋める**。refinement との違いは意図的である —— refinement の不変条件は「Issue を書き換えない」なのでブロックは出力に載せて著者に貼らせる形だったが、**authoring の成果物は本文そのもの**であり、埋めない理由が無い。`open_questions` 配列が真であり、ブロックはそこから組む（二重管理にしない）。記法の正本は cmate-orchestrate 側の `open-questions-notation.md` のままで、authoring はその subset を生成するだけである。制約も記法どおり（`version: 1` が先頭 key・list item は厳密に 2 スペース・最大 32 件・完全一致の重複不可・32 件超は切らずに名乗る）。`validate-plan.mjs`（planner の抽出領域の写し）がブロックを検証するようにした —— planner が受けるものを起案するのだから、起案側の検証がそれを読めないのは写しとしての欠けである。生成規則の正しさは、生成した形のブロックを cmate-orchestrate の実 parser に食わせるリポジトリ層の conformance テストで担保する。散文のミラーはドリフトするからである。",
+          "published_at": "2026-08-14T15:20:25Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-authoring-v0.8.0",
+            "commit": "ff259caaa41e76bd049d072c6218d548556e4b7f"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-authoring-0.8.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.8.0/cmate-issue-authoring-0.8.0.tar.gz",
+            "sha256": "b74e7e6fb4a49a56c7e78548d2ac18b6813f91dbac3b8e60483c2d74814e5d34",
+            "size": 56410,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
