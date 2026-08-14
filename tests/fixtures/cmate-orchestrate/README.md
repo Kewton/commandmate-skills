@@ -72,8 +72,10 @@ node tests/fixtures/cmate-orchestrate/run_tests.mjs
 - `warning_severities` を宣言した case では、`plan.warnings[].severity` が位置対応で一致すること
   （`null` は field 不在＝fail-closed の `blocking` 既定。#199）
 - **全 case について**、`severity` は `notice` か不在のどちらかであること（planner は `blocking` を
-  綴らない＝warning を持たない plan は #199 以前と byte 一致する）と、`status` が `partial` で
-  あることと blocking な warning が在ることが一致すること
+  綴らない＝notice を持たない plan は #199 以前と byte 一致する）と、`status` が `partial` で
+  あることと blocking な warning が在ることが一致すること。notice 集合は #210 の棚卸しで
+  `harness_path_in_scope` / `profile_repository_override` の2件になったので、この不変条件は
+  「1件だけ」を仮定していない —— **notice 側が広がったら、blocking を期待している case が赤くなる**
 - `questions_count` / `questions_include` を宣言した case では、`issues[].questions` の**件数**と
   **含む文字列**が期待どおりであること。dispatch が読むのは `warnings` ではなくこの field であり、
   推論由来の question（`acceptance_requires_tests_but_scope_has_none`, #145）は判定の元になった
@@ -105,7 +107,8 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 | `11-default-profile-repo-match` | origin が一致するとき従来どおり warning 無しの success か（#36） |
 | `12-default-profile-cwd-not-git` | cwd が git リポジトリでないとき照合をスキップして success のままか（#36） |
 | `13-repo-override-unverified` | `--repo` が `verified` を降格させ、確認なしでは拒否するか（#36） |
-| `14-repo-override-allow-unverified` | `--allow-unverified` 時に降格が plan（verified/risk/warning）に見えるか（#36） |
+| `14-repo-override-allow-unverified` | `--allow-unverified` 時に降格が plan（verified/risk/warning）に見えるか（#36）。その warning が `severity: notice` で `status` を落とさないか（#210。**2つの明示 flag が揃わないと出ない code** ＝ operator が既に決めて command line に記録した事実の報告） |
+| `83-repo-override-with-blocking` | 同じ notice と blocking な warning が同居したとき、`status` が blocking 側で決まるか（#210。notice が**先頭**に立つ並びで固定してある。case 72 の profile 版） |
 | `28-acceptance-gates-block` | ```acceptance-gates ブロックが `acceptance_gates` に載るか。ブロック有無の**双子 Issue**で `test_expectations` が byte 一致するか（#114 Phase 0-3: strip しないと本ブロックの終了 fence が後続 ```bash の開始として拾われ、3件が1件に落ちる） |
 | `29-acceptance-gates-invalid` | 2個・未知 version・不正 id・空ブロックを `acceptance_gate_block_invalid` として open question にし、**「ブロックが無かった」に丸めない**か |
 | `30-acceptance-gates-unsupported` | `gates:`（段階2の新規コマンドゲート）を黙って無視せず `acceptance_gate_block_unsupported` で止めるか |

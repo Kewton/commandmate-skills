@@ -1,0 +1,40 @@
+{
+  "description": "Issue #210, the guardrail for the second notice code — the same shape case 72 pins for the first. `--repo` + `--allow-unverified` raises `profile_repository_override` (notice), and this body states no acceptance criteria, so the plan carries both severities at once and the status must be decided by the BLOCKING one: `partial`, with the notice still present and still annotated. A runner that computed the status from the FIRST warning, or from any single entry rather than from 'is there at least one blocking', would return success here and lose the fact that nobody wrote down what done means — and the notice sits FIRST in the list precisely because profile warnings are assembled ahead of per-issue ones, so this is the ordering that would break it. The other half of #199's byte discipline is pinned in the same list: only the notice carries `severity`, the blocking entry carries nothing at all.",
+  "args": ["419", "--repo", "Kewton/BorderFreeKidsMap", "--allow-unverified"],
+  "cwd": { "git": true, "origin": "git@github.com:Kewton/BorderFreeKidsMap.git" },
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": ["profile_repository_override", "no_acceptance_criteria"],
+    "warning_severities": ["notice", null],
+    "warning_details_include": [
+      "--repo re-pointed profile \"node-commandmate\" at Kewton/BorderFreeKidsMap",
+      "#419: Acceptance criteria are unclear; add 1-3 concrete completion checks."
+    ],
+    "waves": [[419]],
+    "merge_order": [419],
+    "dependencies": [],
+    "classifications": { "419": "independent" },
+    "suspected_files": {
+      "419": [
+        "src/cli.ts",
+        "src/cli.test.ts",
+        "src/cli.spec.ts",
+        "src/__tests__/cli.ts",
+        "src/__tests__/cli.test.ts"
+      ]
+    },
+    "scope_defaults": {
+      "419": [
+        "src/cli.test.ts",
+        "src/cli.spec.ts",
+        "src/__tests__/cli.ts",
+        "src/__tests__/cli.test.ts"
+      ]
+    },
+    "reference_files": { "419": [] },
+    "questions_count": { "419": 1 },
+    "profile_verified": false,
+    "risk_level": "high"
+  }
+}

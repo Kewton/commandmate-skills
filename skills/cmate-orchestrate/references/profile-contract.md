@@ -79,8 +79,17 @@ branch/base/worktree/baseline を **そのリポジトリで** 確認した」�
 `repository` と異なる値を指定した場合、planner は `verified` を `false` に落とす。
 結果として `--allow-unverified` が無ければ `unverified_profile` で拒否し、
 付けた場合は risk factor `unverified_profile`（high）と warning
-`profile_repository_override` が載って result は `partial` になる。
+`profile_repository_override` が載る。
 `--base` の上書きは `verified` を変えない（同一リポジトリ内の話だからである）。
+
+**この warning は `status` を落とさない**（`severity: notice`。
+[#210](https://github.com/Kewton/commandmate-skills/issues/210)。
+[plan-contract.md](./plan-contract.md) 第5.6節）。この経路は `--repo`（差し替え）と
+`--allow-unverified`（降格の受諾）の**2つの明示 flag が揃わないと通れない**ので、warning が運ぶのは
+operator が既に決めて run の command line に記録した事実である。同じ受諾を
+`--profile-json <verified: false> --allow-unverified` と綴った run は warning すら出ずに
+`success` で返るので、`partial` は同一の判断を綴りで色分けしていた。**降格自体は何も変わっていない**
+—— `profile.verified` は `false` のまま plan に載り、`risk.level` は `high` のままである。
 
 ## 5. 既定 profile と cwd の照合
 

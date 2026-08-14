@@ -1,11 +1,16 @@
 {
-  "description": "Issue #36: with --allow-unverified the --repo override is permitted, but the downgrade is visible — profile.verified is false, risk carries unverified_profile (high), and the result is partial. The cwd origin matches the overridden repository, so no mismatch warning is added on top.",
+  "description": "Issue #36 / #210: with --allow-unverified the --repo override is permitted, and the downgrade stays visible — profile.verified is false, risk carries unverified_profile (high), and `profile_repository_override` names it. Since #210 the warning no longer paints the run: it is the SECOND notice code, so this plan is `success`. The classification is the operator side of #199's principle — the code cannot be raised unless BOTH --repo and --allow-unverified were passed (case 13 is the same command without the second flag and exits 3), so it reports a decision already made and already in the run's command line. Two measurements decided it over the principle alone: case 08 spells the same acceptance as `--profile-json <unverified> --allow-unverified` and comes back `success` with no warning at all, and the recovery §4 prescribes for `profile_repository_mismatch` is to pass one of --profile/--profile-json/--repo — choosing --repo used to turn a partial into a partial, so following the table moved nothing. The cwd origin matches the overridden repository, so no mismatch warning is added on top. What did NOT move is pinned here too: verified false, risk high.",
   "args": ["100", "--repo", "Kewton/BorderFreeKidsMap", "--allow-unverified"],
   "cwd": { "git": true, "origin": "git@github.com:Kewton/BorderFreeKidsMap.git" },
   "expect": {
     "exit": 0,
-    "status": "partial",
+    "status": "success",
     "warning_codes": ["profile_repository_override"],
+    "warning_severities": ["notice"],
+    "warning_details_include": [
+      "--repo re-pointed profile \"node-commandmate\" at Kewton/BorderFreeKidsMap",
+      "this plan runs on an unverified profile"
+    ],
     "waves": [[100]],
     "merge_order": [100],
     "profile_verified": false,

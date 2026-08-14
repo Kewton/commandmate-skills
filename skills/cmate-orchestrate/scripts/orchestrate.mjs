@@ -3077,14 +3077,43 @@ function completionChecks(plan, dependencyErrors, ranOverwriteGuard) {
 //      status exactly as it did before, so a warning code added by a later change
 //      is blocking until someone argues otherwise. The failure mode of forgetting
 //      to classify is "still partial", never "silently no longer partial".
-//   2. The notice set is ONE code. Moving any other code into it is an
-//      independent judgement about that code and belongs in its own issue (#199
-//      says so). This set is the whole of the mechanism's blast radius.
+//   2. Each member of the set is an independent judgement about ONE code, argued
+//      in its own issue and written down per code in
+//      references/codes-and-recovery.md §2. There is no bulk move.
+//
+// Issue #210 is the inventory #199 deferred: every code that can reach
+// `plan.warnings` is classified there, one row per code, INCLUDING the ones that
+// stay blocking — so "considered and decided blocking" and "never considered" no
+// longer look alike. Sixteen codes were audited against the runner; fifteen are
+// blocking and are recorded as such. One moved:
+//
+//   * `profile_repository_override` (#210). It cannot be raised without TWO
+//     explicit operator flags: `--repo <other>` re-points the profile (which is
+//     what sets `verified_downgraded`), and the run then throws `unverified_profile`
+//     unless `--allow-unverified` is also passed — whose own refusal text asks the
+//     operator to confirm branch/base/worktree/baseline FIRST. So the warning
+//     reports a decision that is already made and already recorded in the run's
+//     command line, which is the notice side of the split.
+//
+//     Two measurements settled it rather than the principle alone. (a) The very
+//     same acceptance — an unverified profile taken knowingly — is `success` with
+//     no warning at all when it arrives as `--profile-json <unverified>
+//     --allow-unverified` (fixture case 08), so `partial` here coloured one of two
+//     identical operator decisions and not the other, on the spelling. (b) The
+//     documented recovery for `profile_repository_mismatch` (SKILL.md §4: pass
+//     `--profile` / `--profile-json` / `--repo`) turns a `partial` into a
+//     `partial` — the operator does exactly what the table says and the colour
+//     does not move. That is the "teaches the reader to skip it" failure #177
+//     named, reached from the operator side instead of the author side.
+//
+//     Nothing about the risk is dropped: `plan.risk` still carries the
+//     `unverified_profile` factor at `high` and `profile.verified` is still
+//     `false` in the plan. Only the colour moved.
 //
 // `harness_path_in_scope` is unchanged in every other respect: it still fires, it
 // still names the path, it still sits in `plan.warnings` and in the recovery
 // table. Only the colour moved.
-const NOTICE_WARNING_CODES = new Set(['harness_path_in_scope']);
+const NOTICE_WARNING_CODES = new Set(['harness_path_in_scope', 'profile_repository_override']);
 
 // `severity` is written on NOTICE entries only. `blocking` stays implicit, which
 // buys two things at once:
