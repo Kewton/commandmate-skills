@@ -75,10 +75,16 @@ const BUILTIN_PROFILES = {
   },
 };
 
-// `scope_companions` is the only OPTIONAL entry. Neither built-in profile
-// declares it: both target repositories whose test layout L1 already derives, so
-// declaring nothing is both accurate and what keeps their plans byte-identical
-// to the ones 0.24.0 produced (references/adr-scope-derivation.md §15).
+// `scope_companions` and `dispatch_defaults` are the OPTIONAL entries. Neither
+// built-in profile declares either: both target repositories whose test layout L1
+// already derives and whose runs need no flag the CLI defaults do not already
+// give, so declaring nothing is both accurate and what keeps their plans
+// byte-identical to the ones 0.24.0 produced
+// (references/adr-scope-derivation.md §15).
+//
+// ORDER IS PART OF THE CONTRACT for the optional entries: publicProfile() echoes
+// them in this order, and the echo decides the plan's bytes, which every full-text
+// golden measures. A new optional field is appended HERE and echoed LAST there.
 const PROFILE_FIELDS = [
   'id',
   'repository',
@@ -88,6 +94,7 @@ const PROFILE_FIELDS = [
   'baseline',
   'verified',
   'scope_companions',
+  'dispatch_defaults',
 ];
 
 // =============================================================================
@@ -429,6 +436,11 @@ function normalizeProfile(raw) {
   // have. "未指定＝段1 までの挙動" has to be literal, down to the plan bytes.
   const companions = normalizeScopeCompanions(raw.scope_companions);
   if (companions !== null) profile.scope_companions = companions;
+  // Same ABSENT-stays-absent rule, same reason, and the same position it is
+  // echoed in (publicProfile). A profile that declares neither optional field
+  // produces the plan it produced before either existed, byte for byte.
+  const dispatchDefaults = normalizeDispatchDefaults(raw.dispatch_defaults);
+  if (dispatchDefaults !== null) profile.dispatch_defaults = dispatchDefaults;
   return profile;
 }
 
@@ -858,6 +870,94 @@ function profileScopeDefaultsFor(rules, suspected, added) {
     }
   }
   return out;
+}
+
+// =============================================================================
+// dispatch_defaults — repository operating defaults (Issue #180, planner half #196)
+// =============================================================================
+//
+// The planner does not USE this field. It loads it, validates it, and echoes it
+// into `plan.profile` so the dispatch runner can read it from the approved plan
+// (references/profile-contract.md §10, references/dispatch-contract.md §1.1).
+// That is the whole of the planner's part, and it is a part only because a
+// profile field the loader refuses is a field nobody can write: before this, a
+// profile carrying `dispatch_defaults` stopped at `load_error` before an issue
+// was read, so the declaration could only reach dispatch through a plan somebody
+// hand-edited.
+//
+// ---- Why the validation is duplicated rather than shared --------------------
+//
+// dispatch.mjs validates the same shape and keeps doing so. It is not defensive
+// duplication: the two checks are about two different FILES. dispatch reads
+// `plan.profile.dispatch_defaults` out of a plan artifact, and a plan can arrive
+// there without ever having passed through this loader (§10.6 names the
+// hand-written case, and status/resume artifacts are plans this planner did not
+// produce), so dispatch cannot delegate its check to the planner. And the two
+// checks do not even end the same way: each throws a SkillError naming its own
+// file (below), so what could be shared is a table of shapes with the refusal
+// passed in — a factoring that saves four `throw` lines and puts the two
+// runners' contracts in one place where a change to one silently moves both.
+//
+// ---- Why load_error / exit 6 here and plan_invalid / exit 3 there -----------
+//
+// A code names the file the operator has to open. Every other malformed profile
+// field leaves this loader as `load_error` (exit 6) — "the profile file is
+// wrong" — and a `dispatch_defaults` that exits 3 with `plan_invalid` would send
+// the reader of a profile to a plan that does not exist yet. The mirror argument
+// is why dispatch keeps `plan_invalid`: there the fact IS about the plan file,
+// and the operator who typed the dispatch command is generally not the person
+// who wrote the profile (the comment above readDispatchDefaults says so).
+// Same rules, same messages, two different subjects.
+const DISPATCH_DEFAULT_BOOLEANS = ['no_infer', 'auto_yes'];
+const DISPATCH_DEFAULT_COUNTS = ['wait_timeout', 'max_turns'];
+const DISPATCH_DEFAULT_KEYS = [...DISPATCH_DEFAULT_BOOLEANS, ...DISPATCH_DEFAULT_COUNTS];
+
+// Returns the canonical declaration, or null when the profile has none.
+//
+// REBUILT, not passed through, and rebuilt in DISPATCH_DEFAULT_KEYS order. The
+// resolved profile goes into the run-id hash WHOLE and unsorted (#157, see
+// canonicalInputSignature), so a field that carried a caller-supplied object
+// through unrebuilt would fork the run id when an author merely re-ordered the
+// keys inside it. Rebuilding is what keeps that cosmetic edit invisible, exactly
+// as normalizeScopeCompanions rebuilds every rule as `{when, add}`.
+//
+// The accepted SET is identical to dispatch's: an explicit `null` is refused
+// there, so it is refused here rather than quietly read as "absent" — two copies
+// of one rule are only auditable while they accept the same declarations. An
+// empty `{}` is accepted by both and states nothing, which is what it means.
+function normalizeDispatchDefaults(raw) {
+  if (raw === undefined) return null;
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new SkillError('load_error',
+      `profile.dispatch_defaults must be a JSON object of ${DISPATCH_DEFAULT_KEYS.join(' / ')}, got ${JSON.stringify(raw)}`, 6);
+  }
+  for (const key of Object.keys(raw)) {
+    if (!DISPATCH_DEFAULT_KEYS.includes(key)) {
+      throw new SkillError('load_error',
+        `profile.dispatch_defaults has an unknown key "${key}"; this runner understands ${DISPATCH_DEFAULT_KEYS.join(', ')}. `
+          + 'A profile written for a newer runner is refused rather than half-honored, for the reason an unknown profile '
+          + 'FIELD is refused (profile-contract.md §9.3): the keys it declares would otherwise be silently dropped, and a '
+          + 'run driven by half a declaration is the accident the declaration was written to prevent', 6);
+    }
+  }
+  const declared = {};
+  for (const key of DISPATCH_DEFAULT_BOOLEANS) {
+    if (!(key in raw)) continue;
+    if (typeof raw[key] !== 'boolean') {
+      throw new SkillError('load_error',
+        `profile.dispatch_defaults.${key} must be true or false, got ${JSON.stringify(raw[key])}`, 6);
+    }
+    declared[key] = raw[key];
+  }
+  for (const key of DISPATCH_DEFAULT_COUNTS) {
+    if (!(key in raw)) continue;
+    if (!Number.isInteger(raw[key]) || raw[key] < 1) {
+      throw new SkillError('load_error',
+        `profile.dispatch_defaults.${key} must be a positive integer, got ${JSON.stringify(raw[key])}`, 6);
+    }
+    declared[key] = raw[key];
+  }
+  return declared;
 }
 
 // =============================================================================
@@ -3008,11 +3108,20 @@ function publicProfile(profile) {
     baseline: profile.baseline,
     verified: profile.verified,
   };
-  // Echoed only when the profile declared it, and LAST, so a plan built on a
-  // profile without the key is byte-for-byte the plan 0.24.0 produced. When it is
-  // there, it is what lets a reviewer trace a `scope_defaults` entry that no L1
-  // rule explains back to the declaration that produced it.
+  // The optional fields are echoed ONLY when the profile declared them, and
+  // after the required seven, so a plan built on a profile without them is
+  // byte-for-byte the plan 0.24.0 produced. THE ORDER OF THESE LINES IS THE
+  // PLAN'S BYTE ORDER — it is fixed by PROFILE_FIELDS and measured by every
+  // full-text golden — so a new optional field is appended below, never spliced
+  // in between.
+  //
+  // `scope_companions` is here so a reviewer can trace a `scope_defaults` entry
+  // that no L1 rule explains back to the declaration that produced it.
+  // `dispatch_defaults` is here because the plan is how it reaches the runner
+  // that consumes it: dispatch reads `plan.profile.dispatch_defaults` and never
+  // opens the profile (profile-contract.md §10, Issue #196).
   if (profile.scope_companions !== undefined) out.scope_companions = profile.scope_companions;
+  if (profile.dispatch_defaults !== undefined) out.dispatch_defaults = profile.dispatch_defaults;
   return out;
 }
 
@@ -3346,7 +3455,8 @@ function run(argv) {
       `run directory ${runDir} already exists; refusing to overwrite. ` +
         'The default run id hashes the planner inputs — the issue set INCLUDING each title/body/labels, the ' +
         'resolved profile (every field, so editing baseline/branch_template/worktree_template/verified/' +
-        'scope_companions derives a new id), and the CLI options — so an earlier run hashed to this same id. ' +
+        'scope_companions/dispatch_defaults derives a new id), and the CLI options — so an earlier run hashed to this ' +
+        'same id. ' +
         'Read the plan.json already in that directory to see whether it is the plan you meant to produce. ' +
         'To re-plan anyway: pass --run-id <new-id> (e.g. --run-id plan-retry-1) or --runs-dir <dir> to write elsewhere.',
       4,

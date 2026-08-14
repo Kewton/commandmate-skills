@@ -1,0 +1,18 @@
+{
+  "id": "dispatch-defaults-with-companions",
+  "repository": "Kewton/CommandMate",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": ["bundle exec rspec"],
+  "verified": true,
+  "dispatch_defaults": {
+    "auto_yes": true,
+    "wait_timeout": 3600
+  },
+  "scope_companions": {
+    "derive": [
+      { "when": "app/{dir}{base}.rb", "add": ["spec/{dir}{base}_spec.rb"] }
+    ]
+  }
+}

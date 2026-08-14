@@ -1,0 +1,14 @@
+{
+  "description": "Issue #196, profile-contract.md §10.2: an unknown key inside `dispatch_defaults` is refused, not skipped. `schedule` is the realistic one — release-notes.md records it as deliberately LEFT OUT of #180 (it is a property of the run, not of the repository) — so a profile written for a runner that adopted it must fail loudly on this one rather than run with half its declaration honored. Refused at profile load, before an issue is read. The code is `load_error` / exit 6, not the dispatch runner's `plan_invalid` / exit 3: the fact here is about the PROFILE file, and every other malformed profile field exits the same way, so the message sends the reader to the file they can fix.",
+  "args": ["461", "--profile-json", "PROFILE:dispatch-defaults-invalid-unknown-key.json"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "profile.dispatch_defaults has an unknown key \"schedule\"",
+      "no_infer, auto_yes, wait_timeout, max_turns"
+    ],
+    "plan_null": true
+  }
+}

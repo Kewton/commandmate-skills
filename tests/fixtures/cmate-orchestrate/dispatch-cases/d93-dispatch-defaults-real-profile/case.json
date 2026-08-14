@@ -1,0 +1,41 @@
+{
+  "description": "d81 の相方（#196）: **宣言が profile から run まで通ることの端から端までの測定**。世界も期待値も d81 と同一で、違いは1つだけ —— `plan_patch` を使わず、`dispatch_defaults` を宣言した**本物の profile を planner に渡して plan を作る**。#180 が着地した時点では planner が契約外 field を `load_error` で拒否していたので、この経路は存在せず、d81〜d86 はすべて手で patch した plan を入力にするしかなかった（profile-contract.md 第10.6節）。したがってここで測っているのは planner の echo である: `publicProfile()` が宣言を `plan.profile` に載せなければ、dispatch は既定値のまま走り、`wait` の argv は 300 に、`send` の窓は 1h に戻って赤くなる。証拠の取り方は d81 と同じく report の self-report ではなく **fake CLI が受け取った argv** である。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "profile_json": "node-fake-dispatch-defaults.json",
+    "orchestrate_args": ["200", "201", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "auto_yes": true,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "sent": [201, 200],
+    "dispatch_send_args": {
+      "201": ["--auto-yes", "--duration", "3h"],
+      "200": ["--auto-yes", "--duration", "3h"]
+    },
+    "cli_args_include": {
+      "wait": ["--timeout", "600"]
+    },
+    "cli_args_absent": {
+      "wait": ["300"]
+    },
+    "limitation_codes": ["dispatch_defaults_applied"],
+    "limitation_code_counts": {
+      "dispatch_defaults_applied": 1
+    },
+    "limitation_details_include": [
+      "profile node-fake-dispatch-defaults declares dispatch_defaults",
+      "auto_yes=true (from the profile)",
+      "wait_timeout=600 (from the profile)",
+      "max_turns=10 (from the profile)"
+    ],
+    "absent_limitation_codes": ["auto_yes_window_short", "dispatch_defaults_no_infer_not_applied"]
+  }
+}

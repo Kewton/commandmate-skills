@@ -1,0 +1,12 @@
+{
+  "id": "dispatch-defaults-invalid-not-object",
+  "repository": "Kewton/CommandMate",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": ["bundle exec rspec"],
+  "verified": true,
+  "dispatch_defaults": [
+    { "auto_yes": true }
+  ]
+}

@@ -696,6 +696,29 @@ function runCase(caseId) {
   if (expect.risk_level) check(plan.risk.level === expect.risk_level, `risk ${plan.risk.level} !== ${expect.risk_level}`);
   if (expect.profile_verified !== undefined) check(plan.profile.verified === expect.profile_verified, `profile.verified ${plan.profile.verified} !== ${expect.profile_verified}`);
   if (expect.base) check(plan.profile.base === expect.base, `base ${plan.profile.base} !== ${expect.base}`);
+  // The ORDERED field list of `plan.profile` (Issue #196). The optional fields
+  // are echoed only when declared and each new one is APPENDED, so the order of
+  // this list is the plan's byte order — the property every full-text golden
+  // rests on, and the one a runner that spliced a key in between would break for
+  // plans whose content did not change. A golden measures it too, but only by
+  // byte diff; a case that states the list says which property it is defending.
+  if (expect.profile_keys) {
+    check(
+      deepEqual(Object.keys(plan.profile), expect.profile_keys),
+      `plan.profile keys ${JSON.stringify(Object.keys(plan.profile))} !== ${JSON.stringify(expect.profile_keys)}`,
+    );
+  }
+  // The declaration as the DISPATCH runner will read it: dispatch opens
+  // plan.profile.dispatch_defaults and never the profile, so the echo is the
+  // whole of the channel. Compared with key order (deepEqual stringifies), because
+  // the loader rebuilds the object in the contract's order and the resolved
+  // profile is hashed whole into the default run id.
+  if (expect.profile_dispatch_defaults !== undefined) {
+    check(
+      deepEqual(plan.profile.dispatch_defaults, expect.profile_dispatch_defaults),
+      `plan.profile.dispatch_defaults ${JSON.stringify(plan.profile.dispatch_defaults)} !== ${JSON.stringify(expect.profile_dispatch_defaults)}`,
+    );
+  }
 
   // max_parallel is honored: no wave is wider than the bound.
   check(plan.waves.every((w) => w.length <= plan.max_parallel), `a wave exceeds max_parallel ${plan.max_parallel}`);
@@ -942,9 +965,13 @@ function runDispatchCase(caseId) {
   // The same knob the merge cases have, for the same reason (see patchPlan): the
   // plan is this runner's INPUT, and a state a real profile reaches cannot always
   // be produced by running the planner. `profile.dispatch_defaults` (Issue #180)
-  // is exactly that state today — the plan-core runner refuses a profile field it
-  // does not list, so the declaration is written into the plan here, which is
-  // what the dispatch runner reads either way.
+  // used to be that state absolutely — the planner refused the field outright —
+  // and since #196 it is a deliberate choice instead: dispatch must read a plan
+  // whose profile it never saw (profile-contract.md §10.6 names the hand-written
+  // one), so its own validation cannot be delegated to the loader, and patching
+  // the declaration in here keeps these cases about what DISPATCH does with it.
+  // The planner's half — accepting the field and echoing it — is measured by the
+  // plan cases 66/67, which run a real profile through a real plan.
   if (spec.plan_patch) patchPlan(planPath, spec.plan_patch);
 
   const work = mkdtempSync(join(tmpdir(), 'cmate-disp-'));
@@ -4813,6 +4840,20 @@ function runIdCoversProfileTest() {
       args: [],
       project: (plan) => plan.issues[0].suspected_files,
     },
+    {
+      // The seventh field (Issue #196). It is the one field under measurement
+      // that decides no plan CONTENT — the planner echoes it and stops — so the
+      // projection is the echo itself. That is not a weaker measurement: the echo
+      // is the whole of the channel to the dispatch runner, so a plan whose
+      // operating defaults differ IS a different plan to run, and the id has to
+      // say so. It inherits the property by construction, which is the point:
+      // nothing in the signature enumerates fields, so accepting the field in the
+      // LOADER was the only half that had to land.
+      field: 'dispatch_defaults',
+      overrides: { dispatch_defaults: { auto_yes: true, wait_timeout: 3600 } },
+      args: [],
+      project: (plan) => plan.profile.dispatch_defaults,
+    },
   ];
 
   for (const variant of variants) {
@@ -4896,38 +4937,42 @@ function runIdCoversProfileTest() {
   // The five fields the old three-field hash missed are named, because the
   // operator reading this is deciding whether their profile edit is the reason
   // this id already exists.
-  for (const field of ['baseline', 'branch_template', 'worktree_template', 'verified', 'scope_companions']) {
+  for (const field of ['baseline', 'branch_template', 'worktree_template', 'verified', 'scope_companions', 'dispatch_defaults']) {
     check(detail.includes(field), `run_exists detail should name the profile field ${field}: ${detail}`);
   }
 
-  // ---- dispatch_defaults and the run id (Issue #180, acceptance condition 4) --
+  // ---- dispatch_defaults and the run id (Issue #180 condition 4, landed by #196)
   //
-  // The property asked for is "editing an operating default forks the run id",
-  // and the measurement of it is the variants table above: nothing in the
-  // signature enumerates fields, so a profile field inherits the property by
-  // construction the moment the LOADER accepts it — which is the half that has
-  // not landed. `dispatch_defaults` is read by the dispatch runner, declared by
-  // the plan schema and documented in profile-contract.md §10, while
-  // orchestrate.mjs's PROFILE_FIELDS still refuses it (Issue #180 is cut to
-  // leave that file to the Issue editing it concurrently).
-  //
-  // So the state of the split is pinned rather than described: today the planner
-  // REFUSES the field, loudly and by name. When the planner half lands this
-  // assertion is the first thing that goes red, and the fix is to move the field
-  // into the variants table above with `project: (plan) => plan.profile
-  // .dispatch_defaults` — at which point the run-id property is measured for it
-  // exactly as it is measured for the other six.
-  log('  the planner still refuses profile.dispatch_defaults, so the run-id property is not yet reachable through it (#180)');
-  const defaultsPath = join(dir, 'dispatch-defaults.json');
-  writeFileSync(defaultsPath, `${JSON.stringify({
-    ...RUN_ID_BASE_PROFILE,
-    dispatch_defaults: { no_infer: true, auto_yes: true, wait_timeout: 3600 },
-  }, null, 2)}\n`);
-  const refused = planWithProfile(defaultsPath, issuesPath);
-  check(refused.exit === 6, `a profile with dispatch_defaults should be refused with load_error (exit 6), exited ${refused.exit}`);
-  const refusedDetail = (refused.result?.errors ?? []).map((error) => `${error.code} ${error.detail}`).join(' ');
-  check(refusedDetail.includes('load_error') && refusedDetail.includes('dispatch_defaults'),
-    `the refusal should name the field it refused: ${refusedDetail}`);
+  // The variants table above measures the outer half: editing an operating
+  // default forks the id. This is the INNER half, and it is the one the field
+  // brought with it — `dispatch_defaults` is the first profile field whose value
+  // is an object with several keys of its own, so the key-order guarantee the
+  // reordering case above states for the profile has to hold one level down too.
+  // Nothing sorts anything in the signature; normalizeDispatchDefaults REBUILDS
+  // the declaration in the contract's key order, and this is what says so. A
+  // future loader that passed the caller's object straight through would fork the
+  // id for an author who merely moved two lines in their profile.
+  log('  re-ordering the keys INSIDE dispatch_defaults does not change the run id (#196)');
+  const declaration = { no_infer: true, auto_yes: true, wait_timeout: 3600, max_turns: 10 };
+  const straightDefaults = writeProfileVariant(dir, 'dispatch-defaults.json', { dispatch_defaults: declaration });
+  const reorderedDefaults = {};
+  for (const key of Object.keys(declaration).reverse()) reorderedDefaults[key] = declaration[key];
+  const shuffledDefaults = writeProfileVariant(dir, 'dispatch-defaults-reordered.json', { dispatch_defaults: reorderedDefaults });
+  const asWritten = planWithProfile(straightDefaults, issuesPath);
+  const asShuffled = planWithProfile(shuffledDefaults, issuesPath);
+  if (check(asWritten.exit === 0 && asShuffled.exit === 0,
+    `both key orders should plan successfully, exited ${asWritten.exit}/${asShuffled.exit}`)) {
+    check(
+      asWritten.result.run_id === asShuffled.result.run_id,
+      `re-ordering dispatch_defaults keys forked the run id (${asWritten.result.run_id} / ${asShuffled.result.run_id})`,
+    );
+    // …and the echo the dispatch runner reads is the canonical one either way,
+    // which is what makes the two ids equal rather than merely coincidental.
+    check(
+      deepEqual(asShuffled.result.plan.profile.dispatch_defaults, declaration),
+      `the echoed declaration is not canonical: ${JSON.stringify(asShuffled.result.plan.profile.dispatch_defaults)}`,
+    );
+  }
 }
 
 // =============================================================================

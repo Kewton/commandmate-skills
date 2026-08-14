@@ -1,0 +1,38 @@
+{
+  "description": "Issue #196 (the planner half of #180): a profile that declares `dispatch_defaults` now PLANS. Before this the same profile stopped at load_error (exit 6) before an issue was read, so the field could only reach dispatch through a hand-edited plan. Two properties are pinned here that the accept alone would not give. (1) The declaration is ECHOED into plan.profile — that is the only channel to the dispatch runner, which reads plan.profile.dispatch_defaults and never opens the profile. (2) It is echoed CANONICALLY: the profile authors the four keys in max_turns/auto_yes/wait_timeout/no_infer order and the plan carries them in the contract's order, because the resolved profile is hashed WHOLE into the default run id (#157) and a passed-through object would fork that id on a cosmetic re-ordering. Diff this case against 45: the profile is `companions-absent` plus this one field, and the issue bytes are identical, so everything below `profile` is the same plan.",
+  "args": ["461", "--profile-json", "PROFILE:dispatch-defaults-declared.json", "--run-id", "fixture-dd-declared"],
+  "golden": "expected-plan.json",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[461]],
+    "merge_order": [461],
+    "dependencies": [],
+    "classifications": { "461": "independent" },
+    "risk_level": "low",
+    "profile_keys": [
+      "id",
+      "repository",
+      "base",
+      "branch_template",
+      "worktree_template",
+      "baseline",
+      "verified",
+      "dispatch_defaults"
+    ],
+    "profile_dispatch_defaults": {
+      "no_infer": true,
+      "auto_yes": true,
+      "wait_timeout": 3600,
+      "max_turns": 10
+    },
+    "suspected_files": {
+      "461": ["app/models/user.rb", "app/models/user_spec.rb"]
+    },
+    "scope_defaults": {
+      "461": ["app/models/user_spec.rb"]
+    },
+    "questions_count": { "461": 0 }
+  }
+}

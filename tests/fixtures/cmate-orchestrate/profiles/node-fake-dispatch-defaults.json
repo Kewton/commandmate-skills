@@ -1,0 +1,14 @@
+{
+  "id": "node-fake-dispatch-defaults",
+  "repository": "Kewton/CommandMate",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": ["cat cmate-verify-ok"],
+  "verified": true,
+  "dispatch_defaults": {
+    "auto_yes": true,
+    "wait_timeout": 600,
+    "max_turns": 10
+  }
+}

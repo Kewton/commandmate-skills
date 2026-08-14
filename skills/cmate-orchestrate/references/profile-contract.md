@@ -439,14 +439,31 @@ runner 側の正本は [dispatch-contract.md](./dispatch-contract.md) 第1.1節�
 
 | key | 型 | 対応する flag | 消費するのは |
 |---|---|---|---|
-| `no_infer` | boolean | `--no-infer` | **planner**（`orchestrate.mjs`） |
+| `no_infer` | boolean | `--no-infer` | **planner**（`orchestrate.mjs`）。ただし現 version は未消費 —— 第10.6節 |
 | `auto_yes` | boolean | `--auto-yes` / `--no-auto-yes` | dispatch |
 | `wait_timeout` | 1 以上の整数（秒） | `--wait-timeout` | dispatch |
 | `max_turns` | 1 以上の整数 | `--max-turns` | dispatch |
 
-すべて任意で、**未指定の key は宣言が無いのと同じ**である。未知の key・型違い・0 以下は
-`plan_invalid`（exit 3）で dispatch を始めない。読み飛ばす実装だと、新しい runner 向けの profile が
-古い runner で**半分だけ効く**ことになるからである（第9.3節と同じ理由）。
+すべて任意で、**未指定の key は宣言が無いのと同じ**である。未知の key・型違い・0 以下は拒否する。
+読み飛ばす実装だと、新しい runner 向けの profile が古い runner で**半分だけ効く**ことになるからである
+（第9.3節と同じ理由）。空の `{}` は正当で、何も宣言していないのと同じである。
+
+**同じ型規則を両側が持ち、code / exit だけが違う**（[#196](https://github.com/Kewton/commandmate-skills/issues/196)）。
+
+| 読む側 | 何について読むか | 拒否 |
+|---|---|---|
+| planner（`orchestrate.mjs`） | **profile ファイル** | `load_error` / exit 6。Issue を読む前、profile を読んだ時点で止まる |
+| dispatch（`dispatch.mjs`） | **plan ファイル**の `plan.profile.dispatch_defaults` | `plan_invalid` / exit 3。dispatch を始めない |
+
+code が割れているのではなく、**同じ不備が違うファイルについての事実**だからそうなっている。
+profile の他の不備（`profile.baseline must be an array of strings` 等）はすべて `load_error` / exit 6
+で出ており、ここだけ exit 3 にすると planner 側の規約が割れる。dispatch にとっては逆で、渡された plan は
+この planner が作ったとは限らない（第10.6節）から、事実は plan ファイルについてのものになる。
+
+**検証ロジックは共有しない（両側に持つ）。** dispatch は自分の検証を planner に降ろせない ——
+loader を通っていない plan を受ける経路がある以上、profile 側の検査は dispatch にとって
+「起きたはず」でしかない。二重に持つ代わりに、**受理する宣言の集合は完全に一致させる**
+（`null` はどちらも拒否、`{}` はどちらも受理）。片方だけが通す宣言があると、二重化が監査できなくなる。
 
 ### 10.3 解決規則
 
@@ -490,12 +507,34 @@ TODO はすべてのリポジトリで永久に立ち続けることになる。
 **key ごと出さない。** 出さなければ flag の既定値がそのまま効き、draft の使い勝手は変わらない。
 運転して分かった時点で、人間がこの節を見て書き足す。
 
-### 10.6 現時点の制約 — planner 側は未着地
+### 10.6 planner 側（[#196](https://github.com/Kewton/commandmate-skills/issues/196)）
 
-**この version の `orchestrate.mjs` は、契約外の field を持つ profile を `load_error` で拒否する
-（第1節）。`dispatch_defaults` を書いた profile はまだ plan 段階を通らない。**
-本 field を読む側（dispatch runner・`execution-plan.v2` schema・本節）が先に着地しており、
-planner 側は `PROFILE_FIELDS` への追加と `publicProfile()` での echo という別 Issue の変更を待っている
-（#180 は `orchestrate.mjs` を触らない範囲で切られている）。着地するまでは、
-`plan.profile.dispatch_defaults` を持つ plan を手で用意した場合にだけ本節の解決規則が働く。
-第10.4節の run_id の性質は、planner が field を受け取った時点で**追加の実装なしに**得られる。
+**`dispatch_defaults` を宣言した profile は plan 段階を通る。** `orchestrate.mjs` の
+`PROFILE_FIELDS` が本 field を持ち、`publicProfile()` が宣言を `plan.profile` へ echo する。
+dispatch は profile ファイルを開かず `plan.profile.dispatch_defaults` を読むので、
+**この echo が宣言から runner までの経路そのもの**である。
+
+echo の規則は `scope_companions` と同じで、そこに1つ足す。
+
+- **宣言したときだけ**出す。宣言しない profile の plan は、本 field が無かった頃と **1 byte も変わらない**
+  （既存の全文 golden がそのまま非回帰の測定になっている）
+- **必須7 field の後ろに、宣言順ではなく固定順で**出す。順は
+  `scope_companions` → `dispatch_defaults` であり、[#195](https://github.com/Kewton/commandmate-skills/issues/195)
+  の `integration_baseline` はさらにその後ろに付く。**この順序が plan のバイト列を決める**ので、
+  新しい任意 field は常に末尾へ追加する（間に差し込むと、内容の変わっていない plan のバイト列が動く）
+- **契約の key 順に組み直して**から載せる（`no_infer` / `auto_yes` / `wait_timeout` / `max_turns`）。
+  profile は field を選ばず丸ごと run_id の hash に入る（第10.4節）ので、組み直さないと
+  **profile の中で key を並べ替えただけで run_id が割れる**
+
+第10.4節の run_id の性質は、宣言が loader を通った時点で追加の実装なしに得られている
+（署名は field を列挙していない）。
+
+**planner は本 field を読むだけで、使わない。** `no_infer` は planner の flag だが、この version の
+planner は宣言を消費しない —— 受理して echo するだけである。したがって `no_infer: true` を宣言した
+profile で `--no-infer` を渡さずに plan を作ると、plan は**推論ありのまま**作られ、dispatch が
+第10.3節の `dispatch_defaults_no_infer_not_applied` を残す。第10.2節の表が `no_infer` の消費者を
+planner と書いているのは**到達点であって現状ではない**。宣言を planner が実際に消費するのは別 Issue である。
+
+`plan.profile.dispatch_defaults` を持つ plan を**手で用意する**経路は塞がらない（plan は artifact であり、
+status / resume が読む plan をこの planner が作ったとは限らない）。だから dispatch 側の検証は
+残り続ける ——第10.2節の「両側に持つ」はそれである。

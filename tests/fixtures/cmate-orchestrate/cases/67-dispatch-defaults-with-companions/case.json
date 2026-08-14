@@ -1,0 +1,37 @@
+{
+  "description": "Issue #196: the ECHO ORDER of the two optional profile fields, pinned. A profile declaring both `scope_companions` and `dispatch_defaults` echoes them in that order — scope_companions first, dispatch_defaults appended after it — and #195 appends `integration_baseline` after both. The order is not cosmetic: it is the plan's byte order, every full-text golden measures it, and a runner that spliced a new key in between would rewrite the bytes of plans whose content did not change. `profile_keys` states the whole ordered field list so this case says what it measures without a golden diff. The declared companion still reaches suspected_files exactly as in case 44, which is the half proving dispatch_defaults did not disturb L2.",
+  "args": ["461", "--profile-json", "PROFILE:dispatch-defaults-with-companions.json", "--run-id", "fixture-dd-companions"],
+  "golden": "expected-plan.json",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[461]],
+    "merge_order": [461],
+    "dependencies": [],
+    "classifications": { "461": "independent" },
+    "risk_level": "low",
+    "profile_keys": [
+      "id",
+      "repository",
+      "base",
+      "branch_template",
+      "worktree_template",
+      "baseline",
+      "verified",
+      "scope_companions",
+      "dispatch_defaults"
+    ],
+    "profile_dispatch_defaults": {
+      "auto_yes": true,
+      "wait_timeout": 3600
+    },
+    "suspected_files": {
+      "461": ["app/models/user.rb", "app/models/user_spec.rb", "spec/models/user_spec.rb"]
+    },
+    "scope_defaults": {
+      "461": ["app/models/user_spec.rb", "spec/models/user_spec.rb"]
+    },
+    "questions_count": { "461": 0 }
+  }
+}
