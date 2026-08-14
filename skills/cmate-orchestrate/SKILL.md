@@ -128,7 +128,7 @@ orchestrate.mjs <issue>... [options]
 | `--issues a,b,c` | — | Issue 番号（positional でも可）。1件以上 |
 | `--profile <id>` | `node-commandmate` | 内蔵 profile。`node-commandmate` / `rust-commandagent` |
 | `--profile-json <path>` | — | 独自 profile |
-| `--issue-json <path>` | — | Issue fixture。offline・決定的に回す |
+| `--issue-json <path>` | — | Issue fixture。offline・決定的に回す。**形式は [plan-contract.md](./references/plan-contract.md) 第1.1節** |
 | `--base <ref>` / `--repo <owner/name>` | profile 由来 | 上書き。**`--repo` は profile の `verified` を降格させる** |
 | `--max-parallel <1-3>` | `3` | 1 Wave の最大幅 |
 | `--depends <a:b>` / `--no-infer` / `--order <a,b>` | — | 依存の override / 推論無効化 / 順序の主張 |
