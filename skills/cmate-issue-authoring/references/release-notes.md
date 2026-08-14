@@ -19,6 +19,56 @@ install 先で走らせるよう案内している箇所は無い。
 
 ## Changelog
 
+### 0.8.0 — 未決の問いを起案本文に埋める（Issue #209）
+
+- **`open-questions` ブロックを起案する本文そのものに埋めるようにした。** 記法の正本は
+  cmate-orchestrate の `references/open-questions-notation.md` であり、この package は
+  ミラーする側である（`acceptance-gates` と同じ関係）。何をブロックにし、どこへ入れ、
+  誰が組むかは [open-questions.md](./open-questions.md) が正本。
+- **これが消しに来た事象**: 計画は open question を `open_questions[]` に持つのに、起案した
+  本文には載らなかった。載らなければ planner は止める理由を1つも持たず、worker は本文の他節から
+  推測するか自分で決める —— **未決のまま登録された Issue が dispatch を素通りする**。先に着地した
+  cmate-issue-refinement（0.4.0 / Issue #198）の対象は既存 Issue の refinement だけで、
+  起案の経路はこの穴が開いたままだった。
+- **配列が真であり、ブロックはその射影である。**「本文に写す」step を作らなかったので、
+  写し漏れの経路が無い。ブロックは validator に計画から組ませる
+  （`--render-open-questions <issue-key>`）。ブロックする question が1件も無い key を渡すと
+  **何も出力せず** exit 0 で終わる —— 未決の無い Issue はブロックを持たないのが正しい形である。
+- **二重管理にしない。** ブロックへ入るのは `open_questions[].blocks` がその Issue の `key` を
+  名指した question だけで、順序は配列のまま、`question` の値は**逐語**で運ぶ（引用符付けも
+  escape も再改行もせず、末尾の句点を足しも消しもしない）。`why_blocking` / `options` は
+  ブロックに入らない（記法が持つのは自由文の問いだけである）。
+- rule を 4 件足した。`open_questions_block_is_derived` は**両方向**に落とす ——
+  宣言した問いが本文に無いことも、宣言していない問いが本文に在ることも invalid である。残りは
+  `open_questions_block_is_canonical`（renderer の出力と byte 一致するか）/
+  `open_questions_block_parses`（planner が読めるか）/ `open_questions_are_representable`
+  （重複・予約文字・改行・32 件超）。`--checkout` は要らない —— 突き合わせる相手が対象リポジトリ
+  ではなく**計画の中**にあるためである（`acceptance_gates_*` との違いはここだけである）。
+- **32 件を超えたら切らない。** 切ったブロックは「この Issue の未決はこれで全部だ」と名乗ることに
+  なり、それは本記法が消しに来た silent drop そのものである。超えたのは**ブロックが短すぎるのでは
+  なく Issue が大きすぎる**ので、計画を invalid にして Issue を割らせる（renderer も同じ理由で
+  exit 2、何も出力しない）。
+- **写しとしての欠けを1つ直した。** `checkBodies` は `acceptance-gates` しか剥がしておらず、
+  planner は `open-questions` も剥がしてから散文の抽出器を走らせる。剥がさないミラーは
+  ブロック内の `  - 問い` を受入条件と読み、**問いの中の backtick path を「書いてよい file」と
+  読んでいた**。実測で確かめてある: 剥がしを外すと `planner_ready` / `body_lists_target_files` の
+  新 mutant が2件とも exit 0 で通る（＝**実物の planner が止める本文を validator が ready と
+  呼ぶ**）。問いの中にしか現れない path が `suspected_files` に入らないことは、実 planner で
+  測っている。
+- completion check を 9 件から **10 件**にした（10 番目が「ブロックを手で写していない」の自己申告）。
+  正本は [plan-contract.md](./plan-contract.md) 第 8 節。**解けたときの手順も述べる** ——
+  `open_questions[]` から question を外し、本文のブロックを同じ編集で消す。**ブロックの削除が
+  「決めた」の記録である。** 片方だけ直した計画は `open_questions_block_is_derived` が落とす。
+- 計画 artifact の schema に変更は無い。`plan_schema_version` は 1 のままである
+  （ブロックは `issues[].body` の中身であり、新しい field を作っていない）。既に出力済みの計画は
+  引き続き valid である。**ブロックを持たない計画の挙動は従来どおり**である。
+- 一致は #198 が置いたリポジトリ層の conformance テスト
+  （`tests/fixtures/cmate-issue-authoring/open-questions-conformance.mjs`）が固定する。定数・関数
+  本体の byte 一致・corpus・strip 一致に加え、**生成した形のブロックを実物の planner に食わせる**。
+  生産側が2つ（refinement / authoring）になっても**形は1つである**ことを、両者が同じ bytes を
+  出すことで測っている。mutant は 48 件から **60 件**にした。リポジトリの CI が走らせる
+  （install 先には含まれない）。
+
 ### 0.7.0 — 受入ゲート記法の生産側（Issue #124）
 
 - **`acceptance-gates` ブロックを起案側が出せるようにした。** 記法の正本は
