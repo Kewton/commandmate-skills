@@ -1,5 +1,5 @@
 {
-  "description": "#175 (c) — the green side of the same world: the merged base passes the profile baseline, so the run stays success/completed with integration_verify.outcome pass and no blocking reason. The throwaway checkout is created AND removed (fetch once, worktree add + remove), so a green integration verification leaves nothing behind.",
+  "description": "#175 (c) — the green side of the same world: the merged base passes the profile baseline, so the run stays success/completed with integration_verify.outcome pass and no blocking reason. The throwaway checkout is created AND removed (fetch once, worktree add + remove), so a green integration verification leaves nothing behind. #195: this profile declares no `integration_baseline`, so the run records `source: \"baseline\"` — the fallback, which is the pre-#195 behaviour and stays byte-for-byte what it was for every profile that does not declare the field (m29 is the declared twin).",
   "phase": "merge-prs",
   "plan": {
     "issues_fixture": "cases/02-explicit-dependency/issues.json",
@@ -35,6 +35,7 @@
       "base": "origin/develop",
       "base_sha": "deadbee",
       "merged_issues": [201, 200],
+      "source": "baseline",
       "commands": ["cat cmate-verify-ok"],
       "failed_command": null,
       "exit_code": null

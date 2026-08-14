@@ -1,0 +1,14 @@
+{
+  "description": "Issue #195: `integration_baseline` written as a bare string is refused, not wrapped. The accepted shape is `baseline`'s — an array of strings — because both fields are \"commands to run, in this order\" and a profile whose two verification lists disagreed about what a command is would refuse one and accept the other for the same text. Coercing a lone string into a one-element array is the tempting alternative and is worse than it looks: `\"npm run lint && npm test\"` would become one command run through whitespace splitting (the runner does not use a shell), so the profile would quietly measure `npm` with the wrong argv instead of running two steps. Refused at profile load, before an issue is read: `load_error` / exit 6, the code every other malformed profile field exits with, so the message sends the reader to the file they can fix.",
+  "args": ["461", "--profile-json", "PROFILE:integration-baseline-invalid-not-array.json"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "profile.integration_baseline must be an array of strings",
+      "integration_baseline ?? baseline"
+    ],
+    "plan_null": true
+  }
+}

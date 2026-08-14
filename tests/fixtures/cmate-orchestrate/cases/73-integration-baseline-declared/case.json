@@ -1,0 +1,33 @@
+{
+  "description": "Issue #195 (the planner half): a profile that declares `integration_baseline` now PLANS. Before this the same profile stopped at load_error (exit 6) before an issue was read, so `merge.mjs --integration-verify` could only have found the declaration in a hand-edited plan — the asymmetry #180 left behind and profile-contract.md §10.6 had to record (this Issue lands both halves at once instead). The property pinned here is the ECHO: merge reads plan.profile.integration_baseline and never opens the profile, so the echo is the whole channel. Diff this case against 45: the profile is `companions-absent` plus this one field, and the issue bytes are identical, so everything below `profile` is the same plan — the planner does not USE the field, it carries it.",
+  "args": ["461", "--profile-json", "PROFILE:integration-baseline-declared.json", "--run-id", "fixture-ib-declared"],
+  "golden": "expected-plan.json",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[461]],
+    "merge_order": [461],
+    "dependencies": [],
+    "classifications": { "461": "independent" },
+    "risk_level": "low",
+    "profile_keys": [
+      "id",
+      "repository",
+      "base",
+      "branch_template",
+      "worktree_template",
+      "baseline",
+      "verified",
+      "integration_baseline"
+    ],
+    "profile_integration_baseline": ["bundle exec rspec", "bin/verify-all"],
+    "suspected_files": {
+      "461": ["app/models/user.rb", "app/models/user_spec.rb"]
+    },
+    "scope_defaults": {
+      "461": ["app/models/user_spec.rb"]
+    },
+    "questions_count": { "461": 0 }
+  }
+}

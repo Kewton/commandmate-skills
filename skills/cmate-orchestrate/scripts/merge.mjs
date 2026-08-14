@@ -132,13 +132,13 @@ const UNATTENDED_STAGE = 'C（dispatch + merge + uat）';
 //
 //   1. WHAT to run comes from the profile, never from this file. No `develop`,
 //      no `npm`: the base branch is `plan.profile.base` and the commands are
-//      `plan.profile.baseline`, the same pair the dispatch runner's fallback
-//      verification re-runs inside a worktree (profile-contract.md section 1).
-//   2. A profile with no baseline is an ERROR, not a skip, and it is raised
-//      BEFORE the first merge (see `integrationBaselineCommands`). Opting in and
-//      being told "verified" by a stage that never ran is the failure mode this
-//      whole issue is about; refusing before anything moves leaves nothing to
-//      undo.
+//      `plan.profile.integration_baseline ?? plan.profile.baseline`
+//      (`resolveIntegrationBaseline`, Issue #195 — see the second block below).
+//   2. A profile that supplies no command is an ERROR, not a skip, and it is
+//      raised BEFORE the first merge (see `resolveIntegrationBaseline`). Opting
+//      in and being told "verified" by a stage that never ran is the failure mode
+//      this whole issue is about; refusing before anything moves leaves nothing
+//      to undo.
 //   3. The merged state is measured in a THROWAWAY DETACHED CHECKOUT of the
 //      freshly fetched base, never by mutating the invocation's own working
 //      tree. `git worktree add --detach` + `git worktree remove --force` is the
@@ -146,6 +146,48 @@ const UNATTENDED_STAGE = 'C（dispatch + merge + uat）';
 //      acceptance — so this is not the worker-worktree preparation path that
 //      adr-worktree-preparation.md routes through `cmate-worktree-setup`.
 const INTEGRATION_TREE_DIRNAME = 'integration-tree';
+
+// =============================================================================
+// Which verification set this runs — `integration_baseline` (Issue #195)
+// =============================================================================
+//
+// #175 ran `plan.profile.baseline`, and that was one key doing two jobs with
+// different purposes, so one of the two was always wrong:
+//
+//   `baseline`              every worker runs it inside its own worktree, as a
+//                           PROPORTIONAL health check of that worker's change.
+//                           Making it heavy makes every dispatch run a build.
+//   `integration_baseline`  run ONCE after the merges. It is the repository's
+//                           definition of "green", so it is the place the heavy
+//                           build / unit / e2e set belongs.
+//
+// The measured consequence (Kewton/BorderFreeKidsMap, the same repository whose
+// #105 x #106 produced #175): its `baseline` is `npm ci` / lint / typecheck by a
+// documented decision — "a worker's health check should be proportional; leave
+// the heavy build to the final verify" — and carries no unit step. So
+// `--integration-verify` ran lint and typecheck on the merged base and reported
+// `outcome: "pass"`, while `npm run test:unit` — the command that actually goes
+// red on #105 x #106 — was in neither list. The feature let the very event it
+// was built to remove pass through it green.
+//
+// The resolution is `integration_baseline ?? baseline`, and the `??` is the
+// whole of the compatibility story: a profile that does not declare the field
+// runs exactly what #175 ran, so no existing profile changes behaviour.
+//
+// A DECLARED empty array is NOT the fallback case. `"integration_baseline": []`
+// is a repository saying "there is no integration verification here", and
+// answering that with `baseline` would re-create the confusion above by another
+// route — silently, in the one profile that took the trouble to be explicit. So
+// the fallback keys off the key's PRESENCE (`!== undefined`), not on the list
+// being empty, and a declared-but-empty list lands on the same fail-closed
+// refusal as a profile with no commands at all: `preflight_failed` / exit 1 /
+// `integration_verify_unavailable`, before the first merge.
+//
+// WHICH ONE WAS TAKEN IS RECORDED (`integration_verify.source`). Without it the
+// split is a silent second baseline: two runs of the same command can measure
+// two different sets and the reports read identically.
+const INTEGRATION_BASELINE_FIELD = 'integration_baseline';
+const BASELINE_FIELD = 'baseline';
 
 // The red verdict, and the two ways the verification can fail to happen at all.
 // `integration_verify_failed` is the one the next wave's dispatch reads
@@ -202,13 +244,17 @@ Options:
                                        phase — nothing is merged, and the target
                                        set is never quietly shrunk instead.
   --integration-verify   --merge-prs only, default OFF. After every merge this
-                         invocation performed, run the profile baseline on the
-                         MERGED result: fetch the base branch, check it out into
-                         a throwaway detached worktree and run
-                         plan.profile.baseline there. A red result is recorded as
+                         invocation performed, run the profile's verification set
+                         on the MERGED result: fetch the base branch, check it out
+                         into a throwaway detached worktree and run
+                         plan.profile.integration_baseline ?? .baseline there —
+                         the fallback fires for an ABSENT integration_baseline
+                         only, and which one ran is recorded in
+                         integration_verify.source. A red result is recorded as
                          integration_verify_failed and the run is not a success,
                          so the next wave is not dispatched. Nothing is merged at
-                         all when the profile declares no baseline — an opt-in
+                         all when the resolved set has no command (no baseline, or
+                         an integration_baseline declared empty) — an opt-in
                          verification that cannot run is refused, not skipped.
   --merge-method <m>     merge | squash | rebase for --merge-prs (default ${DEFAULT_MERGE_METHOD}).
   --out <dir>            Where merge artifacts are written
@@ -1241,22 +1287,43 @@ function runMergePrs(inputs, plan, eligible, report) {
 }
 
 // =============================================================================
-// Integration verification (Issue #175)
+// Integration verification (Issue #175; which set it runs, Issue #195)
 // =============================================================================
 
-// The commands the PROFILE declares, cleaned and in the profile's order. Empty
-// means the profile declares no baseline, which under `--integration-verify` is
-// refused before the first merge rather than skipped (rule 2 at the top of this
-// file, and the same reading the dispatch runner's fallback verification takes:
-// "profile has no baseline to verify against" is a fail there too).
-function integrationBaselineCommands(plan) {
-  const declared = plan.profile && Array.isArray(plan.profile.baseline) ? plan.profile.baseline : [];
-  return declared
+// WHICH profile field supplies the post-merge verification, and the commands it
+// declares — cleaned and in the profile's order.
+//
+// `integration_baseline` when the profile DECLARES it (Issue #195), `baseline`
+// otherwise. Presence decides, so a declared `[]` selects `integration_baseline`
+// with no commands, which is the fail-closed refusal and never a fallback; see
+// the block above `INTEGRATION_BASELINE_FIELD`. `null` is not accepted by the
+// planner (orchestrate.mjs normalizeIntegrationBaseline), and a hand-written plan
+// that carries one is read here as a declaration with nothing runnable in it —
+// the same fail-closed side.
+//
+// An empty result means no command can be run, which under `--integration-verify`
+// is refused before the first merge rather than skipped (rule 2 at the top of
+// this file, and the same reading the dispatch runner's fallback verification
+// takes: "profile has no baseline to verify against" is a fail there too).
+function resolveIntegrationBaseline(plan) {
+  const profile = plan.profile ?? {};
+  const declared = profile[INTEGRATION_BASELINE_FIELD] !== undefined;
+  const source = declared ? INTEGRATION_BASELINE_FIELD : BASELINE_FIELD;
+  const raw = declared ? profile[INTEGRATION_BASELINE_FIELD] : profile[BASELINE_FIELD];
+  const commands = (Array.isArray(raw) ? raw : [])
     .filter((command) => typeof command === 'string' && command.trim() !== '')
     .map((command) => command.trim());
+  return { source, commands };
+}
+
+// The prose name of the set, for the report's own sentences: a run that cannot
+// say WHICH list it measured is the "silent second baseline" this Issue is about.
+function integrationSetLabel(source) {
+  return `profile ${source}`;
 }
 
 function newIntegrationVerify(plan) {
+  const resolved = resolveIntegrationBaseline(plan);
   return {
     requested: true,
     ran: false,
@@ -1264,9 +1331,15 @@ function newIntegrationVerify(plan) {
     base: plan.profile.base,
     base_sha: null,
     merged_issues: [],
+    // The field the commands below came from (Issue #195). Recorded even on the
+    // paths that never run anything: "which set would have been measured" is
+    // what tells a refusal for a declared-empty `integration_baseline` apart
+    // from a refusal for a profile with no `baseline` at all, and the two have
+    // opposite next actions.
+    source: resolved.source,
     // Transcribed through redact() like every other value this report carries
     // from a document the runner did not write.
-    commands: integrationBaselineCommands(plan).map((command) => redact(command)),
+    commands: resolved.commands.map((command) => redact(command)),
     failed_command: null,
     exit_code: null,
     detail: 'not run: the invocation had not reached the merge phase',
@@ -1345,7 +1418,9 @@ function runIntegrationVerify(inputs, plan, outDir, report) {
   }
 
   iv.ran = true;
-  const commands = integrationBaselineCommands(plan);
+  // Re-resolved rather than read back from `iv.commands`: what runs must be the
+  // profile's own text, and the record is a redacted transcription of it.
+  const { source, commands } = resolveIntegrationBaseline(plan);
   let failure = null;
   for (const command of commands) {
     const argv = command.split(/\s+/).filter(Boolean);
@@ -1370,9 +1445,10 @@ function runIntegrationVerify(inputs, plan, outDir, report) {
   }
 
   const where = `${baseBranch}${iv.base_sha === null ? '' : ` at ${iv.base_sha}`}`;
+  const set = integrationSetLabel(source);
   if (failure === null) {
     iv.outcome = 'pass';
-    iv.detail = `every one of the ${commands.length} profile baseline command(s) exited 0 on the merged ${where} `
+    iv.detail = `every one of the ${commands.length} ${set} command(s) exited 0 on the merged ${where} `
       + `(the state after merging ${merged.map((n) => `#${n}`).join(', ')})`;
     return;
   }
@@ -1380,7 +1456,7 @@ function runIntegrationVerify(inputs, plan, outDir, report) {
   iv.outcome = 'fail';
   iv.failed_command = redact(failure.command);
   iv.exit_code = Number.isInteger(failure.status) ? failure.status : null;
-  iv.detail = `the profile baseline is RED on the merged ${where}: \`${redact(failure.command)}\` exited `
+  iv.detail = `the ${set} is RED on the merged ${where}: \`${redact(failure.command)}\` exited `
     + `${iv.exit_code === null ? 'non-zero' : iv.exit_code} (${failure.note})`;
   halt(
     report,
@@ -1558,8 +1634,14 @@ function renderSummary(report) {
   const integration = report.integration_verify;
   if (integration) {
     const verdict = integration.outcome === 'pass' ? 'green' : integration.outcome === 'fail' ? '**RED**' : '未実行';
+    // WHICH set was measured, said out loud (Issue #195). A report that only
+    // says "green" cannot be told from one that measured the wrong list — which
+    // is the whole failure this field separates.
+    const source = integration.source === INTEGRATION_BASELINE_FIELD
+      ? `profile の \`integration_baseline\`（宣言あり。\`baseline\` は使っていない）`
+      : `profile の \`baseline\`（\`integration_baseline\` 未宣言のためフォールバック）`;
     lines.push('## 統合検証（--integration-verify）');
-    lines.push(`- 合流後の ${integration.base}${integration.base_sha === null ? '' : `（${integration.base_sha}）`}で profile baseline を実行: ${verdict}。`);
+    lines.push(`- 合流後の ${integration.base}${integration.base_sha === null ? '' : `（${integration.base_sha}）`}で ${source} を実行: ${verdict}。`);
     lines.push(`- 対象（この invocation が merge した PR の Issue）: ${integration.merged_issues.length === 0 ? 'なし' : integration.merged_issues.map((n) => `#${n}`).join(', ')}`);
     lines.push(`- 詳細: ${integration.detail}`);
     lines.push('- **wave barrier は「全 worker completed + verification pass」だけでは満たされない。** 合流後の統合ブランチが green であることまでが barrier である。');
@@ -1577,11 +1659,15 @@ function renderSummary(report) {
   // not exist — and re-running the merge phase cannot undo a landed merge.
   const integrationFailed = report.blocking_reasons.some((r) => r.code === INTEGRATION_VERIFY_FAILED_CODE);
   const integrationUnavailableStop = report.blocking_reasons.some((r) => r.code === INTEGRATION_VERIFY_UNAVAILABLE_CODE);
-  // The two unavailable stops need opposite instructions, and they are told
-  // apart by WHAT was missing rather than by the stop_reason they landed on: a
-  // profile with no baseline is refused before the first merge, everything else
-  // is a probe that failed after the merges had landed.
-  const integrationUndeclared = integrationUnavailableStop && (report.integration_verify?.commands.length ?? 0) === 0;
+  // The unavailable stops need opposite instructions, and they are told apart by
+  // WHAT was missing rather than by the stop_reason they landed on: a profile
+  // with no command to run is refused before the first merge, everything else is
+  // a probe that failed after the merges had landed. Since #195 the first case
+  // splits again by `source` — an EMPTY `integration_baseline` is a declaration,
+  // and telling its author to write a `baseline` would be telling them to undo it.
+  const integrationNoCommands = integrationUnavailableStop && (report.integration_verify?.commands.length ?? 0) === 0;
+  const integrationUndeclared = integrationNoCommands && report.integration_verify?.source !== INTEGRATION_BASELINE_FIELD;
+  const integrationDeclaredEmpty = integrationNoCommands && report.integration_verify?.source === INTEGRATION_BASELINE_FIELD;
   if (report.blocking_reasons.length === 0 && report.limitations.length === 0) {
     lines.push(report.approved ? '- なし。全 eligible を処理した。' : '- なし。preview のみ（mutation なし）。');
   } else {
@@ -1594,10 +1680,14 @@ function renderSummary(report) {
       lines.push(`- next: ${INTEGRATION_VERIFY_FAILED_CODE} は「file 重なりに出ない意味的衝突」の徴候である。同 wave の Issue 同士が同じデータ・同じ前提を別方向へ動かしていないかを読む（owner: human）。`);
     }
     if (integrationUndeclared) {
-      lines.push('- next: **profile に `baseline` を宣言してから再実行する（owner: operator）。1件も merge していないので、直して同じコマンドを回せばよい。** 統合検証をしない運転に戻すなら `--integration-verify` を外す（#175 以前の挙動）。');
+      lines.push('- next: **profile に `baseline` を宣言してから再実行する（owner: operator）。1件も merge していないので、直して同じコマンドを回せばよい。** 合流後を別の集合で判定するなら `integration_baseline` に書く（#195）。統合検証をしない運転に戻すなら `--integration-verify` を外す（#175 以前の挙動）。');
     }
-    if (integrationUnavailableStop && !integrationUndeclared) {
-      lines.push('- next: **merge は済んでいるのに、その結果を測れていない。** `git fetch` / base の解決 / 検証用 checkout の失敗要因を直し、統合ブランチで profile baseline を手で1回通してから次の wave へ進む（owner: operator）。');
+    if (integrationDeclaredEmpty) {
+      lines.push('- next: **profile の `integration_baseline` が空である（＝「統合検証の定義は無い」という宣言）。`baseline` へは落とさない（owner: operator）。1件も merge していないので、直して同じコマンドを回せばよい。** 合流後の「合格の定義」を `integration_baseline` に書く（例: 検証 gate を1本にまとめた command）。`baseline` を流用してよいなら key ごと消す。統合検証をしない運転に戻すなら `--integration-verify` を外す（#195）。');
+    }
+    if (integrationUnavailableStop && !integrationNoCommands) {
+      const set = report.integration_verify?.source === INTEGRATION_BASELINE_FIELD ? '`integration_baseline`' : '`baseline`';
+      lines.push(`- next: **merge は済んでいるのに、その結果を測れていない。** \`git fetch\` / base の解決 / 検証用 checkout の失敗要因を直し、統合ブランチで profile の ${set} を手で1回通してから次の wave へ進む（owner: operator）。`);
     }
     // The evidence stop shares `pr_create_failed`, but nothing about push or gh
     // failed there, so it gets its own next action instead of the generic one.
@@ -1609,7 +1699,10 @@ function renderSummary(report) {
     if (acceptanceBlocked) {
       lines.push('- next: 無人 merge の対象 Issue に受入ゲートブロック（```acceptance-gates）／受入条件が無い。**Issue 本文に書いて re-plan する。** 該当 Issue を除外して回す道は用意していない（対象集合を黙って縮めないため）。人間が読む運転に戻すなら `--unattended` を外す（owner: human）。');
     }
-    if (report.stop_reason === 'preflight_failed' && !acceptanceBlocked && !integrationUndeclared) lines.push('- next: gh 認証・repo 到達性・base 解決を復旧し、再実行する（owner: operator）。');
+    // `integrationNoCommands`, not `integrationUndeclared`: the declared-empty
+    // stop lands on `preflight_failed` too, and nothing about gh or git failed
+    // there either — the action is on the profile (Issue #195).
+    if (report.stop_reason === 'preflight_failed' && !acceptanceBlocked && !integrationNoCommands) lines.push('- next: gh 認証・repo 到達性・base 解決を復旧し、再実行する（owner: operator）。');
   }
   return lines.join('\n');
 }
@@ -1667,13 +1760,29 @@ function runMerge(inputs, plan, dispatch, outDir) {
   // cannot supply the commands for is refused, not skipped. Skipping would let a
   // report say the phase completed while the one stage that would have caught a
   // semantic conflict never ran — the exact shape of the failure this flag
-  // exists for. Refusing here leaves the world untouched, so the operator fills
-  // in `baseline` and re-runs with nothing to undo.
-  if (inputs.integrationVerify && integrationBaselineCommands(plan).length === 0) {
-    const detail = `--integration-verify was requested, but profile "${String(plan.profile.id ?? 'unknown')}" declares no baseline command, `
-      + 'so there is nothing to run on the merged branch. Nothing was merged: an opt-in verification that cannot run is refused rather than skipped '
-      + '(a skipped verification would report a completed merge phase whose result nobody measured). '
-      + 'Declare `baseline` in the profile and re-run, or drop --integration-verify to accept the pre-#175 behaviour';
+  // exists for. Refusing here leaves the world untouched, so the operator fixes
+  // the profile and re-runs with nothing to undo. WHICH field they have to fix
+  // is `integrationSet.source`, and since #195 it decides the message too.
+  const integrationSet = inputs.integrationVerify ? resolveIntegrationBaseline(plan) : null;
+  if (integrationSet !== null && integrationSet.commands.length === 0) {
+    const profileId = String(plan.profile.id ?? 'unknown');
+    // Two different facts, and their next actions are opposite (Issue #195), so
+    // they are never rounded into one sentence. A declared-empty
+    // `integration_baseline` is a repository STATEMENT, and telling its author to
+    // "declare a baseline" would be advice to undo the declaration they made on
+    // purpose — the fallback this Issue removed, offered back as prose.
+    const detail = integrationSet.source === INTEGRATION_BASELINE_FIELD
+      ? `--integration-verify was requested, but profile "${profileId}" declares \`integration_baseline\` with no runnable command, `
+        + 'which is this repository stating that it has no integration verification. It is NOT answered with `baseline`: that list is each '
+        + "worker's proportional health check, and running it here is what let a merged state be called green without being measured (Issue #195). "
+        + 'Nothing was merged: an opt-in verification that cannot run is refused rather than skipped. '
+        + 'Declare the commands that define "green" for the merged branch in `integration_baseline` and re-run, remove the key to fall back to '
+        + '`baseline`, or drop --integration-verify'
+      : `--integration-verify was requested, but profile "${profileId}" declares no baseline command, `
+        + 'so there is nothing to run on the merged branch. Nothing was merged: an opt-in verification that cannot run is refused rather than skipped '
+        + '(a skipped verification would report a completed merge phase whose result nobody measured). '
+        + 'Declare `baseline` in the profile — or `integration_baseline`, if the merged branch should be judged by a different set (Issue #195) — '
+        + 'and re-run, or drop --integration-verify to accept the pre-#175 behaviour';
     report.integration_verify.detail = detail;
     halt(report, 'failure', 'preflight_failed', INTEGRATION_VERIFY_UNAVAILABLE_CODE, detail);
     finalize(report);

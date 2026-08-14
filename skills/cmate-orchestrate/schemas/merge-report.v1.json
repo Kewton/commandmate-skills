@@ -108,7 +108,7 @@
     },
     "integration_verify": {
       "$ref": "#/$defs/integration_verify",
-      "description": "Present only when --integration-verify was passed (merge_prs only, Issue #175). The wave barrier's second half: after every merge this invocation performed, the profile baseline is run on the MERGED state of the base branch — fetched from origin and checked out into a throwaway detached worktree, so the invocation's own working tree is never touched. Absent means the run did not verify the merged state; it never means the merged state is green."
+      "description": "Present only when --integration-verify was passed (merge_prs only, Issue #175). The wave barrier's second half: after every merge this invocation performed, the profile's post-merge verification set is run on the MERGED state of the base branch — fetched from origin and checked out into a throwaway detached worktree, so the invocation's own working tree is never touched. The set is plan.profile.integration_baseline ?? plan.profile.baseline, resolved on the KEY'S PRESENCE (Issue #195), and `source` records which one ran. Absent means the run did not verify the merged state; it never means the merged state is green."
     },
     "blocking_reasons": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
     "limitations": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
@@ -179,6 +179,7 @@
         "base",
         "base_sha",
         "merged_issues",
+        "source",
         "commands",
         "failed_command",
         "exit_code",
@@ -211,9 +212,13 @@
           "description": "The issues whose PRs THIS invocation merged — the merges whose combined result is being judged. Empty means the base branch did not move here.",
           "items": { "$ref": "#/$defs/issue_number" }
         },
+        "source": {
+          "enum": ["integration_baseline", "baseline"],
+          "description": "WHICH profile field the commands below came from (Issue #195). integration_baseline: the profile declares that field, and it is what ran — the repository's definition of a green merged branch, which is generally heavier than what each worker runs. baseline: the profile does not declare integration_baseline, so the worker health-check list ran as the fallback (the pre-#195 behaviour, unchanged for every profile that does not declare the field). Recorded on the paths that ran nothing too, because a refusal for a DECLARED-empty integration_baseline and a refusal for a profile with no baseline at all have opposite next actions. Without this field the split would be a silent second baseline: two reports that measured different sets read identically."
+        },
         "commands": {
           "type": "array",
-          "description": "The profile baseline commands, transcribed in profile order. Empty means the profile declares none, which is refused before the first merge rather than skipped.",
+          "description": "The commands of the field named by `source`, transcribed in profile order. Empty means that field supplies none — an absent/empty `baseline`, or an `integration_baseline` declared as [] (which states that the repository has no integration verification and is NOT answered with `baseline`) — and either way it is refused before the first merge rather than skipped.",
           "items": { "type": "string", "minLength": 1 }
         },
         "failed_command": {

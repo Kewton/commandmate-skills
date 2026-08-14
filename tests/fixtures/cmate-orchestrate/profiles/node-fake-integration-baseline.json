@@ -1,0 +1,13 @@
+{
+  "id": "node-fake-integration-baseline",
+  "repository": "Kewton/CommandMate",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": ["cat cmate-verify-ok"],
+  "verified": true,
+  "integration_baseline": [
+    "cat cmate-verify-ok",
+    "cat cmate-unit-ok"
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "description": "#195, fixed decision 2: `\"integration_baseline\": []` is a DECLARATION — \"this repository has no integration verification\" — and it is never answered with `baseline`. The profile here declares a perfectly runnable `baseline` (`cat cmate-verify-ok`, green in the merged checkout), so a runner whose fallback keyed off the list being EMPTY rather than the key being ABSENT would merge both PRs and report a green integration verification. This case is the opposite: refused before the first merge (failure / preflight_failed / integration_verify_unavailable, exit 1), `git fetch` never called, nothing merged, and `source: integration_baseline` with `commands: []` recording which declaration was read. The next action is the one the operator can act on — write the definition of green, or remove the key — and NOT m25's \"declare a baseline\", which would be advice to undo the declaration they made on purpose.",
+  "phase": "merge-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "profile_json": "node-fake-integration-baseline-empty.json",
+    "orchestrate_args": ["200", "201", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--approve", "--integration-verify"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" },
+      "201": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" }
+    },
+    "integration": { "verify": "pass" }
+  },
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "preflight_failed",
+    "approved": true,
+    "mutated": false,
+    "eligible": [201, 200],
+    "completion_passed": false,
+    "no_merge": true,
+    "pr_merge_calls": 0,
+    "blocking_codes": ["integration_verify_unavailable"],
+    "integration_verify": {
+      "requested": true,
+      "ran": false,
+      "outcome": "not_run",
+      "base": "origin/develop",
+      "base_sha": null,
+      "merged_issues": [],
+      "source": "integration_baseline",
+      "commands": [],
+      "failed_command": null,
+      "exit_code": null
+    },
+    "git_calls": { "fetch": 0, "worktree": 0 },
+    "summary_contains": [
+      "`baseline` へは落とさない",
+      "合流後の「合格の定義」を `integration_baseline` に書く"
+    ],
+    "summary_absent": [
+      "profile に `baseline` を宣言してから再実行する",
+      "gh 認証・repo 到達性・base 解決を復旧し"
+    ]
+  }
+}

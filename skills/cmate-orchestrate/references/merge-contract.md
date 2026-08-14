@@ -237,7 +237,8 @@ develop に入った直後から `npm run test:unit` が赤で、**発覚は dev
 
 | 論点 | 規定 |
 |---|---|
-| 何を | **profile の `baseline`**（[profile-contract.md](./profile-contract.md) 第1節）。dispatch の fallback 検証が worktree の中で再実行するのと**同じ配列**である。**`npm` も `develop` も runner は1つも持たない** —— 規約の出どころは profile だけ、という設計原則（同第1節・ADR [#1447](https://github.com/Kewton/CommandMate/issues/1447)）をここでも守る |
+| 何を | **profile の `integration_baseline` ?? `baseline`**（[profile-contract.md](./profile-contract.md) 第11節。[#195](https://github.com/Kewton/commandmate-skills/issues/195)）。`integration_baseline` を宣言していない profile では `baseline` —— dispatch の fallback 検証が worktree の中で再実行するのと同じ配列 —— がそのまま走る（#195 以前と同一）。**`npm` も `develop` も runner は1つも持たない** —— 規約の出どころは profile だけ、という設計原則（同第1節・ADR [#1447](https://github.com/Kewton/CommandMate/issues/1447)）をここでも守る |
+| どちらを採ったか | `integration_verify.source`（`"integration_baseline"` \| `"baseline"`）に**必ず記録する**。何も実行しなかった run でも記録する。**どちらを測ったのかが report から読めないと、この分離は「静かな2つ目の baseline」になる**（profile-contract.md 第11.3節） |
 | どこで | **使い捨ての detached checkout**。`git fetch origin <base-branch>` で remote を読み直し、`FETCH_HEAD`（＝ **今この invocation が merge し終えた後の** base の tip）を `git worktree add --detach <out>/integration-tree` で取り出し、その中で baseline を回して `git worktree remove --force` で畳む。**invocation の作業ツリーには一切触れない**（operator が checkout している branch は operator のものである）。ここで作るのは branch を持たず CommandMate にも登録しない使い捨てなので、[adr-worktree-preparation.md](./adr-worktree-preparation.md) が `cmate-worktree-setup` に委ねている **worker 用 worktree の準備段ではない** |
 | なぜ `FETCH_HEAD` か | ローカルの `develop` も、fetch 前の `origin/develop` も、**各 PR の CI が既に green だと主張した状態**である。合流後を測るには remote が今持っている tip でなければならない |
 | いつ | merge ループの**後**に**1回だけ**（PR ごとではない）。対象は **この invocation が実際に merge した PR** の集合（`integration_verify.merged_issues`）。途中で止まった run でも、1件でも merge していれば実行する —— 止まったことと、既に入った分が green かは別の問いだからである |
@@ -245,9 +246,9 @@ develop に入った直後から `npm run test:unit` が赤で、**発覚は dev
 | `--approve` との関係 | 含意しない。承認が無ければ merge が無く、merge が無ければ検証する合流後も無い（上の行に落ちる） |
 | `--unattended` との関係 | **独立である。** `--unattended`（5.3節）はこのフラグを含意せず、このフラグも `--unattended` を含意しない。段階 C が `--merge-prs` に含意する締め付けは**受入ゲートブロックと受入条件の1つだけ**であり、後から品目を足して段階 B / C の意味を変えることはしない（5.3節「phase をまたがないこと」と同じ規律）。無人で合流後まで見たい CI は**両方書く** |
 
-### profile に baseline が無いとき —— **error（skip ではない）**
+### 実行できる command が1つも無いとき —— **error（skip ではない）**
 
-`--integration-verify` を渡したのに profile が `baseline` を1つも宣言していない場合、
+`--integration-verify` を渡したのに、解決された集合（第11.2節の表）に command が1つも無い場合、
 **最初の merge の前に `failure` / exit 1 / `stop_reason: preflight_failed` /
 `blocking_reasons[]` に `integration_verify_unavailable` で拒否する。1件も merge しない。**
 
@@ -257,15 +258,27 @@ develop に入った直後から `npm run test:unit` が赤で、**発覚は dev
   `outcome: fail`（「検証すべき gate が無いから pass」に化けさせない）、profile-init が
   埋められない baseline に置く雛形は **exit 0 しない command** である
   （profile-contract.md 第7.2節）。**埋め忘れた baseline は fail-closed でなければならない。**
-- **merge の前**に拒否するので世界は動いていない。operator は profile に `baseline` を書いて
+- **merge の前**に拒否するので世界は動いていない。operator は profile を直して
   同じコマンドを再実行すればよく、取り消すものは何も無い。
+
+**この拒否は2種類あり、対処が逆である**（[#195](https://github.com/Kewton/commandmate-skills/issues/195)）。
+`source` が両者を分ける。
+
+| `source` | 何が起きたか | 対処 |
+|---|---|---|
+| `"baseline"` | `integration_baseline` は未宣言で、フォールバック先の `baseline` が空である | profile に `baseline` を書く（合流後を別集合で判定するなら `integration_baseline` に書く） |
+| `"integration_baseline"` | **`"integration_baseline": []` が宣言されている** ——「このリポジトリに統合検証の定義は無い」 | **`baseline` へは落とさない。** 合流後の「合格の定義」を `integration_baseline` に書く。`baseline` を流用してよいなら **key ごと消す**（未宣言に戻せばフォールバックが効く） |
+
+後者に「`baseline` を宣言してから再実行する」と案内するのは、**operator が意図して書いた宣言を
+取り消せという指示**になる —— #195 が消しに来た静かなフォールバックを、散文で提供し直すことになる。
+summary の next action は `source` で分岐する。
 
 ### code と、停止が次 wave へ伝わる経路
 
 | code | どこに | いつ | status / stop_reason |
 |---|---|---|---|
 | `integration_verify_failed` | `blocking_reasons[]` | 合流後の baseline が赤 | `partial` / `merge_failed`（exit 7） |
-| `integration_verify_unavailable` | `blocking_reasons[]` | 検証を実行できない（baseline 未宣言 ／ fetch・rev-parse・checkout の失敗） | baseline 未宣言は `failure` / `preflight_failed`（exit 1、merge 前）。merge 後の probe 失敗は `partial` / `merge_failed`（exit 7） |
+| `integration_verify_unavailable` | `blocking_reasons[]` | 検証を実行できない（実行できる command が無い ／ fetch・rev-parse・checkout の失敗） | command が無い場合は `failure` / `preflight_failed`（exit 1、merge 前。`source` が上の表のどちらかを名指す）。merge 後の probe 失敗は `partial` / `merge_failed`（exit 7） |
 | `integration_verify_not_run` | `limitations[]` | 1件も merge していないので検証対象が無い | 変えない |
 | `integration_verify_tree_left` | `limitations[]` | 使い捨て checkout を畳めなかった | 変えない（裁定は baseline の結果のまま） |
 
@@ -320,10 +333,16 @@ node scripts/merge.mjs --dispatch <out>/dispatch-report.json --merge-prs --appro
 ### 変えていないもの
 
 - `merge_schema_version` は **1 のまま**。`stop_reason` にも target `outcome` にも
-  `preflight[].code` にも **値を1つも足していない**（第6節・第10節）。
+  `preflight[].code` にも **値を1つも足していない**（第6節・第10節）。#195 も
+  `blocking_reasons[]` / `limitations[]` の code を1つも足していない —— 分岐したのは
+  `detail` と summary の next action だけで、機械が読む面は `integration_verify.source` の1 field である。
 - 足したのは **optional な field `integration_verify` 1つだけ**で、それも
   `--integration-verify` を渡した run にしか現れない。渡さない run の report は
-  **key 集合も bytes も #175 以前と同一**である。
+  **key 集合も bytes も #175 以前と同一**である（#195 が足した `source` はその object の中にあるので、
+  この性質は変わらない。fixture `m22` が pre-#175 の golden と byte 比較して固定し続ける）。
+- **`integration_baseline` を宣言していない profile の run も #175 以前と同一**である。
+  解決は未宣言のとき `baseline` に落ちるので、既存 profile が測る集合は1つも変わらない
+  （fixture `m23` / `m24` が `source: "baseline"` としてそれを固定する）。
 - merge queue 方式（base 更新 → CI 再走 → merge の直列化）は**実装しない**。Issue 本文が
   「まずは合流後検証の1段で十分」と裁定している。合流後検証で赤を捕まえられない事象が
   実運用で繰り返し出たときに、その事例とともに再検討する。
@@ -425,3 +444,20 @@ version を据え置いたまま **optional な field を1つ**足した。判�
 version 規則を緩めたのではなく、**この1件について理由を書いて据え置いた**。次に
 `merge_schema_version` を上げる変更（`status.mjs` も一緒に直せる Issue）で、この field の扱いを
 required にするかを含めて見直す。
+
+**[#195](https://github.com/Kewton/commandmate-skills/issues/195) の `integration_verify.source` も
+同じ例外の下に置く。** 足したのは `integration_verify` object の**内側の1 field**（required）で、
+`merge_schema_version` は 1 のままである。上の3点はそのまま成立する。
+
+1. `--integration-verify` を渡さない run の report には `integration_verify` object 自体が無いので、
+   **その内側に何を足しても既存の読み手が出会う文書は1 byte も変わらない**（fixture `m22` が固定し続ける）。
+2. `status.mjs` は今も `merge_schema_version === 1` を pin しており、**`scripts/status.mjs` は
+   #195 の宣言 scope の外**である（version を上げると、フラグを使っていない run の report まで読取不能になる）。
+   なお status runner は JSON schema による検証をしておらず version だけを見るので、**#195 以前に書かれた
+   `source` の無い report も従来どおり読める**。
+3. `stop_reason` / target `outcome` / `preflight[].code` の閉じた enum には**やはり1つも足していない**
+   （`source` は新しい field の enum である）。
+
+`source` を optional にしなかったのは、この field の目的が「どちらを測ったのかを report **単体**で
+読めること」だからである。欠けていてよい field は、読み手が「たぶん `baseline` だろう」と補うことを
+許す —— それは第5.4節が消しに来た推測そのものである。

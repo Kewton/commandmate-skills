@@ -1,0 +1,13 @@
+{
+  "id": "integration-baseline-declared",
+  "repository": "Kewton/CommandMate",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": ["bundle exec rspec"],
+  "verified": true,
+  "integration_baseline": [
+    "bundle exec rspec",
+    "bin/verify-all"
+  ]
+}

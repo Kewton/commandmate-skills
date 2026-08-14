@@ -367,6 +367,14 @@
               "minimum": 1
             }
           }
+        },
+        "integration_baseline": {
+          "description": "Optional post-merge verification set for the merge runner's --integration-verify (Issue #195). It is the repository's definition of a green MERGED branch, kept apart from `baseline` because that list is each worker's proportional health check and the two have different purposes: making one right by sharing a key makes the other wrong. Resolved as integration_baseline ?? baseline on the KEY'S PRESENCE — an absent key runs `baseline` exactly as before this field existed, and a declared [] states that the repository has no integration verification, which --integration-verify refuses (preflight_failed / integration_verify_unavailable) rather than answering with `baseline`. Echoed by the planner only when the profile declared it, and last among the optional fields, so a plan built without it is byte-identical to the plans produced before it existed.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },

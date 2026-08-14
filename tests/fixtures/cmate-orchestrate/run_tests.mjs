@@ -739,6 +739,19 @@ function runCase(caseId) {
       `plan.profile.dispatch_defaults ${JSON.stringify(plan.profile.dispatch_defaults)} !== ${JSON.stringify(expect.profile_dispatch_defaults)}`,
     );
   }
+  // The same, for the MERGE runner's channel (Issue #195): merge resolves
+  // `plan.profile.integration_baseline ?? plan.profile.baseline` under
+  // `--integration-verify` and never opens the profile either. Compared with
+  // deepEqual against a declared `[]` too, and that comparison is the point of
+  // the field: `[] !== undefined`, so a plan that dropped the empty declaration
+  // would fail here rather than reach merge looking like a profile that never
+  // declared anything (`profile_keys` states the same fact from the key side).
+  if (expect.profile_integration_baseline !== undefined) {
+    check(
+      deepEqual(plan.profile.integration_baseline, expect.profile_integration_baseline),
+      `plan.profile.integration_baseline ${JSON.stringify(plan.profile.integration_baseline)} !== ${JSON.stringify(expect.profile_integration_baseline)}`,
+    );
+  }
 
   // max_parallel is honored: no wave is wider than the bound.
   check(plan.waves.every((w) => w.length <= plan.max_parallel), `a wave exceeds max_parallel ${plan.max_parallel}`);
@@ -2390,6 +2403,15 @@ function runMergeCase(caseId) {
   }
   for (const needle of expect.summary_contains ?? []) {
     check(report.summary_markdown.includes(needle), `merge summary does not mention "${needle}"`);
+  }
+  // The other direction (Issue #195). A next action is not merely missing text
+  // when the WRONG one is printed: the two refusals of `--integration-verify`
+  // share a stop_reason and land in the same paragraph, and telling the author of
+  // a declared-empty `integration_baseline` to "declare a baseline" is advice to
+  // undo the declaration. Only a negative assertion catches an implementation
+  // that prints both.
+  for (const needle of expect.summary_absent ?? []) {
+    check(!report.summary_markdown.includes(needle), `merge summary should not mention "${needle}"`);
   }
 
   // The byte-level non-regression golden (Issue #175 (a)). `out_dir` is the run's
@@ -4592,6 +4614,20 @@ function runProfileInitCase(caseId) {
     'the draft carries dispatch_defaults; operating defaults are a conclusion somebody reached by RUNNING the repository, not a declaration in its tree');
   check(!(result.todos ?? []).some((todo) => todo.field === 'dispatch_defaults'),
     'the draft raises a TODO for dispatch_defaults; nothing in a tree can ever clear it');
+  // The same discipline, same reason, for the post-merge verification set (Issue
+  // #195 / profile-contract.md §11.5). What the drafter CAN read out of a tree is
+  // the toolchain's own commands, which is what it drafts into `baseline` — and
+  // a drafted `integration_baseline` would either copy that list, making the two
+  // fields identical and the separation pointless, or guess at a heavier one
+  // nothing in the tree states. Worse than a wrong guess: a DRAFTED `[]` is a
+  // declaration under §11, so `--integration-verify` would refuse every run made
+  // from an untouched draft — the drafter deciding a policy question by omission.
+  // Not drafting leaves the pre-#195 fallback in place, which is the behaviour a
+  // profile that never heard of the field should have.
+  check(!('integration_baseline' in result.profile),
+    'the draft carries integration_baseline; what a merged branch must satisfy is a conclusion somebody reached by RUNNING the repository, not a declaration in its tree');
+  check(!(result.todos ?? []).some((todo) => todo.field === 'integration_baseline'),
+    'the draft raises a TODO for integration_baseline; nothing in a tree can ever clear it');
   check(result.status === expect.status, `status ${result.status} != ${expect.status}`);
   check(result.completion_check.passed === true, 'the drafting completion check should pass');
 
@@ -4907,6 +4943,19 @@ function runIdCoversProfileTest() {
       args: [],
       project: (plan) => plan.profile.dispatch_defaults,
     },
+    {
+      // The eighth field (Issue #195), echoed and not consumed like the seventh,
+      // and here the property is worth more than the symmetry: two profiles that
+      // differ only in `integration_baseline` produce runs whose merged state is
+      // judged by DIFFERENT commands. If they shared a run id, the second plan
+      // would refuse to write (run_exists) and the operator's natural next move —
+      // reuse the directory that is already there — would dispatch, merge and
+      // "verify" against the definition of green they had just replaced.
+      field: 'integration_baseline',
+      overrides: { integration_baseline: ['bin/verify-all'] },
+      args: [],
+      project: (plan) => plan.profile.integration_baseline,
+    },
   ];
 
   for (const variant of variants) {
@@ -4987,10 +5036,11 @@ function runIdCoversProfileTest() {
     `run_exists detail still asserts that nothing changed: ${detail}`,
   );
   check(detail.includes('plan.json'), `run_exists detail should point at the existing plan.json: ${detail}`);
-  // The five fields the old three-field hash missed are named, because the
-  // operator reading this is deciding whether their profile edit is the reason
-  // this id already exists.
-  for (const field of ['baseline', 'branch_template', 'worktree_template', 'verified', 'scope_companions', 'dispatch_defaults']) {
+  // The fields the old three-field hash missed are named, because the operator
+  // reading this is deciding whether their profile edit is the reason this id
+  // already exists. `integration_baseline` (#195) is on the list for the sharpest
+  // version of that question: they may have just changed what "green" means.
+  for (const field of ['baseline', 'branch_template', 'worktree_template', 'verified', 'scope_companions', 'dispatch_defaults', 'integration_baseline']) {
     check(detail.includes(field), `run_exists detail should name the profile field ${field}: ${detail}`);
   }
 
