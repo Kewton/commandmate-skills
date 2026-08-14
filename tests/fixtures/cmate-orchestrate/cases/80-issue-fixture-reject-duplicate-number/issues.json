@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 481,
+      "title": "fix: 同じ番号を2度書いてしまう（先に書いた本文）",
+      "body": "## 対象ファイル\n- `src/first.ts`\n\n## Acceptance criteria\n- [ ] 先行の要素が黙って消えない\n",
+      "labels": ["bug"]
+    },
+    {
+      "number": 481,
+      "title": "fix: 同じ番号を2度書いてしまう（後から書いた本文）",
+      "body": "## 対象ファイル\n- `src/second.ts`\n\n## Acceptance criteria\n- [ ] 後勝ちにならない\n",
+      "labels": ["bug"]
+    }
+  ]
+}

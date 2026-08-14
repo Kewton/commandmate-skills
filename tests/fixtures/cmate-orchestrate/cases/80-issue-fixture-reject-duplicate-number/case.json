@@ -1,0 +1,13 @@
+{
+  "description": "Issue #208: 同じ `number` が2度現れる fixture は `load_error` / exit 6 である。0.29.0 までは `Map.set` の後勝ちで、先に書いた要素が黙って消えた —— 2つの本文は別の対象ファイル・別の受入条件を書いているのに、plan にも run_id にも後の1つしか効かない。どちらを意図したかは planner には決められないので、選ばずに拒否する。message は衝突した2要素の index を両方名指しする。",
+  "args": ["481", "--profile", "node-commandmate"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "--issue-json entry 1 repeats issue 481, already declared by entry 0"
+    ],
+    "plan_null": true
+  }
+}
