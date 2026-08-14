@@ -25,6 +25,14 @@
 #     rendered by the package, resolved against a real `.commandmate/verify.yaml`,
 #     read back by the actual planner, and held byte-identical to the 正本 by
 #     `acceptance-gates-conformance.mjs`.
+#  6. **The open-questions notation the producing side writes is the one the
+#     planner reads** (Issue #198). That producer is `cmate-issue-refinement`,
+#     which ships instructions and no scripts, so the rule lives as prose there
+#     and as `render()`/`blocking()` in `open-questions-conformance.mjs` — which
+#     feeds everything it renders to the real planner rather than to a second
+#     description of it. Producing-side notation conformance already lived in this
+#     suite (item 5 checks blocks shipped by both producing packages), so this one
+#     runs here too; the `cmate-issue-authoring` mirror of it is a separate Issue.
 #
 # Requires bash, node and the standard POSIX tools. No network: the planner runs
 # from a fixture, and the `gh` on PATH is a shim that only writes a log.
@@ -437,6 +445,27 @@ else
       'the conformance test could not run; fix its region markers before trusting any of this'
   else
     fail 'the notation matches cmate-orchestrate and the 正本' 'the notation has drifted; see above'
+  fi
+fi
+
+# The same discipline for the open-questions notation, which went in reader-first:
+# cmate-orchestrate has parsed the block since 0.28.0 and nothing wrote one. The
+# producing side is instructions, not code, so the only thing that can hold the
+# rule to the reader is a test that renders from the rule and parses with the
+# reader. Same three exit codes: 0 in sync, 1 drifted, 2 the comparison could not
+# be made.
+printf '\n== the open-questions notation is in sync ==\n'
+if node "$SUITE_DIR/open-questions-conformance.mjs" > "$WORK/open-questions.txt" 2>&1; then
+  sed 's/^/     /' "$WORK/open-questions.txt"
+  pass 'the open-questions block matches the planner and the 正本'
+else
+  status=$?
+  sed 's/^/     /' "$WORK/open-questions.txt"
+  if [ "$status" -eq 2 ]; then
+    fail 'the open-questions block matches the planner and the 正本' \
+      'the conformance test could not run; fix its region markers before trusting any of this'
+  else
+    fail 'the open-questions block matches the planner and the 正本' 'the notation has drifted; see above'
   fi
 fi
 
