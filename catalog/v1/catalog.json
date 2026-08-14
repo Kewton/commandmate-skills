@@ -794,7 +794,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.29.0",
+      "latest": "0.30.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -1778,6 +1778,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.29.0/cmate-orchestrate-0.29.0.tar.gz",
             "sha256": "2ddfa10688036d63d6439b133ccf9e24d508df1b13942c176cddc94e67686306",
             "size": 643443,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.30.0",
+          "changelog": "0.29.0 以降の 2 件（#208 / #210）を公開する。\n\n主題は **planner が黙る場所を 2 つ塞ぐこと**である。片方は壊れた入力を黙って部分集合にしていた経路、もう片方は分類の判断そのものが記録に残っていなかった場所である。\n\n- **#208**: `--issue-json` の fixture loader には黙る挙動が 3 つあった —— object でない要素、`number` が整数として読めない要素、そして**同一 `number` の後勝ち上書き**（先行の要素が消える）。さらに `Number.parseInt` が寛容すぎ、`\"123abc\"` は 123 に、`\"12.9\"` は 12 に読めた。つまり読めない要素は捨てられるだけでなく**別の番号として読まれうる**。3 つとも `load_error` / exit 6 に変え、読み口を厳密な整数判定にした。エラーメッセージは「無い」と「読めない」を区別して帰属させる —— entry は在るのに `number` が読めなかった場合、直すべきは要求側ではなく fixture 側だからである。fixture は plan の入力そのものであり、壊れた入力から黙って部分集合を作った plan は、**測っていない Issue を測ったことにして緑で終わる**。plan-contract 第1.1節（#200 が書いた形式の文書）も新挙動へ更新した。正常な fixture の plan は 1 byte も変わらない。\n- **#210**: #199 が `severity` を導入したとき、notice 集合を `{harness_path_in_scope}` の 1 つに固定し、他 code の判断は別 Issue に送った。その棚卸しである。全 warning code を発生箇所ごとに裏取りし、codes-and-recovery.md を**判断理由つきの台帳**にした。blocking が正しい code には「blocking が正しい」と書いてある —— **無言の既定と、検討して blocking に決めたことは違う**。棚卸しの結果 `profile_repository_override`（operator が明示した override の報告であり、planner が読めなかったものでも著者が決めていないものでもない）を notice へ移した。あわせて「新設 warning code は severity を分類してから足す」を規約として置いた。分類の判断が code の誕生時に記録される形である。#199 の規律はそのまま維持している: severity を書くのは notice の entry だけで、notice を含まない plan は 1 byte も変わらない。",
+          "published_at": "2026-08-14T15:19:05Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.30.0",
+            "commit": "ff259caaa41e76bd049d072c6218d548556e4b7f"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.30.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.30.0/cmate-orchestrate-0.30.0.tar.gz",
+            "sha256": "bea050f5067775477a9adbc747c0a7372832eadf4f7e597b4347d4efa18bd523",
+            "size": 653432,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
