@@ -37,7 +37,26 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 失敗時も stdout に `status: failure` の result を出す。**plan を推測で埋めない。**
 
 
-## 2. plan の warning code（1件でも出れば `partial`）
+## 2. plan の warning code（**blocking** が1件でも出れば `partial`）
+
+**warning には severity がある**（[#199](https://github.com/Kewton/commandmate-skills/issues/199)）。
+`plan.status` を落とすのは **blocking** な warning だけで、**notice** は落とさない。
+既定は blocking であり、**下表のうち `severity` を明記していない code はすべて blocking である** ——
+新しい code が増えたときも、誰かが明示的に notice と判断するまで blocking のままになる
+（fail-closed。「黙って `partial` でなくなる」向きには倒れない）。**notice は現時点で
+`harness_path_in_scope` の1件だけ**で、他の code を notice へ移すのは code ごとの独立した判断として
+別 Issue で行う。notice が blocking を隠すことはない —— blocking が1件でも在れば `partial` である。
+
+`severity` は plan（`plan.warnings[].severity`）にだけ載り、notice の entry にだけ書かれる
+（blocking は暗黙の既定。書かれていない＝blocking と読む）。result envelope
+（`result.json` / stdout）の `warnings` は code と detail だけを運ぶ ——
+その envelope が要る集計は `status` そのものだからである。規範は
+[plan-contract.md](./plan-contract.md) 第5.6節。
+
+**`status` は人間が読む色であって、run を止める信号ではない。** dispatch を止めるのは
+`plan.issues[].questions` の配列であり（`execution-plan.v2` schema の `questions` が
+「this array — not plan.status — is what stops a run」と明言している）、`status` ではない。
+したがって notice を `success` に含めても**自動化系の振る舞いは1つも変わらない**。
 
 | code | 意味 |
 |---|---|
@@ -50,7 +69,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | `unrecognized_file_extension` | 既知拡張子外の backtick path が抽出から落ちた |
 | `ambiguous_file_candidate` | 同じ file の2つの綴り（一方が他方の path 境界つき suffix）が本文に在り、どちらを意図したか決められない。**どちらも落とさず**両方 scope に入れたうえで訊いている |
 | `unconfirmed_lexical_dependency` | 生産者/消費者の推論が**共有 topic token だけ**を根拠にしていたので、依存 edge にしなかった。順序が要るなら人間が述べる |
-| `harness_path_in_scope` | agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を、Issue が**成果物見出しで明示的に宣言した**ので scope に入れた。既定は「入れない」である |
+| `harness_path_in_scope` | agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を、Issue が**成果物見出しで明示的に宣言した**ので scope に入れた。既定は「入れない」である。**唯一 `severity: notice` の code であり、これだけでは `status` は `partial` にならない**（#199） |
 | `open_question_declared` | Issue 本文の ```open-questions ブロックが「これはまだ決めていない」と宣言している。**planner の推論ではなく、著者自身の申告**である。1件につき1件 |
 | `open_question_block_invalid` | ```open-questions ブロックが読めない（2個以上・未知 version・未知 key・空・重複・subset 違反）。**「ブロックが無かった」に丸めない** |
 | `acceptance_requires_tests_but_scope_has_none` | 受入条件がテストの**作成**を能動的に要求しているのに、対象 file（**段1 の導出結果を含めて**）にテストらしき path が1件も無い |
@@ -119,6 +138,15 @@ Issue が `## 対象ファイル`（成果物見出し）に書いた場合だ�
 いるので通す。**通したこと自体を残すのがこの warning である。**詳細と #1756 との整合は
 [plan-contract.md](./plan-contract.md) 第5.3節と
 [adr-scope-derivation.md](./adr-scope-derivation.md) 第17節にある。
+
+**ハーネスを成果物とする Issue でこの code が出るのは正常である。** 検証ゲートを足す・skill 定義を
+直す・`.commandmate/verify.yaml` を書き換えるといった作業は、ハーネスを in-repo で保守している
+リポジトリ（このリポジトリがそうである）では**例外ではなく定常作業**なので、この warning は
+定期的に出る。出たこと自体は欠陥の徴候ではない —— 読むべきは「その Issue の成果物が本当に
+ハーネスなのか」の1点だけである（第4節の対処表）。#199 以前はこの形の Issue が**毎回 `partial` で
+返っていた**（実測 2026-08-14、Kewton/BorderFreeKidsMap）。その `partial` も異常ではなかったが、
+正しい書き方に対して常時出る色は色として機能しないので、#199 でこの code を
+`severity: notice` に分類し、`status` を落とすのをやめた。**warning 自体は残り続ける。**
 
 
 ## 3. limitation code（停止はしていないが、後から効いてくる制約）
@@ -205,7 +233,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | plan `status: partial` + `acceptance_requires_tests_but_scope_has_none`（dispatch 側では `open_questions` として止まる） | 受入条件はテストの作成を要求しているのに、宣言された file からテスト path が1件も導出できていない。**そのまま dispatch すれば worker は正しくテストを書いて scope ゲートで落ち、契約 scope は send 時 snapshot なので worker 側に回復手段は無い** | **Issue 本文の対象 file にテスト path を書いて re-plan する。** テストが本当に不要なら受入条件にそう書く（否定形は検出から除外される）。判定の元になった受入条件が warning detail と question に原文で入っているので、偽陽性の確認はその1行で済む。**`--allow-questions` で押し通すのは、そのまま worker 1人分の run を捨てることである** |
 | plan `status: partial` + `ambiguous_file_candidate`（dispatch 側では `open_questions` として止まる） | 同じ file の2つの綴りが本文に在る（一方が他方の path 境界つき suffix）。**どちらも scope に入れてある** —— 以前は長い方を残して短い方を落としており、実測では「宣言した path が落ちて、触るなと書いたビルド生成物が scope に残る」向きに外れた | **どちらが対象かを決めて、もう片方を本文から消して re-plan する。** 両方とも対象なら `--allow-questions` で進めてよい（両方入っている）。question の本文が2つの path を名指ししているので、判断は本文を開かずに済む |
 | plan `status: partial` + `unconfirmed_lexical_dependency`（同上） | 生産者/消費者の推論が当たったが、根拠が**共有 topic token だけ**で共有 file が無かったので edge にしていない。**その2 Issue は同じ wave に入る** | **順序が要るなら述べる**（Issue 本文に `depends on #N`、または `--depends <consumer>:<producer>`）。要らないなら `--allow-questions` で進めてよい。散文の語が一致しただけで3 Issue が3 wave に直列化していたのが元の障害なので、**「独立である」が正しい答えであることが多い**。**edge が欲しいのに `--no-infer` を足さない** —— それは推論を丸ごと切るだけで、この question の答えにはならない |
-| plan `status: partial` + `harness_path_in_scope` | Issue が `## 対象ファイル`（成果物見出し）に agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を書いたので、**worker がそれを書き換えられる状態で dispatch される**。既定では入らない path が、明示宣言によって入っている | **その Issue の成果物が本当にハーネスなのかを読んで決める。** そうなら（このリポジトリ自身の Issue のように）そのまま進めてよい —— warning は宣言の記録であって停止ではない。そうでない（ただ「その runner を実行して通ること」を言いたいだけの）なら、**成果物見出しから path を消して散文か参考見出し（`根拠` / `参考`）へ移し、re-plan する**。移しても worker はその path を読める（`reference_files` に出る）。**審判を書き換えられる worker を「たぶん大丈夫」で送らない** |
+| plan `harness_path_in_scope`（`severity: notice`。**`status` は落ちない** —— 他に blocking が無ければ `success` である） | Issue が `## 対象ファイル`（成果物見出し）に agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を書いたので、**worker がそれを書き換えられる状態で dispatch される**。既定では入らない path が、明示宣言によって入っている。**ハーネスを成果物とする Issue では正常に出る**（第2節） | **その Issue の成果物が本当にハーネスなのかを読んで決める。** そうなら（このリポジトリ自身の Issue のように）そのまま進めてよい —— warning は宣言の記録であって停止ではない。そうでない（ただ「その runner を実行して通ること」を言いたいだけの）なら、**成果物見出しから path を消して散文か参考見出し（`根拠` / `参考`）へ移し、re-plan する**。移しても worker はその path を読める（`reference_files` に出る）。**審判を書き換えられる worker を「たぶん大丈夫」で送らない。`success` は「読まなくてよい」ではない** —— この行を読ませるために warning は残してある（#199） |
 | plan `cycle_detected` / `override_incomplete` / `dependency_order_violation` | 依存グラフが実行不能 | `dependency-plan.md` の edge `reason`（どの方向語をどの行から読んだか）を見て、Issue 本文か `--depends` を直す |
 | plan `run_exists` | **同じ既定 run_id に hash された run が既にある**（Issue 集合・Issue 内容・**profile 全体**・CLI option がすべて同じ、が典型）。「何も変えていない」とまでは断定できない —— 既定 profile の cwd `origin` 判定は hash の外にある（Issue #157） | エラーが指す既存の `plan.json` と突き合わせて、意図した plan かを確かめる。違うなら Issue 本文か profile を直す（**profile はどの field を編集しても別 run_id になる**）。同じでよいなら `--run-id <new-id>` / `--runs-dir <dir>` を渡す |
 | plan `profile_repository_mismatch` | cwd の origin と profile の対象リポジトリが違う | `--profile` / `--profile-json` / `--repo` のどれかを渡して意図を明示する |
@@ -286,7 +314,10 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 この表には在るが **status runner の hint map にはまだ無い**（`status.mjs` は別 Issue で追随する。
 `contract_scope_dropped` については `status.mjs` が #161 / #162 の宣言 scope の外だった。
 `harness_path_in_scope` も同じく [#177](https://github.com/Kewton/commandmate-skills/issues/177)
-の宣言 scope の外であり、`ambiguous_file_candidate` / `unconfirmed_lexical_dependency` は
+の宣言 scope の外である —— なお `status.mjs` は plan の warning を **severity に関わらず全件
+そのまま列挙する**ので、[#199](https://github.com/Kewton/commandmate-skills/issues/199) 後も
+notice が status 出力から消えることはない（`status.mjs` は `severity` を読んでいない。読ませるのは
+別 Issue）。`ambiguous_file_candidate` / `unconfirmed_lexical_dependency` は
 [#182](https://github.com/Kewton/commandmate-skills/issues/182) の、`integration_verify_*` は
 [#175](https://github.com/Kewton/commandmate-skills/issues/175) の、timeout の生死3 code は
 [#179](https://github.com/Kewton/commandmate-skills/issues/179) の宣言 scope の外である。

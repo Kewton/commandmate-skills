@@ -448,6 +448,12 @@ function warningCodesOf(result) {
   return (result.warnings ?? []).map((w) => w.code);
 }
 
+// `severity ?? null` per plan warning, in plan order (Issue #199). `null` is the
+// absent field, which the schema defines as the fail-closed `blocking` default.
+function planWarningSeverities(plan) {
+  return ((plan ?? {}).warnings ?? []).map((w) => w.severity ?? null);
+}
+
 function check(condition, message) {
   if (!condition) {
     failures += 1;
@@ -516,6 +522,20 @@ function runCase(caseId) {
     check(
       deepEqual(warningCodesOf(result), expect.warning_codes),
       `warning codes ${JSON.stringify(warningCodesOf(result))} !== ${JSON.stringify(expect.warning_codes)}`,
+    );
+  }
+  // The severity of each warning, IN THE PLAN, positionally parallel to
+  // `warning_codes` (Issue #199). An entry's value is its `severity` field or
+  // `null` when the field is absent — which is not a formality: absent IS the
+  // fail-closed `blocking` default, and the planner writes the field on notices
+  // ONLY so that a plan raising no notice stays byte-identical to the one the
+  // pre-#199 runner wrote. Stating `null` therefore pins the byte shape, not just
+  // the meaning, and a case declaring this list would go red on a runner that
+  // started spelling `blocking` out.
+  if (expect.warning_severities) {
+    check(
+      deepEqual(planWarningSeverities(result.plan), expect.warning_severities),
+      `warning severities ${JSON.stringify(planWarningSeverities(result.plan))} !== ${JSON.stringify(expect.warning_severities)}`,
     );
   }
   // A warning's DETAIL is what a reviewer acts on, and a detail that names the
@@ -736,7 +756,40 @@ function runCase(caseId) {
 
   // The plan carries the same warnings the envelope reports; a reviewer reading
   // only the plan artifact must not miss a concern the result envelope raised.
-  check(deepEqual(plan.warnings, result.warnings), 'plan.warnings and result.warnings disagree');
+  // Compared on (code, detail) rather than byte-wise since Issue #199: the PLAN's
+  // entries may carry `severity`, the envelope's never do — `orchestrate-result.v1`
+  // is a closed v1 schema whose `entry` definition is shared with `errors`, so the
+  // severity annotation lives on the plan's `note_entry` alone. Nothing a reviewer
+  // acts on differs between the two.
+  const pairs = (entries) => entries.map((w) => [w.code, w.detail]);
+  check(deepEqual(pairs(plan.warnings), pairs(result.warnings)), 'plan.warnings and result.warnings disagree');
+  // ...and the envelope really is bare, so "the v1 envelope is unchanged" is a
+  // measurement rather than a claim. (The result schema's closed `entry` would
+  // reject the field anyway; this says which side of the split is the reason.)
+  for (const warning of result.warnings) {
+    check(!('severity' in warning), `result.warnings entry ${warning.code} carries severity; the v1 envelope must not`);
+  }
+  // Asserted for EVERY plan case, the way `basis` is (Issue #199):
+  //
+  //   * `blocking` is never spelled out. The planner writes `severity` on notices
+  //     only, which is what keeps a plan with no notice byte-identical to the one
+  //     the pre-#199 runner wrote — the property every full-text golden rests on,
+  //     and one no golden can measure because no golden case raises a warning.
+  //   * `status` is `partial` iff something blocking was raised. This is the whole
+  //     of the behaviour change, and stating it globally means a code accidentally
+  //     moved into the notice set turns some other case red rather than passing
+  //     quietly. A notice can never mask a blocking warning.
+  for (const warning of plan.warnings) {
+    check(
+      !('severity' in warning) || warning.severity === 'notice',
+      `warning ${warning.code} has severity ${JSON.stringify(warning.severity)}; the planner emits notice or nothing`,
+    );
+  }
+  const blocking = plan.warnings.filter((w) => w.severity !== 'notice');
+  check(
+    result.status === (blocking.length > 0 ? 'partial' : 'success'),
+    `status "${result.status}" disagrees with ${blocking.length} blocking of ${plan.warnings.length} warning(s)`,
+  );
 
   // Determinism: a second run into a fresh directory — from the SAME working
   // directory, which is part of the input — yields the same plan.

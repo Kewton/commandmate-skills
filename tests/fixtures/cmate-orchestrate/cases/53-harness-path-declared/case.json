@@ -1,10 +1,11 @@
 {
-  "description": "Issue #177 (b): the other half of the deny. This issue's PRODUCT is the verify runner itself — it is listed under `## 対象ファイル`, the deliverable heading #50 introduced — so the harness path is granted rather than denied. A deny with no door would be the failure #50 removed: an issue that maintains its own harness in-repo (this repository does) would be refused by the scope gate for writing exactly what it was told to write. The grant is never silent: `harness_path_in_scope` names the path, says why the default is deny, and drops the run to partial so a reviewer reads it before dispatch. No test companion is derived for a .sh file, so suspected_files is exactly the one declared path — the grant is as narrow as the declaration.",
+  "description": "Issue #177 (b): the other half of the deny. This issue's PRODUCT is the verify runner itself — it is listed under `## 対象ファイル`, the deliverable heading #50 introduced — so the harness path is granted rather than denied. A deny with no door would be the failure #50 removed: an issue that maintains its own harness in-repo (this repository does) would be refused by the scope gate for writing exactly what it was told to write. The grant is never silent: `harness_path_in_scope` names the path and says why the default is deny. Since Issue #199 the grant no longer paints the run: this is the ONE notice code, so a plan whose only warning is this one is `success` — the declaration is a decision the author already made and wrote down, not one still owed, and a repository that adds a verify gate every few weeks would otherwise read `partial` every single time until `partial` meant nothing. The warning itself is unchanged and still carries the whole recovery text. No test companion is derived for a .sh file, so suspected_files is exactly the one declared path — the grant is as narrow as the declaration.",
   "args": ["417", "--profile", "node-commandmate"],
   "expect": {
     "exit": 0,
-    "status": "partial",
+    "status": "success",
     "warning_codes": ["harness_path_in_scope"],
+    "warning_severities": ["notice"],
     "warning_details_include": [
       "#417 declares `.claude/skills/cmate-verify/scripts/verify-run.sh` under a deliverable heading",
       "can pass by rewriting the judge"

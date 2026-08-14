@@ -1,10 +1,11 @@
 {
-  "description": "Issue #52: an unanswered planner question is a warning, not just a note. #320 states no acceptance criteria and #321 names no file, so the run is partial rather than a clean success — the plan no longer reports 'nothing to see here' about an issue with no stated definition of done.",
+  "description": "Issue #52: an unanswered planner question is a warning, not just a note. #320 states no acceptance criteria and #321 names no file, so the run is partial rather than a clean success — the plan no longer reports 'nothing to see here' about an issue with no stated definition of done. This is also the BLOCKING half of Issue #199's split, pinned from the other side of case 53: both codes are outside the notice set, so both entries carry no `severity` at all (absent IS blocking, fail-closed) and the run is `partial` exactly as it was before severity existed. A change that widened the notice set past its one code would turn this case red.",
   "args": ["320", "321", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "fixture", "--no-infer"],
   "expect": {
     "exit": 0,
     "status": "partial",
     "warning_codes": ["no_acceptance_criteria", "no_suspected_files"],
+    "warning_severities": [null, null],
     "warning_details_include": [
       "#320: Acceptance criteria are unclear; add 1-3 concrete completion checks.",
       "#321: Affected files are unclear; add likely modules or paths.",

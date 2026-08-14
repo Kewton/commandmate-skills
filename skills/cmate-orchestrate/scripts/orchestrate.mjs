@@ -3211,6 +3211,69 @@ function completionChecks(plan, dependencyErrors, ranOverwriteGuard) {
   return { passed: checks.every((c) => c.passed), checks };
 }
 
+// =============================================================================
+// Warning severity — which warnings paint the run (Issue #199)
+// =============================================================================
+//
+// `plan.status` is a COLOUR A HUMAN READS. What stops a run is `issues[].questions`
+// — the schema says so in as many words ("this array — not plan.status — is what
+// stops a run") and the dispatch runner reads that field and never this one. So
+// widening `success` here cannot make an automated run go further than it did.
+//
+// Until #199 every warning dropped the status to `partial`, which made `partial`
+// carry two different states in the same colour:
+//
+//   * the author has NOT DECIDED something yet (`open_question_declared`,
+//     `ambiguous_file_candidate`, `no_acceptance_criteria`, …), and
+//   * the author HAS decided, declared it in the issue body, and the planner is
+//     recording that it honoured the declaration (`harness_path_in_scope`).
+//
+// The second kind fires on CORRECT authoring. A repository that maintains its
+// agent harness in-repo — this one does, and so does Kewton/BorderFreeKidsMap,
+// where #199 measured it — adds a verify gate by writing `.commandmate/verify.yaml`
+// under `## 対象ファイル`, which is the one sanctioned way to say it (§5.3). Every
+// such run came back `partial`, so `partial` started to mean "またこれか". That is
+// precisely the failure #177 refused to create on the DENIED side ("正しい書き方に
+// 対して partial を出す warning は、読み手に読み飛ばし方を教える"); the declaring
+// side had it anyway.
+//
+// The split is FAIL-CLOSED, in two parts:
+//
+//   1. `blocking` is the DEFAULT. A code absent from the set below drops the
+//      status exactly as it did before, so a warning code added by a later change
+//      is blocking until someone argues otherwise. The failure mode of forgetting
+//      to classify is "still partial", never "silently no longer partial".
+//   2. The notice set is ONE code. Moving any other code into it is an
+//      independent judgement about that code and belongs in its own issue (#199
+//      says so). This set is the whole of the mechanism's blast radius.
+//
+// `harness_path_in_scope` is unchanged in every other respect: it still fires, it
+// still names the path, it still sits in `plan.warnings` and in the recovery
+// table. Only the colour moved.
+const NOTICE_WARNING_CODES = new Set(['harness_path_in_scope']);
+
+// `severity` is written on NOTICE entries only. `blocking` stays implicit, which
+// buys two things at once:
+//
+//   * Byte stability. A plan that raises no notice is byte-identical to the plan
+//     the pre-#199 runner wrote, so every checked-in full-text golden — and every
+//     `plan.json` already on disk from an earlier run — survives untouched.
+//   * The absent field reads as the fail-closed default rather than as a gap a
+//     reader has to interpret: no `severity` means blocking, in a plan from this
+//     runner and in a plan from any runner that predates the field.
+//
+// So `blocking` is a value the SCHEMA admits (a future emitter may state it) and
+// this planner never writes.
+function withSeverity(warnings) {
+  return warnings.map((warning) =>
+    NOTICE_WARNING_CODES.has(warning.code) ? { ...warning, severity: 'notice' } : warning,
+  );
+}
+
+function hasBlockingWarning(warnings) {
+  return warnings.some((warning) => !NOTICE_WARNING_CODES.has(warning.code));
+}
+
 function buildResult({ status, runId, runDir, artifacts, plan, errors, warnings, completionCheck, summary }) {
   return {
     result_schema_version: RESULT_SCHEMA_VERSION,
@@ -3324,7 +3387,16 @@ function renderDependencyPlan(plan) {
     lines.push(`${index + 1}. #${number}`);
   });
   if (plan.warnings.length) {
-    lines.push('', '## Warnings', '', ...plan.warnings.map((w) => `- ${w.code}: ${w.detail}`));
+    // The severity is on the line for the same reason an edge's `basis` is: it is
+    // what tells a reviewer whether this warning is why the run says `partial`.
+    // Only a notice is labelled — blocking is the unmarked default (#199) — so a
+    // report with no notice reads exactly as it did before.
+    lines.push(
+      '',
+      '## Warnings',
+      '',
+      ...plan.warnings.map((w) => `- ${w.code}${w.severity === 'notice' ? ' (notice)' : ''}: ${w.detail}`),
+    );
   }
   lines.push('');
   return lines.join('\n');
@@ -3435,7 +3507,15 @@ function run(argv) {
 
   const waves = planWaves(analyses, edges, inputs.maxParallel, inputs.order);
   const plan = buildPlan({ runId, profile, inputs, analyses, edges, waves });
-  plan.warnings = warnings;
+  // The PLAN carries the severity annotation (execution-plan.v2's `note_entry`
+  // grew an optional `severity` in #199); the result ENVELOPE below carries the
+  // same code/detail pairs without it. orchestrate-result.v1 is a closed v1
+  // schema whose `entry` definition is shared with `errors`, and putting a new
+  // field through it is a v1 contract change of its own — #199 asks for the field
+  // on the plan's note_entry, which is where a reader of a run artifact looks.
+  // Nothing is lost in the envelope: the codes and details are identical, and the
+  // only aggregate the envelope needs — "was anything blocking?" — IS `status`.
+  plan.warnings = withSeverity(warnings);
 
   const runDir = join(inputs.runsDir, runId);
   if (existsSync(runDir)) {
@@ -3473,7 +3553,10 @@ function run(argv) {
   ];
 
   const completionCheck = completionChecks(plan, depErrors, true);
-  const status = warnings.length > 0 ? 'partial' : 'success';
+  // `partial` iff a BLOCKING warning was raised (#199). A run whose only warnings
+  // are notices is `success` WITH warnings: the concerns are all in the artifact,
+  // named and addressed to someone, and none of them is a decision still owed.
+  const status = hasBlockingWarning(warnings) ? 'partial' : 'success';
   const result = buildResult({
     status,
     runId,
