@@ -66,7 +66,14 @@ node tests/fixtures/cmate-orchestrate/run_tests.mjs
 - **同じ入力から同じ plan が出ること**（2回実行して byte 一致）
 - golden がある case では、plan が checked-in の期待値と byte 一致すること
 - `warning_codes` を宣言した case では、warnings の code 列がその集合と完全一致すること
-  （`plan.warnings` と `result.warnings` の一致も確認する）
+  （`plan.warnings` と `result.warnings` が同じ `(code, detail)` 列であることも確認する。
+  `severity` は plan にだけ載るので byte 一致ではなく対で比べ、**envelope が `severity` を
+  1件も運ばないこと**を別途固定する。#199）
+- `warning_severities` を宣言した case では、`plan.warnings[].severity` が位置対応で一致すること
+  （`null` は field 不在＝fail-closed の `blocking` 既定。#199）
+- **全 case について**、`severity` は `notice` か不在のどちらかであること（planner は `blocking` を
+  綴らない＝warning を持たない plan は #199 以前と byte 一致する）と、`status` が `partial` で
+  あることと blocking な warning が在ることが一致すること
 - `questions_count` / `questions_include` を宣言した case では、`issues[].questions` の**件数**と
   **含む文字列**が期待どおりであること。dispatch が読むのは `warnings` ではなくこの field であり、
   推論由来の question（`acceptance_requires_tests_but_scope_has_none`, #145）は判定の元になった

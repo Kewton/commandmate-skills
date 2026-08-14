@@ -469,10 +469,20 @@ path は**成果物であるのと同じくらい「実行するコマンド」�
 `orchestrate.mjs` の `DELIVERABLE_HEADING_RE`、本文側の正本は
 [cmate-issue-authoring/references/issue-body-contract.md](../../cmate-issue-authoring/references/issue-body-contract.md)
 第2.3節）配下に書いた場合だけ scope に入り、`harness_path_in_scope` の
-warning が付いて run は `partial` に落ちる。**通したことを黙って通さない。**
+warning が付く。**通したことを黙って通さない。**
 自分のハーネスを in-repo で保守しているリポジトリ（このリポジトリがそうである）は、
 成果物見出しに書けばよい。#50 が消した障害 ——「言われたとおりに書いて scope ゲートで落ちる」——
 をここで再発させないための出口であり、それ以外の目的では使わない。
+
+**この warning は `status` を落とさない**（`severity: notice`。
+[#199](https://github.com/Kewton/commandmate-skills/issues/199)。第5.6節）。
+出口を通るのは**正しい書き方**であり、ハーネスを in-repo で保守しているリポジトリでは
+検証ゲートを足す作業が定常的に出るので、ここで `partial` にすると
+**この Issue 形が毎回 `partial` で返る**（実測 2026-08-14、Kewton/BorderFreeKidsMap）。
+それは本節が既に一段落あとで denied 側について述べているのと同じ失敗である ——
+**正しい書き方に対して `partial` を出す warning は、読み手に読み飛ばし方を教える。**
+`partial` にしないだけで、warning は残る: path も理由も対処も `plan.warnings` に在り、
+[codes-and-recovery.md](./codes-and-recovery.md) 第4節の対処表にも在る。
 
 **落とした path は捨てない。**`reference_files`（「読むが `scope.allow` には入れない」）に出る。
 worker は満たすべき runner を読めるが、書けない。第5.1節の不変条件4（「引いた分も必ず可視である」）
@@ -545,7 +555,7 @@ questions:
 ````
 
 1件につき **1件の blocking question** が `issues[].questions` に載り、同じ code の warning が
-`plan.warnings` にも載るので run は `partial` に落ちる。dispatch は既存の open question ゲートで
+`plan.warnings` にも載るので run は `partial` に落ちる（この code は blocking である。第5.6節）。dispatch は既存の open question ゲートで
 その Issue を送らない —— **新しい停止経路も新しい緩和フラグも足していない**
 （[#178](https://github.com/Kewton/commandmate-skills/issues/178)）。
 
@@ -582,6 +592,50 @@ Kewton/BorderFreeKidsMap#63）: 「未決の問い」3件を本文に残した�
 理由は open-questions-notation.md 第5節にある（誤検出・散文から停止を作らない・
 生成と解消が機械化できる）。同 fixture が「3つの綴りすべてを持つ本文で question が
 1件も立たない」ことを固定している。
+
+## 5.6 warning の severity と `status`（`plan.warnings[].severity`）
+
+**規範。** `plan.status` は **blocking** な warning が1件以上あるとき `partial`、そうでなければ
+`success` である（[#199](https://github.com/Kewton/commandmate-skills/issues/199)）。
+`plan.warnings[]` の entry は任意 field `severity`（`blocking` / `notice`）を持ちうる。
+
+| 項目 | 規範 |
+|---|---|
+| **既定** | `blocking`。`severity` を持たない entry は blocking である |
+| **notice 集合** | `harness_path_in_scope` の **1件だけ** |
+| **emit 規則** | planner は **notice の entry にだけ** `severity` を書く。blocking は暗黙のまま |
+| **required か** | **いいえ。** `note_entry` の `required` には入れない |
+| **envelope** | `orchestrate-result.v1` の `warnings` は code と detail だけを運ぶ（`severity` は載せない） |
+
+**なぜ fail-closed か。** 誤分類の事故は2方向に起こりうるが、対称ではない。
+blocking を notice と誤れば **run が黙って `partial` でなくなる**（読み手は気づかない）。
+notice を blocking と誤れば **色が1つ余分に付く**（読み手は気づく）。前者だけを構造的に
+起こらなくする —— **知らない code は blocking** なので、後から warning code を足した変更が
+分類を忘れても、その code は `status` を落とし続ける。notice 集合を広げるのは
+**code ごとの独立した判断**であり、それぞれ別 Issue で行う。
+
+**なぜ `required` に入れないか。** `dependencies[].basis`（第3節）と同じ理由である。
+`status.mjs` が読む `plan.json` は**過去の run が書いたもの**なので、必須にすると
+この field が存在しなかった時期の plan がすべて invalid になる。任意にしておけば、
+古い plan は「`severity` 無し ＝ blocking」として**当時と同じ意味のまま**読める。
+
+**なぜ notice にだけ書くか（byte 安定性）。** blocking を明示すると、warning を持つ既存の
+plan がすべて 1 byte 変わる。notice にだけ書けば、`harness_path_in_scope` を含まない plan は
+**#199 以前の runner が出したものと byte 一致する** —— checked-in の全文 golden も、
+既にディスクに在る `plan.json` も、そのまま生き残る。副作用として
+「`severity` が無い」が fail-closed 既定そのものを表すので、読み手は欠落を解釈しなくてよい。
+
+**なぜ `success` にしてよいか。** **`status` は人間が読む色であって、run を止める信号ではない。**
+dispatch を止めるのは `issues[].questions` の配列であり（`execution-plan.v2` schema の
+`questions` の記述が「this array — not plan.status — is what stops a run」と明言し、
+dispatch runner はその field だけを読む）、`plan.status` を読んで分岐する自動化系は無い。
+したがって notice を `success` に含めても**自動化系の振る舞いは1つも変わらない**。
+変わるのは色の情報量だけであり、それがこの節の主題である。
+
+**`success` は「warning が無い」ではない。** notice は `plan.warnings` に残り、
+`dependency-plan.md` の `## Warnings` にも `(notice)` の印つきで出て、
+[codes-and-recovery.md](./codes-and-recovery.md) 第4節の対処表にも在る。
+**落としたのは色だけで、記録は落としていない。**
 
 ## 6. risk
 
@@ -668,9 +722,10 @@ Issue 本文の ```acceptance-gates ブロックの転記である。**記法の
   `result_schema_version`）を上げる。
 - 文言・見出しの調整のみ → Skill の `version` だけを上げる。
 
-例外は2つあり、どちらも**任意 field として足し、`required` に入れない**形を取っている。
+例外は3つあり、いずれも**任意 field として足し、`required` に入れない**形を取っている。
 1つ目は `issues[].acceptance_gates`（第10節、[adr-issue-acceptance-gates.md](./adr-issue-acceptance-gates.md)
-第12.1節）。2つ目は `dependencies[].basis`（第3節、[#182](https://github.com/Kewton/commandmate-skills/issues/182)）である。
+第12.1節）。2つ目は `dependencies[].basis`（第3節、[#182](https://github.com/Kewton/commandmate-skills/issues/182)）。
+3つ目は `warnings[].severity`（第5.6節、[#199](https://github.com/Kewton/commandmate-skills/issues/199)）である。
 
 `basis` を 3 に上げなかった理由:
 
@@ -688,3 +743,20 @@ Issue 本文の ```acceptance-gates ブロックの転記である。**記法の
 代わりに **planner が必ず出すこと**は fixture 側で固定してある（全 plan case に対して
 「edge は必ず `basis` を持ち、`lexical` は1件も無い」を検査する）。schema が緩い分を
 test で締めるという配置であり、**緩いまま放置ではない。**
+
+`severity` を 3 に上げなかった理由も同じ3点だが、**2点目の中身が違う**:
+
+1. 4 runner の pin は上と同じ事情である。#199 の宣言 scope は planner と schema と
+   その2つの reference であり、pin を持つ dispatch / merge / uat / status は入っていない。
+2. **plan の warning を読む consumer は `status.mjs` だけで、それは code と detail を
+   そのまま列挙する** —— `severity` を読まないので、field が1つ増えても表示は変わらず、
+   notice が status 出力から消えることもない。`plan.status` を読んで分岐する consumer は
+   1つも無い（止めるのは `issues[].questions` である。第5.6節）。
+3. `required` にすると、この field が存在しなかった時期の `plan.json` がすべて schema 違反に
+   なる。しかも `severity` は **notice の entry にだけ書く**ので、`required` は planner 自身の
+   出力とも矛盾する。
+
+こちらも fixture 側で締めてある: 全 plan case に対して「`severity` は notice か、無いかの
+どちらかである（planner は `blocking` を書かない）」と
+「`status` が `partial` であることと blocking な warning が在ることが一致する」を検査し、
+result envelope の warning が `severity` を運ばないことも固定している。

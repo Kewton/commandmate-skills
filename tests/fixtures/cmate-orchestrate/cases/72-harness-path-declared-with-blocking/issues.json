@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 418,
+      "title": "chore: verify に parity ゲートを足す",
+      "body": "検証ゲートを1本足したい。\n\n## 対象ファイル\n- `.commandmate/verify.yaml`\n- `scripts/check-verify-parity.mjs`\n",
+      "labels": ["chore"]
+    }
+  ]
+}
