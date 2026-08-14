@@ -1,5 +1,5 @@
 {
-  "description": "#175 — --integration-verify against a plan whose profile declares no baseline. The verification cannot run, so the phase is REFUSED before the first merge (failure / preflight_failed / integration_verify_unavailable) rather than merging and skipping the check: an opt-in verification that silently does not happen is the failure this flag exists to remove. Nothing is merged, so the operator fills in the profile and re-runs with nothing to undo. The plan is patched after the dispatch report is generated, because the plan is an INPUT to this runner and a profile with an unfilled baseline is a state a hand-written profile really reaches.",
+  "description": "#175 — --integration-verify against a plan whose profile declares no baseline. The verification cannot run, so the phase is REFUSED before the first merge (failure / preflight_failed / integration_verify_unavailable) rather than merging and skipping the check: an opt-in verification that silently does not happen is the failure this flag exists to remove. Nothing is merged, so the operator fills in the profile and re-runs with nothing to undo. The plan is patched after the dispatch report is generated, because the plan is an INPUT to this runner and a profile with an unfilled baseline is a state a hand-written profile really reaches. #195: this is the UNDECLARED refusal — no `integration_baseline` key at all and an empty `baseline`, so `source: \"baseline\"` and the next action is to write one. m30 is the other refusal, where `integration_baseline` IS declared and empty, and where telling the operator to declare a baseline would be wrong.",
   "phase": "merge-prs",
   "plan": {
     "issues_fixture": "cases/02-explicit-dependency/issues.json",
@@ -35,6 +35,7 @@
       "base": "origin/develop",
       "base_sha": null,
       "merged_issues": [],
+      "source": "baseline",
       "commands": [],
       "failed_command": null,
       "exit_code": null

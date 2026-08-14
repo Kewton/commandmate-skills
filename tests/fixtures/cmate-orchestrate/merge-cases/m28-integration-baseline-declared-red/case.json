@@ -1,0 +1,51 @@
+{
+  "description": "#195, the mutation test: the declared `integration_baseline` is what actually RUNS. The profile is the shape the Issue was filed about (Kewton/BorderFreeKidsMap): `baseline` is the worker's proportional health check and is GREEN on the merged tree, while `integration_baseline` is that list PLUS the unit step (`cat cmate-unit-ok`), whose marker the merged checkout never carries — the stand-in for `npm run test:unit`, which is the command #105 x #106 turned red and which that repository's baseline does not contain. So a runner that ignored the declaration and ran `baseline` — the #175 behaviour — would report `outcome: pass` on this exact world, and this case would be a green that measured nothing. It is red instead, `source` says `integration_baseline`, and `failed_command` names the step only the declaration carries. The profile is fed to the PLANNER (`plan.profile_json`), not patched into the plan, so the planner's echo is under measurement too.",
+  "phase": "merge-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "profile_json": "node-fake-integration-baseline.json",
+    "orchestrate_args": ["200", "201", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--approve", "--integration-verify"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" },
+      "201": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" }
+    },
+    "integration": { "verify": "pass" }
+  },
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "merge_failed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "merged", "200": "merged" },
+    "pr_merge_calls": 2,
+    "completion_passed": true,
+    "blocking_codes": ["integration_verify_failed"],
+    "absent_limitation_codes": ["integration_verify_not_run", "integration_verify_tree_left"],
+    "integration_verify": {
+      "requested": true,
+      "ran": true,
+      "outcome": "fail",
+      "base": "origin/develop",
+      "base_sha": "deadbee",
+      "merged_issues": [201, 200],
+      "source": "integration_baseline",
+      "commands": ["cat cmate-verify-ok", "cat cmate-unit-ok"],
+      "failed_command": "cat cmate-unit-ok",
+      "exit_code": 1
+    },
+    "git_calls": { "fetch": 1, "worktree": 2 },
+    "summary_contains": [
+      "## 統合検証（--integration-verify）",
+      "profile の `integration_baseline`（宣言あり。`baseline` は使っていない）",
+      "次の wave を dispatch しない"
+    ]
+  }
+}

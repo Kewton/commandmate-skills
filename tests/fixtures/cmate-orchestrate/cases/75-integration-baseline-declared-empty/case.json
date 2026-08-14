@@ -1,0 +1,27 @@
+{
+  "description": "Issue #195, fixed decision 2: a DECLARED empty array survives to the plan as an empty array. It is not dropped to an absent key, and it is not normalized away as \"nothing declared\". The whole fail-closed rule of this field lives in that distinction — merge resolves `integration_baseline ?? baseline` on the KEY'S PRESENCE, so a loader that treated [] as absent would answer \"this repository has no integration verification\" with the worker health-check list, which is the silent fallback this Issue exists to remove. Measured at the planner because that is where the key could be lost: by the time merge reads the plan, an [] that became absent is indistinguishable from a profile that never declared the field (merge case m30 measures the other end).",
+  "args": ["461", "--profile-json", "PROFILE:integration-baseline-declared-empty.json", "--run-id", "fixture-ib-empty"],
+  "golden": "expected-plan.json",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[461]],
+    "merge_order": [461],
+    "dependencies": [],
+    "classifications": { "461": "independent" },
+    "risk_level": "low",
+    "profile_keys": [
+      "id",
+      "repository",
+      "base",
+      "branch_template",
+      "worktree_template",
+      "baseline",
+      "verified",
+      "integration_baseline"
+    ],
+    "profile_integration_baseline": [],
+    "questions_count": { "461": 0 }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "description": "Issue #195: one non-string ENTRY refuses the whole declaration. A nested array is the realistic slip — argv-style `[\"bin/verify-all\"]` written inside a list of command strings — and it is the one a permissive loader hides best: `String([\"bin/verify-all\"])` is \"bin/verify-all\", so coercing would appear to work until an entry with two elements silently became one comma-joined command that no shell would run. Refused whole rather than per entry, and before an issue is read, because a verification set that runs all but one of its steps is the shape of green this Issue is about (`load_error` / exit 6).",
+  "args": ["461", "--profile-json", "PROFILE:integration-baseline-invalid-item-type.json"],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "profile.integration_baseline must be an array of strings"
+    ],
+    "plan_null": true
+  }
+}

@@ -75,11 +75,12 @@ const BUILTIN_PROFILES = {
   },
 };
 
-// `scope_companions` and `dispatch_defaults` are the OPTIONAL entries. Neither
-// built-in profile declares either: both target repositories whose test layout L1
-// already derives and whose runs need no flag the CLI defaults do not already
-// give, so declaring nothing is both accurate and what keeps their plans
-// byte-identical to the ones 0.24.0 produced
+// `scope_companions`, `dispatch_defaults` and `integration_baseline` are the
+// OPTIONAL entries. No built-in profile declares any of them: both target
+// repositories have a test layout L1 already derives, runs that need no flag the
+// CLI defaults do not already give, and no integration verification set distinct
+// from their baseline — so declaring nothing is both accurate and what keeps
+// their plans byte-identical to the ones 0.24.0 produced
 // (references/adr-scope-derivation.md §15).
 //
 // ORDER IS PART OF THE CONTRACT for the optional entries: publicProfile() echoes
@@ -95,6 +96,7 @@ const PROFILE_FIELDS = [
   'verified',
   'scope_companions',
   'dispatch_defaults',
+  'integration_baseline',
 ];
 
 // =============================================================================
@@ -441,6 +443,15 @@ function normalizeProfile(raw) {
   // produces the plan it produced before either existed, byte for byte.
   const dispatchDefaults = normalizeDispatchDefaults(raw.dispatch_defaults);
   if (dispatchDefaults !== null) profile.dispatch_defaults = dispatchDefaults;
+  // ABSENT-stays-absent again, and here the distinction it preserves is not only
+  // about bytes: the merge runner resolves `integration_baseline ?? baseline`,
+  // and the `??` may fire for UNDECLARED alone. A declared `[]` — "this
+  // repository has no integration verification" — must therefore arrive as an
+  // empty array and not as a missing key, or it would silently become the
+  // baseline the whole field exists to stop being reused (Issue #195).
+  // `null` is not a synonym for either and is refused (normalizeIntegrationBaseline).
+  const integrationBaseline = normalizeIntegrationBaseline(raw.integration_baseline);
+  if (integrationBaseline !== null) profile.integration_baseline = integrationBaseline;
   return profile;
 }
 
@@ -958,6 +969,52 @@ function normalizeDispatchDefaults(raw) {
     declared[key] = raw[key];
   }
   return declared;
+}
+
+// =============================================================================
+// integration_baseline — the post-merge verification set (Issue #195)
+// =============================================================================
+//
+// The planner does not USE this field either. It loads it, validates it and
+// echoes it into `plan.profile` so the MERGE runner can read it from the
+// approved plan (references/profile-contract.md §11, references/merge-contract.md
+// §5.4) — the same shape as `dispatch_defaults`, and it is here for the same
+// reason: a profile field this loader refuses is a field nobody can write. Before
+// this, a profile carrying `integration_baseline` stopped at `load_error` before
+// an issue was read, so `merge.mjs --integration-verify` could only have found
+// the declaration in a plan somebody hand-edited. #180 landed the reading side
+// alone, and profile-contract.md §10.6 had to carry the asymmetry as a written
+// caveat until #196 closed it; this Issue lands both halves at once instead of
+// repeating that.
+//
+// ---- Why the same shape rule as `baseline`, and no extra one ----------------
+//
+// Both fields are "commands to run, in this order", so the accepted set is
+// `baseline`'s accepted set: an array of strings. Adding a stricter rule here
+// (rejecting an empty string, say) would mean the two verification lists of ONE
+// profile disagree about what a command is, and the reader of a refusal could
+// not tell which rule they had hit.
+//
+// The one thing that is NOT shared is what EMPTY means, and it is the point of
+// the field. An absent `baseline` is a profile that never filled it in, which
+// `--integration-verify` refuses (merge-contract.md §5.4). A declared
+// `"integration_baseline": []` is a repository STATING that it has no
+// integration verification — so it is refused too, but it must never be quietly
+// answered with `baseline`, whose purpose (a worker's proportional health check)
+// is the one this field exists to separate from. That distinction lives in the
+// key's PRESENCE, so this returns `[]` for a declared empty array and `null`
+// only for an absent one.
+function normalizeIntegrationBaseline(raw) {
+  if (raw === undefined) return null;
+  if (!Array.isArray(raw) || raw.some((command) => typeof command !== 'string')) {
+    throw new SkillError('load_error',
+      `profile.integration_baseline must be an array of strings, got ${JSON.stringify(raw)}. `
+        + 'It is the verification set --integration-verify runs on the MERGED base branch, and it is read as '
+        + '`integration_baseline ?? baseline` — where the fallback fires for an ABSENT key only. Omit the key to '
+        + 'keep running `baseline` after a merge; declare `[]` to state that this repository has no integration '
+        + 'verification (which --integration-verify then refuses rather than answering with `baseline`)', 6);
+  }
+  return raw.map(String);
 }
 
 // =============================================================================
@@ -3120,8 +3177,15 @@ function publicProfile(profile) {
   // `dispatch_defaults` is here because the plan is how it reaches the runner
   // that consumes it: dispatch reads `plan.profile.dispatch_defaults` and never
   // opens the profile (profile-contract.md §10, Issue #196).
+  // `integration_baseline` is here for the same reason with a different reader:
+  // merge reads `plan.profile.integration_baseline` under `--integration-verify`
+  // (profile-contract.md §11, Issue #195). The `!== undefined` test is the whole
+  // of the "declared vs absent" distinction that field rests on — a declared `[]`
+  // is echoed AS an empty array, because merge's fallback to `baseline` fires for
+  // an absent key alone.
   if (profile.scope_companions !== undefined) out.scope_companions = profile.scope_companions;
   if (profile.dispatch_defaults !== undefined) out.dispatch_defaults = profile.dispatch_defaults;
+  if (profile.integration_baseline !== undefined) out.integration_baseline = profile.integration_baseline;
   return out;
 }
 
@@ -3535,7 +3599,8 @@ function run(argv) {
       `run directory ${runDir} already exists; refusing to overwrite. ` +
         'The default run id hashes the planner inputs — the issue set INCLUDING each title/body/labels, the ' +
         'resolved profile (every field, so editing baseline/branch_template/worktree_template/verified/' +
-        'scope_companions/dispatch_defaults derives a new id), and the CLI options — so an earlier run hashed to this ' +
+        'scope_companions/dispatch_defaults/integration_baseline derives a new id), and the CLI options — so an ' +
+        'earlier run hashed to this ' +
         'same id. ' +
         'Read the plan.json already in that directory to see whether it is the plan you meant to produce. ' +
         'To re-plan anyway: pass --run-id <new-id> (e.g. --run-id plan-retry-1) or --runs-dir <dir> to write elsewhere.',

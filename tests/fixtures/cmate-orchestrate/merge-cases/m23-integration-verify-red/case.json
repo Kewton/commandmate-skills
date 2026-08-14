@@ -1,5 +1,5 @@
 {
-  "description": "#175 (b) — both PRs merge on their own green CI, and the state they add up to is RED. The runner fetches the merged base, runs the profile baseline in a throwaway detached checkout, records integration_verify_failed with outcome fail, and refuses to call the run a success — which is the signal that stops the next wave's dispatch. Same world as m24 with the deliverable removed from the merged checkout (integration.verify), so the difference between green and red is the artifact and nothing else.",
+  "description": "#175 (b) — both PRs merge on their own green CI, and the state they add up to is RED. The runner fetches the merged base, runs the profile baseline in a throwaway detached checkout, records integration_verify_failed with outcome fail, and refuses to call the run a success — which is the signal that stops the next wave's dispatch. Same world as m24 with the deliverable removed from the merged checkout (integration.verify), so the difference between green and red is the artifact and nothing else. #195: `source: \"baseline\"` records that the fallback ran, because this profile declares no `integration_baseline` (m28 is the declared twin, where the fallback would have been green).",
   "phase": "merge-prs",
   "plan": {
     "issues_fixture": "cases/02-explicit-dependency/issues.json",
@@ -35,6 +35,7 @@
       "base": "origin/develop",
       "base_sha": "deadbee",
       "merged_issues": [201, 200],
+      "source": "baseline",
       "commands": ["cat cmate-verify-ok"],
       "failed_command": "cat cmate-verify-ok",
       "exit_code": 1

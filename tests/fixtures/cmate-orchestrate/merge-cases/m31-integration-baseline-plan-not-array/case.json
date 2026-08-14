@@ -1,0 +1,43 @@
+{
+  "description": "#195: the merge runner reads a PLAN, and a plan it did not produce can carry a shape the profile loader would have refused. The planner rejects a non-array `integration_baseline` (`load_error` / exit 6, plan case 76), but nothing stops a hand-written plan — profile-contract.md §10.6 names that route and status/resume read plans this planner never wrote — so the runner's own reading has to fall to the fail-closed side rather than to the fallback. Here `integration_baseline` is the bare string `\"cat cmate-verify-ok\"`, which would be perfectly runnable if it were coerced, and `baseline` is green: an implementation that coerced, or that treated \"not an array\" as \"not declared\", would merge both PRs and report a green integration verification. It refuses before the first merge instead, and `source` still says `integration_baseline` — the declaration was read, it just has nothing runnable in it. Applied with `plan_patch`, because this is a state the planner cannot produce.",
+  "phase": "merge-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "plan_patch": { "profile": { "integration_baseline": "cat cmate-verify-ok" } },
+  "merge_args": ["--approve", "--integration-verify"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" },
+      "201": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" }
+    },
+    "integration": { "verify": "pass" }
+  },
+  "expect": {
+    "exit": 1,
+    "status": "failure",
+    "stop_reason": "preflight_failed",
+    "approved": true,
+    "mutated": false,
+    "no_merge": true,
+    "pr_merge_calls": 0,
+    "completion_passed": false,
+    "blocking_codes": ["integration_verify_unavailable"],
+    "integration_verify": {
+      "requested": true,
+      "ran": false,
+      "outcome": "not_run",
+      "merged_issues": [],
+      "source": "integration_baseline",
+      "commands": [],
+      "failed_command": null,
+      "exit_code": null
+    },
+    "git_calls": { "fetch": 0, "worktree": 0 },
+    "summary_absent": ["profile に `baseline` を宣言してから再実行する"]
+  }
+}

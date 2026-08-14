@@ -122,11 +122,16 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 | `64-scope-companions-reject-literal-escape` | literal は宣言済み path から作られないので、`isSafeRepoPath` を通していなければ profile 経由の path traversal になる。`users/…`（`..` でも絶対 path でもなく、**この述語だけが落とせる**形）が load 時に拒否されるか（#181） |
 | `65-scope-companions-reject-literal-harness` | #177 の既定除外（`.claude/skills/` 等）を profile が literal で開け直せないか。**静かな2つ目の扉**を作らないことの測定（#181） |
 | `66-dispatch-defaults-declared` | `dispatch_defaults` を宣言した profile が**plan 段階を通り**、宣言が `plan.profile` に echo されるか（#196）。profile は4 key を契約と違う順で書いており、plan は**契約の順**で載せる —— profile は丸ごと run_id の hash に入るので、組み直さないと key の並べ替えで id が割れる。golden は 45 と `run_id` / `profile.id` / この field 以外**完全に同一**である |
-| `67-dispatch-defaults-with-companions` | **任意 field の echo 順の固定**（#196）。`scope_companions` → `dispatch_defaults` の順で、#195 の `integration_baseline` はさらに後ろに付く。順序が plan のバイト列を決めるので、間に差し込む実装は内容の変わっていない plan の golden を壊す。`profile_keys` が順序付きの field 一覧をそのまま述べる |
+| `67-dispatch-defaults-with-companions` | **任意 field の echo 順の固定**（#196）。`scope_companions` → `dispatch_defaults` の順で、#195 の `integration_baseline` はさらに後ろに付く（3つ揃った形は 74）。順序が plan のバイト列を決めるので、間に差し込む実装は内容の変わっていない plan の golden を壊す。`profile_keys` が順序付きの field 一覧をそのまま述べる |
 | `68-dispatch-defaults-reject-unknown-key` | 未知 key（`schedule` —— #180 が意図的に**外した**もの）を読み飛ばさず拒否するか。新しい runner 向けの profile が古い runner で半分だけ効く状態を作らない（第10.2節） |
 | `69-dispatch-defaults-reject-type` | boolean key に文字列 `"true"` を書いた profile を拒否するか。`Boolean("false")` は true なので、強制変換する loader は **off と書いた profile を on と読む** |
 | `70-dispatch-defaults-reject-non-positive` | `wait_timeout: 0` を拒否するか。0 は人には「無制限」に読め、`commandmate wait` には「即 timeout」を意味する |
 | `71-dispatch-defaults-reject-not-object` | field 自体が object でない（`[{…}]`）ものを拒否するか。`typeof [] === 'object'` を素通しすると、誰も書いていない key `"0"` を名指す refusal になる |
+| `73-integration-baseline-declared` | `integration_baseline` を宣言した profile が**plan 段階を通り**、宣言が `plan.profile` に echo されるか（#195）。merge は profile を開かず `plan.profile.integration_baseline` を読むので、**この echo が経路そのもの**である。golden は 45 と `run_id` / `profile.id` / この field 以外**完全に同一**（planner は本 field を使わない） |
+| `74-integration-baseline-echo-order` | **任意 field 3つが揃ったときの echo 順の固定**（#195 × #196）。profile は契約と**逆順**で書き、plan は `scope_companions` → `dispatch_defaults` → `integration_baseline` で載せる。新しい任意 field を末尾でなく途中に足す実装は、内容の変わっていない plan の golden を壊す |
+| `75-integration-baseline-declared-empty` | **宣言された `[]` が `[]` のまま plan に載るか**（#195 の固定事項2）。merge の解決は key の**存在**で分岐するので、空宣言を落とす loader は「統合検証は無い」を「未宣言」と同じにしてしまい、merge から見て**区別が付かなくなる**（merge 側の測定は `m30`） |
+| `76-integration-baseline-reject-not-array` | 配列でない（素の文字列）宣言を拒否するか。1要素の配列に丸める実装は `"npm run lint && npm test"` を whitespace 分割で1 command として回す（runner は shell を経由しない）ので、**違う argv を測って緑にする** |
+| `77-integration-baseline-reject-item-type` | 要素が文字列でない（入れ子配列）宣言を、要素単位でなく**丸ごと**拒否するか。`String(["bin/verify-all"])` は文字列として通ってしまうので、強制変換する loader は2要素になった瞬間に comma 連結の command を黙って作る。**検証集合の1本だけが走らない**のは本 Issue が消しに来た緑の形である |
 
 ## dispatch case 一覧
 
@@ -253,9 +258,10 @@ PR 作成・CI・merge の挙動を注入する。`fake-cli.mjs` は各呼び出
 するので、`--approve` 無しに `git push`/`gh pr create`/`gh pr merge` が呼ばれていないこと、
 CI が green でないときに `gh pr merge` が呼ばれていないことまで検証できる。
 
-**合流後の統合ブランチ検証（#175）**: `--integration-verify` を渡した run は、merge の後に
-`git fetch origin <base>` → `git worktree add --detach` → **profile baseline をその checkout で
-実行** → `git worktree remove --force` を行う。`merge_scenario.integration` がその4段を injection
+**合流後の統合ブランチ検証（#175 / #195）**: `--integration-verify` を渡した run は、merge の後に
+`git fetch origin <base>` → `git worktree add --detach` → **profile の検証集合
+（`integration_baseline` ?? `baseline`。#195）をその checkout で実行** →
+`git worktree remove --force` を行う。`merge_scenario.integration` がその4段を injection
 する（`verify: "pass"` で使い捨て checkout に `cmate-verify-ok` を置く＝ baseline が緑になる。
 `fetch` / `worktree_add` / `remove` に `"fail"`）。緑 case と赤 case は **同じ world・同じ引数**で、
 違いは合流後の checkout に成果物が在るかどうかだけである。フラグ**無し**の case（`m22`）は
@@ -266,7 +272,11 @@ CI が green でないときに `gh pr merge` が呼ばれていないことま�
 case.json は `plan_patch` で**生成された plan を merge に渡す前に書き換えられる**
 （`dispatch_report_patch` と同じ理由: plan はこの runner の**入力**であり、`baseline` を埋め忘れた
 profile のような状態は、harness 自身の dispatch 段が baseline を必要とするため planner だけでは
-作れない）。
+作れない）。**`plan.profile_json` はその逆**で、実在の profile fixture を **planner に食わせて** plan を
+作る（#195 の `m28`〜`m30` がこちら）—— 測りたいのが「宣言が profile から merge まで通ること」
+なので、plan に手で書いてしまうと planner の echo が測定から外れる。`dispatch_scenario` の
+`worktree_files` は worker の worktree にだけ file を置くので、**worker が回す `baseline`** と
+**merge が回す統合検証**を別々に緑／赤にできる（`m29` の二重変異はこれで作っている）。
 
 | case | 何を見るための case か |
 |---|---|
@@ -292,6 +302,10 @@ profile のような状態は、harness 自身の dispatch 段が baseline を�
 | `m25-integration-verify-no-baseline` | profile が `baseline` を宣言していない plan に `--integration-verify` を渡したとき、**1件も merge せずに拒否**するか（`failure` / exit 1 / `preflight_failed` / `integration_verify_unavailable`）。skip にすると「opt-in した検証が走らないまま merge phase 完了」になり、#175 が消しに来た事象そのものになる |
 | `m26-integration-verify-create-prs-refused` | `--create-prs` との併用を `invalid_input`（exit 3）で拒否し、**受理して無視しない**か。push も PR 作成も 0 回 |
 | `m27-integration-verify-preview-not-run` | preview（`--approve` 無し）では merge が無いので合流後も無く、`outcome: not_run` + limitation `integration_verify_not_run` になるか。**fetch も checkout もしない**こと。「測っていない」を pass に丸めない |
+| `m28-integration-baseline-declared-red` | **#195 の空振り検査（変異）。** 宣言した `integration_baseline` が**実際に走っている**か。profile は #175 を起票させた実測の形（`baseline` は proportional で合流後も **green**、`integration_baseline` はそれ＋ unit 相当の1本で **red**）なので、宣言を無視して `baseline` を回す実装 —— #175 の挙動 —— では `outcome: pass` になり、このケースは「緑だが何も測っていない」に化ける。`source` と `failed_command` が「宣言の側だけが持つ command で落ちた」ことを名指す。profile は `plan_patch` でなく **planner に食わせる**ので、planner の echo も同時に測っている |
+| `m29-integration-baseline-declared-green` | **m28 の逆向きの変異。** ここでは**フォールバックが赤・宣言が緑**なので、`pass` は `integration_baseline` を読んだ実装にしか出せない（`baseline` は worker の worktree にだけ在る marker を読み、使い捨て checkout には無い）。緑の report にも `source` が載ることの測定でもある —— **静かな2つ目の baseline が隠れるのは赤ではなく緑の report である** |
+| `m30-integration-baseline-declared-empty` | **#195 の固定事項2。** `"integration_baseline": []` は「統合検証の定義は無い」という**宣言**であり、`baseline` へは落とさない。profile の `baseline` は**実行可能で緑**なので、空かどうかでフォールバックを決める実装は2件 merge して緑を報告する。ここでは merge 前に拒否（exit 1 / `preflight_failed` / `integration_verify_unavailable`、fetch 0回）し、next action は m25 の「`baseline` を宣言しろ」**ではない**こと（`summary_absent` が固定する。意図した宣言を取り消せという案内になるため） |
+| `m31-integration-baseline-plan-not-array` | **plan を読む側の fail-closed。** planner は配列でない `integration_baseline` を拒否する（plan case 76）が、**手で書いた plan** はこの runner に届く（#180 / profile-contract 第10.6節）。素の文字列は「強制変換すれば動く」形で `baseline` は緑なので、丸める実装も「配列でない＝未宣言」と読む実装も 2件 merge して緑を報告する。merge 前に拒否し、`source` は `integration_baseline` のまま（宣言は読めている。実行できる command が無いだけである） |
 
 ## uat case 一覧
 
@@ -397,7 +411,7 @@ plan は入力の純粋関数なので、Agent の種類によらず同じ plan 
 
 | suite | 何を見るための suite か |
 |---|---|
-| **run id vs profile**（#157 / #180 / #196） | profile を1 field だけ変えた2つの plan が**別の run_id になる**か（かつ、その field が本当に plan を動かしているか）。key の並べ替えでは id が割れないこと、同一入力の再実行は同じ id で `run_exists` に落ちること。variants 表の7件目が `dispatch_defaults` で、これは #180 が求めた性質が**追加の実装なしに**付いてきたことの測定である（署名は field を列挙しないので、loader が受理した瞬間に成立する）。並べ替えの assert は**宣言の内側の key 順**についても1件持つ —— 本 field は値が複数 key の object である最初の profile field なので、組み直しを省いた loader は「profile の2行を入れ替えただけ」で run_id を割る |
+| **run id vs profile**（#157 / #180 / #196 / #195） | profile を1 field だけ変えた2つの plan が**別の run_id になる**か（かつ、その field が本当に plan を動かしているか）。key の並べ替えでは id が割れないこと、同一入力の再実行は同じ id で `run_exists` に落ちること。variants 表の7件目が `dispatch_defaults` で、これは #180 が求めた性質が**追加の実装なしに**付いてきたことの測定である（署名は field を列挙しないので、loader が受理した瞬間に成立する）。並べ替えの assert は**宣言の内側の key 順**についても1件持つ —— 本 field は値が複数 key の object である最初の profile field なので、組み直しを省いた loader は「profile の2行を入れ替えただけ」で run_id を割る。8件目が `integration_baseline`（#195）で、ここでは性質の意味が1段強い —— **書き換えたのは「合格の定義」そのもの**なので、id を共有して既存 run directory を再利用すれば、差し替える前の定義で merge して「検証した」と報告することになる |
 | contract parity | runner が叩く `commandmate` の subcommand と flag が `commandmate-cli-contract.json` の範囲内か（実 CLI が在れば実物とも突き合わせる） |
 | launcher resolution | `--cli` の多トークン展開・`$CM` へのフォールバック・起動不能な launcher の拒否（#37） |
 | worktree-setup input | `--worktree-setup` の二重指定・shell 構文を、世界に触れる前に `invalid_input` で拒否するか（#93） |

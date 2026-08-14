@@ -1,0 +1,59 @@
+{
+  "description": "#195, the green twin of m28 and the mutation test run the other way round: here the FALLBACK would be red and the declaration is green, so a `pass` can only have come from `integration_baseline`. The profile's `baseline` is `cat cmate-worker-ok`, whose marker the dispatch harness writes into each worker worktree (`worktree_files`) and which the throwaway merged checkout therefore does NOT have; `integration_baseline` is `cat cmate-verify-ok`, the marker that checkout does have. So the workers verify green on `baseline`, and a merge runner that re-ran `baseline` after the merges would report integration_verify_failed. It reports pass, with `source: integration_baseline` — which is the half m28 cannot show: that a GREEN integration verification also says which set produced it, since a silent second baseline hides in the green reports, not the red ones.",
+  "phase": "merge-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "profile_json": "node-fake-integration-baseline-green.json",
+    "orchestrate_args": ["200", "201", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "dispatch_scenario": {
+    "cli_available": true,
+    "git": { "branch": "feature/integration", "dirty": false },
+    "gh": { "repo_access": true },
+    "workers": {
+      "201": { "state": "completed", "verify": "pass" },
+      "200": { "state": "completed", "verify": "pass" }
+    },
+    "worktree_files": { "cmate-worker-ok": "ok" }
+  },
+  "merge_args": ["--approve", "--integration-verify"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" },
+      "201": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" }
+    },
+    "integration": { "verify": "pass" }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "merged", "200": "merged" },
+    "pr_merge_calls": 2,
+    "completion_passed": true,
+    "absent_blocking_codes": ["integration_verify_failed", "integration_verify_unavailable"],
+    "absent_limitation_codes": ["integration_verify_not_run", "integration_verify_tree_left"],
+    "integration_verify": {
+      "requested": true,
+      "ran": true,
+      "outcome": "pass",
+      "base": "origin/develop",
+      "base_sha": "deadbee",
+      "merged_issues": [201, 200],
+      "source": "integration_baseline",
+      "commands": ["cat cmate-verify-ok"],
+      "failed_command": null,
+      "exit_code": null
+    },
+    "git_calls": { "fetch": 1, "worktree": 2 },
+    "summary_contains": [
+      "profile の `integration_baseline`（宣言あり。`baseline` は使っていない）"
+    ]
+  }
+}

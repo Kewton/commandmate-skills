@@ -1,5 +1,5 @@
 {
-  "description": "#175 — --integration-verify in a preview (no --approve). Nothing is merged, so the base branch did not move and there is nothing merged to judge: outcome not_run with the integration_verify_not_run limitation, and NO fetch and NO checkout of the base. \"not measured\" is recorded as not measured — the run stays success because it changed nothing, and outcome pass is never written by a verification that did not run.",
+  "description": "#175 — --integration-verify in a preview (no --approve). Nothing is merged, so the base branch did not move and there is nothing merged to judge: outcome not_run with the integration_verify_not_run limitation, and NO fetch and NO checkout of the base. \"not measured\" is recorded as not measured — the run stays success because it changed nothing, and outcome pass is never written by a verification that did not run. #195: `source` is recorded even though nothing ran — a preview says which set it WOULD have measured.",
   "phase": "merge-prs",
   "plan": {
     "issues_fixture": "cases/02-explicit-dependency/issues.json",
@@ -35,6 +35,7 @@
       "outcome": "not_run",
       "merged_issues": [],
       "base_sha": null,
+      "source": "baseline",
       "commands": ["cat cmate-verify-ok"]
     },
     "git_calls": { "fetch": 0, "worktree": 0 }

@@ -1,0 +1,39 @@
+{
+  "description": "Issue #195 x #196: the ECHO ORDER of all three optional profile fields, pinned with every one of them declared at once. The profile writes them in the reverse of the contract's order (integration_baseline, dispatch_defaults, scope_companions) and the plan carries them as scope_companions -> dispatch_defaults -> integration_baseline. The order is not cosmetic: it is the plan's byte order, every full-text golden measures it, and a runner that spliced a new optional key in between — rather than appending it — would rewrite the bytes of plans whose content did not change. `profile_keys` states the whole ordered field list so the case says what it measures without a golden diff. The declared companion still reaches suspected_files exactly as in case 44, which is the half proving the two newer fields did not disturb L2.",
+  "args": ["461", "--profile-json", "PROFILE:integration-baseline-all-optional.json", "--run-id", "fixture-ib-all-optional"],
+  "golden": "expected-plan.json",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "waves": [[461]],
+    "merge_order": [461],
+    "dependencies": [],
+    "classifications": { "461": "independent" },
+    "risk_level": "low",
+    "profile_keys": [
+      "id",
+      "repository",
+      "base",
+      "branch_template",
+      "worktree_template",
+      "baseline",
+      "verified",
+      "scope_companions",
+      "dispatch_defaults",
+      "integration_baseline"
+    ],
+    "profile_dispatch_defaults": {
+      "auto_yes": true,
+      "wait_timeout": 3600
+    },
+    "profile_integration_baseline": ["bin/verify-all"],
+    "suspected_files": {
+      "461": ["app/models/user.rb", "app/models/user_spec.rb", "spec/models/user_spec.rb"]
+    },
+    "scope_defaults": {
+      "461": ["app/models/user_spec.rb", "spec/models/user_spec.rb"]
+    },
+    "questions_count": { "461": 0 }
+  }
+}

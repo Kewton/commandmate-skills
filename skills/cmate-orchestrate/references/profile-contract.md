@@ -34,6 +34,7 @@ worktree path、baseline 検証 — を **profile** から解決する。planner
 | `verified` | 任意 | 実機確認済みなら `true`。既定は `false` |
 | `scope_companions` | 任意 | このリポジトリ固有の**伴走ファイル規約**。宣言済み path の関数を書く `derive` と、名前が固定された伴走を書く `require` の2 key。第9節。**未指定なら宣言が無いのと同じ**で、planner は組み込みの導出だけを行う |
 | `dispatch_defaults` | 任意 | このリポジトリ固有の**運転既定**（`no_infer` / `auto_yes` / `wait_timeout` / `max_turns`）。第10節。**未指定なら宣言が無いのと同じ**で、CLI flag の既定値がそのまま効く |
+| `integration_baseline` | 任意 | **合流後の統合ブランチ**に対する検証 command の配列（`merge.mjs --integration-verify` が実行する）。第11節。**未指定なら `baseline` にフォールバック**する（＝#195 以前と同じ挙動）。`[]` は「統合検証の定義は無い」という**宣言**であり、`baseline` には落ちない |
 
 placeholder は次のとおり展開する。
 
@@ -151,11 +152,12 @@ node scripts/orchestrate.mjs 123 --profile-json /tmp/my-profile.json --allow-unv
 | `base` | `.github/workflows/*.yml` の `on.pull_request.branches` → 無ければ `on.push.branches`。複数あるときは `develop` > `main` > `master` > 辞書順先頭 | `origin/main` |
 | `branch_template` | CONTRIBUTING / PR template / `docs/*.md` / README が **命名規約として** 述べている prefix（`feature/issue-…` のように placeholder を伴うか、branch 命名を論じている行に限る。ターミナル貼り付けの `feature/greet` のような**実例は採らない**） | `feature/issue-{number}-{slug}` |
 | `worktree_template` | 上と同じ文書群の `git worktree add ../…`。**確認できるのは「兄弟 directory である」ことだけで、名前ではない** | `../{repo}-issue-{number}-{slug}` |
-| `baseline` | toolchain manifest（`package.json` / `Cargo.toml` / `pyproject.toml` / `go.mod` / `Makefile`）と lockfile。cargo clippy はリポジトリが clippy を使っている証跡があるときだけ入れる | 後述の失敗する placeholder |
+| `baseline` | toolchain manifest（`package.json` / `Cargo.toml` / `pyproject.toml` / `go.mod` / `Makefile`）と lockfile。cargo clippy はリポジトリが clippy を使っている証跡があるときだけ入れる。**これは各 worker が回す proportional な健全性確認である**（重い build / e2e の置き場は第11節の `integration_baseline`） | 後述の失敗する placeholder |
 | `id` | `<toolchain>-<repository 名>`（内蔵 profile と同じ命名） | `custom-repo` |
 | `verified` | — | **常に `false`。この runner が変えることはない** |
 | `scope_companions` | `spec/` `test/` `tests/` の実ファイルと、それが写している `src/` `app/` `lib/` の実ファイルの**対**。両方が実在するときだけ `derive` を1件起案する。`require` は起案しない（第9.4節） | `{"derive": []}`（空。＝宣言が無いのと同じ挙動） |
 | `dispatch_defaults` | **起案しない**（key ごと出さない）。第10.5節に理由を書く | — |
+| `integration_baseline` | **起案しない**（key ごと出さない）。第11.5節に理由を書く | — |
 
 toolchain が複数ある場合は `node` > `rust` > `python` > `go` > `make` の固定順で
 1つを選び、選ばなかったものを warning `multiple_ecosystems` に載せる。npm 系 lockfile が
@@ -519,8 +521,9 @@ echo の規則は `scope_companions` と同じで、そこに1つ足す。
 - **宣言したときだけ**出す。宣言しない profile の plan は、本 field が無かった頃と **1 byte も変わらない**
   （既存の全文 golden がそのまま非回帰の測定になっている）
 - **必須7 field の後ろに、宣言順ではなく固定順で**出す。順は
-  `scope_companions` → `dispatch_defaults` であり、[#195](https://github.com/Kewton/commandmate-skills/issues/195)
-  の `integration_baseline` はさらにその後ろに付く。**この順序が plan のバイト列を決める**ので、
+  `scope_companions` → `dispatch_defaults` → `integration_baseline`
+  （[#195](https://github.com/Kewton/commandmate-skills/issues/195) が末尾に着地済み。第11.6節）。
+  **この順序が plan のバイト列を決める**ので、
   新しい任意 field は常に末尾へ追加する（間に差し込むと、内容の変わっていない plan のバイト列が動く）
 - **契約の key 順に組み直して**から載せる（`no_infer` / `auto_yes` / `wait_timeout` / `max_turns`）。
   profile は field を選ばず丸ごと run_id の hash に入る（第10.4節）ので、組み直さないと
@@ -538,3 +541,109 @@ planner と書いているのは**到達点であって現状ではない**。�
 `plan.profile.dispatch_defaults` を持つ plan を**手で用意する**経路は塞がらない（plan は artifact であり、
 status / resume が読む plan をこの planner が作ったとは限らない）。だから dispatch 側の検証は
 残り続ける ——第10.2節の「両側に持つ」はそれである。
+
+## 11. `integration_baseline` — 合流後の統合ブランチに対する検証（任意）
+
+runner 側の正本は [merge-contract.md](./merge-contract.md) 第5.4節である
+（[#195](https://github.com/Kewton/commandmate-skills/issues/195)、[#175](https://github.com/Kewton/commandmate-skills/issues/175)）。
+
+### 11.1 何を解く field か
+
+`baseline` と「合流後の統合ブランチが green か」は、**目的の違う検証集合**である。
+
+| | `baseline` | `integration_baseline` |
+|---|---|---|
+| 誰が回すか | **各 worker**（dispatch の fallback 検証。worktree の中） | **merge 後に1回**（`--integration-verify`） |
+| 何を測るか | その worker の作業が壊れていないか（proportional な健全性確認） | **合流後の統合ブランチが green か** |
+| 適切な重さ | 軽い。重い build / e2e は最後の verify に任せる | **そのリポジトリの「合格の定義」そのもの** |
+
+#175 は後者を前者の配列で実行していた。同じ key を共有している限り、どちらか一方は必ず間違う ——
+`baseline` を重くすれば worker の fallback 検証が毎回 build / e2e を回し、軽いままにすれば
+opt-in した統合検証が**測っていないのに green** になる。
+
+**実測（Kewton/BorderFreeKidsMap、#175 を起票させた当の事象）。** そのリポジトリの `baseline` は
+`npm ci` / lint / typecheck の3つで、`build` も `unit` も入っていない —— 運用文書が
+「worker が回す健全性確認は proportional であるべきで、重い build は最後の verify に任せる」と
+決めているからである。#105 × #106（file 重なり 0、合流後に `npm run test:unit` が赤）は、
+したがって **`--integration-verify` を付けても捕まらない。** この機能が消しに来た当の事象が、
+この機能を有効にしたまますり抜ける。第7.1節が `baseline` の起案根拠を toolchain manifest に
+置いているのも、`baseline` が意図しているのが前者だという同じ事実である。
+
+### 11.2 形と解決規則
+
+```json
+"integration_baseline": [
+  "bash .claude/skills/cmate-verify/scripts/verify-run.sh --cwd ."
+]
+```
+
+**型規則は `baseline` と同じ**（文字列の配列）。同じ「順番に実行する command の列」であり、
+片方だけ違う規則を持つと、同一 profile の2つの検証リストが「command とは何か」について
+食い違うことになる。未知の型・非文字列の要素は `load_error` / exit 6 で拒否する。
+
+解決は **`integration_baseline` ?? `baseline`** で、**`??` が働くのは未宣言（key が無い）ときだけ**である。
+
+| profile の状態 | `--integration-verify` が実行するもの | `integration_verify.source` |
+|---|---|---|
+| `integration_baseline` 未宣言 | `baseline`（#195 以前と同じ。**既存 profile の run は 1 byte も変わらない**） | `"baseline"` |
+| `integration_baseline` に1件以上 | **その配列**（`baseline` は使わない） | `"integration_baseline"` |
+| `"integration_baseline": []` | **何も実行しない。`preflight_failed` / exit 1 / `integration_verify_unavailable`**（1件も merge しない） | `"integration_baseline"` |
+| 両方とも空／未宣言 | 同上（#175 の fail-closed のまま） | `"baseline"` |
+
+**`[]` を `baseline` に落とさないのは本 field の論旨そのものである。** `[]` は
+「このリポジトリに統合検証の定義は無い」という**宣言**であって、未宣言とは別の事実である。
+目的の違う `baseline` へ黙って落とすことは、明示的に書いた profile に対してだけ
+**静かなフォールバック**を復活させることになる。fail-closed は第7.2節と同じ規律
+（**埋め忘れた検証は fail-closed でなければならない**）で、宣言の有無に関わらず貫く。
+
+### 11.3 どちらを採ったかは report に残る
+
+`merge-report.json` の `integration_verify.source`（`"integration_baseline"` | `"baseline"`）である。
+**どちらを測ったのかが report から読めないと、この分離は「静かな2つ目の baseline」になる** ——
+同じコマンドを打った2つの run が違う集合を測り、report は同じに読めてしまう。
+何も実行しなかった run（preview / 空宣言の拒否）でも記録する: 「何を測るはずだったか」が、
+2つある拒否の対処を分ける唯一の手がかりだからである（[codes-and-recovery.md](./codes-and-recovery.md) 第4節）。
+
+### 11.4 run_id と統合検証
+
+profile は **field を選ばず丸ごと** run_id の hash に入る（第10.4節と同じ性質）。
+`integration_baseline` を書き換えて plan を取り直せば別の run_id になる。ここでは性質の意味が
+1段強い —— **書き換えたのは「合格の定義」そのもの**なので、同じ id を共有して既存の run directory を
+再利用すれば、差し替える前の定義で merge して「検証した」と報告することになる。
+
+### 11.5 起案（`profile-init.mjs`）は `integration_baseline` を出さない
+
+第10.5節・[#180](https://github.com/Kewton/commandmate-skills/issues/180) / [#181](https://github.com/Kewton/commandmate-skills/issues/181) と同じ規律である。
+起案 runner が読むのは**リポジトリが自分について宣言していること**であり（第7.1節）、
+`baseline` は toolchain manifest から読める。しかし**「合流後の統合ブランチが満たすべき条件」は
+tree の中に書いてある事実ではない** —— 起案すれば `baseline` の複製（＝この field を作った意味が消える）か、
+根拠のない重い列の推測かのどちらかにしかならない。
+
+**空宣言 + TODO の route も採らない。** `scope_companions` の空宣言は「配置を決定できなかった」という
+TODO と対になっているから意味があるのに対し、ここでは第11.2節のとおり `[]` 自体が
+「統合検証は無い」という**宣言**であり、`--integration-verify` を渡した run を全部落とす。
+起案 runner が policy を沈黙で決めることになる。**key ごと出さない**（出さなければ `baseline` への
+フォールバックがそのまま効き、draft の使い勝手は #195 以前と同じである）。
+
+### 11.6 planner 側（本 Issue に含む）
+
+**`integration_baseline` を宣言した profile は plan 段階を通る。** `orchestrate.mjs` の
+`PROFILE_FIELDS` が本 field を持ち、`publicProfile()` が宣言を `plan.profile` へ echo する。
+merge は profile ファイルを開かず `plan.profile.integration_baseline` を読むので、
+**この echo が宣言から runner までの経路そのもの**である。
+
+読む側だけ先に着地させると、宣言を書いた profile が plan 段階を通らない（`load_error` / exit 6）。
+それは #180 が踏み、第10.6節が2 release ぶん自認していた非対称そのものなので、
+**本 Issue は planner 側を同時に着地させる。** echo の規則は第10.6節の3点と同じで、順序だけが増える。
+
+- **宣言したときだけ**出す。宣言しない profile の plan は、本 field が無かった頃と **1 byte も変わらない**
+- **必須7 field の後ろに、固定順で**出す。順は
+  `scope_companions` → `dispatch_defaults` → `integration_baseline` で、**新しい任意 field は常に末尾**へ足す
+- **`[]` は `[]` のまま echo する**（絶対に落とさない）。第11.2節の解決は key の**存在**で分岐するので、
+  空宣言を「無かったこと」にした plan は、merge にとって未宣言の profile と見分けが付かなくなる
+
+**planner は本 field を読むだけで、使わない**（`dispatch_defaults` と同じ）。plan 内容は1 byte も変わらず、
+変わるのは `plan.profile` の echo と、その結果としての run_id だけである。
+
+`plan.profile.integration_baseline` を持つ plan を**手で用意する**経路は塞がらない（plan は artifact である）。
+merge 側は plan を読む側として、配列でない値・欠けた値を「実行できるものが無い」＝ fail-closed 側に倒す。
