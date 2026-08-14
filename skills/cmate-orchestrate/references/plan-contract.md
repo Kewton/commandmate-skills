@@ -79,6 +79,58 @@ hash 側に sort を置くと、どの入力でも挙動の変わらない検査
 （[profile-contract.md](./profile-contract.md) 第6節）。plan は「入力 + cwd の origin」の
 純粋関数であり、同一 cwd・同一入力なら byte 単位で一致する。`run_id` は cwd に依存しない。
 
+## 1.1 Issue fixture（`--issue-json`）
+
+上の入力のうち **Issue 内容（number / title / body / labels）** を JSON file から与えるのが
+`--issue-json <path>` である。渡した場合 `gh issue view` は呼ばれない —— planner 唯一の
+network access が消えるので offline で回せる。受け付ける形は次の2つで、どちらでもよい。
+
+```json
+[ { "number": 200, "title": "…", "body": "…", "labels": ["docs"] } ]
+```
+
+```json
+{ "issues": [ { "number": 200, "title": "…", "body": "…", "labels": ["docs"] } ] }
+```
+
+配列でも `issues` 配列を持つ object でもない JSON は `load_error`（exit 6）である。
+file が読めない場合・JSON として parse できない場合も同じ。
+
+要素の field は `gh issue view --json number,title,body,labels` の出力と同じ4つで、
+**`number` 以外は省略できる**（`title` / `body` は `""`、`labels` は `[]` として読む）。
+`number` を要求した Issue が fixture に無ければ `fixture does not contain issues: <n>` の
+`load_error` になる。
+
+`labels` の要素は**文字列でも `{ "name": "…" }` でもよく、混在してもよい**。前者は手書き
+fixture の形、後者は `gh` が返す形である。2形を受けるのは `gh` の出力をそのまま貼れるように
+するためで、`gh` 経路と fixture 経路は同じ正規化を通る。文字列でも `name`（文字列）を持つ
+object でもない要素は、**その label だけ**捨てられる。
+
+**`number` を整数として読めない要素は、黙って捨てられる**（object でない要素も同じ）。
+読み方は `parseInt` 相当なので `200` でも `"200"` でも整数 200 になる。捨てられたことは
+warning にならず、観測できるのは「その番号を `--issues` で要求したときに上の `load_error`
+が出る」形だけである（要求していない番号なら何も起きない）。同じ `number` が2度現れたときは
+**後の要素が勝つ**。なおこの黙殺は 0.28.0 時点の**現状の挙動を仕様として書いたもの**であり、
+`load_error` へ締めるかどうかは別 Issue として切る
+（[#200](https://github.com/Kewton/commandmate-skills/issues/200) の裁定。docs の変更に
+挙動の変更を同乗させない）。
+
+**fixture は plan の入力なので、第1節の run_id にそのまま効く。** 要求した Issue の
+title / body を1文字でも変えれば既定 run_id は変わり、別の run directory に出る
+（labels は sort してから hash するので、並べ替えでは変わらない）。逆に fixture を編集して
+いない再実行は同じ run_id に導かれ `run_exists` で拒否される —— **「本文を直したつもりで
+直っていない」を検出する検査**として使える。`--issues` で要求していない要素は plan にも
+run_id にも影響しない（hash に入るのは要求した番号の内容だけである）。
+
+これが「**Issue 本文の書き方が plan を変える**」経路（第5.5節の `open-questions` ブロック、
+`reference_files`、受入ゲート記法）を試す標準的な方法である。実際の Issue を編集せず、
+本文だけを変えた fixture を2つ作って `plan.json` を diff すればよい。
+
+正準例は planner の fixture テストが実際に読んでいる
+`tests/fixtures/cmate-orchestrate/cases/02-explicit-dependency/issues.json` である
+（`{"issues": […]}` 形・2 Issue・explicit dependency 付き）。散文で書いた例は形式が変わっても
+古いまま残るが、テストが読んでいる fixture への参照は、形式が変わればテストが赤くなる。
+
 ## 2. run の隔離
 
 - run artifact は `<runs-dir>/<run_id>/` 配下に書く。
