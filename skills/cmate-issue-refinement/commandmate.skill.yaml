@@ -28,6 +28,7 @@ capabilities:
   - Assess size, dependencies, file conflicts and parallel-safety with a stated rationale
   - Rank findings as must fix, should fix or nice to have with a locator on each
   - Return decisions only the user can make as open questions instead of silent assumptions
+  - Emit the blocking ones as a pasteable open-questions block the planner reads, without touching the Issue
   - Emit a versioned result document, a human-readable summary and a completion check
   - Recommend a machine-readable acceptance-gates block, naming only gate ids read from verify.yaml
 expected_outcomes:
@@ -85,8 +86,8 @@ risk_rationale: >-
   Issue or the working tree.
 files:
   - path: SKILL.md
-    sha256: 436e63a94accb8614a16f0726fa0ea18086ef47e498e279564276c2f8b9a7487
-    size: 13482
+    sha256: 475f13681516af88d3bd500e83324b481901d1661cf80500c765e95ef16922ab
+    size: 14389
     kind: skill_md
     executable: false
     script: false
@@ -108,9 +109,15 @@ files:
     kind: instruction
     executable: false
     script: false
+  - path: references/open-questions.md
+    sha256: 1ad007b8f2e15ddf8404e8953bb4a39e7431afa105d4ef1c6a27c2fd970c4baa
+    size: 7239
+    kind: instruction
+    executable: false
+    script: false
   - path: references/output-contract.md
-    sha256: c13c33f73f1d0ec943803099fd9795cac7f6608e253a6acc0ef6cb38e764668a
-    size: 6608
+    sha256: 7e4037f0813eb6550192d1f3858e9b1cebdc20b41fd83be7476987706e9bd25b
+    size: 7937
     kind: instruction
     executable: false
     script: false
@@ -133,14 +140,14 @@ files:
     executable: false
     script: false
   - path: references/severity-and-questions.md
-    sha256: 67d9ac813014f607ffa0dc1e8cccbb7be70af37e457d607982324b903a852403
-    size: 3360
+    sha256: 46ff97b8152af0f4e850e03c0f4122ad84094ef15ffc0e26c10764f26af17bb0
+    size: 3912
     kind: instruction
     executable: false
     script: false
   - path: schemas/refinement-result.v1.json
-    sha256: 7256043724901f6d6e92b5ade2a6c18b9fd1032fe8c49c2e113a0275af4dca41
-    size: 12942
+    sha256: 6c0430a024a93db2c911d2543bbae0f5a83c0dddf692f87bc916cabf7415b714
+    size: 14308
     kind: asset
     executable: false
     script: false

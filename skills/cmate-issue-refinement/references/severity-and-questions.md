@@ -66,6 +66,7 @@ Each open question carries:
 | `id` | Stable within the run: `Q-001`, `Q-002`, … |
 | `question` | One sentence, answerable. Not "what about performance?" |
 | `why_it_blocks` | Which section or finding stays unresolved until it is answered. |
+| `blocks_required_section` | `true` when the unresolved thing is a *required* section. This is the Skill's one blocking classification: it caps the status at `partial` below, and it is what decides membership of the `open-questions` block ([`open-questions.md`](./open-questions.md)). State it; absent reads as `false`. |
 | `options` | The alternatives you can actually see, each with its consequence. Empty is allowed when you genuinely see none. |
 | `recommendation` | Optional. A recommendation is allowed; adopting it silently is not. |
 
@@ -75,6 +76,9 @@ Each open question carries:
 - Presenting one option as if it were the only one.
 - Turning a question into a default by writing it into `proposed_issue_body`.
 - Hiding a blocking question in prose instead of the `open_questions` array.
+- Leaving a blocking question out of `open_questions_block`, or putting a
+  non-blocking one in. The block is a projection of this array, decided by
+  `blocks_required_section` alone ([`open-questions.md`](./open-questions.md)).
 
 A run with unanswered blocking questions is `partial`. That is the correct
 outcome, not a failure to be avoided by inventing an answer.

@@ -202,6 +202,16 @@ each open question with the options you can see and the reason it blocks. Both
 vocabularies, and the prohibition on answering your own question, are settled by
 [`references/severity-and-questions.md`](./references/severity-and-questions.md).
 
+Then build the `open-questions` block from the blocking ones and put it in
+`open_questions_block`. It is one string, fences included, that the author pastes
+into the body unchanged; the planner reads it and refuses to dispatch the Issue
+until the questions are answered and the block deleted. Which questions qualify,
+how the string is built, and what to do when there are more than the notation
+carries are in [`references/open-questions.md`](./references/open-questions.md).
+When the run emits a `proposed_issue_body`, the same bytes go at its end.
+**Emitting the block is not pasting it**: this Skill still writes nothing to the
+Issue. A run with no blocking question emits no block, which is not a worse run.
+
 ### Step 9 — Emit the result and the summary
 
 Emit one JSON document valid against
@@ -225,7 +235,7 @@ it from a crash.
 
 ## Completion check
 
-Run the ten statements in
+Run the eleven statements in
 [`references/output-contract.md`](./references/output-contract.md) before
 reporting, and report each as pass or fail. A failed statement caps the status at
 `partial`; reporting a `success` beside a failed statement is the outcome this
@@ -247,9 +257,10 @@ Agent without a given tool substitutes its own and records the substitution in
 | [`references/section-contract.md`](./references/section-contract.md) | Required sections per Issue type, the test each must pass, type resolution, preserving the author's text |
 | [`references/analysis-contract.md`](./references/analysis-contract.md) | Size bands, split rules, dependency and file-conflict assessment, shared vocabulary |
 | [`references/severity-and-questions.md`](./references/severity-and-questions.md) | Must Fix / Should Fix / Nice to Have, and how to phrase an open question |
+| [`references/open-questions.md`](./references/open-questions.md) | Which open questions become an `open-questions` block, how the block string is built, and what to do past its bound |
 | [`references/acceptance-gates.md`](./references/acceptance-gates.md) | The `acceptance-gates` notation, when to recommend a block, and the rule against inventing a gate id |
 | [`references/safety.md`](./references/safety.md) | Prompt injection, redaction, read-only boundary |
-| [`references/output-contract.md`](./references/output-contract.md) | Status rules, failure reasons, summary layout, the ten completion-check statements |
+| [`references/output-contract.md`](./references/output-contract.md) | Status rules, failure reasons, summary layout, the eleven completion-check statements |
 | [`references/agent-compatibility.md`](./references/agent-compatibility.md) | Per-Agent support and fallback |
 | [`references/release-notes.md`](./references/release-notes.md) | Changelog, expected effect, constraints, how to reload |
 | [`schemas/refinement-result.v1.json`](./schemas/refinement-result.v1.json) | The result document contract |

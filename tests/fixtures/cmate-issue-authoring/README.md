@@ -115,11 +115,47 @@ suite 側では、これに加えて次を測っている。
 注入**する。そこの差分がミラーの乖離を隠したり、逆に無いものを作ったりしないためである
 （`SYSTEM_ROOTS` は各 file 自身のものを読むので、この集合の乖離は捕まる）。
 
-どちらの conformance テストも単体で実行できる。
+### 6. 未決の問い記法の生産側が正本と一致していること（Issue #198）
+
+` ```open-questions ` 記法（[#178](https://github.com/Kewton/commandmate-skills/issues/178)）は
+**読む側から先に**入った。planner は 0.28.0 からブロックを読むが、書く側が無かった。
+書く側は `cmate-issue-refinement` で、そこは `scripts/` を持たない指示駆動の package である
+——つまり突き合わせる関数本体が無い。
+
+したがって `open-questions-conformance.mjs` は、生成規則
+（`skills/cmate-issue-refinement/references/open-questions.md`）を `render()` と `blocking()`
+として**この file に 1 つだけ**転写し、その出力を**実物の planner** に食わせる。
+散文の写しを 2 つ置いて見比べるのではなく、片方を実行して読ませるのがこの file の形である。
+
+固定しているもの。
+
+1. **生産側の散文が、消費側の code の値を書いている**こと（上限 `32` と info string
+   `open-questions` が literal として在ること、正本の file 名を名指していること）。
+   二重に書くしかない 1 個の数値が腐らないようにする層である。
+2. **package が同梱するブロックが、そのまま planner に読める**こと、かつ
+   **自分の questions から描き直した形と byte 一致**すること。例が 1 つも無ければ **fail**。
+3. **corpus が実 parser を往復する**こと（1 件・上限ちょうど 32 件・文中の `#`・backtick・
+   CJK・先頭のハイフン）。読み返した list が順序ごと一致する。
+4. **規則が挙げる制約が実際に効いている**こと。規則が「出すな」と言う形
+   （0 件・空文字・完全一致の重複・改行を含む問い・33 件・YAML 予約文字始まり）を実 parser に
+   食わせ、**`open_question_block_invalid` で拒否されること**まで確認する。
+   一度も止めたことのない制約は制約ではない。
+5. **ブロックが `open_questions[]` の射影である**こと（`blocks_required_section` だけが
+   決める・配列順のまま）、および result schema の `open_questions_block` pattern が
+   規則の出力を受け取り、人が手で直さないと貼れない形を拒むこと。
+6. **実物の planner binary で end-to-end**。ブロックを載せた本文は 1 件につき 1 件の
+   blocking question を逐語・順序どおりに返し、**ブロックだけ消した双子の本文**は 1 件も返さない。
+   緑だけの fixture は証拠にしない（正本 第6節と同じ二点測定）。
+
+`cmate-issue-authoring` 側のミラーは本 Issue の範囲外であり、入ったらこの file に
+2 つ目の生産側が増える。
+
+どの conformance テストも単体で実行できる。
 
 ```bash
 node tests/fixtures/cmate-issue-authoring/mirror-conformance.mjs
 node tests/fixtures/cmate-issue-authoring/acceptance-gates-conformance.mjs
+node tests/fixtures/cmate-issue-authoring/open-questions-conformance.mjs
 ```
 
 ## file
@@ -137,3 +173,4 @@ node tests/fixtures/cmate-issue-authoring/acceptance-gates-conformance.mjs
 | `assert-planner-gates.mjs` | 本文のブロックと planner が読んだ `acceptance_gates` の突き合わせ |
 | `mirror-conformance.mjs` | planner mirror の定数一致と挙動一致（単体実行可） |
 | `acceptance-gates-conformance.mjs` | 受入ゲート記法の一致（定数・関数本体・corpus・正本の例。単体実行可） |
+| `open-questions-conformance.mjs` | 未決の問い記法の生産側一致（生成規則の転写・corpus・拒否形・実 planner での end-to-end。単体実行可） |

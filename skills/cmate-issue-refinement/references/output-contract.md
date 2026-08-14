@@ -58,13 +58,19 @@ indistinguishable from a crash, and the caller has to be able to tell.
   [`analysis-contract.md`](./analysis-contract.md) (`true`=`yes`, `false`=`no`),
   never inventing a conversion at the boundary.
 - `proposed_issue_body` is a proposal. Its presence is never permission to apply
-  it. It is also the only place an `acceptance-gates` block appears: this Skill
+  it. It carries the `acceptance-gates` block when there is one — this Skill
   recommends the block and a person applies it
-  ([`acceptance-gates.md`](./acceptance-gates.md)).
+  ([`acceptance-gates.md`](./acceptance-gates.md)) — and the same
+  `open-questions` block that `open_questions_block` holds, byte for byte.
+- `open_questions_block` is the pasteable form of the blocking open questions:
+  one string, fences included, that goes into the Issue body unchanged. It is
+  absent when nothing is blocking, never present and empty. It is derived from
+  `open_questions[]` and never replaces it, and emitting it is not applying it —
+  `github_writes` is unaffected ([`open-questions.md`](./open-questions.md)).
 - `redactions` carries kind and count only, never the value.
 - `github_writes` is always the empty array. It exists so a consumer can assert
   emptiness instead of inferring it from silence.
-- `completion_check` carries the ten statements below, each with `passed` and,
+- `completion_check` carries the eleven statements below, each with `passed` and,
   when false, `detail`.
 
 ## The summary
@@ -92,6 +98,10 @@ document; no numbers that are not in it.
    - blocks: <section or finding>
    - options: <a> / <b>
 
+Paste into the Issue body, and delete it once the answers are written there:
+
+<open_questions_block, verbatim>
+
 ### Evidence
 - <ref> <locator> — <note>
 
@@ -109,6 +119,10 @@ document; no numbers that are not in it.
 Rules:
 
 - Counts in headings match array lengths in the document.
+- The `open-questions` block is shown verbatim when the document carries one, and
+  the count of questions that did not fit its bound is shown beside it. A summary
+  that shows the block but not what was left out is the summary a reader trusts
+  and should not.
 - The "GitHub writes: none" line is not optional. A reader must be able to see,
   without opening the document, that nothing was mutated.
 - When status is `partial` or `failure`, the reason appears in the first three
@@ -141,6 +155,12 @@ explicitly:
     are not machine-decidable were left as prose
     ([`acceptance-gates.md`](./acceptance-gates.md)). A run that recommended no
     block passes this statement; a run that guessed an id does not.
+11. `open_questions_block`, when present, carries exactly the `question` text of
+    the entries whose `blocks_required_section` is `true`, verbatim and in the
+    array's order, with anything past the bound named in `limitations`
+    ([`open-questions.md`](./open-questions.md)). A run with no blocking question
+    and no block passes this statement; a run that dropped one silently, answered
+    one inside the block, or wrote the block into the Issue does not.
 
 Report the check as a list of statements with pass or fail. A failed statement
 caps the status at `partial`. Reporting a `success` beside a failed statement is

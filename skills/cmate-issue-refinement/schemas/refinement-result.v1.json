@@ -160,6 +160,11 @@
         }
       }
     },
+    "open_questions_block": {
+      "type": "string",
+      "pattern": "^```open-questions\\nversion: 1\\nquestions:\\n(?:  - [^\\n]+\\n)+```\\n$",
+      "description": "The blocking open questions rendered as the ```open-questions block the cmate-orchestrate planner reads, fences included, ready to paste into the Issue body unchanged. Derived from open_questions[] entries whose blocks_required_section is true, verbatim and in array order; absent when none is blocking, never present and empty. The notation is owned by references/open-questions-notation.md in cmate-orchestrate; this Skill emits a subset of it and never applies it — github_writes stays empty. See references/open-questions.md."
+    },
     "related_issues": {
       "type": "array",
       "items": {
@@ -331,7 +336,7 @@
         "additionalProperties": false,
         "required": ["id", "statement", "passed"],
         "properties": {
-          "id": { "type": "string", "pattern": "^CC-[0-9]$" },
+          "id": { "type": "string", "pattern": "^CC-[0-9]{1,2}$" },
           "statement": { "type": "string", "minLength": 1 },
           "passed": { "type": "boolean" },
           "detail": { "type": "string" }
@@ -362,6 +367,19 @@
     {
       "if": { "properties": { "status": { "const": "failure" } }, "required": ["status"] },
       "then": { "required": ["failure_reason"] }
+    },
+    {
+      "if": { "required": ["open_questions_block"] },
+      "then": {
+        "properties": {
+          "open_questions": {
+            "items": {
+              "required": ["id", "question", "why_it_blocks", "options", "blocks_required_section"],
+              "description": "A document that carries the block has to state the flag on every question, because the block is exactly the subset whose blocks_required_section is true. An absent flag reads as false, which would drop a stopping question out of the block silently — so the field stops being optional the moment the block exists."
+            }
+          }
+        }
+      }
     }
   ]
 }
