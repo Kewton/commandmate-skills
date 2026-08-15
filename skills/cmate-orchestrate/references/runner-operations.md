@@ -156,15 +156,18 @@ Issue ごとに違うゲート集合を要求する方法が無かった。
 - **明示ブロックだけを運ぶ。散文からは何も生成しない。** `test_expectations`（Issue 本文の
   backtick から拾ったコマンド）は従来どおり**助言的**で、裁定には使われない。引用は指示ではなく、
   抽出結果は profile にも依存するので、裁定の根拠にできない。
-- **planner は構文しか見ない。** id が実在するかは dispatch が worktree の
+- **planner は構文と Issue 番号スコープしか見ない。** id が実在するかは dispatch が worktree の
   `.commandmate/verify.yaml` に突き合わせ、**`send` する前に**拒否する
   （`acceptance_gate_id_unknown`）。`send --contract` の exit 2 には落とさない。
 - **`require:` だけでは `verify.gates` を書かない。** 書くと「そのゲートだけ走らせる」になり、
   lint も test も走らなくなる — 受入条件を足したつもりで判定が弱くなる。キーを省略したまま
   全ゲートを走らせるほうが厳しい。
+- **`gates:`（新規コマンドの定義）は実行契約が運ぶ**（[#125](https://github.com/Kewton/commandmate-skills/issues/125)）。
+  定義は契約の `verify.gateDefinitions` に載り、**`.commandmate/verify.yaml` には 1 バイトも
+  書かない**。id は `issue-<番号>-<何を測るか>` でなければならず、worktree の既存 gate id と
+  衝突すれば dispatch が `send` の前に止める（`acceptance_gate_id_conflict`）。
 - **壊れたブロックは「無かったこと」にしない**（`acceptance_gate_block_invalid`）。
-  `gates:`（新規コマンドの宣言）は記法としては予約済みだが**この release は実行しない**ので、
-  黙って無視せず停止する（`acceptance_gate_block_unsupported`）。
+  32 件の上限を超えたブロックも**切らずに拒否する**。
 - report の `verification.gates[].origin` に由来（`repo` / `issue`）が残る。**欠落は
   「記録されていない」であり `repo` ではない。**
 

@@ -1,0 +1,26 @@
+{
+  "description": "Issue #125 / ADR §3.5 stage 2: `gates:` (declaring a NEW command) is now READ rather than refused. The definition travels in the execution contract's `verify.gateDefinitions` (CommandMate #1791), so nothing is ever written into the worktree's `.commandmate/verify.yaml` — which is what unblocked it: that file stays in the work-evidence change set on purpose (an agent weakening its own judge must stay detectable), while the contract is already snapshotted into `tasks.contract_json` and already excluded. The transcription is a COPY: author order, the author's `command` with its quotes removed, and `timeoutSec` ABSENT on the entry that declared none — so CommandMate's own default applies instead of a number this planner invented. `require:` and `gates:` coexist in one block and share one id space. The run is clean: reading a `gates:` block raises no warning at all.",
+  "args": ["350", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "fixture", "--no-infer"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "acceptance_gates": {
+      "350": {
+        "version": 1,
+        "require": ["selftest"],
+        "gates": [
+          {
+            "id": "issue-350-adr-present",
+            "command": "test -f docs/adr.md",
+            "timeoutSec": 120
+          },
+          {
+            "id": "issue-350-no-timeout",
+            "command": "test -d docs"
+          }
+        ]
+      }
+    }
+  }
+}

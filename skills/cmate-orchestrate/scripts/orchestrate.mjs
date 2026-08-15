@@ -1803,6 +1803,18 @@ const ACCEPTANCE_GATE_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 // Same bound as the contract's verify.gates list (dispatch.mjs MAX_GATE_IDS).
 const MAX_ACCEPTANCE_GATE_IDS = 32;
 
+// The ids CommandMate keeps for its built-in gates (verify-config's
+// RESERVED_GATE_IDS: work-evidence, scope, env-clean). `validateGateEntries` —
+// the SAME function that reads `.commandmate/verify.yaml` — refuses them for a
+// contract's `verify.gateDefinitions`, so a block that redefines one is an
+// `exit 2` at send. Refusing it here names the problem while the author is still
+// looking at the block (Issue #125 / ADR §3.5).
+const ACCEPTANCE_GATE_RESERVED_IDS = ['work-evidence', 'scope', 'env-clean'];
+// verify-config's MIN_TIMEOUT_SEC / MAX_TIMEOUT_SEC, applied to a gate this block
+// DEFINES. Transcribed rather than derived for the same reason the id pattern is.
+const MIN_ACCEPTANCE_GATE_TIMEOUT_SEC = 1;
+const MAX_ACCEPTANCE_GATE_TIMEOUT_SEC = 7200;
+
 // Removing the block before the prose extractors run is NOT tidiness — it is a
 // correctness fix measured on the current regexes (ADR §10 item 3). The fence
 // pattern in `extractTestExpectations` is /```[a-zA-Z]*\n([\s\S]*?)```/g, which
@@ -1834,9 +1846,10 @@ function parseAcceptanceGatesBlock(raw) {
   const bad = (code, reason) => ({ ok: false, code, reason });
   const lines = String(raw).split(/\r?\n/);
   const value = { version: ACCEPTANCE_GATES_VERSION, require: [] };
+  const defined = [];
   const seenKeys = new Set();
   let sawVersion = false;
-  let section = null; // null | 'require'
+  let section = null; // null | 'require' | 'gates'
 
   for (const line of lines) {
     if (line.includes('\t')) return bad('acceptance_gate_block_invalid', 'a tab character is not allowed; the block is indented with 2 spaces');
@@ -1875,19 +1888,29 @@ function parseAcceptanceGatesBlock(raw) {
         continue;
       }
       if (key === 'gates') {
-        // Valid notation, not yet enforceable. `gates:` declares NEW commands,
-        // which means writing them into the worktree's verify.yaml — ADR §3.5
-        // stage 2, whose preconditions are unresolved (measured: an uncommitted
-        // .commandmate/verify.yaml DOES count towards work-evidence, so a
-        // worktree that only received a gate definition reports uncommitted=1 and
-        // exit 21 stops meaning "nothing was done"). Accepting the key and then
-        // not enforcing it would be the silent-drop this whole feature exists to
-        // prevent, so it stops the run instead.
-        return bad('acceptance_gate_block_unsupported', '"gates:" (new command gates) is stage 2 of the ADR and is not enforced by this release; use "require:" with gate ids that already exist in .commandmate/verify.yaml, or keep the condition out of the block and state it for UAT');
+        // Stage 2, enforced since Issue #125. `gates:` declares a NEW command,
+        // and the definition travels in the EXECUTION CONTRACT's
+        // `verify.gateDefinitions` (CommandMate #1791) — nothing is ever written
+        // into the worktree's `.commandmate/verify.yaml`. That is what unblocked
+        // it: the file stays in the work-evidence change set on purpose (so an
+        // agent weakening its own judge is still detectable), while the contract
+        // is already snapshotted into `tasks.contract_json` and already excluded,
+        // so carrying the definition there adds no new tamper surface.
+        if (rest !== '') return bad('acceptance_gate_block_invalid', '"gates:" takes a block sequence on the following lines, not an inline value');
+        section = 'gates';
+        continue;
       }
       return bad('acceptance_gate_block_invalid', `unknown key "${key}" (the v1 block accepts only version, require, gates)`);
     }
 
+    // A `gates:` entry spans two indent levels (`  - id:` and its `    command:`
+    // / `    timeoutSec:` fields), so it is read by its own reader rather than by
+    // the single-line rule below.
+    if (section === 'gates') {
+      const problem = readAcceptanceGateDefinition(defined, indent, content);
+      if (problem !== null) return bad('acceptance_gate_block_invalid', problem);
+      continue;
+    }
     if (indent !== 2) return bad('acceptance_gate_block_invalid', `unexpected indentation of ${indent} space(s); list items are indented by exactly 2`);
     if (section !== 'require') return bad('acceptance_gate_block_invalid', `"${content}" is indented but no list is open above it`);
     const item = /^-[ \t]+(.*)$/.exec(content);
@@ -1904,11 +1927,102 @@ function parseAcceptanceGatesBlock(raw) {
   }
 
   if (!sawVersion) return bad('acceptance_gate_block_invalid', 'the block declares no "version: 1"');
+  // A definition with no command is the one gate shape `validateGateEntries`
+  // rejects that cannot be seen line by line: the id line is well formed and the
+  // command line is simply absent, so the entry only becomes wrong once the
+  // block ends.
+  const commandless = defined.find((gate) => gate.command === null);
+  if (commandless !== undefined) return bad('acceptance_gate_block_invalid', `gate "${commandless.id}" declares no command; a gate that runs nothing cannot judge anything`);
+  // `require` and `gates[].id` share ONE id space: a definition is selected by
+  // the same `verify.gates` list a `require` id goes into, and the upstream
+  // parser refuses a duplicate there. Checking both lists together is also what
+  // makes "declared twice, once as a selection and once as a definition"
+  // impossible to write.
+  const declaredIds = new Set();
+  for (const id of [...value.require, ...defined.map((gate) => gate.id)]) {
+    if (declaredIds.has(id)) return bad('acceptance_gate_block_invalid', `duplicate gate id "${id}"`);
+    declaredIds.add(id);
+  }
+  // NOT truncated to the bound — the discipline dispatch-contract.md §2.4.1 puts
+  // on a transcript that does not fit: a block that names 33 gates and is
+  // dispatched with 32 is a run that dropped a declared requirement and said
+  // nothing. It is refused, and the count is named.
+  if (declaredIds.size > MAX_ACCEPTANCE_GATE_IDS) {
+    return bad('acceptance_gate_block_invalid', `at most ${MAX_ACCEPTANCE_GATE_IDS} gate ids may be required and defined together, and this block declares ${declaredIds.size}; the list is NOT cut to fit`);
+  }
   // An empty block is the same contract error as `verify.gates: []`: it declares
   // a requirement set and then names nothing, which reads as "no requirement"
   // exactly where the author meant to state one.
-  if (value.require.length === 0) return bad('acceptance_gate_block_invalid', 'the block requires no gate; remove it, or name at least one gate id under "require:"');
+  if (declaredIds.size === 0) return bad('acceptance_gate_block_invalid', 'the block requires no gate; remove it, or name at least one gate id under "require:" or define one under "gates:"');
+  // Absent rather than empty when the block defines nothing, so an issue that
+  // only uses `require:` produces the same plan bytes it produced before this
+  // key existed (ADR §7's non-regression, read at the plan level).
+  if (defined.length > 0) value.gates = defined;
   return { ok: true, value };
+}
+
+// One line of a `gates:` entry, appended to `entries`. Returns null when the line
+// was read, or the reason it could not be.
+//
+// The shape is `.commandmate/verify.yaml`'s `gates[]` entry, key for key — that
+// is the whole point of the notation (§2: a copy, never a re-encoding), and it is
+// also what makes the block checkable against the constraints CommandMate's
+// `validateGateEntries` applies to the contract: the id pattern, the reserved
+// ids, the integer timeout and its range. An entry this accepts is one
+// `send --contract` accepts; an entry it refuses would have been an exit 2 with
+// the author no longer looking.
+function readAcceptanceGateDefinition(entries, indent, content) {
+  if (indent === 2) {
+    const opener = /^-[ \t]+id:[ \t]*(.*)$/.exec(content);
+    if (opener === null) return `"${content}" is not a "- id: <gate-id>" list item; a gate entry opens with its id`;
+    const id = opener[1];
+    if (!ACCEPTANCE_GATE_ID_RE.test(id)) {
+      return `"${id}" is not a valid gate id (${ACCEPTANCE_GATE_ID_RE.source}); quoting, inline comments and flow syntax are not part of the subset`;
+    }
+    if (ACCEPTANCE_GATE_RESERVED_IDS.includes(id)) {
+      return `"${id}" is reserved for a built-in gate (${ACCEPTANCE_GATE_RESERVED_IDS.join(', ')}); a contract that redefines one is refused at send`;
+    }
+    entries.push({ id, command: null });
+    return null;
+  }
+  if (indent !== 4) return `unexpected indentation of ${indent} space(s); a gate's fields are indented by exactly 4`;
+  if (entries.length === 0) return `"${content}" is a gate field with no "- id:" line above it`;
+  const field = /^([a-zA-Z][a-zA-Z0-9_]*):[ \t]*(.*)$/.exec(content);
+  if (field === null) return `"${content}" is not a "key: value" line inside a gate`;
+  const [, key, rest] = field;
+  const entry = entries[entries.length - 1];
+  if (key === 'command') {
+    if (entry.command !== null) return `gate "${entry.id}" declares "command" twice`;
+    // The one place a quoted scalar is part of the subset. verify.yaml quotes its
+    // commands (a bare `python3 x.py --json` would otherwise read a `:` as a
+    // mapping), so the notation that mirrors verify.yaml has to accept the same
+    // spelling. Ids stay unquoted — there the quotes would be the value.
+    const command = unquoteAcceptanceGateScalar(rest);
+    if (command.trim() === '') return `gate "${entry.id}" declares an empty command`;
+    entry.command = command;
+    return null;
+  }
+  if (key === 'timeoutSec') {
+    if (entry.timeoutSec !== undefined) return `gate "${entry.id}" declares "timeoutSec" twice`;
+    if (!/^[0-9]+$/.test(rest)) return `gate "${entry.id}" declares timeoutSec "${rest}", which is not a plain integer`;
+    const seconds = Number(rest);
+    if (seconds < MIN_ACCEPTANCE_GATE_TIMEOUT_SEC || seconds > MAX_ACCEPTANCE_GATE_TIMEOUT_SEC) {
+      return `gate "${entry.id}" declares timeoutSec ${seconds}, which is outside ${MIN_ACCEPTANCE_GATE_TIMEOUT_SEC}..${MAX_ACCEPTANCE_GATE_TIMEOUT_SEC}`;
+    }
+    entry.timeoutSec = seconds;
+    return null;
+  }
+  return `unknown key "${key}" inside a gate (a gate declares only id, command, timeoutSec)`;
+}
+
+// The single- or double-quoted scalar forms the subset allows, mirroring
+// dispatch.mjs `unquoteYaml` — the two readers of the same YAML subset must agree
+// on what a quoted command means.
+function unquoteAcceptanceGateScalar(value) {
+  if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+    return value.slice(1, -1);
+  }
+  return value;
 }
 
 // The whole block reading for one issue body. Returns
@@ -1937,6 +2051,63 @@ function readAcceptanceGates(body) {
   const parsed = parseAcceptanceGatesBlock(blocks[0][1]);
   if (!parsed.ok) return invalid(parsed.code, parsed.reason);
   return { gates: parsed.value, error: null };
+}
+
+// How a gate id this issue DEFINES is derived: `issue-<number>-<what>` (Issue
+// #125). The runner checks the shape; it never rewrites the author's id, because
+// the contract is a copy of the block and a re-encoding is exactly where "what
+// the issue asked for" and "what actually ran" start to differ (§2).
+//
+// The prefix does three things at once, and it is a rule rather than a
+// convention for the first of them:
+//
+//   1. It makes the collision the upstream parser refuses (a definition whose id
+//      is already a gate in `.commandmate/verify.yaml`, or one of the reserved
+//      built-in ids) impossible to write by accident — a repository's common
+//      gates are named after what they check (`lint`, `selftest`), never after
+//      an issue number.
+//   2. It makes the gate readable in the verdict. `GATE issue-125-repro FAIL`
+//      names its own provenance, which the CLI's own gate line does not carry
+//      (ADR §11.4) and which #97's PR evidence has to reconstruct otherwise.
+//   3. It keeps the id honest about its lifetime. A contract gate exists for one
+//      delegation of one issue; an id that could pass for a repository gate
+//      invites someone to "just add it to verify.yaml", which is the accumulation
+//      ADR §3.5 (1) refused.
+//
+// Checked here rather than inside the block parser because it is the one rule
+// that needs the issue's identity: the parser reads a body, and the same body
+// under a different number would be a different answer.
+function misscopedAcceptanceGateId(gates, issueNumber) {
+  const prefix = `issue-${issueNumber}-`;
+  for (const gate of gates.gates ?? []) {
+    if (!gate.id.startsWith(prefix) || gate.id.length === prefix.length) {
+      return `the gate "${gate.id}" this issue defines must be named "${prefix}<what-it-measures>". `
+        + 'A gate the contract carries exists for this issue alone, and the prefix is what keeps it from '
+        + 'colliding with a gate .commandmate/verify.yaml already declares (a collision is refused at send, '
+        + 'after the block has left the author\'s screen)';
+    }
+  }
+  return null;
+}
+
+// `readAcceptanceGates` plus the one check that needs to know which issue the
+// body belongs to. Same {gates, error} shape and the same wrapper sentence, so a
+// mis-scoped id reads like every other unreadable block: NOT absent, never
+// guessed at.
+function readIssueAcceptanceGates(issue) {
+  const read = readAcceptanceGates(issue.body);
+  if (read.gates === null) return read;
+  const problem = misscopedAcceptanceGateId(read.gates, issue.number);
+  if (problem === null) return read;
+  return {
+    gates: null,
+    error: {
+      code: 'acceptance_gate_block_invalid',
+      text: `The \`${ACCEPTANCE_GATES_INFO}\` block could not be read: ${problem}. `
+        + 'It is NOT treated as absent: fix the block or remove it, then re-plan. '
+        + 'The planner never guesses acceptance gates from prose.',
+    },
+  };
 }
 
 // =============================================================================
@@ -2148,7 +2319,7 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
   // before acceptance gates (ADR §7) and before declared open questions
   // (Issue #178) existed — pinned by fixture 61-open-questions-heading-not-read,
   // whose golden was generated by the runner as it stood before this change.
-  const acceptanceGates = readAcceptanceGates(issue.body);
+  const acceptanceGates = readIssueAcceptanceGates(issue);
   const declaredQuestions = readOpenQuestions(issue.body);
   const body = stripOpenQuestionBlocks(stripAcceptanceGateBlocks(issue.body));
   const text = `${issue.title}\n\n${body}`;

@@ -1,0 +1,52 @@
+{
+  "description": "Issue #125 の受入条件: 定義した id が **worktree の verify.yaml の既存 id と衝突**したら、上流の exit 2 に到達させず dispatch が読める形で止める。ここでは `issue-320-adr-present` が verify.yaml に committed で残っている（ADR §3.5 (1) が案じた蓄積が現実に起きた状態）。契約は足せるだけで上書きできない —— 同じ id なら report がどちらの裁定か言えず、リポジトリ自身の「合格の定義」を委任単位で差し替えられてしまう。send は 1 回も呼ばれず、limitation が衝突した id と直し方を名指しする。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-acceptance-gates-defined.json",
+    "orchestrate_args": [
+      "320",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "never_sent": [
+      320
+    ],
+    "no_contract_calls": true,
+    "worker_states": {
+      "320": "not_dispatched"
+    },
+    "verification_outcomes": {
+      "320": "not_run"
+    },
+    "limitation_codes": [
+      "acceptance_gate_id_conflict"
+    ],
+    "limitation_details_include": [
+      "#320: the issue's `gates:` block defines gate id(s) issue-320-adr-present, which .commandmate/verify.yaml already declares",
+      "A contract may ADD gates, never redefine one",
+      "The issue is NOT dispatched — the same contract exits 2 at `send`"
+    ],
+    "worktree_files_unchanged": [
+      ".commandmate/verify.yaml"
+    ]
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "description": "Issue #125, ADR §4 (1)(2)(3) の変異側（赤）。d94 と Issue も契約も verify.yaml も同一で、違いは worktree から docs/adr.md が消えていることだけ —— 変異は判定対象の成果物に入っている。赤の理由も固定する: exit 20（判定して不合格）であり、失敗ゲート集合に **契約にしか存在しない** issue-320-adr-present が名指しで含まれ、その exit は 1（`test -f` の不在）である。緑 run と赤 run で verification.gates の中身が違うことが、転記が生きていることの証明でもある（ADR §4 補助規約）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-acceptance-gates-defined.json",
+    "orchestrate_args": [
+      "320",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "2"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "verification_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      320
+    ],
+    "send_counts": {
+      "320": 2
+    },
+    "worker_states": {
+      "320": "completed"
+    },
+    "verification_outcomes": {
+      "320": "fail"
+    },
+    "verification_gates": {
+      "320": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "lint",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "issue-320-adr-present",
+          "verdict": "fail",
+          "origin": "issue"
+        }
+      ]
+    },
+    "verification_checks_include": {
+      "320": [
+        "gate issue-320-adr-present: failed (exit 1)"
+      ]
+    },
+    "completed_but_unverified": [
+      320
+    ],
+    "contract_issues": [
+      320
+    ],
+    "wave0_all_workers_completed": true,
+    "wave0_all_verifications_passed": false,
+    "verify_calls": 2,
+    "wait_verify_calls_min": 1
+  }
+}

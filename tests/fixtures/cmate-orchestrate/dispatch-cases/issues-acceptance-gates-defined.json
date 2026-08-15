@@ -1,0 +1,12 @@
+{
+  "issues": [
+    {
+      "number": 320,
+      "title": "docs: write the acceptance-gates ADR",
+      "body": "Write the acceptance-gates ADR and land it.\n\n## 対象ファイル\n- `docs/adr.md`\n\n## Acceptance criteria\n- [ ] the ADR file exists in the repository\n\n```acceptance-gates\nversion: 1\ngates:\n  - id: issue-320-adr-present\n    command: \"test -f docs/adr.md\"\n    timeoutSec: 120\n```\n",
+      "labels": [
+        "documentation"
+      ]
+    }
+  ]
+}

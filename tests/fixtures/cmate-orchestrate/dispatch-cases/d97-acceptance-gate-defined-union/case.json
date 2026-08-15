@@ -1,0 +1,72 @@
+{
+  "description": "Issue #125 / ADR §3.4 の和集合規則を、定義ゲートまで広げた形。operator が `--verify-gates lint` で絞り込んだので契約は `verify.gates` を書く —— そのとき **`gateDefinitions` の id を `gates` にも列挙しなければならない**（上流は「定義したのに誰も走らせない」を契約エラーにする。task-contract.md §2.3.1）。列挙しないと fake の send-time 照合が exit 2 を返すので、このケースが緑であること自体が「列挙した」ことの測定である。fake は契約の verify.gates を読んでその 2 つだけを実行し、両方が GATE 行に出る。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-acceptance-gates-defined.json",
+    "orchestrate_args": [
+      "320",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--verify-gates",
+    "lint"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      320
+    ],
+    "worker_states": {
+      "320": "completed"
+    },
+    "verification_outcomes": {
+      "320": "pass"
+    },
+    "verification_gates": {
+      "320": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "lint",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "issue-320-adr-present",
+          "verdict": "pass",
+          "origin": "issue"
+        }
+      ]
+    },
+    "contract_issues": [
+      320
+    ],
+    "contract_contains": {
+      "320": [
+        "verify:\n  gates:\n    - \"issue-320-adr-present\"\n    - \"lint\"\n  gateDefinitions:\n    - id: \"issue-320-adr-present\"\n"
+      ]
+    },
+    "worktree_files_unchanged": [
+      ".commandmate/verify.yaml"
+    ]
+  }
+}

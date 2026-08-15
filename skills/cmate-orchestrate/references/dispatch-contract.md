@@ -215,8 +215,10 @@ limitation `verification_unrecorded` と completion check `verification_recorded
 これは verification の失敗でも worker の失敗でもなく、**runner が記録に失敗した**という別の事実である。
 
 `verification.gates[]` には optional field **`origin`**（`repo` / `issue`）が載る。
-`issue` はその Issue の ```acceptance-gates ブロックが `require:` で名指しした id、`repo` は
-repo 共通ゲート（verify.yaml に在るが `require` されていないものを含む）である。
+`issue` はその Issue の ```acceptance-gates ブロックが `require:` で名指しした id と
+`gates:` で**定義した** id（定義ゲートは定義上 issue 由来である —— 契約以外にそれを知っている
+場所が無い）、`repo` は repo 共通ゲート（verify.yaml に在るが `require` されていないものを含む）
+である。
 [#97](https://github.com/Kewton/commandmate-skills/issues/97) の PR 証跡が
 「10 個のゲートが緑」ではなく「そのうち何個がこの Issue のために走ったか」を書けるようにするためで、
 `dispatch_schema_version` は **1 のまま**である（optional field の追加は additive。第7節）。
@@ -338,8 +340,12 @@ runner は承認済み plan **だけ**から契約を組み立てる。時刻・
   「全ゲートを走らせる」であり、緩い側ではなく厳しい側の既定である。
   **Issue が `acceptance_gates.require` を宣言していても、それだけではこのキーは書かれない** —
   詳しくは第 2.9 節。
-- Issue が受入ゲートを宣言している場合、`goal` に `## Acceptance gates this issue declared` 節が
-  1つ足される。宣言が無い Issue の `goal` は **byte 単位で従来どおり**である。
+- `verify.gateDefinitions` は Issue が `gates:` で新規コマンドを**定義した**ときだけ書く
+  （[#125](https://github.com/Kewton/commandmate-skills/issues/125)）。`verify.gates` とは独立である。
+  **`.commandmate/verify.yaml` は読むだけで 1 バイトも書かない。**
+- Issue が受入ゲートを宣言している場合、`goal` に `## Acceptance gates this issue declared`
+  （`require:`）／`## Acceptance gates this issue defined`（`gates:`）節が足される。
+  宣言が無い Issue の `goal` は **byte 単位で従来どおり**である。
 - `success.requireScopeClean` は**常に `true`** である。以前は `<allow が非空か>` で決めており、
   対象 file を1つも挙げていない Issue だけ scope ゲートが丸ごと無効化されていた。scope 判定が
   無い契約は「worktree 内の何を書いても clean」と同義なので、これは過剰拒否の裏返しの
@@ -502,17 +508,25 @@ plan の byte 列は変わらない。dispatch report にも解決結果は載�
 **記法の正本は [acceptance-gates-notation.md](./acceptance-gates-notation.md)**、裁定の記録は
 [adr-issue-acceptance-gates.md](./adr-issue-acceptance-gates.md) である。ここは dispatch 側の規約だけを書く。
 
-planner は `plan.issues[].acceptance_gates.require` を**構文だけ**見て載せる。id が実在するかは
-worktree を持つ dispatch にしか判断できない。dispatch は `commandmate ls` で解決した実 path の
+planner は `plan.issues[].acceptance_gates` を**構文と Issue 番号スコープだけ**見て載せる。
+id が実在するか（`require`）／既に在って衝突しないか（`gates`）は worktree を持つ dispatch にしか
+判断できない。dispatch は `commandmate ls` で解決した実 path の
 `<worktree>/.commandmate/verify.yaml` を読み、**`send` する前に**突き合わせる。
 
 - **解決可能な id** = `work-evidence` + `scope` + verify.yaml が宣言した全 gate id。
   これは CommandMate 自身が契約の `verify.gates` を検証するときの集合と同一である
   （built-in の `env-clean` は**この集合に入らない**）。
+- `require` の id は**この集合に在ること**、`gates:` の定義 id は**この集合に在らないこと**を
+  要求する。後者は上流の裁定「契約は足せるだけで上書きできない」の写しである
+  （[#1791](https://github.com/Kewton/CommandMate/issues/1791)）—— 同じ id を契約が再定義できると、
+  リポジトリ自身が宣言した「合格の定義」を委任単位で差し替えられ、しかも report 上は同じ id なので
+  **差し替えたことが読み取れない**。
 - verify.yaml の読み取りは **fail-closed** である。ファイルが無い・読めない・YAML subset で
-  読めない場合、`require` を宣言した Issue は dispatch しない。部分的に読めた id 集合で
+  読めない場合、受入ゲートを宣言した Issue は dispatch しない。部分的に読めた id 集合で
   「実在しない」と判断すると、理由の違う停止が同じ顔をしてしまう。
-  **このファイルは `require` を宣言した Issue のためにしか読まれない**ので、subset で読めない
+  `gates:` を宣言した Issue でも同じく止まる —— `gateDefinitions` を宣言した契約は verify.yaml が
+  無ければ上流が送信時に拒否する（config 無しでは run が起動せず、評価され得ない完了条件になる）。
+  **このファイルは受入ゲートを宣言した Issue のためにしか読まれない**ので、subset で読めない
   verify.yaml を持つリポジトリでも他の挙動は一切変わらない。
 
 #### `verify.gates` の書き出し — 絞り込みを禁ずる
@@ -521,19 +535,41 @@ worktree を持つ dispatch にしか判断できない。dispatch は `commandm
 したがって `require: [adr-present]` を素朴に `verify.gates: [adr-present]` と書き出すと、
 lint も test も走らない契約になる。**受入条件を足したつもりで、判定が弱くなる。**
 
-| operator の `--verify-gates` | Issue の `require:` | 契約の `verify` |
+| operator の `--verify-gates` | Issue の `require:` / `gates:` | 契約の `verify.gates` |
 |---|---|---|
 | 無し | 無し | **キーを書かない**（＝全ゲート） |
-| 無し | 有り | **キーを書かない**。全ゲートに `require` の id は必ず含まれる（実在確認済み） |
+| 無し | 有り | **キーを書かない**。全ゲートに `require` の id は必ず含まれ（実在確認済み）、`gates:` の定義も「全ゲート」に含まれる |
 | 有り | 無し | operator の列挙を、operator の順序のまま |
-| 有り | 有り | **和集合**（sort + 重複除去） |
+| 有り | 有り | **和集合**（sort + 重複除去）。**`gates:` の定義 id は必ず入る** |
+
+最後の行の「必ず」は選択ではない: `verify.gates` を書いた契約が `verify.gateDefinitions` の id を
+列挙しないと、上流は「定義したのに誰も走らせない」として契約エラーにする。その契約が唯一の
+宣言元なので、選ばれなければ永久に走らない。
+
+#### `verify.gateDefinitions` の書き出し（[#125](https://github.com/Kewton/commandmate-skills/issues/125)）
+
+Issue が `gates:` を宣言していれば、**`verify.gates` の有無と無関係に**書く。2 つのキーは別の
+問いに答えている（何が走るか／ゲートとは何か）。entry は `{id, command, timeoutSec}` で、
+`timeoutSec` は **Issue が書いたときだけ**書く（書かなければ上流の既定 600 秒が効き、runner が
+決めた数が混ざらない）。順序は Issue に書かれた順のままである。
+
+**`.commandmate/verify.yaml` には 1 バイトも書かない。** そのファイルは work-evidence の変更集合に
+意図的に残されており（エージェントが自分を裁くゲートを弱めたことの検出面）、契約は既に
+`tasks.contract_json` へ snapshot され変更集合から除外されている。定義を契約に載せる経路は、
+**新しい改竄面を作らずに** Issue 固有ゲートを運ぶ唯一の道である
+（[adr-issue-acceptance-gates.md](./adr-issue-acceptance-gates.md) 第3.5.1節）。
+
+goal には `## Acceptance gates this issue defined` 節が足され、**id だけでなく command も書く** ——
+契約にしか存在しないゲートは worktree のどこにも無いので、id だけ渡された worker は何が走るのか
+判定できない。
 
 #### 停止する条件（いずれも `send` の前）
 
 | limitation | 条件 | 読み方 |
 |---|---|---|
 | `acceptance_gate_id_unknown` | `require` の id が worktree の verify.yaml に無い / ファイルを読めない | limitation が**実在する id を列挙する**ので、綴り違いなら diff がそのまま出る |
-| `acceptance_gates_not_enforceable` | 実行契約の無い run（`--contract-mode off`、契約非対応 CLI）で `require` が宣言されている | 裁定は profile baseline の再実行になり、gate id を伝える口が無い。ここで dispatch すると **Issue が書いた条件を一度も測っていない緑**ができる |
+| `acceptance_gate_id_conflict` | `gates:` の定義 id が worktree の verify.yaml に**既に在る** | Issue 側の id を `issue-<番号>-<何を測るか>` に直すか、定義をやめて既存ゲートを `require:` する。上流は同じ契約を送信時 exit 2 で拒否するので、**そこへ到達させないための停止**である |
+| `acceptance_gates_not_enforceable` | 実行契約の無い run（`--contract-mode off`、契約非対応 CLI）で `require` / `gates` が宣言されている | 裁定は profile baseline の再実行になり、gate id を伝える口も定義を置く場所も無い。ここで dispatch すると **Issue が書いた条件を一度も測っていない緑**ができる |
 | `acceptance_gate_block_invalid` | plan の `acceptance_gates` 自体が壊れている（手編集された plan）、または和集合が 32 件を超える | planner は構文の通ったブロックからしかこの field を書かないので、前者は plan が手で編集された証拠である |
 
 いずれも `send --contract` の exit 2 に頼らない。理由は `contract_scope_unknown` と同じで、

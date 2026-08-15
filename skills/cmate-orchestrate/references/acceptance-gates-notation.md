@@ -8,8 +8,8 @@
 
 | 実装 | 役割 |
 |---|---|
-| `scripts/orchestrate.mjs`（planner） | ブロックを **構文だけ** parse し `plan.issues[].acceptance_gates` に載せる |
-| `scripts/dispatch.mjs` | `require` の id を worktree の `.commandmate/verify.yaml` に突き合わせ、契約に反映する |
+| `scripts/orchestrate.mjs`（planner） | ブロックを **構文と Issue 番号スコープだけ** parse し `plan.issues[].acceptance_gates` に載せる |
+| `scripts/dispatch.mjs` | `require` の id を worktree の `.commandmate/verify.yaml` に突き合わせ、`gates:` の id が衝突しないことを確かめ、契約に反映する |
 
 生産側（`cmate-issue-authoring` / `cmate-issue-refinement`）はこの記法を**ミラーする側**であり、
 独自に拡張しない（ADR 第5節。後続 Issue）。
@@ -48,13 +48,17 @@ require:
 ````
 
 - **`require:`** — `.commandmate/verify.yaml` に**実在する** gate id の列挙。
-  「この Issue では必ずこのゲートが判定に参加すること」の宣言。
-- **`gates:`** — 新規コマンドの宣言。**記法としては予約済みだが、この release は実行しない**
-  （第 6 節）。
+  「この Issue では必ずこのゲートが判定に参加すること」の宣言。**選択**である。
+- **`gates:`** — **新規コマンドの定義**（第 6 節）。実行契約の `verify.gateDefinitions` に載り、
+  その Issue の裁定にだけ参加する。**`.commandmate/verify.yaml` には 1 バイトも書かない。**
+
+どちらか一方でも、両方でもよい。両方空なら syntax error である。
 
 `require` の id は verify.yaml をそのまま指す。翻訳を挟まないのは、記法から verify.yaml への
 変換が「再エンコード」になった瞬間に「Issue が書いた条件」と「実際に走ったコマンド」が
 ずれる余地が生まれるからである。コピーであれば、ずれは構造的に存在しない。
+**`gates:` の entry も同じ理由で verify.yaml の gate entry と同じ key・同じ型・同じ制約**
+であり、runner は id を書き換えない（第 6.1 節）。
 
 ---
 
@@ -65,16 +69,26 @@ require:
 | 個数 | 本文中にちょうど 0 個か 1 個。**2 個以上は syntax error**（マージも先勝ちもしない） |
 | `version` | 必須・**先頭 key**・値は `1`。未知の version は syntax error（前方互換に丸めない） |
 | 構文 | `.commandmate/verify.yaml` と同じ YAML subset。**best-effort 解釈をしない** |
-| インデント | list item は**厳密に 2 スペース**。tab は禁止 |
+| インデント | list item は**厳密に 2 スペース**、`gates:` entry の field は**厳密に 4 スペース**。tab は禁止 |
 | コメント | **行頭 `#` の行だけ**。行末の `# ...` は値の一部であり syntax error になる |
 | 禁止 | anchor / alias（`&` `*`）・flow collection（`[` `{`）・block scalar（`|` `>`）・複数行文字列・`---` / `...` |
-| gate id | `^[a-z0-9][a-z0-9-]{0,31}$`。CommandMate の `GATE_ID_PATTERN` と同一 |
-| 個数上限 | `require` と `gates[].id` を合わせて最大 32 件。重複は error |
+| gate id | `^[a-z0-9][a-z0-9-]{0,31}$`。CommandMate の `GATE_ID_PATTERN` と同一。**引用符は付けない**（付けたら値の一部） |
+| `gates[].id` | 上記に加えて **`issue-<Issue 番号>-` で始まる**こと（第 6.1 節）。予約 id（`work-evidence` / `scope` / `env-clean`）は不可 |
+| `gates[]` の key | `id`（**entry の先頭**）・`command`（必須・非空）・`timeoutSec`（任意・整数・1..7200）。**閉じた集合** |
+| `gates[].command` | 単一行。`"` / `'` で囲ってよい（囲えば外側の引用符は値に含まれない）。verify.yaml の書き方と同じ |
+| 個数上限 | `require` と `gates[].id` を合わせて最大 32 件。重複は error（2 つのリストは**同じ id 空間**である） |
 | 空ブロック | `require` も `gates` も空なら syntax error |
 | 期待 exit code | **0 に固定する。宣言しない**（第 4 節） |
 
-`require` の順序は**著者が書いた順のまま** plan に載る。契約は Issue の写しであって
-再エンコードではない、という第 2 節の原則の帰結である。
+`require` と `gates` の順序は**著者が書いた順のまま** plan に載り、契約に載る。契約は Issue の
+写しであって再エンコードではない、という第 2 節の原則の帰結である。
+
+**上限を超えたら切らない。** 33 件を宣言したブロックは 32 件に丸めずに拒否し、件数を名乗る。
+黙って 1 件落として dispatch すると、宣言された受入条件が消えた run が緑で終わる —— この機能が
+存在する理由そのものである。
+
+`timeoutSec` を書かなかった entry は**契約でも書かれない**。CommandMate 自身の既定
+（`DEFAULT_TIMEOUT_SEC` = 600 秒）が効き、runner が勝手に決めた数が混ざらない。
 
 ---
 
@@ -115,19 +129,71 @@ verify.yaml のゲートは定義上「exit 0 が pass」であり、ランナ�
 
 ---
 
-## 6. `gates:`（新規コマンド）は予約であって未実装
+## 6. `gates:`（新規コマンドゲート）— 契約が定義を運ぶ
 
-`gates:` を含むブロックは **planner が `acceptance_gate_block_unsupported` で止める**。
-黙って無視しない — 受け取っておいて実行しないのは、この機能が防ごうとしている
-「書いたはずの受入条件が消えた run」そのものだからである。
+**実装済み**（[#125](https://github.com/Kewton/commandmate-skills/issues/125)）。
+`gates:` は「この Issue の裁定にだけ参加する新しいコマンド」を定義する。
 
-実行するには dispatch が worktree の `.commandmate/verify.yaml` に追記する必要があり、
-ADR 第3.5節の前提条件が未解決である。実測（[ADR 第11節](./adr-issue-acceptance-gates.md)）:
-**未 commit の `.commandmate/verify.yaml` は work-evidence の `uncommitted` に計上される**
-（除外されているのは `.commandmate/tasks/` だけ）。契約を置いただけの worktree が
-「作業済み」に見え、exit 21 が意味を失う。
+````markdown
+```acceptance-gates
+version: 1
+gates:
+  - id: issue-125-adr-updated
+    command: "grep -aq 'gateDefinitions' skills/cmate-orchestrate/references/adr-issue-acceptance-gates.md"
+    timeoutSec: 120
+```
+````
 
-ゲートに落とせない条件は、**ゲート外として明示**し UAT / 人間の確認に残すこと。
+定義は **実行契約の `verify.gateDefinitions`** に載る（CommandMate
+[#1791](https://github.com/Kewton/CommandMate/issues/1791) / `docs/design/task-contract.md` 第2.3.1節）。
+**`.commandmate/verify.yaml` には 1 バイトも書かない。**
+
+### なぜ verify.yaml に書かないのか
+
+当初の設計（ADR 第3.5節）は「dispatch が worktree の `.commandmate/verify.yaml` に未 commit で
+追記する」だった。それは 2 つの理由で採れない。
+
+1. 未 commit の `.commandmate/verify.yaml` は **work-evidence の `uncommitted` に計上される**
+   （除外は `.commandmate/tasks/` だけ）。契約を置いただけの worktree が「作業済み」に見え、
+   exit 21 が意味を失う（[ADR 第11.2節](./adr-issue-acceptance-gates.md)の実測）。
+2. その除外を広げるのは**上流が意図的に拒んでいる**。verify.yaml は毎ラン読み直され snapshot が
+   無いので、変更集合に残っていること自体が「エージェントが自分を裁くゲートを弱めた」ことの
+   検出面である。
+
+実行契約は既に `tasks.contract_json` へ snapshot され、変更集合からも除外済みなので、
+**そちらに載せれば新しい改竄面が増えない**。これが上流 #1791 の裁定である。
+
+### 6.1 id は Issue に紐付ける（`issue-<番号>-<何を測るか>`）
+
+`gates[].id` は **`issue-<Issue 番号>-` で始まらなければならない**。planner が**確かめる**のであって、
+書き換えはしない —— 書き換えは第 2 節が禁じる再エンコードであり、Issue に書いた id と report に
+出る id が違う状態を作る。
+
+3 つのことを同時に果たす。
+
+1. **衝突が構造的に起きない。** 契約の定義 id が verify.yaml の既存 gate id や予約 id
+   （`work-evidence` / `scope` / `env-clean`）と衝突すると、上流は送信時に **exit 2** で拒否する。
+   リポジトリ共通ゲートは測る対象で名付けられる（`lint` / `selftest`）ので、Issue 番号を含む id が
+   そこに在ることはまず無い。それでも残る場合のために dispatch が突き合わせる（第 7 節）。
+2. **裁定の行が由来を名乗る。** `GATE issue-125-adr-updated FAIL` は、それだけで
+   「repo 共通ゲートではない」と読める。CLI の GATE 行は由来を出さない
+   （[ADR 第11.4節](./adr-issue-acceptance-gates.md)）ので、id 自身が持つのが唯一の手段である。
+3. **寿命を偽らない。** 契約ゲートは 1 Issue の 1 委任のあいだだけ存在する。repo 共通ゲートに
+   見える名前は「ついでに verify.yaml に足しておこう」を誘い、ADR 第3.5節 (1) が拒んだ蓄積を招く。
+
+### 6.2 それでもゲートに落とせない条件
+
+**ゲート外として明示**し UAT / 人間の確認に残すこと。第 5 節の裁定は変わっていない ——
+散文から `gates:` を生成することは無い。書くのは著者であり、読むのはレビュアーである。
+
+### 6.3 生産側（`cmate-issue-authoring` / `cmate-issue-refinement`）はまだ出さない
+
+記法をミラーする 2 package は `require:` だけを出し、`gates:` は出さない（ADR 第5節の後続 Issue）。
+**consumer が読めることと producer が書けることは別に進む。** 現状の producer は `gates:` を
+`acceptance_gate_block_unsupported` で拒否する —— 「自分が出せない記法」を出さないための
+producer 側の判断であって、consumer の状態を述べたものではない。
+conformance テスト（`tests/fixtures/cmate-issue-authoring/acceptance-gates-conformance.mjs`）が
+この差を**明示的な 1 件の乖離として固定**しているので、producer が追いつく Issue はそこを見ればよい。
 
 ---
 
@@ -140,9 +206,10 @@ ADR 第3.5節の前提条件が未解決である。実測（[ADR 第11節](./ad
 | ブロックが 0 個 | **従来挙動**。受入ゲートは載らない。契約は byte 単位で従来どおり |
 | ブロックが 1 個・構文 OK | `plan.issues[].acceptance_gates` に載り、契約へ運ばれる |
 | ブロックが 2 個以上 / 構文違反 / 未知 version / id 不正 / 空 | planner が open question + warning `acceptance_gate_block_invalid`。**推測で復旧しない** |
-| `gates:` を含む | planner が open question + warning `acceptance_gate_block_unsupported`（第 6 節） |
+| `gates[].id` が予約 id / `issue-<番号>-` 始まりでない / command 無し / timeout 範囲外 / 重複 / 上限超過 | 同上（`acceptance_gate_block_invalid`）。**上限超過は切らずに拒否する**（第 3 節） |
 | `require` の id が worktree の verify.yaml に無い | dispatch が `acceptance_gate_id_unknown` で **`send` する前に**当該 Issue を止める |
-| 実行契約が無い run で `require` がある | dispatch が `acceptance_gates_not_enforceable` で止める（第 8 節） |
+| `gates[].id` が worktree の verify.yaml の既存 id と衝突 | dispatch が `acceptance_gate_id_conflict` で **`send` する前に**止める（第 8 節）。上流の exit 2 には到達させない |
+| 実行契約が無い run で `require` / `gates` がある | dispatch が `acceptance_gates_not_enforceable` で止める（第 8 節） |
 
 いずれも `plan.issues[].acceptance_gates` は `null` になる。**`null` は「ブロックが無かった」を
 意味しない** — 区別は warning が持つ。
@@ -163,18 +230,32 @@ id の実在確認は **planner ではなく dispatch** が行う。planner は�
 これは CommandMate 自身が契約の `verify.gates` を検証するときの集合と同一である
 （`env-clean` は built-in ゲートだが**この集合に入らない**ので、`require: [env-clean]` は拒否される）。
 
+`gates:` の定義 id には**逆向き**の判定が要る: **この集合に在ってはならない**。
+在れば `acceptance_gate_id_conflict` で止める。契約は**足せるだけで上書きできない**（上流の裁定）
+—— 同じ id を契約が再定義できると、リポジトリ自身が宣言した「合格の定義」を委任単位で
+差し替えられることになり、しかも report 上は同じ id なので**差し替えたことが読み取れない**。
+verify.yaml が読めないときも止める。`gateDefinitions` を宣言した契約は、verify.yaml が無ければ
+上流が送信時に拒否する（config 無しでは run が起動せず、評価され得ない完了条件になる）。
+
 ### 8.1 `verify.gates` の書き出し規則 — **絞り込みを禁ずる**
 
 契約の `verify` key の省略は「全ゲートを走らせる」であり、明示は「そのゲートだけを走らせる」
 である。したがって `require: [adr-present]` を素朴に `verify.gates: [adr-present]` と書き出すと、
 lint も test も走らない契約になる。**受入条件を足したつもりで、判定が弱くなる。**
 
-| operator の `--verify-gates` | Issue の `require:` | 契約の `verify` |
+| operator の `--verify-gates` | Issue の `require:` / `gates:` | 契約の `verify.gates` |
 |---|---|---|
 | 無し | 無し | **key を書かない**（＝全ゲート） |
-| 無し | 有り | **key を書かない**。全ゲートに `require` の id は必ず含まれる（実在確認済み） |
+| 無し | 有り | **key を書かない**。全ゲートに `require` の id は必ず含まれ（実在確認済み）、`gates:` の定義も「全ゲート」に含まれる |
 | 有り | 無し | operator の列挙を、operator の順序のまま |
-| 有り | 有り | **和集合**（sort + 重複除去） |
+| 有り | 有り | **和集合**（sort + 重複除去）。`gates:` の id も**必ず**入る |
+
+最後の行は選択ではなく**上流の要求**である: `verify.gates` を書いた契約が `verify.gateDefinitions`
+の id を列挙しないのは「定義したのに誰も走らせない」であり、契約エラーになる。その契約が唯一の
+宣言元なので、選ばれなければ**永久に走らない**。
+
+`verify.gateDefinitions` は `verify.gates` とは独立に、**Issue が定義したときは必ず**書かれる。
+2 つは別の問いに答えている（何が走るか／ゲートとは何か）。
 
 和集合が 32 件を超える場合は dispatch しない。片側を落とす縮約は、どちらを落としても
 「宣言された要求を黙って捨てる」ことになるので採らない。
@@ -182,13 +263,18 @@ lint も test も走らない契約になる。**受入条件を足したつも�
 ### 8.2 goal への転記
 
 `require` が空でないときだけ、契約 `goal` に `## Acceptance gates this issue declared` 節が
-足される。ブロックを持たない Issue の goal は **byte 単位で従来どおり**である。
+足される。`gates:` が空でないときは `## Acceptance gates this issue defined` 節が足され、
+**id だけでなく command も書く** —— 契約にしか存在しないゲートは worktree のどこを探しても
+見つからないので、id だけ渡された worker は何が走るのか判定できない（上流の前文が
+`gateDefinitions[].command` を実コマンドに展開するのと同じ理由）。
+ブロックを持たない Issue の goal は **byte 単位で従来どおり**である。
 
 ### 8.3 report の `origin`
 
 `verification.gates[]` に optional field `origin`（`repo` / `issue`）が載る。
 
-- `issue` — その Issue の `require:` が名指しした id
+- `issue` — その Issue の `require:` が名指しした id、およびその Issue の `gates:` が定義した id
+  （定義ゲートは定義上 issue 由来である。契約以外にそれを知っている場所が無い）
 - `repo` — repo 共通ゲート（verify.yaml に在るが `require` されていないものを含む）
 - **欠落は「由来が記録されていない」であり、`repo` と読んではならない**
 
@@ -248,6 +334,54 @@ report:
   { "id": "orchestrate-fixtures", "verdict": "pass", "origin": "issue" }
 ]
 ```
+
+### 9.1 新規コマンドを足す例（Issue #125 が実装した側）
+
+同じ `.commandmate/verify.yaml` に対し、Issue #125 の本文が次を書いたとする。
+
+````markdown
+```acceptance-gates
+version: 1
+require:
+  - orchestrate-fixtures
+gates:
+  - id: issue-125-no-verify-yaml-write
+    command: "! grep -aq 'verify.yaml' skills/cmate-orchestrate/scripts/dispatch.mjs"
+    timeoutSec: 120
+```
+````
+
+plan:
+
+```json
+"acceptance_gates": {
+  "version": 1,
+  "require": ["orchestrate-fixtures"],
+  "gates": [
+    {
+      "id": "issue-125-no-verify-yaml-write",
+      "command": "! grep -aq 'verify.yaml' skills/cmate-orchestrate/scripts/dispatch.mjs",
+      "timeoutSec": 120
+    }
+  ]
+}
+```
+
+契約（operator が `--verify-gates` を渡していない場合）:
+
+```yaml
+verify:
+  gateDefinitions:
+    - id: "issue-125-no-verify-yaml-write"
+      command: "! grep -aq 'verify.yaml' skills/cmate-orchestrate/scripts/dispatch.mjs"
+      timeoutSec: 120
+```
+
+`verify.gates` は**書かれない**。走るのは「verify.yaml の全ゲート ＋ この定義」であり、
+これが最も強い読みである。`--verify-gates validate` を渡した場合だけ
+`gates: ["issue-125-no-verify-yaml-write", "validate"]` が加わる（定義 id の列挙は必須）。
+
+`.commandmate/verify.yaml` は**この間ずっと 1 バイトも変わらない**。
 
 ---
 

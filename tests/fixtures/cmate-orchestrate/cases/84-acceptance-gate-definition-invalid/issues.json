@@ -1,0 +1,40 @@
+{
+  "issues": [
+    {
+      "number": 360,
+      "title": "fix: a definition that takes a reserved id",
+      "body": "A gate id CommandMate keeps for itself.\n\n## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\ngates:\n  - id: work-evidence\n    command: \"true\"\n```\n",
+      "labels": []
+    },
+    {
+      "number": 361,
+      "title": "fix: a definition that is not scoped to this issue",
+      "body": "A gate named as if it belonged to the repository.\n\n## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\ngates:\n  - id: adr-present\n    command: \"test -f docs/adr.md\"\n```\n",
+      "labels": []
+    },
+    {
+      "number": 362,
+      "title": "fix: a definition that runs nothing",
+      "body": "A gate entry with no command.\n\n## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\ngates:\n  - id: issue-362-repro\n    timeoutSec: 60\n```\n",
+      "labels": []
+    },
+    {
+      "number": 363,
+      "title": "fix: one gate over the bound",
+      "body": "Thirty-two required ids and one definition.\n\n## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\nrequire:\n  - gate-0\n  - gate-1\n  - gate-2\n  - gate-3\n  - gate-4\n  - gate-5\n  - gate-6\n  - gate-7\n  - gate-8\n  - gate-9\n  - gate-10\n  - gate-11\n  - gate-12\n  - gate-13\n  - gate-14\n  - gate-15\n  - gate-16\n  - gate-17\n  - gate-18\n  - gate-19\n  - gate-20\n  - gate-21\n  - gate-22\n  - gate-23\n  - gate-24\n  - gate-25\n  - gate-26\n  - gate-27\n  - gate-28\n  - gate-29\n  - gate-30\n  - gate-31\ngates:\n  - id: issue-363-repro\n    command: \"true\"\n```\n",
+      "labels": []
+    },
+    {
+      "number": 364,
+      "title": "fix: the same id twice, once as each kind",
+      "body": "One id selected and defined at the same time.\n\n## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\nrequire:\n  - issue-364-repro\ngates:\n  - id: issue-364-repro\n    command: \"true\"\n```\n",
+      "labels": []
+    },
+    {
+      "number": 365,
+      "title": "fix: a timeout the contract parser refuses",
+      "body": "A timeout outside CommandMate's range.\n\n## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\ngates:\n  - id: issue-365-repro\n    command: \"true\"\n    timeoutSec: 9000\n```\n",
+      "labels": []
+    }
+  ]
+}

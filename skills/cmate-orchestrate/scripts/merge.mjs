@@ -1012,11 +1012,15 @@ const SCOPE_EXCEEDED_CODE = 'branch_changed_outside_declared_scope';
 // criteria at all, is not merged with nobody watching. Both readings are of the
 // PLAN — the document a human approved — and neither is re-derived here:
 //
-//   - `acceptance_gates.require` is the transcription of the issue body's
+//   - `acceptance_gates` is the transcription of the issue body's
 //     ```acceptance-gates block (Issue #114, #100 stage 1). Null means the body
 //     carried no block, or carried one the planner refused to read; the plan
 //     tells the two apart with an open question, not with this field, and for
 //     this gate they are the same finding — no machine condition was declared.
+//     EITHER half counts (Issue #125): `require` names existing gates that must
+//     judge the issue, `gates` DEFINES new ones the contract carries. A block
+//     that only defines is not a weaker declaration than one that only selects —
+//     it is the issue writing a condition that did not exist before.
 //   - an empty `acceptance_criteria` is exactly what makes the planner raise
 //     `no_acceptance_criteria`, so the code the report carries is that same one:
 //     the operator's action is identical (write it in the issue and re-plan) and
@@ -1034,7 +1038,9 @@ function hasAcceptanceGateBlock(issue) {
   if (declared === null || declared === undefined) return false;
   if (typeof declared !== 'object' || Array.isArray(declared)) return false;
   if (declared.version !== 1) return false;
-  return Array.isArray(declared.require) && declared.require.some((id) => typeof id === 'string' && id.trim() !== '');
+  const selects = Array.isArray(declared.require) && declared.require.some((id) => typeof id === 'string' && id.trim() !== '');
+  const defines = Array.isArray(declared.gates) && declared.gates.some((gate) => gate !== null && typeof gate === 'object' && typeof gate.id === 'string' && gate.id.trim() !== '');
+  return selects || defines;
 }
 
 function hasAcceptanceCriteria(issue) {
