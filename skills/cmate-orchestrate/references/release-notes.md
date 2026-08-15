@@ -1647,6 +1647,89 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 
 ## パッケージ
 
+### 0.31.0 — Issue が定義した受入ゲートを、`.commandmate/verify.yaml` を 1 バイトも書かずに運ぶ（#125）
+
+**「読めているのに強制できない」記法が、1つだけ残っていた**（#125 / PR #215）。```acceptance-gates
+ブロックの `gates:`（新規コマンドゲートの**定義**）は #114（0.19.0）以来「記法としては予約済み・
+planner が `acceptance_gate_block_unsupported` で停止」だった。停止は既定として正しい —— 読めた宣言を
+黙って捨てれば、著者が書いた受入条件が消えた run が緑で終わる。だが停止は答えではない。裁定に入れ
+られるのは `require:` に書ける**既存**ゲートだけで、「この Issue でだけ測りたい新しい条件」はブロックの
+外の散文に落ち、誰も測らないまま残っていた。
+
+**当初の設計は採らなかった。** [ADR](./adr-issue-acceptance-gates.md) 第3.5節は「dispatch が worktree の
+`.commandmate/verify.yaml` に未 commit で追記し、裁定後に SHA-256 を突き合わせて改竄を検出する」経路を
+前提に、上流へ「work-evidence の除外を 1 path 広げてほしい」を出す想定だった。**その見積もりが誤って
+いた** —— 上流のソース（`src/lib/verification/scope-gate.ts`）に理由が書いてある。`.commandmate/tasks/**`
+を除外できるのは契約が送信時に `tasks.contract_json` へ snapshot されるからであり、
+`.commandmate/verify.yaml` には snapshot が無く**毎ラン読み直される**。変更集合に残っていること自体が
+「エージェントが自分を裁くゲートを弱めた」ことの**検出面**である。「1 path 広げるだけ」の依頼は、実際
+には snapshot 機構の新設を要求していた。
+
+そこで上流に設計相談 CommandMate #1756 を起こし、**案 B ——「そもそも verify.yaml を書き換えない」**が
+採られた（CommandMate #1791 / PR #1793）。実行契約の `verify` が**ゲート定義そのもの**を運ぶ
+（`gateDefinitions`。`{id, command, timeoutSec}` の list、最大 32 件）。契約は既に snapshot され変更集合
+からも除外済みなので、**新しい改竄面が 1 つも増えない**。ADR 第3.5節の前提 (1)(2)(4) は消滅し、(2') は
+「除外を広げる」ではなく「追記をやめる」で解決した —— **除外は 1 バイトも広がっていない**（第3.5.1節に
+読み替え表を足した。第10節・第11節の当時の測定は取り消していない。**その測定こそが #1756 を起こす根拠
+だった**）。
+
+したがって **この runner は `.commandmate/verify.yaml` を 1 バイトも書かない。** 実装にもテストにも書き
+込み経路が無く、dispatch case が worktree の verify.yaml を byte 単位で不変と assert する。
+
+planner はブロックを**構文と Issue 番号スコープだけ**読み、`plan.issues[].acceptance_gates.gates` に
+**著者の順のまま**載せる。`timeoutSec` は**著者が書いたときだけ**載り、書かなければ契約でも黙る ——
+CommandMate 自身の既定（600 秒）が効き、runner が発明した数が混ざらない。定義 id が
+`issue-<番号>-<何を測るか>` で始まることは**確かめるだけで、書き換えない** —— 書き換えは
+[acceptance-gates-notation.md](./acceptance-gates-notation.md) 第2節が禁じる再エンコードであり、Issue に
+書いた id と report に出る id が違う状態を作る。予約 id・command 無し・timeout 範囲外・重複・32 件超は
+`acceptance_gate_block_invalid` である。**上限超過は 32 件に丸めず、拒否して件数を名乗る**（黙って 1 件
+落として dispatch するのは、この機能が消しに来た失敗そのものである）。
+
+dispatch は定義を契約の `verify.gateDefinitions` に書く。`verify.gates` を出力する経路では**定義 id を
+`gates` にも必ず列挙する** —— 上流は「定義したのに誰も走らせない」を契約エラーにするし、契約が唯一の
+宣言元なので選ばれなければ**永久に走らない**。goal には **id だけでなく command も**書く（契約にしか
+存在しないゲートは worktree のどこを探しても見つからず、id だけ渡された worker は何が走るのか判定でき
+ない）。定義ゲートの `verification.gates[].origin` は `issue` である —— 契約以外にそれを知っている場所が
+無い以上、定義ゲートは定義上 issue 由来である。
+
+**衝突は runner が先に止める。** 定義 id が worktree の `.commandmate/verify.yaml` の既存 id と衝突する
+と、新 code `acceptance_gate_id_conflict` が **`send` の前に**その Issue を止める。契約は**足せるだけで
+上書きできない**（上流の裁定）—— 同じ id を契約が再定義できると、リポジトリ自身が宣言した「合格の定義」
+を委任単位で差し替えられ、しかも report 上は同じ id なので**差し替えたことが読み取れない**。上流は同じ
+契約を送信時 exit 2 で拒否するので、これは**そこへ到達させないための停止**である: 走ってすらいない
+worker を「契約が不正だった」と報告するより解ける（`acceptance_gate_id_unknown` と同じ理由である）。
+
+**`acceptance_gate_block_unsupported` は planner からは出なくなった。** 記法違反は
+`acceptance_gate_block_invalid` に一本化し、台帳（[codes-and-recovery.md](./codes-and-recovery.md) 第2節）
+からは外して**廃止 note として意味だけ残した** —— 古い plan に在れば「その run の runner は `gates:` を
+実行できなかった」という意味である。#210（0.30.0）が入れた「新設 code は severity を分類してから足す」の
+反対側、**出なくなった code の畳み方**である。停止そのものが消えたのではない: 読めない `gates:` ブロックは
+今も止まるし、実行契約の無い run（`--contract-mode off`、契約非対応 CLI への fallback）で `gates:` を宣言
+した Issue も `acceptance_gates_not_enforceable` で止まる。この code と `acceptance_gate_id_unknown` は
+**#125 以前から dispatch に在ったのに台帳に無かった**ので、`acceptance_gate_id_conflict` と併せて第3節へ
+載せた（#210 の棚卸しが `plan.warnings` について見つけた欠落と、同じ形の欠落である）。
+
+merge の段階 C（`--merge-prs` の無人 merge）は、**`gates:` だけのブロックも declaration として読む** ——
+既存ゲートを選ぶより、**新しい条件を書くほうが弱い宣言ではない**。
+
+**宣言の無い Issue は byte 不変である。** `gates` キーは定義が無いとき**空 list ではなく不在**なので、
+`require:` だけの Issue が出す plan は key が存在しなかった頃と同じ byte になり、ブロックを持たない Issue の
+goal も従来どおりである。`plan_schema_version`（2）・`dispatch_schema_version`・`merge_schema_version` は
+すべて据え置きで、**破壊的変更は無い**。
+
+**生産側 2 package（`cmate-issue-authoring` / `cmate-issue-refinement`）はまだ `gates:` を出さない**
+（今回は据え置き。ミラーは後続 Issue である）。consumer が読めることと producer が書けることは別に進む ——
+producer が `gates:` を `acceptance_gate_block_unsupported` で拒否し続けるのは「**自分が出せない記法を
+出さない**」という producer 側の判断であって、consumer の状態を述べたものではない。conformance テスト
+（`tests/fixtures/cmate-issue-authoring/acceptance-gates-conformance.mjs`）は、この乖離を `PRODUCER_LAG` の
+patch 列として書き下し、**patch を当てた結果が mirror と byte 一致する**ことを要求する形に変えた（共有部分は
+今も byte 固定である）。乖離が 1 件の明示的な差として固定されているので、producer が追いつく Issue はそこを
+見ればよい。
+
+fixture は plan case 30（受理）/ 84（6 通りの拒否）、dispatch case d94〜d98、段階 C の `gates:`-only case を
+足した。**13 通りの変異で空振りでないことを実測**し、`tests/fixtures/cmate-orchestrate/README.md` に表として
+記録してある。
+
 ### 0.30.0 — 壊れた fixture から黙って部分集合を作らず、warning の severity に台帳を持たせる（#208 / #210）
 
 **offline fixture の読めない要素が、黙って捨てられていた**（#208）。`--issue-json` の loader
