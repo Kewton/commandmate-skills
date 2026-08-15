@@ -1,0 +1,51 @@
+{
+  "description": "Issue #125: 実行契約の無い run（`--contract-mode off`）は、`require:` と同じく `gates:` も運べない。契約が無ければ `verify.gateDefinitions` を置く場所が無く、裁定は profile baseline の再実行になる —— Issue が書いたコマンドを一度も走らせないまま緑になる run そのものである。fail-closed で止め、acceptance_gates_not_enforceable が「定義した」ことを名指しする（`require` しか宣言していない d43 と対になる）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-acceptance-gates-defined.json",
+    "orchestrate_args": [
+      "320",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--contract-mode",
+    "off"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "never_sent": [
+      320
+    ],
+    "worker_states": {
+      "320": "not_dispatched"
+    },
+    "verification_outcomes": {
+      "320": "not_run"
+    },
+    "limitation_codes": [
+      "acceptance_gates_not_enforceable"
+    ],
+    "limitation_details_include": [
+      "#320: the issue defines gate(s) issue-320-adr-present, but this dispatch runs without an execution contract"
+    ],
+    "worktree_files_unchanged": [
+      ".commandmate/verify.yaml"
+    ]
+  }
+}

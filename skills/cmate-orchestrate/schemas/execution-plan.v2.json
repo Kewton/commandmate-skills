@@ -272,6 +272,34 @@
       "description": "A CommandMate verification gate id. Mirrors GATE_ID_PATTERN in CommandMate's verify config and GATE_ID_RE in dispatch.mjs: an id this rejects is one `send --contract` would reject.",
       "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
     },
+    "acceptance_gate_definitions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "description": "New command gates the issue DEFINES, in the author's order. Shape, bounds and reserved ids are CommandMate's own gate entry (validateGateEntries in verify-config, shared with the contract's verify.gateDefinitions since #1791), so an entry here is one `send --contract` accepts. The id is issue-scoped — `issue-<number>-<what>` — which is checked, never rewritten. `timeoutSec` is absent when the author did not state one, and the contract stays silent about it too, so CommandMate's own default (600s) applies rather than a number this planner invented.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "command"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/gate_id"
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timeoutSec": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7200
+          }
+        }
+      }
+    },
     "severity": {
       "enum": [
         "low",
@@ -438,11 +466,38 @@
                   "items": {
                     "$ref": "#/$defs/gate_id"
                   }
+                },
+                "gates": {
+                  "$ref": "#/$defs/acceptance_gate_definitions"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "version",
+                "require",
+                "gates"
+              ],
+              "properties": {
+                "version": {
+                  "const": 1
+                },
+                "require": {
+                  "type": "array",
+                  "maxItems": 0,
+                  "items": {
+                    "$ref": "#/$defs/gate_id"
+                  }
+                },
+                "gates": {
+                  "$ref": "#/$defs/acceptance_gate_definitions"
                 }
               }
             }
           ],
-          "description": "Transcription of the issue body's ```acceptance-gates block (references/acceptance-gates-notation.md). Null means the body carries no such block, OR that it carries one the planner refused to read — the two are told apart by the acceptance_gate_block_invalid / acceptance_gate_block_unsupported open question, never by this field. `require` names gate ids that MUST take part in the verdict; it is transcribed in the author's order and is a COPY, not a re-encoding. The planner checks syntax only: it never opens the target repository, so the ids are resolved against `<worktree>/.commandmate/verify.yaml` by the dispatch runner, which refuses the issue before `send` when one does not exist (ADR §3.4)."
+          "description": "Transcription of the issue body's ```acceptance-gates block (references/acceptance-gates-notation.md). Null means the body carries no such block, OR that it carries one the planner refused to read — the two are told apart by the acceptance_gate_block_invalid open question, never by this field. `require` names gate ids that MUST take part in the verdict and already exist in the target repository; `gates` DEFINES new ones, which the dispatch runner carries in the execution contract's verify.gateDefinitions (CommandMate #1791) and never writes into `.commandmate/verify.yaml`. Both are transcribed in the author's order and are a COPY, not a re-encoding. The `gates` key is absent — not an empty list — when the block defines nothing, so an issue that only uses `require:` produces the plan bytes it produced before the key existed. The two branches above say that at least one of the two lists is non-empty: an empty block is a syntax error, not an issue without gates. The planner checks syntax and issue-scoping only: it never opens the target repository, so `require` ids and definition-id collisions are resolved against `<worktree>/.commandmate/verify.yaml` by the dispatch runner, which refuses the issue before `send` (ADR §3.4, §3.5)."
         },
         "suspected_files": {
           "type": "array",
@@ -504,7 +559,7 @@
             "type": "string",
             "minLength": 1
           },
-          "description": "Blocking questions for this issue. The dispatch runner refuses an issue carrying any of them unless --allow-questions is passed, so this array — not plan.status — is what stops a run. Each entry also appears in plan.warnings under the private code that produced it: open_question_declared (the issue body's ```open-questions block says the AUTHOR has not decided this; the sentence is transcribed verbatim, in the author's order — references/open-questions-notation.md), open_question_block_invalid (that block could not be read and is NOT treated as absent), acceptance_gate_block_invalid / acceptance_gate_block_unsupported (the ```acceptance-gates block, likewise), no_acceptance_criteria, no_suspected_files, ambiguous_file_candidate, acceptance_requires_tests_but_scope_has_none, unconfirmed_lexical_dependency. Every code but the first is the planner reporting something it could not READ; the first is the author reporting something they have not DECIDED, and it is raised before the others for that reason. See references/plan-contract.md sections 5.4 and 5.5 and references/codes-and-recovery.md."
+          "description": "Blocking questions for this issue. The dispatch runner refuses an issue carrying any of them unless --allow-questions is passed, so this array — not plan.status — is what stops a run. Each entry also appears in plan.warnings under the private code that produced it: open_question_declared (the issue body's ```open-questions block says the AUTHOR has not decided this; the sentence is transcribed verbatim, in the author's order — references/open-questions-notation.md), open_question_block_invalid (that block could not be read and is NOT treated as absent), acceptance_gate_block_invalid (the ```acceptance-gates block, likewise — including a `gates:` definition whose id is not scoped to this issue), no_acceptance_criteria, no_suspected_files, ambiguous_file_candidate, acceptance_requires_tests_but_scope_has_none, unconfirmed_lexical_dependency. Every code but the first is the planner reporting something it could not READ; the first is the author reporting something they have not DECIDED, and it is raised before the others for that reason. See references/plan-contract.md sections 5.4 and 5.5 and references/codes-and-recovery.md."
         },
         "classification": {
           "enum": [

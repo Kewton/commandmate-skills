@@ -1,0 +1,85 @@
+{
+  "description": "Issue #125, ADR §4 (1) の適合側（緑）。Issue が `gates:` で **repo に存在しないコマンド**を定義し、その定義は実行契約の `verify.gateDefinitions` に載る。worktree の `.commandmate/verify.yaml` は `lint` しか宣言していないので、緑は「fake がそう言うよう指示された」ではなく「契約が運んだ `test -f docs/adr.md` が本当に通った」である。契約に `verify.gates` は書かれない —— 定義を書いただけなら「全 repo ゲート＋この定義」が走るのであって、絞り込みではない（ADR §3.4 と同じ理由）。由来は issue-320-adr-present だけが origin=issue、lint と work-evidence は repo。実行順は verify.yaml 宣言順 → 契約宣言順（task-contract.md §6）。そして **`.commandmate/verify.yaml` は 1 バイトも変わっていない** —— それが上流 #1791 の経路を採った理由そのものなので、byte 単位で assert する。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-acceptance-gates-defined.json",
+    "orchestrate_args": [
+      "320",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      320
+    ],
+    "send_counts": {
+      "320": 1
+    },
+    "worker_states": {
+      "320": "completed"
+    },
+    "verification_outcomes": {
+      "320": "pass"
+    },
+    "verification_gates": {
+      "320": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "lint",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "issue-320-adr-present",
+          "verdict": "pass",
+          "origin": "issue"
+        }
+      ]
+    },
+    "task_ids": {
+      "320": "task-issue-320"
+    },
+    "contract_issues": [
+      320
+    ],
+    "contract_contains": {
+      "320": [
+        "verify:\n  gateDefinitions:\n    - id: \"issue-320-adr-present\"\n      command: \"test -f docs/adr.md\"\n      timeoutSec: 120\n",
+        "  ## Acceptance gates this issue defined",
+        "  - issue-320-adr-present: test -f docs/adr.md"
+      ]
+    },
+    "contract_absent": {
+      "320": [
+        "  gates:"
+      ]
+    },
+    "worktree_files_unchanged": [
+      ".commandmate/verify.yaml"
+    ],
+    "verify_calls": 0,
+    "wait_verify_calls_min": 1
+  }
+}

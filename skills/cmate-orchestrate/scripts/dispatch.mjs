@@ -170,6 +170,16 @@ const MAX_SCOPE_PATTERNS = 200;
 const MAX_SCOPE_PATTERN_LENGTH = 200;
 const MAX_GATE_IDS = 32;
 const GATE_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+// `verify.gateDefinitions` — the gates a contract carries itself (CommandMate
+// #1791 / task-contract.md §2.3.1). MAX_GATE_DEFINITIONS matches MAX_GATE_IDS
+// upstream ("a contract cannot select more gates than it may define"), and the
+// per-entry rules are verify-config's own `validateGateEntries`, so the timeout
+// range and the reserved ids below are the SAME constraints a gate declared in
+// `.commandmate/verify.yaml` is held to.
+const MAX_GATE_DEFINITIONS = 32;
+const RESERVED_GATE_IDS = ['work-evidence', 'scope', 'env-clean'];
+const MIN_GATE_TIMEOUT_SEC = 1;
+const MAX_GATE_TIMEOUT_SEC = 7200;
 
 // Bounds on the issue-body text the goal transcribes verbatim (Issue #176).
 // Both are this runner's, not CommandMate's, and they exist for one reason: the
@@ -3086,15 +3096,16 @@ function constraintLimitation(number, constraints) {
 // and it writes that criterion out as the REAL gate commands resolved from
 // verify.yaml. Repeating the profile baseline here would tell the worker to
 // satisfy one thing while a different thing judges it.
-// `requiredGates` adds ONE section, and only when the issue declared gates. An
-// issue with no `acceptance-gates` block produces the same bytes as before this
-// feature existed — the non-regression the ADR §4 (6) fixture pins.
+// `requiredGates` and `definedGates` add ONE section each, and only when the
+// issue declared them. An issue with no `acceptance-gates` block produces the
+// same bytes as before this feature existed — the non-regression the ADR §4 (6)
+// fixture pins.
 //
 // The section is what finally makes the "## Rules" sentence below true for the
 // mechanized part of the acceptance criteria: until now the goal told the worker
 // that "the same gates decide the verdict" while the verdict was actually the
 // repository's common gate set, which the issue had no way to speak to (ADR §1.1).
-function buildContractGoal(plan, issue, requiredGates = [], workerMethod = null, constraints = null) {
+function buildContractGoal(plan, issue, requiredGates = [], workerMethod = null, constraints = null, definedGates = []) {
   const goal = [
     `# Issue #${issue.number} — ${issue.title ?? 'no title'}`,
     '',
@@ -3131,6 +3142,21 @@ function buildContractGoal(plan, issue, requiredGates = [], workerMethod = null,
       ...requiredGates.map((id) => `- ${id}`),
       'These are gate ids from this repository\'s .commandmate/verify.yaml, named by the',
       'issue itself. They take part in the verdict; run them and make them pass.',
+      '',
+    ]),
+    // The commands, not only the ids (Issue #125). A gate that exists ONLY in
+    // this contract is one the worker cannot look up: it is in no file in the
+    // worktree, and `verify.yaml` does not mention it. CommandMate's own preamble
+    // resolves `gateDefinitions[].command` into the completion criterion for the
+    // same reason, and stating it here too means the section a reader of
+    // `<out>/prompts/` sees is the section the worker was sent.
+    ...(definedGates.length === 0 ? [] : [
+      '## Acceptance gates this issue defined',
+      ...definedGates.map((gate) => `- ${gate.id}: ${gate.command}`),
+      'The issue declared these commands itself and the execution contract carries them',
+      'as verify.gateDefinitions. They run in ADDITION to this repository\'s own gates and',
+      'take part in the verdict. Do not add them to .commandmate/verify.yaml — they belong',
+      'to this issue, and the contract is what declares them.',
       '',
     ]),
     '## Rules',
@@ -3208,19 +3234,20 @@ const AUTO_YES_ALLOWED_PROMPT_TYPES = ['yes_no', 'multiple_choice'];
 
 // The contract document for one issue. Field order is fixed, so is every list.
 //
-// `requiredGates` is the issue's resolved `require:` list (empty when the issue
-// declared none). It is passed in rather than re-read here because the CALLER is
-// what verified those ids exist in the worktree — a contract must never name a
-// gate this run has not seen in `.commandmate/verify.yaml`.
-function buildTaskContract(plan, issue, inputs, requiredGates = [], workerMethod = null, constraints = null) {
+// `requiredGates` is the issue's resolved `require:` list and `definedGates` its
+// resolved `gates:` entries (both empty when the issue declared none). They are
+// passed in rather than re-read here because the CALLER is what checked them
+// against the worktree — a contract must never name a gate this run has not seen
+// in `.commandmate/verify.yaml`, nor define one that file already declares.
+function buildTaskContract(plan, issue, inputs, requiredGates = [], workerMethod = null, constraints = null, definedGates = []) {
   const allow = contractScopeAllow(issue);
-  const verifyGates = contractVerifyGates(inputs.verifyGates, requiredGates);
+  const verifyGates = contractVerifyGates(inputs.verifyGates, requiredGates, definedGateIds(definedGates));
   const lines = [];
   lines.push('# Generated by cmate-orchestrate (dispatch runner) from an approved plan.');
   lines.push('# Do not edit by hand: the same plan regenerates this file byte for byte.');
   lines.push('version: 1');
   lines.push(`title: ${yamlString(contractTitle(issue))}`);
-  lines.push(yamlBlockScalar('goal', buildContractGoal(plan, issue, requiredGates, workerMethod, constraints)));
+  lines.push(yamlBlockScalar('goal', buildContractGoal(plan, issue, requiredGates, workerMethod, constraints, definedGates)));
   lines.push('scope:');
   if (allow.length === 0) {
     lines.push('  allow: []');
@@ -3234,10 +3261,41 @@ function buildTaskContract(plan, issue, inputs, requiredGates = [], workerMethod
   // Omitting the key means "run every declared gate", which is the stricter
   // reading, never the looser one — and it is why an issue's `require:` list
   // alone does NOT write this key (contractVerifyGates, ADR §3.4).
-  if (verifyGates.length > 0) {
+  // `gateDefinitions` is the OTHER half (Issue #125): the gates the issue
+  // declared with a `gates:` block, carried by the contract itself. It is written
+  // whenever the issue defined one, independently of `verify.gates` — the two
+  // keys answer different questions (which gates run vs what a gate IS), and
+  // omitting `gates` while defining one is the normal case, meaning "every
+  // repository gate plus these".
+  //
+  // Nothing here touches `.commandmate/verify.yaml`. That is the point of the
+  // upstream design: the file stays in the work-evidence change set so an agent
+  // weakening its own judge is still visible, and the definition rides in the
+  // contract, which is already snapshotted into `tasks.contract_json` and already
+  // excluded from that change set.
+  if (verifyGates.length > 0 || definedGates.length > 0) {
     lines.push('verify:');
-    lines.push('  gates:');
-    for (const gate of verifyGates) lines.push(`    - ${yamlString(gate)}`);
+    if (verifyGates.length > 0) {
+      lines.push('  gates:');
+      for (const gate of verifyGates) lines.push(`    - ${yamlString(gate)}`);
+    }
+    if (definedGates.length > 0) {
+      lines.push('  gateDefinitions:');
+      for (const gate of definedGates) {
+        // The command is written VERBATIM — it is the thing that runs, and a
+        // redacted command is a broken one. The goal's copy of the same line
+        // does pass through `redact()`, so an issue that wrote an absolute host
+        // path into its gate reads differently in the two places. That is the
+        // safe direction (the prose a human reads does not echo the path) and
+        // the case barely exists: a gate command naming `/Users/...` cannot run
+        // in anyone else's worktree either.
+        lines.push(`    - id: ${yamlString(gate.id)}`);
+        lines.push(`      command: ${yamlString(gate.command)}`);
+        // Absent when the author stated none, so CommandMate's own
+        // DEFAULT_TIMEOUT_SEC applies rather than a number this runner invented.
+        if (gate.timeoutSec !== undefined) lines.push(`      timeoutSec: ${gate.timeoutSec}`);
+      }
+    }
   }
   // The contract states the same Auto-Yes stance the runner itself takes, so the
   // server-side policy and the supervision loop cannot disagree. `off` is an
@@ -3285,9 +3343,14 @@ function contractRelativePath(issueNumber) {
 // worktree path, so it can read that worktree's own `.commandmate/verify.yaml`
 // and answer whether the ids exist (ADR §3.4).
 //
-// Nothing here writes to the worktree. `require:` selects gates that are ALREADY
-// declared, which is what makes stage 1 shippable on its own — the `gates:`
-// (new command) half of the notation is stage 2 and is refused by the planner.
+// Nothing here writes to the worktree, and that is now the whole design rather
+// than a property of stage 1. `require:` selects gates that are ALREADY declared;
+// `gates:` DEFINES new ones, and the definition travels in the execution
+// contract's `verify.gateDefinitions` (CommandMate #1791) instead of being
+// appended to `.commandmate/verify.yaml`. The file that records what this
+// repository counts as passing stays in the work-evidence change set on purpose —
+// an agent weakening its own judge must remain visible — so the one thing this
+// runner must never do to it is write (ADR §3.5.1).
 
 // The file both judges read: `commandmate verify` and cmate-verify's
 // verify-run.sh. That is the whole reason the ADR put issue-specific gates here
@@ -3409,11 +3472,11 @@ function unquoteYaml(value) {
 // contract" instead of "the plan declares something unusable".
 function issueRequiredGates(issue) {
   const declared = issue.acceptance_gates;
-  if (declared === null || declared === undefined) return { ids: [], error: null };
-  const bad = (reason) => ({ ids: [], error: reason });
+  if (declared === null || declared === undefined) return { ids: [], define: [], error: null };
+  const bad = (reason) => ({ ids: [], define: [], error: reason });
   if (typeof declared !== 'object' || Array.isArray(declared)) return bad('acceptance_gates must be an object or null');
   if (declared.version !== 1) return bad(`acceptance_gates.version must be 1 (got ${JSON.stringify(declared.version)})`);
-  if (!Array.isArray(declared.require) || declared.require.length === 0) return bad('acceptance_gates.require must be a non-empty list');
+  if (!Array.isArray(declared.require)) return bad('acceptance_gates.require must be a list');
   if (declared.require.length > MAX_GATE_IDS) return bad(`acceptance_gates.require names more than ${MAX_GATE_IDS} gate ids`);
   const ids = [];
   for (const id of declared.require) {
@@ -3421,7 +3484,58 @@ function issueRequiredGates(issue) {
     if (ids.includes(id)) return bad(`acceptance_gates.require repeats "${id}"`);
     ids.push(id);
   }
-  return { ids, error: null };
+  const definitions = issueDefinedGates(declared, ids);
+  if (definitions.error !== null) return bad(definitions.error);
+  // The block that names nothing at all. The planner refuses it, so a plan that
+  // carries one was hand-edited — and "declares acceptance gates" would then be
+  // true of an issue whose verdict nothing extra judges.
+  if (ids.length === 0 && definitions.define.length === 0) return bad('acceptance_gates declares neither a required nor a defined gate');
+  return { ids, define: definitions.define, error: null };
+}
+
+// `acceptance_gates.gates` — the gates the ISSUE defines, which travel in the
+// contract's `verify.gateDefinitions` (CommandMate #1791). Re-validated on the
+// way in for the same reason `require` is: the plan is an INPUT, and a
+// hand-edited one must not be able to put an entry into a contract that
+// `send --contract` then rejects with "the contract was invalid" about a worker
+// that never ran.
+//
+// Every rule here is transcribed from verify-config's `validateGateEntries`, the
+// function upstream runs over BOTH `.commandmate/verify.yaml` gates and a
+// contract's definitions — that is, exactly the rules whose violation would make
+// `send --contract` exit 2. Two rules are deliberately elsewhere:
+//
+//   - the collision with the worktree's own gate ids needs the worktree, so the
+//     dispatch loop does it after `ls` has resolved a path;
+//   - the `issue-<number>-` naming is a NOTATION rule, not an upstream one, so
+//     the planner owns it. Re-checking it here would refuse a hand-edited plan
+//     that CommandMate itself would accept, which is a different job from
+//     "never write a contract the server will reject".
+function issueDefinedGates(declared, requiredIds) {
+  const bad = (error) => ({ define: [], error });
+  if (declared.gates === undefined) return { define: [], error: null };
+  if (!Array.isArray(declared.gates) || declared.gates.length === 0) return bad('acceptance_gates.gates must be a non-empty list when the key is present');
+  if (declared.gates.length > MAX_GATE_DEFINITIONS) return bad(`acceptance_gates.gates defines more than ${MAX_GATE_DEFINITIONS} gates`);
+  const define = [];
+  const seen = new Set(requiredIds);
+  for (const gate of declared.gates) {
+    if (gate === null || typeof gate !== 'object' || Array.isArray(gate)) return bad('acceptance_gates.gates contains an entry that is not an object');
+    const id = gate.id;
+    if (typeof id !== 'string' || !GATE_ID_RE.test(id)) return bad(`acceptance_gates.gates contains "${redact(String(id))}", which is not a valid gate id`);
+    if (RESERVED_GATE_IDS.includes(id)) return bad(`acceptance_gates.gates redefines "${id}", which is reserved for a built-in gate`);
+    if (seen.has(id)) return bad(`acceptance_gates declares "${id}" twice`);
+    seen.add(id);
+    if (typeof gate.command !== 'string' || gate.command.trim() === '') return bad(`acceptance_gates.gates entry "${id}" declares no command`);
+    const entry = { id, command: gate.command };
+    if (gate.timeoutSec !== undefined) {
+      if (!Number.isInteger(gate.timeoutSec) || gate.timeoutSec < MIN_GATE_TIMEOUT_SEC || gate.timeoutSec > MAX_GATE_TIMEOUT_SEC) {
+        return bad(`acceptance_gates.gates entry "${id}" declares timeoutSec ${JSON.stringify(gate.timeoutSec)}, which is not an integer in ${MIN_GATE_TIMEOUT_SEC}..${MAX_GATE_TIMEOUT_SEC}`);
+      }
+      entry.timeoutSec = gate.timeoutSec;
+    }
+    define.push(entry);
+  }
+  return { define, error: null };
 }
 
 // The contract's `verify.gates` list — ADR §3.4, whose whole point is that
@@ -3440,10 +3554,24 @@ function issueRequiredGates(issue) {
 // exists to prevent: it would turn "these gates must also judge me" into "only
 // these gates judge me", and lint and test would stop running on the very issue
 // that asked for a stricter verdict.
-function contractVerifyGates(operatorGates, requiredGates) {
+//
+// `definedGates` (the ids of the issue's `gates:` definitions, Issue #125) joins
+// the union for a reason the table above cannot express: when `verify.gates` is
+// written at all, CommandMate's contract parser REQUIRES every id in
+// `verify.gateDefinitions` to appear in it — "defined but not named in
+// verify.gates" is a contract error, because that contract is the definition's
+// only declaration site and an unselected one would never run anywhere. Omitting
+// the key (rows 1 and 2) already runs every definition, so nothing is needed
+// there.
+function contractVerifyGates(operatorGates, requiredGates, definedGates = []) {
   if (operatorGates.length === 0) return [];
-  if (requiredGates.length === 0) return operatorGates.slice();
-  return [...new Set([...operatorGates, ...requiredGates])].sort();
+  if (requiredGates.length === 0 && definedGates.length === 0) return operatorGates.slice();
+  return [...new Set([...operatorGates, ...requiredGates, ...definedGates])].sort();
+}
+
+// The ids of the gates an issue defines, in the author's order.
+function definedGateIds(definedGates) {
+  return definedGates.map((gate) => gate.id);
 }
 
 // Place the contract in the worktree (what `send --contract` reads) and keep a
@@ -4122,10 +4250,12 @@ async function hasNewCommit(inputs, worktreePath, baseSha) {
 // `--on-prompt human` would therefore have replaced "stop and present the prompt"
 // with "hang until --timeout, then report a timeout" — the opposite of the
 // human-in-the-loop rule it was written to serve.
-async function superviseWithContract(inputs, worktreeId, worktreePath, relativeContractPath, requiredGates = []) {
-  // The ids the ISSUE named, as a set, so every gate this loop records can say
-  // where it came from (#97 / ADR §8.2).
-  const requiredGateIds = new Set(requiredGates);
+async function superviseWithContract(inputs, worktreeId, worktreePath, relativeContractPath, issueGateIds = []) {
+  // The ids the ISSUE named — the ones it `require`d and the ones it defined —
+  // as a set, so every gate this loop records can say where it came from
+  // (#97 / ADR §8.2). A gate the issue DEFINED is issue-declared by
+  // construction: nothing but this contract knows it exists.
+  const requiredGateIds = new Set(issueGateIds);
   const baseSha = await worktreeHeadSha(inputs, worktreePath);
   // When this worker's supervision opened. The elapsed time a liveness probe
   // reports is measured from here (Issue #179) — against `--wait-timeout` it is
@@ -4775,7 +4905,7 @@ function gatesFromVerifyDocument(run, requiredGateIds = new Set()) {
 // 0 pass, 20 judged-and-failed, 21 the work-evidence gate finding nothing,
 // 99 NO VERDICT AT ALL (escalated, never re-instructed), anything else
 // infrastructure and therefore no verdict to record.
-async function reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePath, requiredGates) {
+async function reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePath, issueGateIds) {
   if (!contractMode) {
     // The fallback judge, unchanged: the profile baseline re-run inside the
     // worktree. It is the same function, called with the same arguments, as the
@@ -4806,7 +4936,7 @@ async function reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePa
     run = null;
   }
   const code = result.ok ? VERIFY_EXIT_PASS : (result.status ?? null);
-  const reverifyGates = gatesFromVerifyDocument(run, new Set(requiredGates));
+  const reverifyGates = gatesFromVerifyDocument(run, new Set(issueGateIds));
   const done = (outcome, checks, extra = {}) => ({
     source: 'contract',
     notJudged: false,
@@ -5283,7 +5413,9 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
         worker,
         worktreeId: res.resolved.id,
         worktreePath: res.worktreePath,
-        requiredGates: declaredGates.error === null ? declaredGates.ids : [],
+        issueGateIds: declaredGates.error === null
+          ? [...declaredGates.ids, ...definedGateIds(declaredGates.define)]
+          : [],
       });
       sink.workers.push(worker);
       return;
@@ -5304,6 +5436,11 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     // on — the same reading `contract_scope_unknown` takes (ADR §3.4).
     const declared = issueRequiredGates(res.issue);
     const requiredGates = declared.ids;
+    // The gates the issue DEFINES (Issue #125). They are resolved in the same
+    // place and for the same reason: a definition whose id collides with a gate
+    // the worktree already declares is an exit 2 at `send`, and that reports a
+    // bad contract instead of the name that has to change.
+    const definedGates = declared.define;
     if (declared.error !== null) {
       worker.note = redact(`#${number} was not dispatched: ${declared.error}`);
       report.limitations.push({
@@ -5313,27 +5450,43 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
       sink.workers.push(worker);
       return;
     }
-    if (requiredGates.length > 0) {
+    if (requiredGates.length > 0 || definedGates.length > 0) {
+      // What the issue said about its own verdict, in one phrase, for the
+      // refusals below. `require` and `gates:` fail for the same reasons and a
+      // block may carry either or both, so the message names what this issue
+      // actually wrote rather than assuming one of the two.
+      const declaredGatesPhrase = [
+        ...(requiredGates.length > 0 ? [`requires gate(s) ${requiredGates.join(', ')}`] : []),
+        ...(definedGates.length > 0 ? [`defines gate(s) ${definedGateIds(definedGates).join(', ')}`] : []),
+      ].join(' and ');
       if (!contractMode) {
-        // Without an execution contract there is no `verify.gates` and no
-        // `wait --verify`: the judge is the profile baseline re-run in the
-        // worktree, which cannot be told about a gate id. Dispatching anyway
-        // would produce exactly the run this whole feature exists to prevent —
-        // a green verdict that never measured the condition the issue wrote.
+        // Without an execution contract there is no `verify.gates`, no
+        // `verify.gateDefinitions` and no `wait --verify`: the judge is the
+        // profile baseline re-run in the worktree, which cannot be told about a
+        // gate id and has nowhere to put a gate the issue defined. Dispatching
+        // anyway would produce exactly the run this whole feature exists to
+        // prevent — a green verdict that never measured the condition the issue
+        // wrote.
         worker.note = redact(`#${number} was not dispatched: it declares acceptance gates, and this run has no execution contract to carry them`);
         report.limitations.push({
           code: 'acceptance_gates_not_enforceable',
-          detail: `#${number}: the issue requires gate(s) ${requiredGates.join(', ')}, but this dispatch runs without an execution contract (--contract-mode off, or the CLI has no \`send --contract\`), so nothing can carry the requirement into the verdict. The fallback judge is the profile baseline, which has no gate ids. Use a CommandMate with contract support, or remove the \`acceptance-gates\` block and state the condition for UAT`,
+          detail: `#${number}: the issue ${declaredGatesPhrase}, but this dispatch runs without an execution contract (--contract-mode off, or the CLI has no \`send --contract\`), so nothing can carry the requirement into the verdict. The fallback judge is the profile baseline, which has no gate ids. Use a CommandMate with contract support, or remove the \`acceptance-gates\` block and state the condition for UAT`,
         });
         sink.workers.push(worker);
         return;
       }
+      // Read for BOTH halves. `require` needs it to resolve ids; a `gates:`
+      // definition needs it because CommandMate refuses a contract that declares
+      // `verify.gateDefinitions` when the repository has no readable
+      // `.commandmate/verify.yaml` at all (a run that cannot start is a
+      // completion criterion nothing can evaluate), and because the collision
+      // check below is against exactly those ids.
       const config = readWorktreeGateIds(res.worktreePath);
       if (!config.ok) {
         worker.note = redact(`#${number} was not dispatched: ${config.reason}`);
         report.limitations.push({
           code: 'acceptance_gate_id_unknown',
-          detail: `#${number}: the issue requires gate(s) ${requiredGates.join(', ')}, but ${config.reason}. The ids are resolved against the worktree's own ${VERIFY_CONFIG_RELATIVE} because that is the one file BOTH judges read (\`commandmate verify\` and cmate-verify); declare the gates there, or drop the requirement from the issue`,
+          detail: `#${number}: the issue ${declaredGatesPhrase}, but ${config.reason}. The ids are resolved against the worktree's own ${VERIFY_CONFIG_RELATIVE} because that is the one file BOTH judges read (\`commandmate verify\` and cmate-verify); declare the gates there, or drop the requirement from the issue`,
         });
         sink.workers.push(worker);
         return;
@@ -5349,11 +5502,30 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
         sink.workers.push(worker);
         return;
       }
-      if (contractVerifyGates(inputs.verifyGates, requiredGates).length > MAX_GATE_IDS) {
-        worker.note = redact(`#${number} was not dispatched: the operator's --verify-gates and the issue's require: exceed the contract's ${MAX_GATE_IDS}-id bound`);
+      // The mirror image of `missing` (Issue #125): a DEFINITION may not name an
+      // id the worktree already declares. Upstream refuses it rather than letting
+      // a contract silently redefine a gate, and the reason is worth repeating
+      // here: the report would show the same id either way, so the substitution
+      // would not be readable — a delegation could replace the repository's own
+      // definition of "passing" and nothing downstream could tell.
+      //
+      // The reserved ids are refused by the planner and by `issueDefinedGates`
+      // already; this is the collision that needs the worktree.
+      const shadowed = definedGateIds(definedGates).filter((id) => known.has(id));
+      if (shadowed.length > 0) {
+        worker.note = redact(`#${number} was not dispatched: defined gate id(s) ${shadowed.join(', ')} already exist in the worktree`);
+        report.limitations.push({
+          code: 'acceptance_gate_id_conflict',
+          detail: `#${number}: the issue's \`gates:\` block defines gate id(s) ${shadowed.join(', ')}, which ${VERIFY_CONFIG_RELATIVE} already declares. A contract may ADD gates, never redefine one — the report would print the same id for either definition, so a repository's own idea of "passing" could be replaced without that being readable anywhere. Rename the issue's gate (it is scoped to the issue: \`issue-${number}-<what-it-measures>\`), or drop the definition and \`require:\` the existing gate instead. The issue is NOT dispatched — the same contract exits 2 at \`send\``,
+        });
+        sink.workers.push(worker);
+        return;
+      }
+      if (contractVerifyGates(inputs.verifyGates, requiredGates, definedGateIds(definedGates)).length > MAX_GATE_IDS) {
+        worker.note = redact(`#${number} was not dispatched: the operator's --verify-gates and the issue's acceptance-gates block exceed the contract's ${MAX_GATE_IDS}-id bound`);
         report.limitations.push({
           code: 'acceptance_gate_block_invalid',
-          detail: `#${number}: the union of --verify-gates and the issue's \`require:\` names more than ${MAX_GATE_IDS} gate ids, which CommandMate's contract parser rejects. Narrowing the union is not an option — it would drop a requirement one side declared — so the issue is not dispatched. Reduce one of the two lists`,
+          detail: `#${number}: the union of --verify-gates and the issue's \`require:\` / \`gates:\` ids names more than ${MAX_GATE_IDS} gate ids, which CommandMate's contract parser rejects. Narrowing the union is not an option — it would drop a requirement one side declared, and a definition dropped from \`verify.gates\` is a contract error in its own right — so the issue is not dispatched. Reduce one of the two lists`,
         });
         sink.workers.push(worker);
         return;
@@ -5416,7 +5588,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
         return;
       }
       try {
-        contractPath = placeContract(res.worktreePath, number, buildTaskContract(plan, res.issue, inputs, requiredGates, inputs.workerMethod, constraintsFor()), contractsDir);
+        contractPath = placeContract(res.worktreePath, number, buildTaskContract(plan, res.issue, inputs, requiredGates, inputs.workerMethod, constraintsFor(), definedGates), contractsDir);
       } catch (error) {
         worker.worker_state = 'failed';
         worker.note = redact(`could not place the execution contract in the worktree: ${error.message}`);
@@ -5429,7 +5601,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     // In contract mode the artifact is the goal — the body CommandMate sends
     // after its own preamble — so the file still shows what the worker read.
     const prompt = contractMode
-      ? buildContractGoal(plan, res.issue, requiredGates, inputs.workerMethod, constraintsFor())
+      ? buildContractGoal(plan, res.issue, requiredGates, inputs.workerMethod, constraintsFor(), definedGates)
       : buildWorkerPrompt(plan, res.issue, inputs.workerMethod, constraintsFor());
     writeFileSync(promptFile, `${prompt}\n`, 'utf8');
 
@@ -5458,15 +5630,15 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     }
 
     sink.workers.push(worker);
-    sink.supervisable.push({ worker, worktreeId: res.resolved.id, worktreePath: res.worktreePath, prompt, contractPath, requiredGates });
+    sink.supervisable.push({ worker, worktreeId: res.resolved.id, worktreePath: res.worktreePath, prompt, contractPath, issueGateIds: [...requiredGates, ...definedGateIds(definedGates)] });
   };
 
   // One worker's supervision, and the state updates that belong to it. Awaited as
   // a group by the wave loop and raced one at a time by the DAG scheduler; the
   // body is identical either way, which is the point of it being one function.
-  const superviseOne = async ({ worker, worktreeId, worktreePath, prompt, contractPath, requiredGates }) => {
+  const superviseOne = async ({ worker, worktreeId, worktreePath, prompt, contractPath, issueGateIds }) => {
     const supervised = contractMode
-      ? await superviseWithContract(inputs, worktreeId, worktreePath, contractPath, requiredGates)
+      ? await superviseWithContract(inputs, worktreeId, worktreePath, contractPath, issueGateIds)
       : await superviseUntilCommit(inputs, worktreeId, worktreePath, prompt);
     worker.worker_state = supervised.state;
     worker.note = redact(supervised.note);
@@ -5781,7 +5953,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     //      Concurrent for the same reason the supervision loop is: a gate run is
     //      the slow part, the wave width is already <= max_parallel, and one
     //      issue's gates must not wait behind another's.
-    await Promise.all(reverifiable.map(async ({ worker, worktreeId, worktreePath, requiredGates }) => {
+    await Promise.all(reverifiable.map(async ({ worker, worktreeId, worktreePath, issueGateIds }) => {
       // A pending prompt is a worker still mid-turn, waiting for a human. The
       // tree under it is being changed by somebody who has not finished, so a
       // verdict about it would describe a state that is not a deliverable — and
@@ -5816,7 +5988,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
           : 'not re-judged by this --reverify attempt: its worktree holds no work evidence (no commit, no uncommitted change)');
         return;
       }
-      const judged = await reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePath, requiredGates);
+      const judged = await reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePath, issueGateIds);
       if (judged.workEvidenceDisagreed) {
         report.limitations.push({
           code: 'reverify_evidence_disagreement',

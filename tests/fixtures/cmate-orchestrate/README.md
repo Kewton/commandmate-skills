@@ -111,7 +111,8 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 | `83-repo-override-with-blocking` | 同じ notice と blocking な warning が同居したとき、`status` が blocking 側で決まるか（#210。notice が**先頭**に立つ並びで固定してある。case 72 の profile 版） |
 | `28-acceptance-gates-block` | ```acceptance-gates ブロックが `acceptance_gates` に載るか。ブロック有無の**双子 Issue**で `test_expectations` が byte 一致するか（#114 Phase 0-3: strip しないと本ブロックの終了 fence が後続 ```bash の開始として拾われ、3件が1件に落ちる） |
 | `29-acceptance-gates-invalid` | 2個・未知 version・不正 id・空ブロックを `acceptance_gate_block_invalid` として open question にし、**「ブロックが無かった」に丸めない**か |
-| `30-acceptance-gates-unsupported` | `gates:`（段階2の新規コマンドゲート）を黙って無視せず `acceptance_gate_block_unsupported` で止めるか |
+| `30-acceptance-gates-defined` | `gates:`（新規コマンドゲート）を読み、`{id, command, timeoutSec}` を著者の順のまま `acceptance_gates.gates` に載せるか。`timeoutSec` を書かなかった entry では**キーごと落ちる**（上流の既定に任せ、runner が決めた数を混ぜない）。`require:` と併記でき、warning は 1 件も出ない |
+| `84-acceptance-gate-definition-invalid` | `gates:` の定義が上流の契約パーサに拒否される 6 通り（予約 id・Issue 番号スコープ違反・command 無し・上限超過・require との重複・timeout 範囲外）を、**planner が**`acceptance_gate_block_invalid` で止めるか。上限超過は 32 件に**切らずに**件数を名乗る |
 | `54-lexical-edge-not-serialized` | 相互参照ゼロの3 Issue（実測 #104/#105/#106 の形）が、語彙一致だけで3 wave に直列化されず、1 wave のまま question になるか（#182） |
 | `55-inferred-edge-file-conflict` | 逆向き: 同じ file を書く生産者/消費者は inferred edge のまま残り、`basis: file_conflict` と共有 file を名乗るか（#182） |
 | `56-context-heading-issue-number` | `## 根拠` 配下で**否定するために**書いた `depends on #N` が phantom 依存にならず、かつ CONTEXT の外に書いた依存は残るか（#182） |
@@ -226,6 +227,11 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 | `d41-acceptance-gate-command-missing` | ゲートのコマンドが起動不能（binary 不在→exit 127）のとき赤になり、report がその事実を名指しするか。**この case を d38 の変異側に流用してはならない**（打ち間違えた偽ゲートは成果物が正しくても 127 で赤くなる） |
 | `d42-acceptance-gate-union` | `--verify-gates` と Issue の `require:` の**和集合**（sort + 重複除去）を契約に書くか。素朴な書き出しは lint を止め、operator の列挙をそのまま使うと Issue の要求が落ちる |
 | `d43-acceptance-gates-not-enforceable` | 実行契約の無い run（`--contract-mode off`）で受入ゲートを宣言した Issue を dispatch しないか（裁定に運ぶ口が無いので fail-closed） |
+| `d94-acceptance-gate-defined-pass` | **Issue が定義した**ゲートの適合側（緑）。定義は契約の `verify.gateDefinitions` に載り、fake CLI は verify.yaml のゲート集合とマージして実行する。契約に `verify.gates` は書かれない。そして **`.commandmate/verify.yaml` が byte 単位で不変**であることを assert する（#125 の中心的な主張） |
+| `d95-acceptance-gate-defined-mutation` | 同じ**変異側（赤）**。d94 と Issue も契約も verify.yaml も同一で、違いは worktree から成果物が消えていることだけ。exit 20 であり、**契約にしか存在しない** gate id が失敗集合に名指しで含まれ、その exit は 1 |
+| `d96-acceptance-gate-defined-conflict` | 定義した id が worktree の verify.yaml に**既に在る**とき、`send` の前に `acceptance_gate_id_conflict` で止めるか。契約は足せるだけで上書きできない（上流は同じ契約を送信時 exit 2 で拒否する） |
+| `d97-acceptance-gate-defined-union` | `--verify-gates` を渡した run で、契約の `verify.gates` に**定義した id が列挙される**か。列挙しない契約は上流が「定義したのに誰も走らせない」として拒否するので、fake の送信時照合が exit 2 を返す |
+| `d98-acceptance-gate-defined-not-enforceable` | 実行契約の無い run で `gates:` を宣言した Issue を dispatch しないか（d43 の `require:` 版と対になる） |
 | `d49-unattended-two-waves-parity` | **無人運転の二点測定（#122）。** 同じ世界を `--unattended` 有り／無しで2回 dispatch し、`status` / `stop_reason` / `waves[]` / `drift_checks` / `blocking_reasons` / `completion_check` / `redactions` が**一致**し、差分は limitation の `unattended_mode` / `unattended_baseline` **だけ**であることを assert する（「緩めない」の機械的証明。self-report の boolean より強い） |
 | `d50-unattended-prompt-halts` | 無人でも prompt（exit 10）で止まり、`respond` を送らず `human_required: true` のままか。**無人だから human_required を false にする、はしない** |
 | `d51-unattended-not-judged` | 無人でも exit 99 を pass に丸めず、20 の再指示ループにも流さないか。フラグ無しの run との二点測定つき |
@@ -430,6 +436,33 @@ checked-in artifact が古い形のまま緑になり続けることを防ぐた
   一致する**こと。ローダを2つ持ったら最初に落ちるのがこの 2 本である
 - **`--check` は mode である** —— `--out` / `--emit` / `--repo` / `--id` と併用すると
   `invalid_input`（exit 3）で、`--out` の file は作られないこと
+
+## 受入ゲートの `gates:` — 空振り検査の実測（[#125](https://github.com/Kewton/commandmate-skills/issues/125)）
+
+**「緑になった」はテストが効いている証拠にならない**（ADR 第4節）。`gates:`（新規コマンドゲート）で
+足した case が本当に何かを測っていることを、**13 通りの変異を注入して赤くなることで確かめた**
+（2026-08-15。各変異は repo を temp へ複写して 1 箇所だけ書き換え、suite を回して戻す）。
+
+| 変異 | 赤くなった case |
+|---|---|
+| dispatch が契約に `verify.gateDefinitions` を書かなくなる | d94 / d95 / d97（golden 不一致・`contract_contains`・`verification.gates`・裁定そのもの） |
+| dispatch が **worktree の verify.yaml に定義を追記する**（#1791 が避けた経路） | d94 / d95 / d97。うち `.commandmate/verify.yaml in #320's worktree was rewritten by the run` が名指しで落ちる |
+| 定義 id と worktree の既存 id の衝突検査を外す | d96（`acceptance_gate_id_conflict` が出ず、fake の送信時照合が exit 2 を返して worker が failed になる） |
+| `contractVerifyGates` の和集合から定義 id を落とす | d97（上流と同じ「定義したのに誰も走らせない」で送信が exit 2） |
+| 定義ゲートの `origin` を `issue` にしない | d94 / d95 / d97（`verification.gates[].origin` が `repo` に化ける） |
+| planner が 32 件超を**切って**受理する | `84`（#363） |
+| planner が予約 id を受理する | `84`（#360） |
+| planner が `issue-<番号>-` 接頭辞を要求しなくなる | `84`（#361） |
+| planner が command 無しの entry を受理する | `84`（#362）＋ plan schema 違反 |
+| **入力側**: Issue 本文の `gates:` から `command:` 行を消す | d94 / d95（planner が open question を立て、dispatch が 1 人も送らない） |
+| **入力側**: worktree の verify.yaml に同じ id を先に置く | d94（`acceptance_gate_id_conflict` で送らない ← d96 と同じ停止） |
+| **入力側**: ブロックの宣言を 33 件にする | `30`（`acceptance_gate_block_invalid` が立ち、`acceptance_gates` が null になる） |
+| merge の段階 C が `require:` だけを declaration と読む | unattended stage C の `gates:`-only case（#354 が `acceptance_gates_required` で止められ、PR が 0 件になる） |
+
+うち 4 件（`impl-truncates-to-32` / `impl-command-optional` / `impl-allows-reserved-id` /
+その組み合わせ）は `acceptance-gates-conformance.mjs` も同時に赤くする ——
+planner の関数を書き換えると `PRODUCER_LAG` の patch が当たらなくなるためで、
+**記法の乖離が黙って増えない**ことの側からも押さえられている。
 
 ## Claude/Codex parity の確認
 

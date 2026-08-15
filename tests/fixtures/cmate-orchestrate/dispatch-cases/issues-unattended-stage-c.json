@@ -31,6 +31,12 @@
       "labels": [
         "chore"
       ]
+    },
+    {
+      "number": 354,
+      "title": "feat: declare a gate this repository does not have",
+      "body": "This issue declares its acceptance condition by DEFINING a gate rather than by naming one that already exists (Issue #125). It is the case an unattended `--merge-prs` must accept: a block that only defines is not a weaker declaration than one that only selects.\n\n## 対象ファイル\n- `src/defined.ts`\n\n## Acceptance criteria\n- [ ] the defined gate takes part in the verdict\n\n```acceptance-gates\nversion: 1\ngates:\n  - id: issue-354-defined\n    command: \"true\"\n    timeoutSec: 60\n```\n",
+      "labels": []
     }
   ]
 }

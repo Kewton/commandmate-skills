@@ -1,7 +1,10 @@
 # ADR: Issue 受入条件の機械ゲート化（[#100](https://github.com/Kewton/commandmate-skills/issues/100)）
 
 status: **accepted / 段 1〜6 実装済み**（Issue [#114](https://github.com/Kewton/commandmate-skills/issues/114)）。
-段階 2（`gates:` ＝新規コマンドゲート）と生産側のミラーは未着手で、別 Issue である。
+**段階 2（`gates:` ＝新規コマンドゲート）も実装済み**（Issue
+[#125](https://github.com/Kewton/commandmate-skills/issues/125)）—— ただし本書 第 3.5 節が
+前提していた「worktree の `.commandmate/verify.yaml` に追記する」経路**ではない**。
+何がどう変わったかは**第 3.5.1 節**を先に読むこと。生産側のミラーは未着手で、別 Issue である。
 
 **記法の正本は [acceptance-gates-notation.md](./acceptance-gates-notation.md) に移った。**
 本書は裁定の記録として読むこと。実装前に測った未決事項の結果は第 11 節、
@@ -115,6 +118,10 @@ gates:
   判定に参加すること」を宣言する。
 - `gates:` — **新規コマンドの宣言**。`.commandmate/verify.yaml` の gate entry と
   **同じ key・同じ型・同じ制約**で書く（第 3 節。段階 2 で有効化する）。
+
+> **2026-08-15 注（#125）: 上の例の `id: adr-present` は現行の記法に適合しない。**
+> 定義ゲートの id は `issue-<Issue 番号>-<何を測るか>` でなければならない（第 12.5 節）。
+> 現行の例は [acceptance-gates-notation.md](./acceptance-gates-notation.md) 第 6 節に在る。
 
 payload を verify.yaml の subset そのものにしたのは、翻訳を挟まないためである。
 記法から verify.yaml への変換が「再エンコード」になった瞬間、
@@ -279,6 +286,12 @@ limitation に記録する。`send --contract` の exit 2 に頼らないのは�
 
 ### 3.5 段階 2 — 新規コマンドゲートの前提条件
 
+> **2026-08-15 追記（[#125](https://github.com/Kewton/commandmate-skills/issues/125)）: 本節の前提は
+> 4 つのうち 3 つが消滅し、1 つは別の形で解決した。** 以下の原文は当時の裁定として残す。
+> **何がどうなったかは第 3.5.1 節を読むこと。** 一行で言えば、`gates:` は
+> **`.commandmate/verify.yaml` に 1 バイトも書かずに**実装され、その経路は本節が前提していた
+> 「追記する」という設計そのものを不要にした。
+
 `gates:`（新規コマンド）を有効化するには、dispatch が worktree の `.commandmate/verify.yaml`
 に追記する必要がある。**着手前に次を解決すること。解決前に実装しない。**
 
@@ -308,6 +321,56 @@ limitation に記録する。`send --contract` の exit 2 に頼らないのは�
 **実測で確定すべき未決事項**（第 10 節にも再掲）: CommandMate の scope 判定の基準点が
 「task 開始時 SHA」なのか「merge-base」なのか。前者なら dispatch 前に追記を置くだけで
 (2) は不要になる。**推測で実装しないこと。**
+
+#### 3.5.1 その後どうなったか（#125 / 上流 CommandMate #1791）
+
+上の見積もり「(2) は既にある除外を 1 path 拡張するだけ」は**誤りだった**。上流のソースに
+理由が書かれていた（`src/lib/verification/scope-gate.ts` の doc comment、2026-08-08 に確認）:
+
+> Dropping it is tamper-safe because the contract is snapshotted into `tasks.contract_json`
+> at send time, so editing the file afterwards cannot change what the run is judged against.
+> **`.commandmate/verify.yaml` has no such snapshot — the gates are re-read from the file on
+> every run — so it stays in the change set, where a contract's explicit `deny` can still catch
+> an agent weakening its own gates.**
+
+つまり `.commandmate/verify.yaml` が work-evidence の変更集合に残っているのは**仕様であり、
+検出面である**。除外を広げると、第 4 項がわざわざ足そうとしていた
+`acceptance_gates_tampered` 相当の監視を、上流が既に持っている形で壊すことになる。
+「1 path 広げるだけ」の依頼は、実際には snapshot 機構の新設を要求していた。
+
+そこで上流に設計相談として [#1756](https://github.com/Kewton/CommandMate/issues/1756) を起こし、
+**案 B（実行契約がゲート定義そのものを運ぶ）**が採られた
+（[#1791](https://github.com/Kewton/CommandMate/issues/1791) / PR #1793、develop へ着地）。
+契約 v1 の `verify` に `gateDefinitions`（`{id, command, timeoutSec}` の list、最大 32 件）が入り、
+検証ランは **verify.yaml のゲート集合と契約の定義をマージ**して走らせる
+（`docs/design/task-contract.md` 第2.3.1節・第6節）。契約は送信時に `tasks.contract_json` へ
+snapshot され、`.commandmate/tasks/**` は変更集合から除外済みなので、**新しい改竄面が増えない**。
+
+前提表の読み替え:
+
+| 当時の前提 | 現在 |
+|---|---|
+| (1) 追記を commit してはならない | **消滅。** verify.yaml に追記しないので commit する対象が無い |
+| (2) 未 commit の追記が scope / work-evidence から除外される必要がある | **消滅（scope 側）／別解決（work-evidence 側）。** 除外は 1 バイトも広げず、追記自体をやめた。`.commandmate/verify.yaml` 単独変更が work-evidence を通す挙動は**意図的に残っている**（上記の doc comment）ので、直さない |
+| (3) `verify.yaml` を `scope.allow` に入れる回避は却下 | **裁定は生きている。** allow に入れない。#125 の実装は worker に verify.yaml への書き込み権限を渡さないし、runner 自身も書かない |
+| (4) 追記の SHA-256 を裁定後に突き合わせ `acceptance_gates_tampered` | **原則として消滅。** 判定に使う定義は契約 snapshot 側に在り、ファイルを書かないので突き合わせる対象が無い。`acceptance_gates_tampered` は**実装しなかった**。「worker が verify.yaml を書き換えて既存ゲートを弱める」経路は残るが、それが**検出可能であること**が上流の設計意図であり、塞ぐのは本 Issue の仕事ではない |
+
+第 10 節 (1) / 第 11.1〜11.2 節の実測は**取り消していない**。merge-base 基準であることも、
+未 commit の `.commandmate/verify.yaml` が `uncommitted` に計上されることも、今も真である。
+変わったのは「だから追記経路は採れない」という結論の使い道であり、
+**その測定こそが上流 #1756 を起こす根拠になった**。
+
+新しい経路で残った規律は 2 つだけである。
+
+- **id は Issue に紐付ける**（`issue-<番号>-<何を測るか>`）。planner が確かめ、書き換えない。
+  第 (1) 項が案じた「repo 共通ゲート集合への蓄積」は、契約が運ぶようになった時点で
+  構造的に起きなくなったが、**誰かが手で verify.yaml に足す**経路は残る。id が Issue 番号を
+  名乗っていれば、それが起きたときに読める。
+- **衝突は runner が先に止める。** 定義 id が verify.yaml の既存 id または予約 id
+  （`work-evidence` / `scope` / `env-clean`）と衝突すると上流は送信時 exit 2 で拒否する。
+  planner（予約 id・記法）と dispatch（worktree の既存 id）が**その手前で**名指しして止める ——
+  `acceptance_gate_id_unknown` と同じ理由で、走っていない worker を「契約が不正だった」と
+  報告するより解ける。
 
 ### 3.6 失敗様態の対比
 
@@ -551,6 +614,11 @@ deny にマッチ → 違反
 第 3.5 節 (2) は scope と work-evidence を一括りにしていたが、**両者の扱いは違う**。
 上流依頼が要るのは work-evidence 側だけである。
 
+> **2026-08-15 追記（#125）: 本節の測定は取り消していない。今も真である。**
+> 変わったのは 11.2 の結論の使い道だけで、「だから段階 2 は上流の除外拡張を待つ」ではなく
+> 「だから **verify.yaml を書かない経路**を上流に作ってもらう」になった（第 3.5.1 節）。
+> 11.1 / 11.3 / 11.4 は結論もそのまま生きている。
+
 ### 11.2 (2) work-evidence の計数 — **`.commandmate/verify.yaml` は計上される**
 
 work-evidence ゲートの除外は `.commandmate/tasks/` **だけ**である。
@@ -574,6 +642,16 @@ status --porcelain        → ?? .commandmate/tasks/issue-1.yaml
 **第 3.5 節 (2) の懸念はそのまま成立する。** 契約を置いただけの worktree が `uncommitted=1` に
 なり、exit 21（NOT_STARTED）が「worker は何もしていない」を意味しなくなる。
 `gates:` を本 Issue から外した判断は妥当であり、着手前に上流の除外拡張が要る。
+
+> **2026-08-15 追記（#125）: 「上流の除外拡張」は要らなくなった —— 要らなくなったのであって、
+> 実現したのではない。** 除外は 1 バイトも広がっていない。上の測定が示した挙動は今も同じで、
+> それが**意図された検出面**であることが後で分かった（第 3.5.1 節）。段階 2 は
+> verify.yaml を書かない経路（契約の `verify.gateDefinitions`）で実装され、
+> **本節が測った問題に触れずに済ませた**。
+>
+> なお、CommandMate **0.22.1** で取り直した再実測（2026-08-08、Issue #125 のコメント）でも
+> 結論は同じだった: 除外は `.commandmate/tasks/` だけで、commit 側の `:(exclude,top)` pathspec と
+> 未 commit 側の判定の**両方**がそうなっている。
 
 ### 11.3 (3) fence 抽出との干渉 — **実在する。strip で解消**
 
@@ -642,13 +720,28 @@ merge / uat / status を触ると scope ゲートに落ち、触らなければ 
 **後続作業（別 Issue / 統合時）:** 4 runner の pin と `PLAN_SCHEMA_VERSION` を同一 commit で 2 に
 上げる。差分は 5 行で、fixture の追随は不要（plan は毎回生成される）。
 
-### 12.2 `gates:` は「無視」ではなく **停止**
+### 12.2 `gates:` は「無視」ではなく **停止**（#114）→ **実装**（#125）
 
 第 2.1 節は `gates:` を記法に含め「段階 2 で有効化する」とだけ書いていた。planner が
 これを受理して dispatch が実行しないと、**宣言された条件が黙って消えた緑の run** になる —
 第 2.4 節がまさに禁じている状態である。そこで新コード `acceptance_gate_block_unsupported` を
 足し、open question + warning で停止させる。第 8.1 節の human_required 相当リストに、
 `acceptance_gate_block_invalid` / `acceptance_gate_id_unknown` と並べてこれも加えること。
+
+> **2026-08-15 追記（#125）: この停止は解除した。** planner はブロックを読み、dispatch が
+> 定義を契約の `verify.gateDefinitions` に載せる（第 3.5.1 節）。
+> **`acceptance_gate_block_unsupported` は planner からは出なくなった** ——
+> 記法違反は `acceptance_gate_block_invalid` に一本化され、
+> worktree の既存 id との衝突だけが新しい code `acceptance_gate_id_conflict`（dispatch）になる。
+> 停止そのものを取り消したのではないことに注意する: 読めない `gates:` ブロックは今も止まるし、
+> 契約の無い run で `gates:` を宣言した Issue も `acceptance_gates_not_enforceable` で止まる
+> （第 12.3 節はそのまま `gates:` にも適用される）。変わったのは
+> 「読めているのに強制できない」という状態が**無くなった**ことだけである。
+>
+> なお生産側 2 package（`cmate-issue-authoring` / `cmate-issue-refinement`）は
+> **まだ `acceptance_gate_block_unsupported` を出す**。第 5 節の裁定どおりミラーは後続 Issue で、
+> 「自分が出せない記法を出さない」という producer 側の判断としては今も正しい。
+> conformance テストがこの 1 件の乖離を明示的に固定している。
 
 ### 12.3 実行契約が無い run の扱い（ADR に無かった穴）
 
@@ -665,3 +758,24 @@ merge / uat / status を触ると scope ゲートに落ち、触らなければ 
 （`{work-evidence, scope} ∪ verify.yaml の宣言 id`）、built-in ゲートのうち `env-clean` だけは
 `require` できない。上流の契約パーサがその id を `verify.gates` に受け付けないためであり、
 受理して `send --contract` の exit 2 に落とすより、`send` 前に名指しで止めるほうが解ける。
+
+### 12.5 `gates:` の id は Issue 番号に紐付ける（#125）
+
+第 2.1 節の例は `id: adr-present` と書いていた。実装では
+**`issue-<Issue 番号>-<何を測るか>` を要求する**（planner が確かめ、書き換えはしない）。
+第 3.5.1 節に理由を 3 つ書いた。ADR の当時の例は `issue-<番号>-` を持たないので、
+**本書の第 2.1 節の例はもう記法に適合しない** —— 正本は
+[acceptance-gates-notation.md](./acceptance-gates-notation.md) 第 6 節であり、そこの例が現行である。
+
+書き換え（runner が id を採番する）ではなく検査にしたのは、第 2 節の
+「契約は Issue の写しであって再エンコードではない」を守るためである。runner が
+`adr-present` を `issue-125-adr-present` に直すと、Issue に書かれた id と report に出る id が
+違うものになり、両方を読む人間がその対応を頭の中で維持することになる。
+
+### 12.6 `acceptance_gates_tampered` は実装しなかった（#125）
+
+第 3.5 節 (4) が予定していた「追記の SHA-256 を裁定後に突き合わせる」検査は、
+**そもそも追記しない**設計になったので対象が無い。第 3.6 節の失敗様態の表で
+「(a) の唯一の明確な優位」とされていた「worker が judge を書き換えた」の検出は、
+上流が `.commandmate/verify.yaml` を変更集合に残すことで既に持っている
+（契約の `deny` で捕まえられる状態を保っている）。runner 側で二重に持つ理由が無い。

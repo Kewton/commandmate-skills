@@ -94,8 +94,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | `harness_path_in_scope` | **notice** | agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を、Issue が**成果物見出しで明示的に宣言した**ので scope に入れた。既定は「入れない」である。**notice**（#199）。著者が本文に書いて決めたことを honour した記録であり、ハーネスを in-repo で保守しているリポジトリでは**正しい書き方に対して毎回出る**（後述） |
 | `open_question_declared` | blocking | Issue 本文の ```open-questions ブロックが「これはまだ決めていない」と宣言している。**planner の推論ではなく、著者自身の申告**である。1件につき1件。**blocking が正しい。著者の宣言だから notice、ではない** —— 分けるのは「何が宣言されたか」であり、これが宣言しているのは**未決そのもの**なので、この表で最も強い blocking である |
 | `open_question_block_invalid` | blocking | ```open-questions ブロックが読めない（2個以上・未閉・未知 version・未知 key・空・重複・subset 違反）。**「ブロックが無かった」に丸めない**。**blocking が正しい。** 「planner が読めなかった」の報告である |
-| `acceptance_gate_block_invalid` | blocking | ```acceptance-gates ブロックが読めない（2個以上・未閉・tab・未知 version・未知 key・不正な gate id・重複・空・上限超過）。**「ブロックが無かった」に丸めない**（[acceptance-gates-notation.md](./acceptance-gates-notation.md) 第4節）。**blocking が正しい。** 「planner が読めなかった」の報告であり、丸めれば著者が書いたはずの受入ゲートが黙って消えた run が緑で終わる |
-| `acceptance_gate_block_unsupported` | blocking | ```acceptance-gates ブロックが `gates:`（新規 command gate の定義）を含む。**記法としては正しいが本 release は強制できない**ので、黙って無視せず止める（同記法 第6節）。**blocking が正しい。** 読めてはいるが**強制できない**ので、宣言された受入条件の一部が誰にも測られないまま run が緑になるのを防ぐ。`require:` に既存 gate id で書き直すか、条件をブロックの外に出して UAT で述べる |
+| `acceptance_gate_block_invalid` | blocking | ```acceptance-gates ブロックが読めない（2個以上・未閉・tab・未知 version・未知 key・不正な gate id・重複・空・上限超過、および `gates:` の定義が予約 id / `issue-<番号>-` 始まりでない / command 無し / timeout 範囲外）。**「ブロックが無かった」に丸めない**（[acceptance-gates-notation.md](./acceptance-gates-notation.md) 第4節）。**blocking が正しい。** 「planner が読めなかった」の報告であり、丸めれば著者が書いたはずの受入ゲートが黙って消えた run が緑で終わる |
 | `acceptance_requires_tests_but_scope_has_none` | blocking | 受入条件がテストの**作成**を能動的に要求しているのに、対象 file（**段1 の導出結果を含めて**）にテストらしき path が1件も無い。**blocking が正しい。** 「テストを足すのか、足さないのか」を著者が決めていない（判定は推論なので偽陽性がありうる。detail に原文が入っている） |
 | `contract_scope_dropped` | blocking | 宣言された対象 file の一部が、dispatch の実行契約の `scope.allow` に**入らない**（件数上限 200 超過、または契約が扱えない形の path）。detail に**落ちた件数・落ちた path（先頭3件）・落ちた理由**が入る。**blocking が正しい。** worker の権限が Issue の宣言より**狭く**なるという予告であり、`--unattended` では dispatch 側で blocking reason になって run ごと止まる |
 
@@ -105,6 +104,15 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 （`acceptance_gate_block_invalid` / `acceptance_gate_block_unsupported`）が**載っていなかった** ——
 どちらも `plan.warnings` に出て `status` を落とすのに、台帳の側から見えていなかった。
 新設 code をここへ書き足す規約は本書の冒頭に在る。
+
+> **廃止した code: `acceptance_gate_block_unsupported`**（[#125](https://github.com/Kewton/commandmate-skills/issues/125)）。
+> ```acceptance-gates ブロックの `gates:`（新規 command gate の定義）が実装されたので、
+> 「読めてはいるが強制できない」という状態が無くなった。**この planner はもう出さない**ので
+> 上表から外した。意味だけ残す: 古い plan に在れば「その run の runner は `gates:` を
+> 実行できなかった」という意味である。記法違反は `acceptance_gate_block_invalid` に一本化され、
+> worktree の既存 gate id との衝突は dispatch の `acceptance_gate_id_conflict`（第3節）になる。
+> なお生産側 2 package（`cmate-issue-authoring` / `cmate-issue-refinement`）は**まだ出す** ——
+> 「自分が出せない記法を出さない」という producer 側の判断であり、ミラーは後続 Issue である。
 
 `open_question_declared` / `open_question_block_invalid` /
 `no_acceptance_criteria` / `no_suspected_files` / `acceptance_requires_tests_but_scope_has_none` /
@@ -219,6 +227,9 @@ Issue が `## 対象ファイル`（成果物見出し）に書いた場合だ�
 | `contract_unsupported` | dispatch | CLI が実行契約に非対応で、より弱い baseline 裁定に落ちた |
 | `contract_disabled` | dispatch | `--contract-mode off` を明示したため probe していない |
 | `contract_scope_unknown` | dispatch | 対象 file が空の Issue を dispatch しなかった（その wave は advance しない） |
+| `acceptance_gate_id_unknown` | dispatch | Issue の ```acceptance-gates ブロックが `require:` した gate id が worktree の `.commandmate/verify.yaml` に無い、あるいはそのファイルを読めない（`gates:` を宣言した Issue も同じく読めなければ止まる —— `gateDefinitions` を運ぶ契約は config 無しでは評価され得ない）。**Issue ごとに1件。send する前に止める。** detail が実在する id を列挙するので、綴り違いなら diff がそのまま出る |
+| `acceptance_gate_id_conflict` | dispatch | Issue の `gates:` が定義した id が、worktree の `.commandmate/verify.yaml` が**既に宣言している** id と衝突している（[#125](https://github.com/Kewton/commandmate-skills/issues/125)）。**Issue ごとに1件。send する前に止める。** 契約は**足せるだけで上書きできない** —— 同じ id なら report がどちらの裁定か言えず、リポジトリ自身の「合格の定義」を委任単位で差し替えられてしまう。Issue 側の id を `issue-<番号>-<何を測るか>` に直すか、定義をやめて既存ゲートを `require:` する。上流は同じ契約を送信時 exit 2 で拒否するので、**そこへ到達させないための停止**である |
+| `acceptance_gates_not_enforceable` | dispatch | 実行契約の無い run（`--contract-mode off`、契約非対応 CLI への fallback）で、Issue が受入ゲートを `require:` / `gates:` している。**Issue ごとに1件。** 裁定は profile baseline の再実行になり、gate id を伝える口も定義を置く場所も無い。dispatch すると **Issue が書いた条件を一度も測っていない緑**ができるので止める |
 | `contract_scope_dropped` | dispatch | 宣言された対象 file の一部が実行契約の `scope.allow` に入らないまま dispatch した。**Issue ごとに1件。** worker の権限は Issue の宣言より**狭い**。detail に落ちた件数・落ちた path・落ちた理由が入る。**`--unattended` では limitation ではなく blocking reason になり、`--out` を作る前に停止する** |
 | `open_questions_accepted` | dispatch | `--allow-questions` で未回答 question を引き受けた |
 | `auto_yes_used` | dispatch | `--auto-yes` で prompt を自動応答した |

@@ -107,20 +107,20 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: 6b1a3eea5df54240b90eb323532bd74ac008f4bb35fc213b688e7a33e6164a0c
-    size: 59912
+    sha256: 1ba9d35811d9cfb86151b0e2f737d9871958c70551640240ab887342ff23f186
+    size: 59956
     kind: skill_md
     executable: false
     script: false
   - path: references/acceptance-gates-notation.md
-    sha256: 47d8c2b39699809debdcebba46da4e437f5df9937eae8d05f01a6dd53f7c2057
-    size: 13925
+    sha256: e6c668e055a0f673389441bc9517d7be25457d32d0f1c4a4a8dcdcb5840b709e
+    size: 22715
     kind: instruction
     executable: false
     script: false
   - path: references/adr-issue-acceptance-gates.md
-    sha256: ce9686b7883e6be896294c9ad56718869e56b4ccf08e0d085979d61fcb9c127f
-    size: 47554
+    sha256: 85b09f6e5ef83ae4fb4e80ea8ec2ffe3964ee4451266c3efcaae29853c625018
+    size: 57527
     kind: instruction
     executable: false
     script: false
@@ -155,20 +155,20 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: 1d053f48d1200eb96ae97b3b413f2a35635dbdafa5af98331977ed43bed98b57
-    size: 70902
+    sha256: 9ad8b9e451948b6fd855afcc9c943086d445d3b23948358087deff45e084da8a
+    size: 73190
     kind: instruction
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: 2c683649913901155cbfb4cb7bc8f946c1bf6e190b4e83141b28c07e510cbbf6
-    size: 134892
+    sha256: ef38974287fa17e297a207a14fcc4d6aa998b80a4de92438149a6ff3751d9872
+    size: 138565
     kind: instruction
     executable: false
     script: false
   - path: references/merge-contract.md
-    sha256: 35b3734471f1f6e112959b1d0f3055f2406be63241c7d5c1a67aeda64a0b788e
-    size: 41751
+    sha256: 601b1b3247ace5faff08460e177edb5c6d754a457b0db9742dc3998f4c47dc7c
+    size: 42181
     kind: instruction
     executable: false
     script: false
@@ -179,8 +179,8 @@ files:
     executable: false
     script: false
   - path: references/plan-contract.md
-    sha256: b85ec112ec0841039cf2f6d15b4170bfd4d0e88b2213cc6413cfe885112d4a27
-    size: 60495
+    sha256: 4f5dd298bedfd8722c4b222d11918271f9cbb9dacd165e9b8c20ad5266b1ceb6
+    size: 61560
     kind: instruction
     executable: false
     script: false
@@ -197,8 +197,8 @@ files:
     executable: false
     script: false
   - path: references/runner-operations.md
-    sha256: dec0ec3d68de2487245a7c86e082ed71e2d7f2312053aea50e1f558ff9b953c4
-    size: 37424
+    sha256: 1968ee62c45bb7fe352da240d5bd2b49f51798ce41e92cf506ebbc00fe78ae15
+    size: 37786
     kind: instruction
     executable: false
     script: false
@@ -221,8 +221,8 @@ files:
     executable: false
     script: false
   - path: schemas/execution-plan.v2.json
-    sha256: 673eef4cd2f7ee8fbcf0e93bbe935bc12954553c4961db52b6b9a09aae43813c
-    size: 22455
+    sha256: 5b4584840d3a9a51ef921242d98c8c456c0fd5272cf4bf5f4a288bf3b3f0fbaf
+    size: 24992
     kind: asset
     executable: false
     script: false
@@ -245,8 +245,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: 55b87df4be0e6429dec9bee34ead4e1a7c7594ec2a287ef5fb1e189bab91b1dd
-    size: 411195
+    sha256: 41817fbcb1352b29b9f1005adcf39817485d46fb3a54ee52907db4ce688b5bdc
+    size: 422955
     kind: script
     executable: true
     script: true
@@ -257,14 +257,14 @@ files:
     executable: false
     script: true
   - path: scripts/merge.mjs
-    sha256: 1ee4f9ed4cd0a2ec0f9ffd07049fec7be70e0431441ad1c34a88168b971a48e3
-    size: 96837
+    sha256: dd93117aa33d0bcfdef2a1fa714ff7f8523e4f28dfd97083ccc84a61cc025b12
+    size: 97362
     kind: script
     executable: true
     script: true
   - path: scripts/orchestrate.mjs
-    sha256: 9846c9e848327efd500cd638687d96d4fc270f18d281f25f61fc7222cb88c645
-    size: 172871
+    sha256: c52030dd65f5e196cf7e8eb3002fb9360f28df0593921aa3e69477308f57f0c5
+    size: 182483
     kind: script
     executable: true
     script: true

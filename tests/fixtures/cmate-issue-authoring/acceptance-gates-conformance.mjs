@@ -120,9 +120,6 @@ const MIRRORED_FUNCTIONS = [
   { left: { file: PLANNER, label: 'planner', name: 'countAcceptanceGateBlocks' },
     right: { file: MIRROR, label: 'mirror', name: 'plannerCountAcceptanceGateBlocks' },
     renames: BLOCK_RENAMES },
-  { left: { file: PLANNER, label: 'planner', name: 'parseAcceptanceGatesBlock' },
-    right: { file: MIRROR, label: 'mirror', name: 'plannerParseAcceptanceGatesBlock' },
-    renames: BLOCK_RENAMES },
   { left: { file: PLANNER, label: 'planner', name: 'readAcceptanceGates' },
     right: { file: MIRROR, label: 'mirror', name: 'plannerReadAcceptanceGates' },
     renames: BLOCK_RENAMES },
@@ -133,6 +130,82 @@ const MIRRORED_FUNCTIONS = [
     right: { file: MIRROR, label: 'mirror', name: 'unquoteYaml' },
     renames: VERIFY_RENAMES },
 ];
+
+// =============================================================================
+// The one place the producer has NOT caught up (Issue #125)
+// =============================================================================
+//
+// `gates:` — a block that DEFINES a new command gate — is implemented on the
+// consumer side: the planner reads it and dispatch carries it in the execution
+// contract's `verify.gateDefinitions`. The producing packages still refuse it
+// (`acceptance_gate_block_unsupported`), because writing Issues that declare one
+// is a separate Issue (ADR §5) and a producer that emitted a shape it cannot
+// resolve would be writing Issues that stop at dispatch.
+//
+// That makes `parseAcceptanceGatesBlock` the one mirrored function that is NOT a
+// verbatim copy any more, and the interesting question becomes "diverged HOW".
+// Dropping it from MIRRORED_FUNCTIONS would answer that with "somehow", and the
+// `require:` half — every rule the two sides still share — would stop being
+// pinned at all. So the divergence is written down instead: applying these
+// patches to the planner's function must produce the mirror's, byte for byte.
+// A change to anything else in either function lands outside a patch and fails.
+//
+// When the producer catches up, delete this list and move the pair back into
+// MIRRORED_FUNCTIONS. Until then, a patch that stops applying is the signal that
+// the two implementations moved apart somewhere nobody wrote down.
+const PRODUCER_LAG = {
+  left: { file: PLANNER, label: 'planner', name: 'parseAcceptanceGatesBlock' },
+  right: { file: MIRROR, label: 'mirror', name: 'plannerParseAcceptanceGatesBlock' },
+  renames: BLOCK_RENAMES,
+  patches: [
+    {
+      what: 'the definitions the planner accumulates',
+      planner: '  const value = { version: ACCEPTANCE_GATES_VERSION, require: [] };\n  const defined = [];\n',
+      mirror: '  const value = { version: ACCEPTANCE_GATES_VERSION, require: [] };\n',
+    },
+    {
+      what: 'the sections the block may open',
+      planner: "  let section = null; // null | 'require' | 'gates'\n",
+      mirror: "  let section = null; // null | 'require'\n",
+    },
+    {
+      what: 'the `gates:` key — read by the consumer, refused by the producer',
+      planner: '      if (key === \'gates\') {\n'
+        + '        if (rest !== \'\') return bad(\'acceptance_gate_block_invalid\', \'"gates:" takes a block sequence on the following lines, not an inline value\');\n'
+        + "        section = 'gates';\n"
+        + '        continue;\n'
+        + '      }\n',
+      mirror: '      if (key === \'gates\') {\n'
+        + '        return bad(\'acceptance_gate_block_unsupported\', \'"gates:" (new command gates) is stage 2 of the ADR and is not enforced by this release; use "require:" with gate ids that already exist in .commandmate/verify.yaml, or keep the condition out of the block and state it for UAT\');\n'
+        + '      }\n',
+    },
+    {
+      what: 'the two-indent-level entry reader the producer has no need for',
+      planner: "    if (section === 'gates') {\n"
+        + '      const problem = readAcceptanceGateDefinition(defined, indent, content);\n'
+        + "      if (problem !== null) return bad('acceptance_gate_block_invalid', problem);\n"
+        + '      continue;\n'
+        + '    }\n',
+      mirror: '',
+    },
+    {
+      what: 'the end-of-block checks over BOTH lists',
+      planner: '  const commandless = defined.find((gate) => gate.command === null);\n'
+        + '  if (commandless !== undefined) return bad(\'acceptance_gate_block_invalid\', `gate "${commandless.id}" declares no command; a gate that runs nothing cannot judge anything`);\n'
+        + '  const declaredIds = new Set();\n'
+        + '  for (const id of [...value.require, ...defined.map((gate) => gate.id)]) {\n'
+        + '    if (declaredIds.has(id)) return bad(\'acceptance_gate_block_invalid\', `duplicate gate id "${id}"`);\n'
+        + '    declaredIds.add(id);\n'
+        + '  }\n'
+        + '  if (declaredIds.size > MAX_ACCEPTANCE_GATE_IDS) {\n'
+        + '    return bad(\'acceptance_gate_block_invalid\', `at most ${MAX_ACCEPTANCE_GATE_IDS} gate ids may be required and defined together, and this block declares ${declaredIds.size}; the list is NOT cut to fit`);\n'
+        + '  }\n'
+        + '  if (declaredIds.size === 0) return bad(\'acceptance_gate_block_invalid\', \'the block requires no gate; remove it, or name at least one gate id under "require:" or define one under "gates:"\');\n'
+        + '  if (defined.length > 0) value.gates = defined;\n',
+      mirror: '  if (value.require.length === 0) return bad(\'acceptance_gate_block_invalid\', \'the block requires no gate; remove it, or name at least one gate id under "require:"\');\n',
+    },
+  ],
+};
 
 // =============================================================================
 // Corpus — the block reader
@@ -159,10 +232,6 @@ const BLOCK_CORPUS = [
 ];
 
 const BLOCK_REFUSALS = [
-  { name: 'gates: is stage 2 and no release runs it', code: 'acceptance_gate_block_unsupported',
-    body: '```acceptance-gates\nversion: 1\ngates:\n  - id: new-gate\n```\n' },
-  { name: 'gates: alongside a require: list', code: 'acceptance_gate_block_unsupported',
-    body: '```acceptance-gates\nversion: 1\nrequire:\n  - validate\ngates:\n  - id: new-gate\n```\n' },
   { name: 'two blocks are not merged and the first does not win', code: 'acceptance_gate_block_invalid',
     body: '```acceptance-gates\nversion: 1\nrequire:\n  - a\n```\n\n```acceptance-gates\nversion: 1\nrequire:\n  - b\n```\n' },
   { name: 'an unknown version is not rounded forward', code: 'acceptance_gate_block_invalid',
@@ -189,7 +258,13 @@ const BLOCK_REFUSALS = [
     body: '```acceptance-gates\nversion: 1\nrequire:\n  - validate\n  - validate\n```\n' },
   { name: 'more than 32 ids', code: 'acceptance_gate_block_invalid',
     body: `\`\`\`acceptance-gates\nversion: 1\nrequire:\n${Array.from({ length: 33 }, (_, index) => `  - gate-${index}`).join('\n')}\n\`\`\`\n` },
+  // Both refuse it, with the same code, for the same reason — but the sentences
+  // differ: the consumer's names `gates:` as the other way to fill the block, and
+  // the producer has no such key to offer. That one wording is inside the
+  // PRODUCER_LAG patch that records it, so comparing the code (rather than the
+  // whole answer) here is not a hole: it is the same difference, counted once.
   { name: 'an empty block declares a requirement and names none', code: 'acceptance_gate_block_invalid',
+    laggedReason: true,
     body: '```acceptance-gates\nversion: 1\nrequire:\n```\n' },
   { name: 'an unknown key', code: 'acceptance_gate_block_invalid',
     body: '```acceptance-gates\nversion: 1\nexpect_exit: 1\n```\n' },
@@ -197,6 +272,43 @@ const BLOCK_REFUSALS = [
     body: '```acceptance-gates\n---\nversion: 1\nrequire:\n  - validate\n```\n' },
   { name: 'the block is never closed', code: 'acceptance_gate_block_invalid',
     body: '```acceptance-gates\nversion: 1\nrequire:\n  - validate\n' },
+];
+
+// The corpus for the ONE key the two sides read differently (Issue #125). Every
+// case states both answers, so "they disagree" is a fact this file records rather
+// than a hole it leaves. `consumer` is what the planner returns — an accepted
+// block or the code it refuses with; `producer` is always the same refusal,
+// because the producing packages do not emit `gates:` at all yet.
+//
+// The consumer's refusals are here for the same reason the shared corpus has a
+// negative half: `gates:` is where a definition is checked against CommandMate's
+// own gate rules (reserved ids, a command that must exist, the timeout range),
+// and a reader of this file should be able to see which of those the planner
+// enforces without opening it.
+const GATES_KEY_CORPUS = [
+  { name: 'a definition with a command and a timeout',
+    consumer: 'accept',
+    body: '```acceptance-gates\nversion: 1\ngates:\n  - id: issue-1-repro\n    command: "node scripts/repro.mjs"\n    timeoutSec: 300\n```\n' },
+  { name: 'a definition alongside a require: list',
+    consumer: 'accept',
+    body: '```acceptance-gates\nversion: 1\nrequire:\n  - validate\ngates:\n  - id: issue-1-repro\n    command: "true"\n```\n' },
+  { name: 'a bare (unquoted) command',
+    consumer: 'accept',
+    body: '```acceptance-gates\nversion: 1\ngates:\n  - id: issue-1-repro\n    command: test -f docs/adr.md\n```\n' },
+  { name: 'a definition that names no command', consumer: 'acceptance_gate_block_invalid',
+    body: '```acceptance-gates\nversion: 1\ngates:\n  - id: issue-1-repro\n```\n' },
+  { name: 'a reserved id', consumer: 'acceptance_gate_block_invalid',
+    body: '```acceptance-gates\nversion: 1\ngates:\n  - id: work-evidence\n    command: "true"\n```\n' },
+  { name: 'a timeout outside 1..7200', consumer: 'acceptance_gate_block_invalid',
+    body: '```acceptance-gates\nversion: 1\ngates:\n  - id: issue-1-repro\n    command: "true"\n    timeoutSec: 7201\n```\n' },
+  { name: 'an unknown key inside a gate', consumer: 'acceptance_gate_block_invalid',
+    body: '```acceptance-gates\nversion: 1\ngates:\n  - id: issue-1-repro\n    command: "true"\n    retries: 2\n```\n' },
+  { name: 'an entry that does not open with its id', consumer: 'acceptance_gate_block_invalid',
+    body: '```acceptance-gates\nversion: 1\ngates:\n  - command: "true"\n    id: issue-1-repro\n```\n' },
+  { name: 'the same id required and defined', consumer: 'acceptance_gate_block_invalid',
+    body: '```acceptance-gates\nversion: 1\nrequire:\n  - issue-1-repro\ngates:\n  - id: issue-1-repro\n    command: "true"\n```\n' },
+  { name: 'one gate past the combined bound', consumer: 'acceptance_gate_block_invalid',
+    body: `\`\`\`acceptance-gates\nversion: 1\nrequire:\n${Array.from({ length: 32 }, (_, index) => `  - gate-${index}`).join('\n')}\ngates:\n  - id: issue-1-repro\n    command: "true"\n\`\`\`\n` },
 ];
 
 // The ids the emitter is asked to render. A round trip through the consumer's own
@@ -409,6 +521,33 @@ async function main() {
     else fail(label, `${pair.left.label}:\n${left}\n\nmirror (renames applied):\n${right}`);
   }
 
+  // ---- layer 2b: the ONE function that diverged, and exactly how ------------
+  {
+    const lag = PRODUCER_LAG;
+    // Trailing newlines make each patch a whole-line region, so a patch can never
+    // match half of a line it was not written for.
+    let patched = `${codeOnly(functionBlock(lag.left.file, lag.left.label, lag.left.name))}\n`;
+    const expected = `${codeOnly(functionBlock(lag.right.file, lag.right.label, lag.right.name), lag.renames)}\n`;
+    let applied = true;
+    for (const patch of lag.patches) {
+      const label = `producer lag: ${patch.what}`;
+      const occurrences = patched.split(patch.planner).length - 1;
+      if (occurrences !== 1) {
+        fail(label, `the planner's ${lag.left.name} carries this region ${occurrences} time(s), not once:\n${patch.planner}\n` +
+          'the two implementations moved apart somewhere this file does not describe; update the patch (or delete it, ' +
+          'if the producer has caught up) rather than widening what counts as "the same"');
+        applied = false;
+        continue;
+      }
+      patched = patched.replace(patch.planner, patch.mirror);
+      pass(label);
+    }
+    const label = `${lag.right.name} is ${lag.left.label}'s ${lag.left.name} with only the recorded divergences`;
+    if (!applied) fail(label, 'a patch did not apply, so the remainder could not be compared');
+    else if (patched === expected) pass(label);
+    else fail(label, `planner (patched):\n${patched}\nmirror (renames applied):\n${expected}`);
+  }
+
   // ---- the modules ---------------------------------------------------------
   const plannerBlockRegion = region(PLANNER, 'planner', /^const ACCEPTANCE_GATES_INFO\b/, /^\/\/ Topic tokens power/);
   const mirrorBlockRegion = region(MIRROR, 'mirror', /^const ACCEPTANCE_GATES_INFO\b/, /^\/\/ ---- the block this package emits/);
@@ -470,8 +609,9 @@ async function main() {
       fail(`block: ${item.name}`, `the reader threw: ${error.message}`);
       continue;
     }
-    const leftJson = JSON.stringify(left, null, 2);
-    const rightJson = JSON.stringify(right, null, 2);
+    const shown = (value) => (item.laggedReason ? { gates: value.gates, code: value.error?.code ?? null } : value);
+    const leftJson = JSON.stringify(shown(left), null, 2);
+    const rightJson = JSON.stringify(shown(right), null, 2);
     if (leftJson !== rightJson) {
       fail(`block: ${item.name}`, `planner:\n${leftJson}\nmirror:\n${rightJson}`);
       continue;
@@ -496,6 +636,53 @@ async function main() {
       continue;
     }
     pass(`block: ${item.name}`);
+  }
+
+  // ---- layer 3a': the key they read differently ----------------------------
+  for (const item of GATES_KEY_CORPUS) {
+    const name = `gates: ${item.name}`;
+    let consumer;
+    let producer;
+    try {
+      consumer = plannerBlocks.readBlock(item.body);
+      producer = mirrorBlocks.readBlock(item.body);
+    } catch (error) {
+      fail(name, `a reader threw: ${error.message}`);
+      continue;
+    }
+    // The producer's answer is the same for every case: it does not emit this key
+    // and refuses to resolve one. If that ever changes, it changes here first.
+    if (producer.gates !== null || producer.error?.code !== 'acceptance_gate_block_unsupported') {
+      fail(name, `the producer no longer refuses \`gates:\` with acceptance_gate_block_unsupported (got ${producer.error?.code ?? 'an accepted block'}); ` +
+        'if it has caught up, this corpus and PRODUCER_LAG are what to retire');
+      continue;
+    }
+    if (item.consumer === 'accept') {
+      if (consumer.gates === null) {
+        fail(name, `the planner refused a block it should read: ${consumer.error?.code}: ${consumer.error?.text}`);
+        continue;
+      }
+      if (!Array.isArray(consumer.gates.gates) || consumer.gates.gates.length === 0) {
+        fail(name, `the planner accepted the block but carried no definition: ${JSON.stringify(consumer.gates)}`);
+        continue;
+      }
+    } else if (consumer.gates !== null) {
+      fail(name, `expected the planner to refuse with ${item.consumer}, but the block was accepted`);
+      continue;
+    } else if (consumer.error?.code !== item.consumer) {
+      fail(name, `expected ${item.consumer}, got ${consumer.error?.code}: ${consumer.error?.text}`);
+      continue;
+    }
+    // Whatever they decide, they must agree on what the block IS: stripping it
+    // out of a body is how both sides keep the prose extractors from reading gate
+    // ids as acceptance criteria, and that half is not allowed to drift.
+    const stripLeft = plannerBlocks.stripBlocks(item.body);
+    const stripRight = mirrorBlocks.stripBlocks(item.body);
+    if (stripLeft !== stripRight) {
+      fail(name, `strip differs:\nplanner: ${JSON.stringify(stripLeft)}\nmirror:  ${JSON.stringify(stripRight)}`);
+      continue;
+    }
+    pass(name);
   }
 
   // ---- layer 3b: the verify.yaml reader over a corpus -----------------------
@@ -541,6 +728,21 @@ async function main() {
     const parsed = plannerBlocks.readBlock(block);
     if (parsed.gates === null) {
       fail(name, `the 正本's own example is refused by the planner: ${parsed.error?.text}`);
+      return;
+    }
+    // An example that DEFINES a gate is one the producer cannot render (Issue
+    // #125), so the round trip does not apply to it. What is asserted instead is
+    // the pair of facts that make the lag legible: the consumer reads the 正本's
+    // own example, and the producer refuses it for the one recorded reason.
+    if (parsed.gates.gates !== undefined) {
+      const refusal = mirrorBlocks.readBlock(block).error?.code;
+      if (refusal === 'acceptance_gate_block_unsupported') {
+        pass(`notation example ${index + 1} declares gates: — read by the consumer, refused by the emitter`);
+      } else {
+        fail(`notation example ${index + 1} declares gates: — read by the consumer, refused by the emitter`,
+          `the producer answered ${refusal ?? 'by accepting it'}; if it has learned to emit \`gates:\`, teach this ` +
+            'test to round-trip the definition instead of skipping it');
+      }
       return;
     }
     const rendered = mirrorBlocks.render(parsed.gates.require);

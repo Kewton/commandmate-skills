@@ -71,14 +71,25 @@ planner の抽出が変われば、ここが落ちる。落ちたら
    （`planner` prefix、`checkoutGateIds` ↔ `readWorktreeGateIds` 等）だけを正規化して比較する。
    rename は対ごとにスコープしてある — ブロック側に dispatch の rename を当てると、
    本物の乖離を書き換えで隠してしまうため。
-3. **corpus で挙動が一致**。正常系と、拒否されるべき 19 形（`gates:` / tab / 3 スペース /
+
+   **例外が 1 つある**（[#125](https://github.com/Kewton/commandmate-skills/issues/125)）。
+   consumer 側が `gates:`（新規コマンドゲートの定義）を実装し、生産側はまだ出さないので、
+   `parseAcceptanceGatesBlock` だけが verbatim copy でなくなった。そこで**乖離そのものを
+   patch の列として書き下し**（`PRODUCER_LAG`）、planner の関数にその patch を順に当てた結果が
+   mirror の関数と byte 一致することを要求する。patch の外側が 1 行でも動けば赤くなるので、
+   共有部分（`require:` の側）は今も byte で固定されている。生産側が追いつく Issue では
+   `PRODUCER_LAG` を消して `MIRRORED_FUNCTIONS` に戻す。
+3. **corpus で挙動が一致**。正常系と、拒否されるべき 17 形（tab / 3 スペース /
    行末コメント / 未知 version / 2 個 / 33 件 …）を、**返る code まで**突き合わせる。
-   `acceptance_gate_block_invalid`（直せ）と `acceptance_gate_block_unsupported`
-   （この release では走らない）は著者の行き先が違うので、同じ「拒否」に丸めない。
+   さらに `gates:` だけは**両者の答えが違う**ので専用 corpus を持ち、
+   consumer が受理する形と拒否する形（予約 id / command 無し / timeout 範囲外 / 重複 /
+   上限超過 …）を並べたうえで、producer が毎回 `acceptance_gate_block_unsupported` で
+   拒否することを assert する。**「食い違っている」ことを、この file が記録している。**
 4. **出す形が正本の例と byte 一致**。正本 `acceptance-gates-notation.md` の例をその id から
    renderer で描き直して byte 比較し、生産側 2 package が同梱するブロックも同じ形であること・
-   `gates:` を含まないことを確かめる。各 package に例が 1 つも無ければ **fail** である
-   （比較対象が消えたことを「一致」と読ませない）。
+   `gates:` を含まないことを確かめる。正本の例のうち `gates:` を宣言しているものは
+   renderer が描けないので、代わりに「consumer は読む／producer は拒む」を assert する。
+   各 package に例が 1 つも無ければ **fail** である（比較対象が消えたことを「一致」と読ませない）。
 
 suite 側では、これに加えて次を測っている。
 

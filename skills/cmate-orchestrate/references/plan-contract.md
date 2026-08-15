@@ -723,20 +723,35 @@ Issue 本文の ```acceptance-gates ブロックの転記である。**記法の
 [adr-issue-acceptance-gates.md](./adr-issue-acceptance-gates.md) にある。
 
 ```json
-"acceptance_gates": { "version": 1, "require": ["orchestrate-fixtures"] }
+"acceptance_gates": {
+  "version": 1,
+  "require": ["orchestrate-fixtures"],
+  "gates": [
+    { "id": "issue-125-repro", "command": "node scripts/repro-125.mjs", "timeoutSec": 300 }
+  ]
+}
 ```
 
-- **planner が見るのは構文だけである。** plan は対象リポジトリを開かない read-only の
-  分析器なので、id が実在するかは判断できない。実在確認は dispatch が worktree の
-  `.commandmate/verify.yaml` に対して行う（[dispatch-contract.md](./dispatch-contract.md) 第 2.9 節）。
-- `require` は**著者が書いた順のまま**である。契約は Issue の写しであって再エンコードではない。
+- **planner が見るのは構文と Issue 番号スコープだけである。** plan は対象リポジトリを開かない
+  read-only の分析器なので、id が実在するか（`require`）／既に在って衝突しないか（`gates`）は
+  判断できない。突き合わせは dispatch が worktree の `.commandmate/verify.yaml` に対して行う
+  （[dispatch-contract.md](./dispatch-contract.md) 第 2.9 節）。planner が確かめられるのは
+  **Issue 番号から決まる形**（`gates[].id` が `issue-<番号>-` で始まること）と、予約 id
+  （`work-evidence` / `scope` / `env-clean`）でないことだけで、それは worktree を要さない。
+- `require` も `gates` も**著者が書いた順のまま**である。契約は Issue の写しであって
+  再エンコードではない —— id は検査されるが**書き換えられない**。
+- **`gates` キーは、定義が 1 件も無ければ書かれない**（空リストにしない）。`require:` しか
+  使わない Issue の plan は、このキーが存在する前と **byte 単位で同じ**である。
+- `gates[].timeoutSec` も、Issue が書かなければ**書かれない**。契約でも省略され、
+  CommandMate 自身の既定（600 秒）が効く。
 - **`null` は「ブロックが無かった」を意味しない。** ブロックが 0 個のときも、ブロックが
   壊れていて読めなかったときも `null` になる。区別は warning が持つ:
-  `acceptance_gate_block_invalid`（記法違反）/ `acceptance_gate_block_unsupported`（`gates:` は
-  段階 2 で未実装）。どちらも open question なので run は `partial` に落ち、dispatch は
-  `--allow-questions` 無しではその Issue を送らない。
+  `acceptance_gate_block_invalid`（記法違反。`gates:` の定義が予約 id・Issue 番号スコープ違反・
+  command 無し・timeout 範囲外・重複・上限超過の場合を含む）。open question なので run は
+  `partial` に落ち、dispatch は `--allow-questions` 無しではその Issue を送らない。
 - 壊れたブロックを「無かったこと」に丸めない理由は `unrecognized_file_extension`（Issue #43）と
   同じである: **黙って捨てると、書いたはずの受入条件が消えた run が緑で終わる。**
+  上限超過を 32 件に**切らない**のも同じ理由である。
 
 ### 10.1 散文抽出との関係
 

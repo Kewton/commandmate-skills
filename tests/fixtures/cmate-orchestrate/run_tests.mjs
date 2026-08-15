@@ -1057,6 +1057,27 @@ function runDispatchCase(caseId) {
   const expect = spec.expect;
   check(exit === expect.exit, `exit ${exit} !== expected ${expect.exit}`);
 
+  // Files the run must not have touched, compared against the bytes the scenario
+  // put in every worktree (Issue #125). `.commandmate/verify.yaml` is the one
+  // that matters: an issue-defined gate reaches the worker through the execution
+  // contract's `verify.gateDefinitions`, and the moment a runner "helpfully"
+  // appends the definition to the worktree's own gate declarations instead, the
+  // worktree reports uncommitted work it never did (exit 21 stops meaning
+  // "nothing happened") and the file that records what this repository counts as
+  // passing has been edited by the machine being judged. A case asserts the
+  // absence of that write rather than trusting that nobody wrote the code.
+  const plan = JSON.parse(readFileSync(planPath, 'utf8'));
+  for (const relative of expect.worktree_files_unchanged ?? []) {
+    const before = (scenarioObject.worktree_files ?? {})[relative];
+    if (!check(before !== undefined, `worktree_files_unchanged names "${relative}", which the scenario never wrote`)) continue;
+    const want = before.endsWith('\n') ? before : `${before}\n`;
+    for (const issue of plan.issues) {
+      const target = join(work, basename(registeredPathFor(issue, scenarioObject.worktree_paths ?? {})), relative);
+      if (!check(existsSync(target), `${relative} is gone from #${issue.number}'s worktree`)) continue;
+      check(readFileSync(target, 'utf8') === want, `${relative} in #${issue.number}'s worktree was rewritten by the run`);
+    }
+  }
+
   const schemaErrors = validateAgainst(dispatchSchema, report, 'dispatch');
   check(schemaErrors.length === 0, `dispatch schema: ${schemaErrors.slice(0, 3).join('; ')}`);
 
@@ -4072,6 +4093,25 @@ function unattendedMergePrsTest() {
         `a run stopped before the phase should have no targets, got ${JSON.stringify(targetShape(unattended.report))}`);
       check((unattended.report?.summary_markdown ?? '').includes('acceptance-gates'),
         'the summary should say what to write into the issue body');
+    }
+  }
+
+  // --- 3b. a block that only DEFINES a gate is a declaration too (#125) ------
+  // The mirror image of the case above. #354 carries no `require:` at all — its
+  // whole acceptance condition is a gate the repository does not have, carried
+  // by the execution contract. Reading "declared a machine condition" as "wrote
+  // a `require:` list" would refuse the STRONGER of the two blocks: selecting an
+  // existing gate reuses a condition somebody already wrote, while defining one
+  // is the issue stating a condition that did not exist before.
+  {
+    const world = stageCWorld('cmate-stagec-defined', [350, 354]);
+    if (check(world !== null, 'stage C: the defined-gate world was not generated')) {
+      const unattended = mergePhase(world, ['--approve', '--unattended']);
+      check(unattended.exit === 0, `a gates:-only block must not stop an unattended merge, exited ${unattended.exit}`);
+      check(unattended.report?.status === 'success', `the unattended run should succeed, got ${unattended.report?.status}`);
+      check(!codesOf(unattended.report?.blocking_reasons).includes('acceptance_gates_required'),
+        `a gates:-only block was read as "no acceptance-gate block": ${JSON.stringify(codesOf(unattended.report?.blocking_reasons))}`);
+      check(mergedPrs(unattended.log).length === 2, `both PRs should merge, merged ${mergedPrs(unattended.log).length}`);
     }
   }
 

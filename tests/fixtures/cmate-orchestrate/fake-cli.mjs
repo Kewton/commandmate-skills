@@ -710,28 +710,98 @@ function declaredGatesOf(worktreePath) {
   return gates.filter((gate) => gate.id !== '' && gate.command !== '');
 }
 
-// The gate ids the contract selected, or null when it declares no `verify.gates`
-// (which means "every declared gate runs" — the case an issue's `require:` list
-// deliberately produces, ADR §3.4).
-function contractGateIds(worktreePath, issue) {
+function contractText(worktreePath, issue) {
   const path = join(worktreePath, '.commandmate', 'tasks', `cmate-orchestrate-issue-${issue}.yaml`);
-  let text;
   try {
-    text = readFileSync(path, 'utf8');
+    return readFileSync(path, 'utf8');
   } catch {
     return null;
   }
+}
+
+function unquoteScalar(value) {
+  return /^".*"$/.test(value) || /^'.*'$/.test(value) ? value.slice(1, -1) : value;
+}
+
+// The gate ids the contract selected, or null when it declares no `verify.gates`
+// (which means "every declared gate runs, including every gateDefinitions entry"
+// — the case an issue's `require:` list and a bare `gates:` definition both
+// deliberately produce, ADR §3.4 / task-contract.md §2.3.1).
+function contractGateIds(worktreePath, issue) {
+  const text = contractText(worktreePath, issue);
+  if (text === null) return null;
   const lines = text.split(/\r?\n/);
   const start = lines.findIndex((line) => line === 'verify:');
   if (start < 0) return null;
+  // `verify:` may open with either key, so the list is found by its own header
+  // rather than by an offset — a contract that declares only `gateDefinitions`
+  // selects nothing, and reading its first entry as a selection would silently
+  // narrow the run to one gate.
+  const gatesAt = lines.findIndex((line, index) => index > start && line === '  gates:');
+  if (gatesAt < 0) return null;
   const ids = [];
-  for (const line of lines.slice(start + 2)) {
+  for (const line of lines.slice(gatesAt + 1)) {
     const item = /^ {4}- (.+?)\s*$/.exec(line);
     if (!item) break;
-    const value = item[1];
-    ids.push(/^".*"$/.test(value) || /^'.*'$/.test(value) ? value.slice(1, -1) : value);
+    ids.push(unquoteScalar(item[1]));
   }
   return ids;
+}
+
+// `verify.gateDefinitions` — the gates the CONTRACT itself declares (CommandMate
+// #1791). The real server merges them into the verify.yaml gate set for the run
+// this task is attached to, in verify.yaml order followed by contract order, and
+// that merge is what makes an issue-defined gate runnable without a single byte
+// being written into `.commandmate/verify.yaml`.
+function contractGateDefinitions(worktreePath, issue) {
+  const text = contractText(worktreePath, issue);
+  if (text === null) return [];
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((line) => line === 'verify:');
+  if (start < 0) return [];
+  const definitionsAt = lines.findIndex((line, index) => index > start && line === '  gateDefinitions:');
+  if (definitionsAt < 0) return [];
+  const gates = [];
+  for (const line of lines.slice(definitionsAt + 1)) {
+    const opener = /^ {4}- id: (.+?)\s*$/.exec(line);
+    if (opener) {
+      gates.push({ id: unquoteScalar(opener[1]), command: '' });
+      continue;
+    }
+    const field = /^ {6}(command|timeoutSec): (.+?)\s*$/.exec(line);
+    if (field && gates.length > 0) {
+      if (field[1] === 'command') gates[gates.length - 1].command = unquoteScalar(field[2]);
+      continue;
+    }
+    break;
+  }
+  return gates.filter((gate) => gate.id !== '' && gate.command !== '');
+}
+
+// The reserved ids `validateGateEntries` refuses for a contract definition.
+const RESERVED_GATE_IDS = ['work-evidence', 'scope', 'env-clean'];
+
+// Why `send --contract` would exit 2 over the contract's gate declarations, or
+// null when it would not.
+function contractVerifyRefusal(worktreePath, issue) {
+  const definitions = contractGateDefinitions(worktreePath, issue);
+  if (definitions.length === 0) return null;
+  if (!existsSync(join(worktreePath, '.commandmate', 'verify.yaml'))) {
+    return 'verify.gateDefinitions: .commandmate/verify.yaml is missing, so the gates it declares could never run';
+  }
+  const declared = new Set(declaredGatesOf(worktreePath).map((gate) => gate.id));
+  for (const gate of definitions) {
+    if (RESERVED_GATE_IDS.includes(gate.id)) return `verify.gateDefinitions.id: "${gate.id}" is reserved for a built-in gate`;
+    if (declared.has(gate.id)) return `verify.gateDefinitions.id: "${gate.id}" is already declared in .commandmate/verify.yaml`;
+  }
+  const selected = contractGateIds(worktreePath, issue);
+  if (selected !== null) {
+    const unselected = definitions.map((gate) => gate.id).filter((id) => !selected.includes(id));
+    if (unselected.length > 0) {
+      return `verify.gateDefinitions: ${unselected.join(', ')} defined but not named in verify.gates, so nothing would ever run them`;
+    }
+  }
+  return null;
 }
 
 // Run them. Returns { lines, exit, failing } shaped like the real CLI's output:
@@ -739,7 +809,10 @@ function contractGateIds(worktreePath, issue) {
 function runDeclaredGates(spec, issue, worktreeId) {
   const row = visibleWorktrees(spec).find((entry) => entry.id === worktreeId);
   const worktreePath = resolve(process.cwd(), row?.path ?? '.');
-  const declared = declaredGatesOf(worktreePath);
+  // verify.yaml first, then the contract's own definitions — the execution order
+  // the real runner uses (task-contract.md §6), so an issue-specific gate runs
+  // after the repository's common ones.
+  const declared = [...declaredGatesOf(worktreePath), ...contractGateDefinitions(worktreePath, issue)];
   const selected = contractGateIds(worktreePath, issue);
   const toRun = selected === null ? declared : declared.filter((gate) => selected.includes(gate.id));
   const lines = ['GATE work-evidence PASS (commits=1, uncommitted=0)'];
@@ -1248,6 +1321,16 @@ function main() {
       if (!existsSync(absolute)) {
         fail(`Error: invalid task contract:\n  - ${contractPath}: contract file not found in the worktree`, 2);
       }
+      // The send-time cross-check against `.commandmate/verify.yaml`
+      // (task-contract.md §5), for the half this fake can model: a contract that
+      // declares `verify.gateDefinitions` needs a readable verify.yaml, and a
+      // definition may not take an id the repository already declares or one of
+      // the built-in reserved ids. Modelled here rather than assumed away because
+      // the runner's promise is that it refuses these BEFORE `send` — an exit 2
+      // reaching this point is the runner having failed to, and a fake that
+      // accepted everything could not tell the two apart.
+      const contractRefusal = contractVerifyRefusal(resolve(process.cwd(), row?.path ?? '.'), issue);
+      if (contractRefusal !== null) fail(`Error: invalid task contract:\n  - ${contractRefusal}`, 2);
       const taskId = `task-issue-${issue}`;
       // The contract this send RECORDED is what the server's Auto-Yes poller
       // later reads its policy out of (Issue #136), so the path is remembered
