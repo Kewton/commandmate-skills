@@ -838,7 +838,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.30.0",
+      "latest": "0.31.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -1866,6 +1866,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.30.0/cmate-orchestrate-0.30.0.tar.gz",
             "sha256": "bea050f5067775477a9adbc747c0a7372832eadf4f7e597b4347d4efa18bd523",
             "size": 653432,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.31.0",
+          "changelog": "0.30.0 以降の 1 件（#125）を公開する。\n\n主題は **受入条件の段階 2 —— Issue が書いた「新規コマンドゲート」を、審判を書き換えずに worker へ届けること**である。#114（0.19.0）が段階 1 として実装したのは `require:`（`verify.yaml` に実在する gate id の名指し）までで、`gates:` は「ADR 第3.5節の前提が未達」として planner が `acceptance_gate_block_unsupported` で止めていた。\n\n- **#125**: `` ```acceptance-gates `` ブロックの `gates:` 宣言を、dispatch が実行契約の `verify.gateDefinitions`（`{id, command, timeoutSec}`）に載せるようにした。planner の段階 2 停止は解除した。\n\n  **当初の設計は採っていない。** ADR 第3.5節は「worktree の `.commandmate/verify.yaml` に未 commit で追記し、裁定後に SHA-256 を突き合わせて改竄を検出する」としており、その前提として上流に work-evidence の除外拡張を依頼していた。しかし上流（CommandMate #1756）の裁定は **案 B —— 実行契約がゲート定義そのものを運ぶ** であった。契約は送信時に snapshot され、`.commandmate/tasks/**` は work-evidence / scope の変更集合から既に除外されているので、**新しい改竄面を作らずに済む**。その結果、当初の前提のうち「追記を commit しない」「未 commit の追記を両ゲートから除外する」「追記の SHA-256 を突き合わせる」は**まとめて消滅した** —— 書かないものは、commit されることも、除外を要ることも、改竄されることもない。\n\n  **`.commandmate/verify.yaml` 単独の変更が work-evidence を通す上流の挙動は、意図的にそのまま残っている。** 除外を広げる道を選んでいれば、これは「エージェントが自分を裁くゲートを弱めたことを検出できない」と引き換えになっていた。\n\n  上流 API の制約はそのまま守る: `gateDefinitions` は最大 32 件（超過は切らずに名乗る）、`verify.gates` を書く場合は定義した id を `gates` にも列挙する（列挙しない定義は「誰も走らせない」として契約エラーになる）、予約 id（`work-evidence` / `scope` / `env-clean`）や `verify.yaml` の既存 id との衝突は **planner / dispatch 側で読める形で止める**（上流の送信時 exit 2 に到達させない）。\n\n  ADR `adr-issue-acceptance-gates.md` 第3.5節・第11節と記法 `acceptance-gates-notation.md` は、当時の測定記録を残したまま「その後どう解決したか」を追記する形で更新した。",
+          "published_at": "2026-08-15T03:02:07Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.31.0",
+            "commit": "6f5fc641318507dcb41a58c988aa4872c5542359"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.31.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.31.0/cmate-orchestrate-0.31.0.tar.gz",
+            "sha256": "903971eb850b7ba5558243f0f1d8eb7ad6f59e9b28511c84b4d665b9caa24648",
+            "size": 672391,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
