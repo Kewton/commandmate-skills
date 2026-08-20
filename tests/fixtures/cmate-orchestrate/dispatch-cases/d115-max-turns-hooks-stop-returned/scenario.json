@@ -1,0 +1,28 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "236": {
+      "state": "completed",
+      "verify_exits": [
+        21
+      ],
+      "capture_extra": {
+        "realtimeSnippet": "\n\n\n",
+        "lineCount": 60,
+        "structuredEvents": {
+          "lastEventType": "stop",
+          "lastEventAt": "@now",
+          "lastStopEventAt": "@now"
+        }
+      }
+    }
+  }
+}

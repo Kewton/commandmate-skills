@@ -886,6 +886,29 @@ function writeGateLine(line) {
   process.stderr.write(`${line}\n`);
 }
 
+// Hook timestamps are RELATIVE facts — "did a `stop` come back after the send
+// that opened the last turn?" — and the send happens while this fixture runs, so
+// a literal timestamp in a scenario could only be a guess about the clock. Two
+// tokens stand in for the two answers and are resolved at capture time:
+//
+//   "@now"       an event that happened just now  → after the last send
+//   "@long-ago"  an event from a previous era     → before it
+//
+// Anything else is passed through untouched, so a scenario can still pin a
+// literal string (or null) where the VALUE is what is being measured.
+function substituteClock(value) {
+  if (typeof value === 'string') {
+    if (value === '@now') return new Date().toISOString();
+    if (value === '@long-ago') return '2020-01-01T00:00:00.000Z';
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(substituteClock);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, substituteClock(entry)]));
+  }
+  return value;
+}
+
 function emit(object) {
   process.stdout.write(`${JSON.stringify(object)}\n`);
   process.exit(0);
@@ -1650,6 +1673,27 @@ function main() {
     }
     const confirmAfter = typeof worker.confirm_after === 'number' ? worker.confirm_after : 1;
     const started = worker.capture === 'idle' ? false : readSends(issue) >= confirmAfter;
+    // Why there is nothing at the --max-turns cap (Issue #220). The product's
+    // CurrentOutputResponse carries more than the three liveness flags, and the
+    // fields that separate "the worker ran and produced nothing" from "the worker
+    // never got a turn" are exactly the ones this fake had to grow:
+    //
+    //   cliToolId        which agent's transcript layout the reader may look for
+    //   realtimeSnippet  the tail of the PANE (the screen), not `content`
+    //   lineCount        how many lines that pane holds
+    //   structuredEvents the hook trail; `lastStopEventAt` is the only field that
+    //                    says a turn ENDED rather than that a session exists
+    //   upstreamFault    CommandMate #1839's own verdict — present only on new
+    //                    CLIs, which is why a scenario can omit it entirely
+    //
+    // `capture_extra` is spread LAST so a scenario can also delete a field by
+    // setting it to null (a CLI that does not name its `cliToolId`), which is the
+    // world the "could not read it" case is about. `content` stays what it was:
+    // it is the diff since `lastCapturedLine`, not the screen, and the runner must
+    // not be able to pass this case by reading it.
+    const extra = (worker.capture_extra !== null && typeof worker.capture_extra === 'object' && !Array.isArray(worker.capture_extra))
+      ? substituteClock(worker.capture_extra)
+      : {};
     emit({
       isRunning: started,
       isGenerating: started,
@@ -1657,6 +1701,8 @@ function main() {
       content: started ? 'working…' : '',
       promptData: null,
       sessionStatus: started ? 'working' : 'idle',
+      cliToolId: 'claude',
+      ...extra,
     });
   }
   if (sub === 'respond') {

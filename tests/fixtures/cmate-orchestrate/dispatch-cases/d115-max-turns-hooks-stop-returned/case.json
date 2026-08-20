@@ -1,0 +1,66 @@
+{
+  "description": "[#220] **hooks だけで「ターンは成立した」を測る側。** pane は空白のみ、transcript は無い —— それでも `structuredEvents.lastStopEventAt` が**最後の send より新しい**ので、そのターンは終わっている（`stop` は「セッションが在る」ではなく「ターンが終わった」を言う唯一の signal である。`isRunning` は tmux セッションが healthy という意味なので、生きているが不活性な worker では常に真であり、ここでは使えない）。よって `worker_produced_nothing`。d116 と**同じ世界で timestamp の前後だけが違う** 2 点測定であり、`stop` の比較を反転する変異は両方を赤にする。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "236",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      236
+    ],
+    "worker_states": {
+      "236": "failed"
+    },
+    "verification_outcomes": {
+      "236": "fail"
+    },
+    "worker_turn_evidence": {
+      "236": {
+        "code": "worker_produced_nothing",
+        "turns": 3,
+        "snippet_blank": true,
+        "line_count": 60,
+        "upstream_signature": null,
+        "structured_events": {
+          "last_event_type": "stop"
+        },
+        "transcript": {
+          "read": false
+        }
+      }
+    },
+    "worker_turn_evidence_detail_includes": {
+      "236": [
+        "hooks reported a `stop` event",
+        "after the send that opened the last turn"
+      ]
+    },
+    "blocking_codes": [
+      "worker_produced_nothing",
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_upstream_unavailable",
+      "worker_output_unreadable"
+    ]
+  }
+}

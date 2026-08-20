@@ -1,0 +1,73 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "233": {
+      "state": "completed",
+      "verify_exits": [
+        21
+      ],
+      "capture_extra": {
+        "realtimeSnippet": "● Read(src/cluster.ts)\n  ⎿  Read 42 lines\n\n● クラスタリングの方針を決めました。\n",
+        "lineCount": 320
+      }
+    }
+  },
+  "claude_transcripts": {
+    "233": [
+      {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "上の実行契約に従って作業を開始してください。"
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "src/cluster.ts の現状を読みます。"
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "Read",
+              "input": {
+                "file_path": "src/cluster.ts"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "クラスタリングの方針を決めましたが、まだ書けていません。"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

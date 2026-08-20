@@ -240,6 +240,81 @@
             "detail": { "type": "string", "minLength": 1 }
           }
         },
+        "worker_turn_evidence": {
+          "type": "object",
+          "description": "OPTIONAL. WHY there is nothing, collected ONCE when this worker reached the `--max-turns` cap with `commandmate wait --verify` returning exit 21 (work-evidence: no commit and no uncommitted change) on every turn (Issue #220). The cap alone cannot distinguish 'the worker ran N turns and produced nothing' (the Issue is too large or too vague → split it, re-plan) from 'the worker never got a turn' (the upstream API was down → wait, then --resume), and the two recoveries are opposite — MEASURED in Kewton/CommandMate#1834, where 13 consecutive `API Error: 529 Overloaded` entries were reported as '12 turns, no work evidence'. This object adds ONLY that reading: the adjudication is untouched (`verification.outcome` stays `fail`, `worker_state` stays `failed`, blocking `worker_failed` still says why the run stopped). Collected only at that one cap — the exit-20 and pass-without-commit caps are out of scope because real work exists there. ABSENT means no collection was made (the worker did not reach that cap, or the record was transcribed from a prior attempt) and must NOT be read as 'nothing was found', for the same reason an absent `worker_liveness` is not 'the worker was not alive'. Added optionally, so reports written before this field keep validating and dispatch_schema_version stays 1.",
+          "additionalProperties": false,
+          "required": ["code", "turns", "turn_durations_seconds", "snippet_blank", "line_count", "upstream_signature", "structured_events", "transcript", "detail"],
+          "properties": {
+            "code": {
+              "enum": ["worker_upstream_unavailable", "worker_produced_nothing", "worker_output_unreadable"],
+              "description": "worker_upstream_unavailable: POSITIVE evidence that the upstream refused (a run of identical one-line errors at the end of the worker's transcript, an upstream-fault signature on its pane, hooks showing a submitted turn that never emitted `stop`, or the CLI's own `upstreamFault`). Nothing about the Issue was measured, so the recovery is to wait and --resume the SAME plan — never to split the Issue. worker_produced_nothing: POSITIVE evidence that turns really ran (tool calls or non-error assistant output in the transcript, a `stop` after the last send, non-chrome output on the pane) and still left no commit and no uncommitted change; that is a finding about the Issue. worker_output_unreadable: NEITHER positive evidence was obtained, so the runner names that rather than rounding to one of the other two — the rule merge.mjs wrote for `change_evidence_unavailable`. The same code is recorded as a blocking reason."
+            },
+            "turns": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "How many turns this worker was given before the cap. Equal to --max-turns on the path that writes this object."
+            },
+            "turn_durations_seconds": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 0 },
+              "description": "Wall-clock seconds each turn took, in order; the array's length equals `turns`. RECORDED, never adjudicated — deliberately no part of `code`. A worker that bounces off an upstream error returns to its prompt in one or two `wait` poll intervals, so twelve turns of a few seconds each is a fact a human reads instantly, while any threshold this runner picked would be a guess about model speed."
+            },
+            "snippet_blank": {
+              "oneOf": [{ "type": "null" }, { "type": "boolean" }],
+              "description": "Whether `capture --json`'s `realtimeSnippet` (the tail of the worker's pane) held nothing but whitespace. Null when the capture failed or carried no snippet. Transcribed, not adjudicated: a blank pane is normal in some states, which is why it is not evidence on its own."
+            },
+            "line_count": {
+              "oneOf": [{ "type": "null" }, { "type": "integer", "minimum": 0 }],
+              "description": "The capture's own `lineCount`, transcribed. Null when absent or unreadable. A large count beside `snippet_blank: true` is what a pane scrolled full of blank lines looks like."
+            },
+            "upstream_signature": {
+              "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }],
+              "description": "The upstream-fault text that was matched, quoted from the CLI's own output (transcript first, then the pane, then the CLI's `upstreamFault` field) — so a reader sees what was seen instead of the name of a regex. Null when no signature matched. Recorded whenever it was found, including beside `worker_produced_nothing`."
+            },
+            "structured_events": {
+              "oneOf": [
+                { "type": "null" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["last_event_type", "last_event_at", "last_stop_event_at"],
+                  "properties": {
+                    "last_event_type": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] },
+                    "last_event_at": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] },
+                    "last_stop_event_at": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1 }] }
+                  }
+                }
+              ],
+              "description": "`capture --json`'s `structuredEvents`, transcribed (CommandMate 0.24.0+). A `stop` event is the only signal that says a turn ENDED rather than that a session exists. Null when the capture carried no such object — a repository with no hooks installed yields no evidence here, which is absence of evidence and never evidence of absence."
+            },
+            "transcript": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["read", "path", "trailing_identical_error_entries"],
+                  "properties": {
+                    "read": { "const": true },
+                    "path": { "type": "string", "minLength": 1, "description": "The transcript that was read, after redaction (absolute paths never reach an artifact, so this is normally [REDACTED-PATH]; `detail` carries a path-free command that recomputes it)." },
+                    "trailing_identical_error_entries": { "type": "integer", "minimum": 0, "description": "How many IDENTICAL one-line upstream errors sit at the very end of the transcript. Three or more is the positive evidence for worker_upstream_unavailable." }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["read", "reason"],
+                  "properties": {
+                    "read": { "const": false },
+                    "reason": { "type": "string", "minLength": 1 }
+                  }
+                }
+              ],
+              "description": "The worker's own agent transcript, when this runner could identify and read exactly one. `read: false` (with the reason) for every case it could not — a non-Claude `cliToolId`, no `cliToolId` at all, no transcript directory, several candidate sessions, or an unreadable file. Not reading it is never a failure of the run and never decides the code on its own."
+            },
+            "detail": { "type": "string", "minLength": 1 }
+          }
+        },
         "verification": {
           "type": "object",
           "description": "The verdict that judged this worker. Recorded for EVERY worker that reached one, independently of whether the rest of the wave completed (Issue #83): the wave barrier decides whether the next wave dispatches, never whether this fact is written down. `note` never states a verification result this object does not — the sentence a human reads is rendered from these fields.",

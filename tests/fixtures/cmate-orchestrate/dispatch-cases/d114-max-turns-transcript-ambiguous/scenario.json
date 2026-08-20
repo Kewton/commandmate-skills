@@ -1,0 +1,47 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "235": {
+      "state": "completed",
+      "verify_exits": [
+        21
+      ],
+      "capture_extra": {
+        "realtimeSnippet": "\n\n\n",
+        "lineCount": 88
+      }
+    }
+  },
+  "claude_transcripts": {
+    "235": {
+      "sessions": [
+        [
+          {
+            "type": "user",
+            "message": {
+              "role": "user",
+              "content": "上の実行契約に従って作業を開始してください。"
+            }
+          }
+        ],
+        [
+          {
+            "type": "user",
+            "message": {
+              "role": "user",
+              "content": "別セッションの最初の1通。"
+            }
+          }
+        ]
+      ]
+    }
+  }
+}

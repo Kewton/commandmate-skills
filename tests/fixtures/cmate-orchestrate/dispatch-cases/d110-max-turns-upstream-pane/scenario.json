@@ -1,0 +1,23 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "231": {
+      "state": "completed",
+      "verify_exits": [
+        21
+      ],
+      "capture_extra": {
+        "realtimeSnippet": "\n\n✻ 529 Overloaded · Retrying in 4s · attempt 7/10\n\n",
+        "lineCount": 214
+      }
+    }
+  }
+}

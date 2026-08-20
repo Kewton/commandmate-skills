@@ -12,7 +12,7 @@
 // Node stdlib only. Not part of the release pipeline; run on demand.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync, statSync, realpathSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -110,7 +110,67 @@ function baseEnv() {
   // it explicitly to a per-run temp directory, so the suite never touches the
   // shared default ($TMPDIR/cmate-orchestrate-locks).
   delete env.CMATE_ORCHESTRATE_LOCK_DIR;
+  // The agent transcript root the dispatch runner reads at the --max-turns cap
+  // (Issue #220). Deleted for the same reason as the two above, and then set
+  // explicitly per run below: a suite that fell through to the developer's real
+  // `~/.claude/projects` would be reading somebody's actual sessions, and the
+  // answer would differ between machines.
+  delete env.CLAUDE_CONFIG_DIR;
   return env;
+}
+
+// Deep-PARTIAL comparison, for the nested objects of `worker_turn_evidence`
+// (Issue #220). Scalars, arrays and null compare exactly; a plain object in the
+// EXPECTATION names the keys it cares about and says nothing about the rest.
+// This exists for one honest reason: `structured_events` transcribes hook
+// timestamps that are minted while the fixture runs, so pinning the whole object
+// would pin the clock. The shape itself is not left unchecked — the report is
+// validated against dispatch-report.v1.json, whose `additionalProperties: false`
+// is what refuses a field nobody expected.
+function matchesPartial(actual, expected) {
+  if (expected !== null && typeof expected === 'object' && !Array.isArray(expected)) {
+    if (actual === null || typeof actual !== 'object' || Array.isArray(actual)) return false;
+    return Object.entries(expected).every(([key, value]) => matchesPartial(actual[key], value));
+  }
+  return deepEqual(actual, expected);
+}
+
+// Claude Code's own encoding of a session cwd into a `projects/` directory name:
+// every non-alphanumeric byte becomes a hyphen (`/Users/x/repo_a` →
+// `-Users-x-repo-a`). Written out here rather than imported because the runner
+// under test owns its copy — if the two ever disagree the transcript simply is
+// not found, which surfaces as `transcript.read: false` and fails the cases
+// below rather than passing quietly.
+function claudeProjectDirName(absolutePath) {
+  return absolutePath.replace(/[^a-zA-Z0-9]/g, '-');
+}
+
+// Materialize the worker transcripts a scenario declares (Issue #220), into the
+// per-run CLAUDE_CONFIG_DIR. `claude_transcripts` maps an issue number to either
+// one session (an array of JSONL entries) or several (`{ sessions: [[…], […]] }`,
+// which is the "this runner will not guess which session was this worker's"
+// world). An issue that declares nothing has no transcript at all — also a case,
+// and the one that produces `read: false`.
+function writeClaudeTranscripts(plan, work, configDir, pathOverrides, declared) {
+  for (const [number, value] of Object.entries(declared)) {
+    const issue = plan.issues.find((entry) => Number(entry.number) === Number(number));
+    if (issue === undefined) continue;
+    const worktreeDir = join(work, basename(registeredPathFor(issue, pathOverrides)));
+    mkdirSync(worktreeDir, { recursive: true });
+    let absolute;
+    try {
+      absolute = realpathSync(worktreeDir);
+    } catch {
+      absolute = worktreeDir;
+    }
+    const sessions = Array.isArray(value) ? [value] : (value?.sessions ?? []);
+    const dir = join(configDir, 'projects', claudeProjectDirName(absolute));
+    mkdirSync(dir, { recursive: true });
+    sessions.forEach((entries, index) => {
+      const body = entries.map((entry) => JSON.stringify(entry)).join('\n');
+      writeFileSync(join(dir, `session-${index + 1}.jsonl`), `${body}\n`, 'utf8');
+    });
+  }
 }
 
 // Mirror CommandMate's generateWorktreeId(branch, repoName): lowercase, non
@@ -282,8 +342,16 @@ function runDispatchRunner(planPath, scenarioObject, work, outDir, extraArgs, lo
   writeFileSync(scenarioPath, `${JSON.stringify(scenario, null, 2)}\n`);
   const stateDir = opts.state ?? work;
   mkdirSync(stateDir, { recursive: true });
+  // Per-run, always — not only for the cases that declare a transcript (Issue
+  // #220). An empty directory is what "this worktree has no transcript" looks
+  // like, and pinning it here is what keeps every other case from reaching the
+  // developer's real `~/.claude/projects`.
+  const claudeConfigDir = join(work, 'claude-config');
+  mkdirSync(join(claudeConfigDir, 'projects'), { recursive: true });
+  writeClaudeTranscripts(plan, work, claudeConfigDir, pathOverrides, scenarioObject.claude_transcripts ?? {});
   const env = {
     ...baseEnv(),
+    CLAUDE_CONFIG_DIR: claudeConfigDir,
     CMATE_FAKE_SCENARIO: scenarioPath,
     CMATE_FAKE_STATE: stateDir,
     // Per-run by default so an unattended case cannot collide with another case
@@ -1392,6 +1460,54 @@ function runDispatchCase(caseId) {
         `#${num} worker_liveness.elapsed_seconds ${JSON.stringify(worker.worker_liveness.elapsed_seconds)} is not a non-negative integer`);
       check(typeof worker.worker_liveness.detail === 'string' && worker.worker_liveness.detail.length > 0,
         `#${num} worker_liveness carries no detail`);
+    }
+  }
+  // Why there is nothing at the --max-turns cap (Issue #220). Same shape and same
+  // rules as `worker_liveness` above: the case pins the CODE and the transcribed
+  // materials, `null` asserts the field is ABSENT (a worker that never reached
+  // that cap), and the INVARIANTS are checked for every worker that carries one —
+  // one duration per turn, and a detail that says something. The durations are
+  // wall-clock, so their VALUES are never pinned; their COUNT is the acceptance
+  // condition, because an array that silently drops a turn is a report that
+  // undercounts the very thing a human reads it for.
+  if (expect.worker_turn_evidence) {
+    for (const [num, expected] of Object.entries(expect.worker_turn_evidence)) {
+      const worker = allWorkers(report).find((w) => w.issue === Number(num));
+      if (!check(worker !== undefined, `#${num} has no worker record`)) continue;
+      if (expected === null) {
+        check(worker.worker_turn_evidence === undefined,
+          `#${num} carries a worker_turn_evidence ${JSON.stringify(worker.worker_turn_evidence)} on a worker that never reached the --max-turns cap on exit 21`);
+        continue;
+      }
+      if (!check(worker.worker_turn_evidence !== undefined, `#${num} has no worker_turn_evidence after the --max-turns cap`)) continue;
+      const evidence = worker.worker_turn_evidence;
+      for (const [key, value] of Object.entries(expected)) {
+        check(matchesPartial(evidence[key], value),
+          `#${num} worker_turn_evidence.${key} ${JSON.stringify(evidence[key])} does not match ${JSON.stringify(value)}`);
+      }
+      const durations = evidence.turn_durations_seconds;
+      if (check(Array.isArray(durations), `#${num} worker_turn_evidence.turn_durations_seconds is not an array`)) {
+        check(durations.length === evidence.turns,
+          `#${num} worker_turn_evidence has ${durations.length} duration(s) for ${evidence.turns} turn(s)`);
+        check(durations.every((value) => Number.isInteger(value) && value >= 0),
+          `#${num} worker_turn_evidence.turn_durations_seconds holds a non-integer or negative value: ${JSON.stringify(durations)}`);
+      }
+      check(typeof evidence.detail === 'string' && evidence.detail.length > 0,
+        `#${num} worker_turn_evidence carries no detail`);
+    }
+  }
+  // The prose a human acts on. Pinned separately from the structured fields for
+  // the reason #83 gave: the sentence and the object are one claim, and the
+  // `worker_output_unreadable` case is ONLY useful if its detail refuses to round
+  // and names the command that answers the question.
+  if (expect.worker_turn_evidence_detail_includes) {
+    for (const [num, needles] of Object.entries(expect.worker_turn_evidence_detail_includes)) {
+      const worker = allWorkers(report).find((w) => w.issue === Number(num));
+      if (!check(worker !== undefined, `#${num} has no worker record`)) continue;
+      const detail = String(worker.worker_turn_evidence?.detail ?? '');
+      for (const needle of needles) {
+        check(detail.includes(needle), `#${num} worker_turn_evidence.detail does not contain "${needle}": ${JSON.stringify(detail.slice(0, 400))}`);
+      }
     }
   }
   for (const id of expect.completion_checks_failed ?? []) {

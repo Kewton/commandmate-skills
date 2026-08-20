@@ -22,7 +22,7 @@
       "201": ["dispatch/blocking/worker_failed"]
     },
     "hints_include": {
-      "worker_failed": "Issue を分割して re-plan する",
+      "worker_failed": "`worker_upstream_unavailable` なら Issue を分割せず待って `--resume`",
       "worktree_unresolved": "cmate-worktree-setup で worktree を作成して再実行する",
       "drift_integration_clean": "drift の上に dispatch しない",
       "auto_yes_used": "何に答えたのかを report で確認する",
