@@ -29,7 +29,7 @@ exit 0 になるのは M が 0 **かつ** assertion 数が `MIN_ASSERTIONS`（�
 
 ## 何を固定しているか
 
-fixture は `fixtures/*.yaml`（46 本。うち 27 本が拒否されるべき設定）。
+fixture は `fixtures/*.yaml`（47 本。うち 27 本が拒否されるべき設定）。
 
 | 群 | 内容 |
 |---|---|
@@ -43,6 +43,7 @@ fixture は `fixtures/*.yaml`（46 本。うち 27 本が拒否されるべき�
 | `retryOnFail` / `flakyIsPass`（#224 / CommandMate #1772） | fail→pass が `FLAKY` になり両ランの exit / duration が出る / `flakyIsPass` 未宣言で RESULT failed・exit 20 / 宣言 true で passed・exit 0（**綴りは両方 `FLAKY`**）/ 2 回とも fail は `FAIL exit=3,3`（`flakyIsPass: true` でも fail）/ 3 回目で緑になるゲートは**それでも FAIL**（コマンドの実行回数を marker で数える）/ TIMEOUT は再実行しない / `mutex` と併用してもロックは試行ごとに解放される |
 | env 注入（#223） | `CM_WORKTREE_INDEX` / `CM_WORKTREE_ID` を export した／しないで同じ verify.yaml が期待どおり走る（ランナーは**上書きしない**） |
 | `options.requireEnvClean`（#1740） | 受理され（exit 2 にならない）、`GATE env-clean SKIP reason=no-baseline` と理由が出て、判定は変えない |
+| `$WORKDIR` の寿命（#228） | 48 ゲート × 12 run を回して、どの run でも作業 directory が**run の途中で消えない**（`No such file or directory` / `no output captured` がゼロ・全ゲートの marker が log tail に残る）ことと、run が本当に終わったときには**消える**ことを両側から固定する |
 | harness 自身 | アサーションヘルパの自己検査 |
 
 ## 失敗の追跡可能性
@@ -88,6 +89,11 @@ EXIT trap で消えるため、ここで echo しないものは後から読め�
 | mutex 待ちの SKIP で `RESULT passed` を出す | 3 件 |
 | `GATE env-clean SKIP` 行を出さない | 1 件 |
 | ゲートに `CM_WORKTREE_INDEX` / `CM_WORKTREE_ID` を**上書きで**渡す | 2 件 |
+| **#228（2026-08-20 実測。Linux/ARM64 の container・bash 5.2.21 で計測）** ||
+| watchdog の停止を `kill -TERM` に戻し **かつ** `cleanup_workdir` の `BASH_SUBSHELL` ガードを外す（= 修正の全戻し） | `workdir-lifetime` の 2〜3 件。48 ゲート × 12 run を 1 単位として **20 回中 20 回**赤（24 ゲート × 6 run では 20 回中 15 回しか赤にならなかったのでこの件数まで上げた）。修正版は同じ計測で 25 回中 0 回赤 |
+| 片方だけ戻す（`kill -TERM` に戻すが ガードは残す／ガードを外すが `kill -s KILL` は残す） | **赤にならない**（各 20 回中 0 回）。2 つは冗長に置いてある — `kill -s KILL` が引き金（catch できる signal）を消し、ガードが結果（fork した子による `rm -rf`）を消す。どちらか一方でも欠陥は出ない |
+
+#228 で `mutex: the first run declares a wait of zero rather than nothing` を 2 assertion に割った。`GATE e2e PASS exit=0 duration=3s waited=0s` の literal 一致は、runner が約束していない値まで固定していた —— duration は `date +%s` の秒単位計測なので 3 秒の hold が秒境界をまたぐと 4 と読める（20 回連続実行で macOS・Linux/ARM64 とも 20 回中 1 回赤）。いま固定しているのは **`waited` はちょうど 0**（待たなかったゲートも `waited=` を出す）と **duration は 3 秒以上**（待ち時間を duration に足していない）の 2 つ。`lock_acquire` を通さない変異での実測は分割前 23 件 → 分割後 24 件。
 
 script を変更したら、**まず変異を入れて赤くなることを確かめてから**直すこと。
 

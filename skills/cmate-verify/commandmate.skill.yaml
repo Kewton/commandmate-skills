@@ -99,8 +99,8 @@ files:
     executable: false
     script: false
   - path: scripts/verify-run.sh
-    sha256: ed369aad3c06276bafb5ccff9d84bbca846b20a7f6c97d811ab2de7f3bf4ba0a
-    size: 41280
+    sha256: 505a8d145707a53badca1dda0faaa6d9206b2985abf4265ca216ac4c85bc9561
+    size: 43243
     kind: script
     executable: true
     script: true
