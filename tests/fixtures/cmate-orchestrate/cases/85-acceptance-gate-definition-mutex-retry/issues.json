@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 370,
+      "title": "feat: gates that need a lock and a retry",
+      "body": "The e2e suite binds a fixed port and the unit suite trips over a random UUID.\n\n## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\ngates:\n  - id: issue-370-e2e\n    command: \"npm run test:e2e\"\n    timeoutSec: 1800\n    mutex: e2e-port\n  - id: issue-370-unit\n    command: \"npm run test:unit\"\n    retryOnFail: 1\n    flakyIsPass: true\n  - id: issue-370-explicit-default\n    command: \"npm run lint\"\n    retryOnFail: 0\n    flakyIsPass: false\n```\n",
+      "labels": []
+    }
+  ]
+}

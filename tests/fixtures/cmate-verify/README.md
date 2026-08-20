@@ -3,10 +3,10 @@
 `skills/cmate-verify` のランナー（`scripts/verify-run.sh`）の回帰テスト。
 package には含まれない（配布物は `skills/cmate-verify/` の下だけ）。0.4.0 で
 `skills/cmate-verify/scripts/tests/` からここへ移した（Issue #69）。移送前後で
-**214 assertion / 0 failed** は同一である。
+**214 assertion / 0 failed** は同一である。Issues #223 / #224 で 314 assertion に増えた。
 
 ```bash
-bash tests/fixtures/cmate-verify/run-tests.sh   # 214 assertions
+bash tests/fixtures/cmate-verify/run-tests.sh   # 314 assertions
 ```
 
 bash と git だけで動く。ネットワークも Node も使わない（テスト対象のランナー自身が
@@ -24,12 +24,12 @@ bash + git + awk しか要求しないので、その suite が依存を増や�
 ## 出力形式
 
 TAP 風（`ok - ...` / `not ok - ...`）＋最終行 `# tests: N passed, M failed`。
-exit 0 になるのは M が 0 **かつ** assertion 数が `MIN_ASSERTIONS`（現在 200）以上のとき。
+exit 0 になるのは M が 0 **かつ** assertion 数が `MIN_ASSERTIONS`（現在 300）以上のとき。
 この下限は、ケースが黙って落ちた suite が「0 failed」で緑になるのを防ぐためにある。
 
 ## 何を固定しているか
 
-fixture は `fixtures/*.yaml`（28 本。うち 19 本が拒否されるべき設定）。
+fixture は `fixtures/*.yaml`（46 本。うち 27 本が拒否されるべき設定）。
 
 | 群 | 内容 |
 |---|---|
@@ -39,6 +39,10 @@ fixture は `fixtures/*.yaml`（28 本。うち 19 本が拒否されるべき�
 | 診断可能性（Issue #1607） | 出力ゼロで落ちるゲート・`maxLogTailBytes: 0`・exit 126/127 の spawn ヒント |
 | `options.requireCommit` | 未 commit のみ → 21 / 同じ変更を commit → 0 / 既定では同じ dirty tree が PASS / 作業ゼロを commit 規則のせいにしない / `--skip-work-evidence` は要求ごと飛ばす |
 | 実行契約の除外（#1651 / #1580） | 契約だけの untracked → 21 / 契約だけの setup commit → 21 / 同じツリーに実作業を足すと 0 / 契約を実作業へ rename・その逆向きも作業として数える / 空白を含む契約パスも非契約パスも誤判定しない / 新規ディレクトリはファイル単位で数える |
+| `mutex`（#223 / CommandMate #1771） | 2 プロセス同時実行で片方が待つ（`waited=` が duration と**別に**出る）/ ロックは `<root>/<name>.lock` の**ディレクトリ**で `owner` に pid・host・token を持つ / 終了時に解放される / 待たなかったゲートも `waited=0s` を出す / 宣言していないゲートに `waited=` は付かない / 空かないまま timeout → `SKIP reason=mutex-wait` + exit 22（TIMEOUT でも FAIL でもない）/ 他ホストの記録は奪わない / 自ホストの死んだ pid の記録は奪う |
+| `retryOnFail` / `flakyIsPass`（#224 / CommandMate #1772） | fail→pass が `FLAKY` になり両ランの exit / duration が出る / `flakyIsPass` 未宣言で RESULT failed・exit 20 / 宣言 true で passed・exit 0（**綴りは両方 `FLAKY`**）/ 2 回とも fail は `FAIL exit=3,3`（`flakyIsPass: true` でも fail）/ 3 回目で緑になるゲートは**それでも FAIL**（コマンドの実行回数を marker で数える）/ TIMEOUT は再実行しない / `mutex` と併用してもロックは試行ごとに解放される |
+| env 注入（#223） | `CM_WORKTREE_INDEX` / `CM_WORKTREE_ID` を export した／しないで同じ verify.yaml が期待どおり走る（ランナーは**上書きしない**） |
+| `options.requireEnvClean`（#1740） | 受理され（exit 2 にならない）、`GATE env-clean SKIP reason=no-baseline` と理由が出て、判定は変えない |
 | harness 自身 | アサーションヘルパの自己検査 |
 
 ## 失敗の追跡可能性
@@ -75,6 +79,15 @@ EXIT trap で消えるため、ここで echo しないものは後から読め�
 | 契約除外: `-uall` 除去 | 10 件 |
 | 契約除外: rename の 2 パス目を見ない | 1 件 |
 | 契約除外: `-z` をやめて人間向けフォーマットを行単位で読む | 21 件 |
+| **#223 / #224（2026-08-20 実測）** ||
+| ロックを取らずにゲートを回す | 19 件 |
+| `waited` を duration に足す | 1 件（`mutex: waited is reported beside duration, never added to it`） |
+| `FLAKY` を `PASS` に丸める | 4 件 |
+| `flakyIsPass` 未宣言でも FLAKY を pass と数える | 4 件 |
+| 再実行を 1 回でなく 2 回にする | 3 件（うち 1 件はコマンドの実行回数そのもの） |
+| mutex 待ちの SKIP で `RESULT passed` を出す | 3 件 |
+| `GATE env-clean SKIP` 行を出さない | 1 件 |
+| ゲートに `CM_WORKTREE_INDEX` / `CM_WORKTREE_ID` を**上書きで**渡す | 2 件 |
 
 script を変更したら、**まず変異を入れて赤くなることを確かめてから**直すこと。
 

@@ -1,0 +1,36 @@
+{
+  "description": "Issue #224 の既定側、d99 との二点測定。GATE 行の綴りは d99 と **同一の `FLAKY`** で、変わるのは wait の exit code だけ（20）—— `flakyIsPass` を宣言していない repository では FLAKY は fail として数えられる、というのが上流の既定であり、「再実行を宣言してもゲートは 1 bit も弱くならない」の実体である。ここで assert するのは 2 つ。(1) report の gates は d99 と同じ `flaky` を残す。裁定が fail に転んだからといって `FLAKY` を `fail` へ書き換えると、この run と「本当に 2 回落ちた run」が report 上で区別できなくなる。(2) 裁定は exit code に従い `fail` になる —— GATE 行に PASS/FAIL が 1 本も無いことを理由に pass へ倒したりしない。さらに、失敗の内訳を読む `commandmate verify --json` 側では gate が `status: failed` と `flaky.outcome: flaky` の両方を持つ（#1772 は DB マイグレーションを行っていないので、FLAKY は保存された status に重ねて読む LABEL である）。runner はその事実を worker への再指示に載せる: 「unit が壊れている」ではなく「unit は同一 tree で再現しなかったが、この repository はそれを失敗として数える」と伝わることが、再指示が意味を持つ条件である。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--expect-branch", "feature/integration", "--max-turns", "2"],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "verification_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [false],
+    "no_respond": true,
+    "sent": [201],
+    "never_sent": [200],
+    "worker_states": { "201": "completed" },
+    "verification_outcomes": { "201": "fail" },
+    "verification_gates": {
+      "201": [
+        { "id": "work-evidence", "verdict": "pass", "origin": "repo" },
+        { "id": "unit", "verdict": "flaky", "origin": "repo" }
+      ]
+    },
+    "verification_checks_include": {
+      "201": [
+        "gate unit: failed (exit 1) — FLAKY: it failed, then passed on a re-run of the same tree, and this repository does not declare flakyIsPass for it"
+      ]
+    },
+    "completed_but_unverified": [201],
+    "verify_calls": 2,
+    "wait_verify_calls_min": 2
+  }
+}

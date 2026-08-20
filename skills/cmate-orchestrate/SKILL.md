@@ -281,8 +281,8 @@ pending・check 0 件は `ci_pending` として **merge を拒否**する。
 **定型文ではなくこの Issue の実測値**である。人間が見るのは PR だけなので、証拠が
 run ディレクトリの JSON の中にしか無い状態を残さない。載せるのは verdict・gate ごとの合否と
 exit code・宣言 scope と実変更 file の対比（scope 外の件数を含む）・diff 規模の4つで、
-**転記であって主張ではなく**、**読めなかったものを pass に丸めず**、上限で打ち切ったなら
-**打ち切った件数を本文に明記する**。出どころの表と規則の全文は
+**転記であって主張ではなく**、**読めなかったものも `flaky` も pass に丸めず**（#224）、
+上限で打ち切ったなら**打ち切った件数を本文に明記する**。出どころの表と規則の全文は
 [references/runner-operations.md](./references/runner-operations.md) 第12節。
 
 merge-report.json / merge-summary.md の構造は変わらない。

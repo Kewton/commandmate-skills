@@ -88,15 +88,32 @@ GATE unit FAIL exit=1 duration=45s
 RESULT failed
 ```
 
+| 行 | 形式 |
+|---|---|
+| コマンド系ゲート | `GATE <id> PASS\|FAIL exit=<code> duration=<n>s` |
+| 再実行したゲート | `GATE <id> FLAKY\|FAIL exit=<c1>,<c2> duration=<n>s,<n>s` |
+| タイムアウト | `GATE <id> TIMEOUT exit=124 duration=<n>s` |
+| skip | `GATE <id> SKIP reason=primary-checkout\|flag\|mutex-wait\|no-baseline` |
+| work-evidence | `GATE work-evidence PASS\|FAIL commits=<n> uncommitted=<n>` |
+| 判定 | `RESULT passed\|failed\|not_started\|skipped` |
+
+`mutex` を宣言したゲートは末尾に `waited=<n>s` が付く。
+**製品 CLI は同じ値を括弧で描画する**（`GATE lint PASS (exit=0, 12.3s)`）—— 元から別形式であり、
+契約は**フィールド名・単位・「waited を duration に足さない」ことであって区切り文字ではない**
+（verification-config.md §9.3 の表が綴りの確定形）。
+
 | RESULT | exit code | 意味 |
 |---|---|---|
 | `passed` | 0 | 実行した全ゲートが PASS |
 | — | 2 | 設定エラー（verify.yaml 不正 / ファイル無し / git でない cwd 等） |
-| `failed` | 20 | 1 つ以上のゲートが FAIL または TIMEOUT |
+| `failed` | 20 | 1 つ以上のゲートが FAIL / FLAKY（`flakyIsPass` 未宣言）/ TIMEOUT |
 | `not_started` | 21 | work-evidence が「作業の痕跡ゼロ」と判定（コマンド系ゲートは走らない） |
-| `skipped` | 22 | 実行したコマンド系ゲートが 0 件（メイン checkout での skip） |
+| `skipped` | 22 | 実行したコマンド系ゲートが 0 件、または `mutex` が空かず**裁定に到達しなかった**ゲートが在る |
 
 **`skipped` を `passed` と読まないこと。** 何も検証していない状態であり、緑ではない。
+CommandMate 本体はこの「判定不能」を exit 99 で表すが、本ランナーの語彙に 99 は無い。
+22 が「ここでは何も裁定していない。これは緑ではない」を既に意味しているので、そちらに寄せている。
+**実際に落ちたゲートが在れば 20 が勝つ** —— 在る裁定は無い裁定より強い。
 
 失敗ゲートのログ末尾は **stderr** に出る（stdout をパース可能に保つため）。FAIL / TIMEOUT では
 **必ず理由行が出る** — 出力が 1 バイトも無ければ `no output captured`、`maxLogTailBytes: 0` なら
@@ -115,12 +132,40 @@ gates:
   - id: unit
     command: "npm run test:unit"
     timeoutSec: 1800
+    retryOnFail: 1            # 落ちたら同一 tree でもう 1 回だけ回す（0 か 1 のみ）
+    flakyIsPass: false        # FLAKY を pass と数えるか（既定 false = 数えない）
+  - id: e2e
+    command: "npm run test:e2e"
+    timeoutSec: 1800
+    mutex: e2e-port           # マシン全体で同時に 1 つ
 options:
   baseRef: origin/develop
   skipInPrimaryCheckout: true
   maxLogTailBytes: 8192
   requireCommit: false        # true で work-evidence が commit を要求する（既定 false）
+  requireEnvClean: false      # CommandMate の組み込み env-clean ゲート（本ランナーは判定できない）
 ```
+
+### キーの一覧（両ランナーが受理する集合）
+
+正準は CommandMate の `src/lib/verification/verify-config.ts`。**本ランナーと
+cmate-verify-advisor はこの集合に追随する**（`tests/fixtures/cmate-verify-advisor/parser-parity.sh`
+が 3 実装の集合一致を機械的に固定している）。**v1 は閉じた集合なので、ここに無いキーは
+無視されるのではなく exit 2 である。**
+
+| 場所 | キー | 値域 | 既定 |
+|---|---|---|---|
+| `gates[]` | `id` | `^[a-z0-9][a-z0-9-]{0,31}$`。`work-evidence` / `scope` / `env-clean` は予約 | 必須 |
+| `gates[]` | `command` | 1 行スカラー | 必須 |
+| `gates[]` | `timeoutSec` | 整数 1..7200 | 600 |
+| `gates[]` | `mutex` | `^[A-Za-z0-9_.-]+$` / 64 文字以内 | 宣言しない |
+| `gates[]` | `retryOnFail` | **`0` か `1` のみ**（2 以上は設定エラー） | 0 |
+| `gates[]` | `flakyIsPass` | `true` / `false`。**`true` は `retryOnFail: 1` を伴わないと設定エラー** | false |
+| `options` | `baseRef` | ref 名 | `refs/remotes/origin/HEAD` |
+| `options` | `skipInPrimaryCheckout` | `true` / `false` | true |
+| `options` | `maxLogTailBytes` | 整数 0..1048576 | 8192 |
+| `options` | `requireCommit` | `true` / `false` | false |
+| `options` | `requireEnvClean` | `true` / `false` | false |
 
 このランナーは awk / sed で読むため、**YAML のサブセットしか受け付けない**:
 
@@ -165,6 +210,105 @@ stderr に 1 行出す（`FAIL commits=0 uncommitted=0` を「ゲートのバグ
 `options.requireCommit` だけである（シェルから起動したランは、どの委任にも紐付いていない）。
 **両方のランナーで効かせたい要求は verify.yaml に書く**。それが 2 実装が共に読む唯一の
 ファイルである。
+
+## 並列 worktree と共有資源（`mutex` / env）
+
+### `mutex: <name>` — マシン全体の排他
+
+固定ポート・ローカル DB・エミュレータのように **worktree ごとに分けられない資源**を持つゲートに
+宣言する。同じ名前を宣言したゲートはマシン全体で同時に 1 つしか走らない。
+
+```
+GATE e2e PASS exit=0 duration=190s waited=42s
+```
+
+- `duration` は**ゲート自身のコマンドが動いていた時間**、`waited` は**ロック待ちの時間**。
+  **足さないこと** —— 混ぜると timeout の調整も advisor の入力も歪む。
+- `mutex` を宣言していて待たなかったゲートも `waited=0s` を出す（「排他されていて待たなかった」と
+  「排他していない」は別の事実である）。宣言していないゲートの行は従来どおりで、`waited=` は付かない。
+- ロックが空かないまま `timeoutSec` に達したら `GATE <id> SKIP reason=mutex-wait waited=<n>s`。
+  **TIMEOUT ではない**（コマンドは 1 度も起動していない）し **FAIL でもない**（work を裁定していない）。
+  その run は `RESULT skipped` / exit 22 になる。
+
+**ロックの置き場と方式は規約であり実装詳細ではない。** CommandMate の runner と本ランナーは
+同じマシンに対して独立に起動されるので、どちらか一方でも違えば排他にならない。
+
+| 項目 | 規約 |
+|---|---|
+| パス | `~/.commandmate/locks/<name>.lock`（環境変数 `CM_VERIFY_LOCK_ROOT` で差し替え可。**テストは必ずこれを使う**） |
+| 方式 | **`mkdir` によるアトミックな作成**（macOS に `flock(1)` が無いため） |
+| 保有者記録 | ロックディレクトリ内の `owner`。JSON `{"pid":N,"host":"…","token":"…","acquiredAt":ms}` |
+| 待ち | 空くまでポーリング（250ms 間隔）。上限は**そのゲートの `timeoutSec`** |
+| 解放 | `owner.token` が自分のものであるときだけ削除する |
+| 死んだ保有者 | `host` が自ホストと一致し、かつ `pid` が存在しないときのみ、待つ側が奪ってよい。**他ホストの pid では判断しない** |
+
+### `CM_WORKTREE_INDEX` / `CM_WORKTREE_ID`
+
+CommandMate はゲートに worktree ごとの採番を渡す（`~/.commandmate/worktree-index/<n>` を
+`O_EXCL` で確保する）。**本ランナーはこの 2 つを設定しない。** 呼び出し側が export していれば
+それがそのまま子プロセスへ渡り、していなければ未設定のまま走る。
+
+理由は臆病さではなく**採番を知らないこと**である。CommandMate の番号は worktree ID に紐づいて
+永続化されており、standalone 側が別の根拠で振った番号は**同じ worktree に別の番号を与える** ——
+その結果、製品 run が既に握っているポートにゲートを載せることになる。無いより悪い。
+
+**ゲート側が既定値を持つこと。**
+
+```yaml
+gates:
+  - id: e2e
+    command: "sh -c 'E2E_PORT=$((60400+${CM_WORKTREE_INDEX:-0})) npm run test:e2e'"
+```
+
+`${CM_WORKTREE_INDEX:-0}` と書いておけば、CommandMate 経由でも素の shell からでも同じ
+verify.yaml が走る。既定値なしで `$((60400+CM_WORKTREE_INDEX))` と書くと、変数が未設定の
+経路で全 worktree が 60400 に潰れる。
+
+## `retryOnFail` / `flakyIsPass` — FLAKY
+
+環境・乱数由来の赤に名前を付ける。`retryOnFail: 1` を宣言したゲートが**非ゼロ終了したときだけ**、
+**同一 tree でもう 1 回だけ**回す。
+
+| outcome | 条件 | GATE 行 | 裁定 |
+|---|---|---|---|
+| FLAKY | 1 回目 fail → 2 回目 pass、`flakyIsPass` 未宣言／`false` | `FLAKY` | **fail**（`RESULT failed` / exit 20） |
+| FLAKY | 1 回目 fail → 2 回目 pass、`flakyIsPass: true` | `FLAKY` | pass（`RESULT passed` / exit 0） |
+| FAIL | 2 回とも fail | `FAIL` | fail |
+
+- **値域は `0` か `1` のみ。** 十分な回数を回せばどんな赤も緑になるので、**上限そのものが機能の中身**である。
+- **再実行するのは `FAIL` だけ。** `TIMEOUT` は再実行しない（既に予算を使い切っており、2 回目は
+  予算が最も大きいゲートの実時間を倍にする）。`SKIP`（mutex 待ち）はコマンドが 1 度も走っていない。
+- 2 回目が裁定に到達しなかったとき（TIMEOUT・mutex 待ち）は **1 回目の FAIL がそのまま立つ**。
+- **既定では FLAKY は fail 扱い。** 再実行を宣言してもゲートは 1 bit も弱くならない。
+  `retryOnFail: 1` が買うのは「何が起きたか」に名前が付くことであって、pass ではない。
+- **`FLAKY` の綴りは `flakyIsPass` で変わらない。** 変わるのは RESULT と exit code だけである。
+  FLAKY を `PASS` と綴ると、この機能が可視化するために存在する唯一の事実が消える。
+- `mutex` と併用したとき、ロックは**試行ごとに取得・解放する**。
+
+両ランの記録は stderr に出る機械可読アンカーで運ばれる（`maxLogTailBytes` は**ラン単位**に適用）:
+
+```
+[flaky] runs=2 outcome=flaky exit=1,0 duration=45.0s,44.0s verdict=fail
+--- [flaky] run 1/2: failed exit=1 duration=45.0s ---
+--- [flaky] run 2/2: passed exit=0 duration=44.0s ---
+[mutex] name=e2e-port waited=42.0s lock=/Users/me/.commandmate/locks/e2e-port.lock
+```
+
+**`outcome=fail`（2 回とも fail）でもアンカーを書く。** 2 回落ちたゲートは flakiness に対する
+**反証**であり、flake advisor はその分母を必要とする。flaky 側にしか印が無ければ、再実行した
+ゲートは全て flaky に見える。
+
+## `options.requireEnvClean`（既定 false）
+
+CommandMate の組み込み `env-clean` ゲート（#1740）を有効にするキー。**本ランナーは受理するが
+判定はできない** —— このゲートは「タスク作成時（`send --contract`）に撮ったマシンのスナップショット」
+と現在を比較するものであり、shell から起動した run はどのタスクにも紐付いていないので、
+比較対象のベースラインが存在しない。
+
+宣言されたときは `GATE env-clean SKIP reason=no-baseline` を出し、理由を stderr に書く
+（黙って飲み込まない）。**この行は判定を変えない** —— 有効にしただけの repository の run を
+すべて緑でなくしてしまえば、読めない設定（exit 2）を別の読めない設定（決して緑にならない）に
+置き換えただけになる。このゲートの裁定を持っているのは `commandmate verify` である。
 
 ## メイン checkout での skip
 

@@ -43,6 +43,7 @@ import {
   SKILL_ID,
   SKILL_VERSION,
   SkillError,
+  isFlakyVerdict,
   loadJson,
   redact,
   redactionsList,
@@ -591,6 +592,7 @@ function dispatchIssueView(number, artifacts) {
     verification_ran: false,
     verification_outcome: null,
     gates: [],
+    flaky_gates: [],
     task_id: null,
     prompt_detected: false,
     prompt_excerpt: null,
@@ -624,6 +626,15 @@ function dispatchIssueView(number, artifacts) {
     verification_outcome: String(verification.outcome ?? ''),
     gates: (Array.isArray(verification.gates) ? verification.gates : [])
       .map((gate) => ({ id: clip(gate.id, 48), verdict: String(gate.verdict ?? '') })),
+    // Listed on their own as well as inside `gates` (Issue #224). A FLAKY gate is
+    // the one entry an operator scanning a wave is looking for — it failed and
+    // then passed against the same tree — and in a run with twenty gates it is
+    // otherwise one token in a comma-separated line. The verdict is NOT re-read
+    // from it: `verification_outcome` above is the runner's exit code and stays
+    // the answer to "did this pass".
+    flaky_gates: (Array.isArray(verification.gates) ? verification.gates : [])
+      .filter((gate) => isFlakyVerdict(gate.verdict))
+      .map((gate) => clip(gate.id, 48)),
     task_id: typeof worker.task_id === 'string' ? clip(worker.task_id, 64) : null,
     prompt_detected: (worker.prompt ?? {}).detected === true,
     prompt_excerpt: (worker.prompt ?? {}).excerpt ? clip((worker.prompt ?? {}).excerpt, 160) : null,
@@ -1063,10 +1074,15 @@ function renderIssueDetail(issue) {
   if (dispatch.state !== 'ok') {
     lines.push(`- dispatch : ${MISSING_CELL[dispatch.state]}（${dispatch.detail}）`);
   } else {
+    // Transcribed, never re-read: a verdict this view has never heard of shows as
+    // itself rather than being rounded to something it recognises.
     const gates = dispatch.gates.length === 0
       ? '（GATE 行の記録なし）'
       : dispatch.gates.map((gate) => `${gate.id}=${gate.verdict}`).join(', ');
     lines.push(`- dispatch : Wave ${dispatch.wave_index === null ? '?' : dispatch.wave_index} / worker_state=${dispatch.worker_state} / verification=${dispatch.verification_outcome}（ran=${dispatch.verification_ran}） / gates: ${gates}`);
+    if (dispatch.flaky_gates.length > 0) {
+      lines.push(`             FLAKY: ${dispatch.flaky_gates.join(', ')}（同一 tree の再実行で fail→pass。裁定は上の verification が正で、この行は再読しない）`);
+    }
     if (dispatch.task_id !== null) lines.push(`             task_id: ${dispatch.task_id}`);
     if (dispatch.prompt_detected) lines.push(`             prompt 検出: ${dispatch.prompt_excerpt ?? '（excerpt なし）'}`);
     if (dispatch.note) lines.push(`             note: ${dispatch.note}`);

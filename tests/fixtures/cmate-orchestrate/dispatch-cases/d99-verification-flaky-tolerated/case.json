@@ -1,0 +1,74 @@
+{
+  "description": "Issue #224 / CommandMate #1772 の受理側。`wait --verify` が `GATE unit FLAKY` を出して **exit 0** を返す —— つまり unit は同一 tree の再実行で fail→pass し、その gate の `flakyIsPass: true` によって run 全体は pass に数えられた、という世界である。runner は 3 点を守る: (1) `FLAKY` を第 3 の語として読み、`pass` にも `fail` にも丸めない。丸めた瞬間、この機能が可視化するために存在する唯一の事実が report から消える。(2) 裁定を GATE 行からやり直さない —— verification.outcome は wait の exit code (0) が正であり、`FLAKY` が 1 本混ざっていても fail にはしない（`flakyIsPass` の宣言は verify.yaml 側にあり、この行には無い。行から裁定を再計算する実装は両方向に間違える）。(3) `waited=` を持つ行を壊さず読む。この scenario は **製品 CLI の括弧形式**（`GATE unit FLAKY (exit=1,0, 45.0s,44.0s)`）と **standalone runner の空白区切り**（`GATE e2e PASS exit=0 duration=190s waited=42s`）を 1 つの出力に混在させてある。両者は元から別物であり、片方でしか読めないパーサは区切り文字を契約と読み違えている（verification-config.md §9.3 の表が綴りの確定形）。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "100",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "1",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      100
+    ],
+    "worker_states": {
+      "100": "completed"
+    },
+    "verification_outcomes": {
+      "100": "pass"
+    },
+    "verification_gates": {
+      "100": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "lint",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "unit",
+          "verdict": "flaky",
+          "origin": "repo"
+        },
+        {
+          "id": "e2e",
+          "verdict": "pass",
+          "origin": "repo"
+        }
+      ]
+    },
+    "verification_checks_include": {
+      "100": [
+        "commandmate wait --verify → exit 0 (every declared gate passed)"
+      ]
+    },
+    "verify_calls": 0,
+    "wait_verify_calls_min": 1,
+    "absent_limitation_codes": [
+      "verification_gates_unrecorded"
+    ]
+  }
+}

@@ -65,11 +65,13 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  NON_PASS_GATE_VERDICTS,
   SKILL_ID,
   SKILL_VERSION,
   SkillError,
   issueOf,
   parseCliJson,
+  parseGateLine,
   redact,
   redactionsList,
   resolveLauncher,
@@ -119,7 +121,27 @@ const VERIFY_EXIT_NO_VERDICT = 99;
 
 // Gate statuses that mean the gate did not pass (mirrors FAILED_GATE_STATUSES in
 // CommandMate's verify command). `skipped` is not a failure.
+//
+// `flaky` is deliberately NOT here, and cannot be (Issue #224): FLAKY is a LABEL
+// laid over the stored status, not a status of its own — CommandMate #1772 added
+// no migration, so `verification_gate_results.status` still holds `passed` or
+// `failed` and the gate's `flakyIsPass` decided which. Adding `flaky` to this set
+// would make a tolerated flake — stored `passed`, run green — read as a failing
+// gate, which is re-adjudicating a verdict from a display word. The word is
+// carried into the report by `gateFlakyOutcome` below and changes nothing about
+// who failed.
 const FAILED_GATE_STATUSES = new Set(['failed', 'timeout', 'error']);
+
+// Did this gate's two runs disagree? `commandmate verify --json` structures the
+// runner's `[flaky]` log marker as `gates[].flaky` (verification-config.md
+// section 10.4), so the fact is read from a field rather than re-parsed out of a
+// log body. A gate that was never retried has no field and no marker.
+function gateFlakyOutcome(gate) {
+  const flaky = gate && typeof gate === 'object' ? gate.flaky : null;
+  if (!flaky || typeof flaky !== 'object') return null;
+  const outcome = String(flaky.outcome ?? '');
+  return outcome === 'flaky' || outcome === 'fail' ? outcome : null;
+}
 
 // How the run decides whether to dispatch under an execution contract.
 //   auto    probe the CLI; use a contract when it has one, fall back (loudly) otherwise
@@ -180,6 +202,13 @@ const MAX_GATE_DEFINITIONS = 32;
 const RESERVED_GATE_IDS = ['work-evidence', 'scope', 'env-clean'];
 const MIN_GATE_TIMEOUT_SEC = 1;
 const MAX_GATE_TIMEOUT_SEC = 7200;
+// The value domains of the #1771 / #1772 gate fields, transcribed from
+// verify-config.ts (GATE_MUTEX_PATTERN / MAX_GATE_MUTEX_LENGTH /
+// MAX_RETRY_ON_FAIL) for the same reason the four constants above are: a plan
+// this runner accepts must be one `send --contract` accepts.
+const GATE_MUTEX_RE = /^[A-Za-z0-9_.-]+$/;
+const MAX_GATE_MUTEX_LENGTH = 64;
+const MAX_RETRY_ON_FAIL = 1;
 
 // Bounds on the issue-body text the goal transcribes verbatim (Issue #176).
 // Both are this runner's, not CommandMate's, and they exist for one reason: the
@@ -3294,6 +3323,14 @@ function buildTaskContract(plan, issue, inputs, requiredGates = [], workerMethod
         // Absent when the author stated none, so CommandMate's own
         // DEFAULT_TIMEOUT_SEC applies rather than a number this runner invented.
         if (gate.timeoutSec !== undefined) lines.push(`      timeoutSec: ${gate.timeoutSec}`);
+        // Same rule for the #1771 / #1772 fields: written only when the issue
+        // declared them, so a contract for an issue that used none is byte-
+        // identical to the one this runner wrote before the keys existed, and
+        // "not declared" keeps meaning "this gate runs exactly once, exclusive
+        // of nothing" rather than a default this runner chose.
+        if (gate.mutex !== undefined) lines.push(`      mutex: ${yamlString(gate.mutex)}`);
+        if (gate.retryOnFail !== undefined) lines.push(`      retryOnFail: ${gate.retryOnFail}`);
+        if (gate.flakyIsPass !== undefined) lines.push(`      flakyIsPass: ${gate.flakyIsPass}`);
       }
     }
   }
@@ -3532,6 +3569,32 @@ function issueDefinedGates(declared, requiredIds) {
         return bad(`acceptance_gates.gates entry "${id}" declares timeoutSec ${JSON.stringify(gate.timeoutSec)}, which is not an integer in ${MIN_GATE_TIMEOUT_SEC}..${MAX_GATE_TIMEOUT_SEC}`);
       }
       entry.timeoutSec = gate.timeoutSec;
+    }
+    // Issues #223 / #224: the same three fields upstream's shared validator
+    // accepts on a gate entry, with the same value domains. Re-checked here for
+    // the reason every rule in this function is — the plan is an INPUT, and a
+    // hand-edited one must not put an entry into a contract that
+    // `send --contract` then rejects about a worker that never ran.
+    if (gate.mutex !== undefined) {
+      if (typeof gate.mutex !== 'string' || gate.mutex === '' || gate.mutex.length > MAX_GATE_MUTEX_LENGTH || !GATE_MUTEX_RE.test(gate.mutex)) {
+        return bad(`acceptance_gates.gates entry "${id}" declares mutex ${JSON.stringify(gate.mutex)}, which is not a 1..${MAX_GATE_MUTEX_LENGTH} character name matching ${GATE_MUTEX_RE.source}`);
+      }
+      entry.mutex = gate.mutex;
+    }
+    if (gate.retryOnFail !== undefined) {
+      if (gate.retryOnFail !== 0 && gate.retryOnFail !== MAX_RETRY_ON_FAIL) {
+        return bad(`acceptance_gates.gates entry "${id}" declares retryOnFail ${JSON.stringify(gate.retryOnFail)}, and only 0 or ${MAX_RETRY_ON_FAIL} are allowed`);
+      }
+      entry.retryOnFail = gate.retryOnFail;
+    }
+    if (gate.flakyIsPass !== undefined) {
+      if (typeof gate.flakyIsPass !== 'boolean') {
+        return bad(`acceptance_gates.gates entry "${id}" declares flakyIsPass ${JSON.stringify(gate.flakyIsPass)}, which is not true or false`);
+      }
+      if (gate.flakyIsPass && gate.retryOnFail !== MAX_RETRY_ON_FAIL) {
+        return bad(`acceptance_gates.gates entry "${id}" declares flakyIsPass: true without retryOnFail: ${MAX_RETRY_ON_FAIL}; without a retry a gate can never be FLAKY`);
+      }
+      entry.flakyIsPass = gate.flakyIsPass;
     }
     define.push(entry);
   }
@@ -3987,14 +4050,17 @@ function readTaskId(stdout) {
   return last && TASK_ID_RE.test(last) ? last : null;
 }
 
-// `commandmate wait --verify` prints one `GATE <id> PASS|FAIL` line per executed
-// gate (CommandMate verify-runner's reportGates). Transcribing them into the
-// report is what lets a reviewer read WHAT judged the work — not only that
-// something passed (#47 / CommandMate #1678 B-5: three static-only gate sets
+// `commandmate wait --verify` prints one `GATE <id> PASS|FAIL|FLAKY` line per
+// executed gate (CommandMate verify-runner's reportGates). Transcribing them
+// into the report is what lets a reviewer read WHAT judged the work — not only
+// that something passed (#47 / CommandMate #1678 B-5: three static-only gate sets
 // passed while the app's core feature was broken, and the report could not show
 // what the pass was based on). Unparseable output degrades to an empty list,
 // never to an invented gate.
-const GATE_LINE_RE = /^GATE\s+(\S+)\s+(PASS|FAIL)\b/;
+//
+// The pattern and the words live in lib.mjs (Issue #224): four runners here read
+// this vocabulary, and a word known to one of them and not the others is how
+// `FLAKY` would land as `unknown` in the PR body and `fail` in the matrix.
 const MAX_REPORTED_GATES = 50;
 
 // Where a gate came from, for #97's PR evidence: `issue` when this issue's
@@ -4002,7 +4068,8 @@ const MAX_REPORTED_GATES = 50;
 // repository's common set and the issue said nothing about it.
 //
 // MEASURED (ADR §10 item 4): the CLI's own gate line carries no provenance. It is
-// `GATE <id> PASS|FAIL (<detail>)`, where detail is `exit=`/duration or the
+// `GATE <id> PASS|FAIL|FLAKY (<detail>)`, where detail is `exit=`/duration (both
+// two-valued on a retried gate, plus `waited=` on a mutexed one) or the
 // work-evidence counts — CommandMate's verify-runner formatGateLine builds it and
 // there is nothing else in it. So origin cannot be READ; it is DECIDED here, from
 // the one fact this runner owns: which ids it resolved out of the issue's
@@ -4028,15 +4095,18 @@ function waitStreams(result) {
 // Cap the reported list, and say how much the cap ate (#165). A silent slice at
 // MAX_REPORTED_GATES reads exactly like a run that had that many gates, which is
 // the same "quietly shortened" failure `capped()`/`droppedNote()` fixed for the PR
-// body in merge.mjs. FAIL entries are taken first when the list must be cut: on a
-// failing run the gates that NAME the failure are the ones the report exists for,
-// and they must not fall out of the window behind 50 passes. A list that fits is
-// returned untouched, in the CLI's own order.
+// body in merge.mjs. Entries that did not cleanly pass are taken first when the
+// list must be cut: on a failing run the gates that NAME the failure are the ones
+// the report exists for, and they must not fall out of the window behind 50
+// passes. `flaky` is kept in that group with `fail` (Issue #224) — it is the one
+// word a reader opened the report to find, and a gate that failed and then passed
+// must not be the entry the cap eats. A list that fits is returned untouched, in
+// the CLI's own order.
 function capGates(gates) {
   if (gates.length <= MAX_REPORTED_GATES) return { gates, dropped: 0 };
   const ordered = [
-    ...gates.filter((gate) => gate.verdict === 'fail'),
-    ...gates.filter((gate) => gate.verdict !== 'fail'),
+    ...gates.filter((gate) => NON_PASS_GATE_VERDICTS.has(gate.verdict)),
+    ...gates.filter((gate) => !NON_PASS_GATE_VERDICTS.has(gate.verdict)),
   ];
   return { gates: ordered.slice(0, MAX_REPORTED_GATES), dropped: gates.length - MAX_REPORTED_GATES };
 }
@@ -4052,10 +4122,15 @@ function droppedGateChecks({ dropped }) {
 function gatesFromWaitOutput(output, requiredGateIds = new Set()) {
   const gates = [];
   for (const line of String(output ?? '').split('\n')) {
-    const match = GATE_LINE_RE.exec(line.trim());
-    if (match) {
-      const id = redact(match[1]);
-      gates.push({ id, verdict: match[2] === 'PASS' ? 'pass' : 'fail', origin: gateOrigin(id, requiredGateIds) });
+    const parsed = parseGateLine(line.trim());
+    if (parsed) {
+      const id = redact(parsed.id);
+      // The verdict is TRANSCRIBED, never re-derived: `flaky` stays `flaky` here
+      // and the run's own verdict stays the wait's exit code (section 2.6). A
+      // reader that collapsed FLAKY into pass or fail would be re-adjudicating
+      // from a display line, and it would get `flakyIsPass` wrong in both
+      // directions — the declaration that decides it is not on this line.
+      gates.push({ id, verdict: parsed.verdict, origin: gateOrigin(id, requiredGateIds) });
     }
   }
   return capGates(gates);
@@ -4103,6 +4178,12 @@ async function describeFailingGates(inputs, worktreeId) {
         exitCode: Number.isInteger(gate.exitCode) ? gate.exitCode : null,
         tail: excerpt(gate.logTail ?? '', 200),
         isScope,
+        // Only reached when the run already failed, so a `flaky` here is a gate
+        // that failed, passed on the retry and was still counted as a failure —
+        // i.e. `flakyIsPass` was not declared. Saying so is the difference
+        // between telling the worker "unit is broken" and telling it "unit did
+        // not reproduce; the repository counts that as a failure anyway".
+        flakyOutcome: gateFlakyOutcome(gate),
         violations: isScope ? scopeViolationLines(gate.logTail) : [],
       };
     });
@@ -4115,7 +4196,10 @@ async function describeFailingGates(inputs, worktreeId) {
   }
   return {
     failing,
-    checks: failing.map((gate) => `gate ${gate.id}: ${gate.status}${gate.exitCode !== null ? ` (exit ${gate.exitCode})` : ''}`),
+    // The flaky note goes AFTER the exit code, never before it: merge.mjs reads
+    // the first `exit <n>` in this line into the PR body's Exit column, and a
+    // second number in front of it would be transcribed as this gate's exit.
+    checks: failing.map((gate) => `gate ${gate.id}: ${gate.status}${gate.exitCode !== null ? ` (exit ${gate.exitCode})` : ''}${gate.flakyOutcome === 'flaky' ? ' — FLAKY: it failed, then passed on a re-run of the same tree, and this repository does not declare flakyIsPass for it' : ''}`),
     summary: failing.map((gate) => gate.id).join(', '),
   };
 }
@@ -4890,8 +4974,12 @@ function gatesFromVerifyDocument(run, requiredGateIds = new Set()) {
     const id = typeof gate.gateId === 'string' ? gate.gateId.trim() : '';
     if (id === '') continue;
     const status = String(gate.status ?? '');
-    const verdict = FAILED_GATE_STATUSES.has(status) ? 'fail' : (status === 'passed' ? 'pass' : null);
+    let verdict = FAILED_GATE_STATUSES.has(status) ? 'fail' : (status === 'passed' ? 'pass' : null);
     if (verdict === null) continue;
+    // A gate whose two runs disagreed is reported as FLAKY whichever way the run
+    // counted it, exactly as the wait's own GATE line spells it (#224). The
+    // count itself is untouched: the run's verdict is its exit code.
+    if (gateFlakyOutcome(gate) === 'flaky') verdict = 'flaky';
     gates.push({ id: redact(id), verdict, origin: gateOrigin(id, requiredGateIds) });
   }
   return capGates(gates);

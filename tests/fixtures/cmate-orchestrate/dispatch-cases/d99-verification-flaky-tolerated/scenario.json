@@ -1,0 +1,19 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "100": {
+      "state": "completed",
+      "commit_on": 1,
+      "verify_exits": [0],
+      "gate_lines_raw": [
+        "GATE work-evidence PASS (commits=1, uncommitted=0)",
+        "GATE lint PASS (exit=0, 12.3s)",
+        "GATE unit FLAKY (exit=1,0, 45.0s,44.0s)",
+        "GATE e2e PASS exit=0 duration=190s waited=42s"
+      ]
+    }
+  }
+}

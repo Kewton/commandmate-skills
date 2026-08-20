@@ -768,9 +768,18 @@ function contractGateDefinitions(worktreePath, issue) {
       gates.push({ id: unquoteScalar(opener[1]), command: '' });
       continue;
     }
-    const field = /^ {6}(command|timeoutSec): (.+?)\s*$/.exec(line);
+    // `mutex` / `retryOnFail` / `flakyIsPass` are part of the entry upstream's
+    // shared validator accepts (Issues #223 / #224). They are read here rather
+    // than merely tolerated: a parser that stopped at the first unknown field
+    // would silently drop every gate declared AFTER one that used them, which is
+    // exactly the shape of failure a fake CLI must not invent on its own.
+    const field = /^ {6}(command|timeoutSec|mutex|retryOnFail|flakyIsPass): (.+?)\s*$/.exec(line);
     if (field && gates.length > 0) {
-      if (field[1] === 'command') gates[gates.length - 1].command = unquoteScalar(field[2]);
+      const gate = gates[gates.length - 1];
+      if (field[1] === 'command') gate.command = unquoteScalar(field[2]);
+      else if (field[1] === 'retryOnFail') gate.retryOnFail = Number(field[2]);
+      else if (field[1] === 'flakyIsPass') gate.flakyIsPass = field[2] === 'true';
+      else if (field[1] === 'mutex') gate.mutex = unquoteScalar(field[2]);
       continue;
     }
     break;
@@ -817,14 +826,40 @@ function runDeclaredGates(spec, issue, worktreeId) {
   const toRun = selected === null ? declared : declared.filter((gate) => selected.includes(gate.id));
   const lines = ['GATE work-evidence PASS (commits=1, uncommitted=0)'];
   const failing = [];
-  for (const gate of toRun) {
+  const runOnce = (gate) => {
     const result = spawnSync('sh', ['-c', gate.command], { cwd: worktreePath, encoding: 'utf8' });
     // A command that could not be launched at all still has an exit status here
     // (sh reports 127); it is recorded as the gate's exit, never as "skipped".
-    const code = result.status === null ? 1 : result.status;
-    lines.push(`GATE ${gate.id} ${code === 0 ? 'PASS' : 'FAIL'} (exit=${code})`);
-    if (code !== 0) {
-      failing.push({ id: gate.id, exit: code, logTail: `${(result.stderr || result.stdout || '').trim().slice(-200) || `${gate.command}: exited ${code}`}` });
+    return {
+      code: result.status === null ? 1 : result.status,
+      tail: (result.stderr || result.stdout || '').trim().slice(-200),
+    };
+  };
+  for (const gate of toRun) {
+    const first = runOnce(gate);
+    // `retryOnFail: 1` re-runs the command ONCE, in the same tree, and only on a
+    // non-zero exit (Issue #224 / CommandMate #1772). FLAKY displaces PASS/FAIL
+    // rather than decorating it, and it does NOT change spelling with
+    // `flakyIsPass` — that decides the verdict, which is the exit code below.
+    if (gate.retryOnFail === 1 && first.code !== 0) {
+      const second = runOnce(gate);
+      const outcome = second.code === 0 ? 'flaky' : 'fail';
+      const passes = outcome === 'flaky' && gate.flakyIsPass === true;
+      const reported = passes ? second : outcome === 'flaky' ? first : second;
+      lines.push(`GATE ${gate.id} ${outcome === 'flaky' ? 'FLAKY' : 'FAIL'} (exit=${first.code},${second.code})`);
+      if (!passes) {
+        failing.push({
+          id: gate.id,
+          exit: reported.code,
+          logTail: reported.tail || `${gate.command}: exited ${reported.code}`,
+          flaky: { runs: 2, outcome, exitCodes: [first.code, second.code], durationsMs: [340, 340], verdict: 'fail' },
+        });
+      }
+      continue;
+    }
+    lines.push(`GATE ${gate.id} ${first.code === 0 ? 'PASS' : 'FAIL'} (exit=${first.code})`);
+    if (first.code !== 0) {
+      failing.push({ id: gate.id, exit: first.code, logTail: `${first.tail || `${gate.command}: exited ${first.code}`}` });
     }
   }
   return { lines, exit: failing.length > 0 ? VERIFY_FAILED : 0, failing };
@@ -1418,6 +1453,17 @@ function main() {
       // the pass was based on, which the runner must record rather than leave as
       // an empty list (Issue #83).
       if (worker.gate_lines === false) gateLines.length = 0;
+      // `gate_lines_raw` replaces the computed lines with literal ones, so a case
+      // can pin a SPELLING the generator here does not produce: the FLAKY word
+      // (#224), a two-valued `exit=`/`duration=`, and the `waited=` field of a
+      // mutexed gate (#223). Both runners' shapes are writable this way — the
+      // product CLI parenthesises its detail and the standalone runner does not,
+      // and a reader that only survives one of them is reading punctuation as a
+      // contract. The verdict is still the exit code beside them, untouched.
+      if (Array.isArray(worker.gate_lines_raw)) {
+        gateLines.length = 0;
+        for (const line of worker.gate_lines_raw) gateLines.push(String(line));
+      }
       for (const line of gateLines) writeGateLine(line);
       process.exit(exit);
     }
@@ -1470,7 +1516,22 @@ function main() {
       : [];
     const gates = [
       { gateId: 'work-evidence', status: 'passed', exitCode: null, durationMs: 12, logTail: 'commits=1 uncommitted=0' },
-      ...passGates.map((id) => ({ gateId: id, status: 'passed', exitCode: 0, durationMs: 210, logTail: `${id}: ok` })),
+      // A pass_gates entry is a gate id, or an object when a scenario needs the
+      // extra fields the run document carries — today `flaky`, which is how
+      // `verify show/verify --json` exposes the runner's `[flaky]` log marker
+      // (verification-config.md section 10.4). A gate counted as a pass can still
+      // be FLAKY: that is exactly what `flakyIsPass: true` means.
+      ...passGates.map((entry) => {
+        const gate = typeof entry === 'string' ? { id: entry } : entry;
+        return {
+          gateId: gate.id,
+          status: 'passed',
+          exitCode: 0,
+          durationMs: 210,
+          logTail: gate.logTail ?? `${gate.id}: ok`,
+          ...(gate.flaky ? { flaky: gate.flaky } : {}),
+        };
+      }),
       ...failedGates.map((entry) => {
         const gate = typeof entry === 'string' ? { id: entry } : entry;
         return {
@@ -1479,6 +1540,10 @@ function main() {
           exitCode: Number.isInteger(gate.exit) ? gate.exit : 1,
           durationMs: 340,
           logTail: gate.logTail ?? `${gate.id}: 1 problem`,
+          // A FLAKY gate whose repository does not declare `flakyIsPass` is
+          // stored `failed` and labelled FLAKY: #1772 added no migration, so the
+          // label is a reading of the marker laid over the stored verdict.
+          ...(gate.flaky ? { flaky: gate.flaky } : {}),
         };
       }),
     ];

@@ -1,0 +1,48 @@
+{
+  "description": "Issues #223 / #224, the fail-closed half of the three new fields — accepting a KEY and accepting any VALUE for it are different things, and the second is where the feature would quietly stop being one. #371 asks for two retries: the ceiling IS the feature (enough re-runs turn any red green), so 2 is a config error rather than a longer retry. #372 declares `flakyIsPass: true` with no retry — a declaration that can never fire, which reads as \"flakes are tolerated here\" while changing nothing. #373 names a mutex that is not safe as a path segment; both runners turn the name into `<root>/<name>.lock`. Each is caught by the PLANNER, while the author is still looking at the block, and `acceptance_gates` is left null rather than rounded to \"there was no block\". #374 is the CONTROL: the same pairing rule, written in the other order. A YAML mapping has no order, so refusing it would refuse a block CommandMate's own parser accepts — the rule is checked once the entry has been read, not line by line.",
+  "args": [
+    "371",
+    "372",
+    "373",
+    "374",
+    "--profile",
+    "node-commandmate",
+    "--max-parallel",
+    "3",
+    "--run-id",
+    "fixture",
+    "--no-infer"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "acceptance_gate_block_invalid",
+      "acceptance_gate_block_invalid",
+      "acceptance_gate_block_invalid"
+    ],
+    "warning_details_include": [
+      "#371: The `acceptance-gates` block could not be read: gate \"issue-371-unit\" declares retryOnFail \"2\", and only 0 or 1 are allowed",
+      "#372: The `acceptance-gates` block could not be read: gate \"issue-372-unit\" declares flakyIsPass: true without retryOnFail: 1; without a retry a gate can never be FLAKY, so the declaration could never take effect",
+      "#373: The `acceptance-gates` block could not be read: gate \"issue-373-e2e\" declares mutex \"e2e/port\", which must match ^[A-Za-z0-9_.-]+$",
+      "It is NOT treated as absent"
+    ],
+    "acceptance_gates": {
+      "371": null,
+      "372": null,
+      "373": null,
+      "374": {
+        "version": 1,
+        "require": [],
+        "gates": [
+          {
+            "id": "issue-374-unit",
+            "command": "npm run test:unit",
+            "flakyIsPass": true,
+            "retryOnFail": 1
+          }
+        ]
+      }
+    }
+  }
+}

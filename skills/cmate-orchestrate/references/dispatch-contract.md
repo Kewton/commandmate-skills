@@ -179,9 +179,46 @@ commit を要求する（下流の PR 作成は commit を必要とする）。
 runner は **stdout と stderr の両方**を読む —— `GATE` 行は行頭一致で拾うので、2つの stream が
 混ざっても、どちらも印字していない gate が生まれることはない（#160）。
 
-`gates` は最大 **50 件**で、それを超えた run では **FAIL を先に**拾ったうえで切り、
-**切った件数を `checks` の1行に書く**（#165）。黙って切ると「この run には gate が 50 本
-在った」と読めてしまい、fail を名指す gate が窓から落ちても report がそれを言えない。
+`gates` は最大 **50 件**で、それを超えた run では **PASS でないもの（`fail` / `flaky`）を先に**
+拾ったうえで切り、**切った件数を `checks` の1行に書く**（#165）。黙って切ると「この run には
+gate が 50 本在った」と読めてしまい、fail を名指す gate が窓から落ちても report がそれを言えない。
+
+#### GATE 行の語彙（[#224](https://github.com/Kewton/commandmate-skills/issues/224) / CommandMate #1772）
+
+**`FLAKY` は PASS / FAIL に並ぶ第 3 の語**であり、どちらかの装飾ではない。「1 回目 fail →
+同一 tree の 2 回目 pass」であって、PASS も FAIL もそのゲートについて真ではなかった。
+
+| 語 | 意味 | `verification.gates[].verdict` |
+|---|---|---|
+| `PASS` | そのゲートは通った | `pass` |
+| `FAIL` | そのゲートは落ちた（`retryOnFail: 1` で 2 回とも落ちた場合を含む） | `fail` |
+| `FLAKY` | 1 回目 fail → 2 回目 pass（同一 tree の再実行） | `flaky` |
+
+読む側の規律は 3 つある。
+
+1. **転記であって再判定ではない。** verdict は `wait --verify` の **exit code** が正である
+   （第2.6節）。`FLAKY` が 1 本混ざっていることを理由に `verification.outcome` を動かさない ——
+   それを決める `flakyIsPass` は verify.yaml 側の宣言で、**GATE 行にも report にも載っていない**。
+   行から裁定を再計算する実装は、`flakyIsPass: true` の run を fail に、`false` の run を pass に、
+   両方向に間違える。
+2. **`FLAKY` を `pass` / `fail` へ丸めない。** 丸めた瞬間、この機能が可視化するために存在する
+   唯一の事実（この緑は 1 回赤かった／この赤は再現しなかった）が report から消え、
+   「本当に 2 回落ちた run」と区別できなくなる。
+3. **`FLAKY` は `flakyIsPass` の値で綴りが変わらない。** 変わるのは RESULT と exit code だけである。
+
+**detail の書式は 2 種類あり、どちらも読めなければならない。** 製品 CLI は括弧形式
+（`GATE unit FLAKY (exit=1,0, 45.0s,44.0s)`）、cmate-verify の standalone runner は空白区切り
+（`GATE unit FLAKY exit=1,0 duration=45s,44s waited=42s`）で、**元から別物である**（#1544 以来）。
+runner は**語だけ**を読み、detail は解釈しない —— detail を解析する実装は、片方のランナーの
+句読点を契約と読み違えている。`mutex` を宣言したゲートが足す `waited=<n>s`
+（[#223](https://github.com/Kewton/commandmate-skills/issues/223) / CommandMate #1771）も、
+行を壊さずに読めることだけが要件である。
+
+`commandmate verify --json` 側では、FLAKY は **status ではなく LABEL** である: #1772 は DB
+マイグレーションを伴わないので `verification_gate_results.status` は `passed` / `failed` のままで、
+`gates[].flaky`（`runs` / `outcome` / `exitCodes` / `durationsMs` / `verdict`）がその上に重なる。
+したがって **`flaky` を「失敗を意味する status」の集合に足してはならない** ——
+`flakyIsPass: true` のゲートは `passed` として保存され、run も緑である。
 
 `outcome: pass` なのに `gates` が
 空になった場合は、**拾えなかったこと自体**を limitation `verification_gates_unrecorded` と `checks`

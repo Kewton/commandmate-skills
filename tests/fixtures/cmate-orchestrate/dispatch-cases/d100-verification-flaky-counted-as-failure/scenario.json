@@ -1,0 +1,20 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": { "branch": "feature/integration", "dirty": false },
+  "gh": { "repo_access": true },
+  "workers": {
+    "201": {
+      "state": "completed",
+      "verify_exits": [20, 20],
+      "failed_gates": [
+        { "id": "unit", "exit": 1, "flaky": { "runs": 2, "outcome": "flaky", "exitCodes": [1, 0], "durationsMs": [45000, 44000], "verdict": "fail" } }
+      ],
+      "gate_lines_raw": [
+        "GATE work-evidence PASS (commits=1, uncommitted=0)",
+        "GATE unit FLAKY (exit=1,0, 45.0s,44.0s)"
+      ]
+    },
+    "200": { "state": "completed", "verify_exits": [0] }
+  }
+}
