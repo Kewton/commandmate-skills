@@ -16,7 +16,7 @@
     "run_next": ["dispatch/stop_reason/worker_failed", "merge/not_run/not_run"],
     "issue_next": { "200": [], "201": ["dispatch/blocking/worker_failed"] },
     "hints_include": {
-      "worker_failed": "指示が過大なら Issue を分割して re-plan する",
+      "worker_failed": "**まず該当 worker の `worker_turn_evidence.code` を読む**",
       "not_run": "dispatch が完走していないので"
     },
     "text_includes": [

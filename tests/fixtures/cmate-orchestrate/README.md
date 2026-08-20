@@ -20,6 +20,8 @@ dispatch-cases/issues-negative-constraints.json  否定的制約（禁止の表�
                                 fixture（#176 の転記 case 用）
 dispatch-cases/issues-acceptance-gates*.json  受入ゲート case の Issue fixture（ブロック有り / 無し / 未知 id）
 dispatch-cases/issues-open-questions-block.json  著者が宣言した未決の問いを持つ Issue fixture（#178 の case 用）
+dispatch-cases/issues-max-turns-evidence.json  `--max-turns` 到達（exit 21）の分類 case 用 Issue fixture（#220）。
+                                独立6件で、case ごとに1件だけを dispatch する
 dispatch-cases/issues-dag-*.json  スケジューリングの case 用 Issue fixture（#183）。`-chain` は
                                 「3件独立 + 1件だけが片方に依存」（wave では最遅 worker を全員が待つ形）、
                                 `-failure` は「独立2系列がそれぞれ1件を従える」（上流失敗の伝播を
@@ -47,7 +49,12 @@ inspect-cases/<id>/case.json    warning code 列・references[]/line_claims[] �
                                 ambiguous/dropped の期待値。`found_at` と `measured` は
                                 **harness が repo/ の bytes から独立に計算して**照合するので、
                                 case が「runner 自身と一致しているだけ」で緑になることはない
-fake-cli.mjs                    commandmate/git/gh を模した stub（failure injection）
+fake-cli.mjs                    commandmate/git/gh を模した stub（failure injection）。`workers.<n>.capture_extra`
+                                は `capture --json` の payload に混ぜる field（`realtimeSnippet` /
+                                `lineCount` / `structuredEvents` / `cliToolId` / `upstreamFault`。#220）。
+                                最後に spread するので `cliToolId: null` のような**欠落**も書ける。
+                                hook の timestamp は run 中に決まるので、`"@now"` / `"@long-ago"` の
+                                2 token が capture 時に解決される（最後の send の前後を書き分けるため）
 profiles/                       独自 profile の例（unverified）
 run_tests.mjs                   fixture test harness（Node stdlib のみ）
 rubric.md                       人が見る採点基準
@@ -243,6 +250,13 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 | `d99-verification-flaky-tolerated` | **`FLAKY` の受理側（[#224](https://github.com/Kewton/commandmate-skills/issues/224)）。** `wait --verify` が `GATE unit FLAKY` を出して **exit 0** を返す世界（gate の `flakyIsPass: true` が効いた）。report の gates に `verdict: flaky` が残り、裁定は exit code に従って `pass` のままであること。**製品 CLI の括弧形式**と **standalone runner の空白区切り（`waited=` 付き）**を 1 つの出力に混在させ、どちらも読めることを同時に測る |
 | `d101-acceptance-gate-defined-flaky` | **契約が運んだ `retryOnFail` / `flakyIsPass` が本当に効くことの端から端まで（[#223](https://github.com/Kewton/commandmate-skills/issues/223) / [#224](https://github.com/Kewton/commandmate-skills/issues/224)）。** ゲートのコマンドは 1 回目に marker を置いて exit 1・2 回目は exit 0 なので、緑になるのは**同一 tree の再実行が実際に走ったときだけ**である。契約に 3 行が宣言どおり書かれ、report の gates はそのゲートを `flaky` として残し、裁定は wait の exit code に従い、**`.commandmate/verify.yaml` は 1 バイトも変わらない** |
 | `d100-verification-flaky-counted-as-failure` | **d99 との二点測定（既定側）。** GATE 行の綴りは d99 と同一の `FLAKY` で、違うのは exit code（20）だけ —— `flakyIsPass` を宣言しない repository では FLAKY は fail として数えられる。gates の `flaky` は裁定が転んでも書き換わらず（「本当に 2 回落ちた run」と区別できなくなるため）、`verify --json` 側の `status: failed` + `flaky.outcome: flaky` が worker への再指示に「再現しなかったが失敗として数える」と載ること |
+| `d110-max-turns-upstream-pane` | **[#220] `--max-turns` 到達の3分類、上流障害を pane で見る側。** exit 21 が続いて cap に達したとき、その時点の `capture --json` の `realtimeSnippet` が上流エラー署名（`529 Overloaded`）に一致する。`worker_turn_evidence.code` は `worker_upstream_unavailable` で、同じ code が blocking にも並ぶ。**裁定は 1 つも動かない**（`verification.outcome: fail` / `worker_state: failed` / `worker_failed` はそのまま）—— これが本 Issue の中心的な主張で、d110〜d116 の全 case が同じ裁定を assert している |
+| `d111-max-turns-upstream-transcript` | **同じ 3 分類の、実測そのもの（CommandMate #1834）。** pane は 1,001 行すべて空白で**画面には何も無い**。判定材料は worker の transcript で、末尾が同一の 1 行エラー（`API Error: 529 Overloaded`）13 件連続である。`snippet_blank: true` / `line_count: 1001` は転記であって判定材料ではない。transcript の `path` が **redaction 後**であること（絶対 path が artifact に出ないこと）もここで固定する |
+| `d112-max-turns-produced-nothing` | **反対側（ターン成立の肯定的証拠）。** transcript に tool 使用と非エラー出力があり、pane にも非空白・非エラーの出力がある —— **「Issue を分割 / 書き直して re-plan」が正しい唯一の世界**である。`upstream_signature` は `null`、`trailing_identical_error_entries` は 0 |
+| `d113-max-turns-capture-unreadable` | **測れなかった側。** `capture` の呼び出し自体が失敗し、画面も `cliToolId` も hooks も 1 つも読めない。`worker_output_unreadable` を名乗り、detail は**どちらとも読み替えない**ことと手動確認コマンド（path-free）を出す。転記できなかった field は `false` ではなく `null` である |
+| `d114-max-turns-transcript-ambiguous` | **「読めなかった」の 2 つ目の形: 候補が絞れない。** pane は空白だけ・hooks 無し・transcript の directory に session が 2 つ。1 つ選べば推測を測定に見せかけることになるので、runner は選ばずに `read: false` と件数を名乗る。**空白だけの pane は肯定的証拠ではない**（d111 では同じ空白の pane が `worker_upstream_unavailable` になっており、判定していたのが pane でないことがそこで分かる） |
+| `d115-max-turns-hooks-stop-returned` | **hooks だけで「ターンは成立した」を測る側。** pane も transcript も何も言わない世界で、`structuredEvents.lastStopEventAt` が最後の send より**新しい**ので `worker_produced_nothing`。`isRunning` は tmux セッションが healthy の意味なので使えず、`stop` だけが「ターンが終わった」を言う |
+| `d116-max-turns-hooks-no-stop` | **d115 の双子（変数は timestamp の前後だけ）。** `lastStopEventAt` が最後の send より**古い** —— 投げたターンが終わっていないので `worker_upstream_unavailable`。2 点にしてあるのは、`stop` の比較を反転する変異が**両方を赤にする**ようにするためである（片側だけなら定数を裏返して緑を保てる） |
 | `d49-unattended-two-waves-parity` | **無人運転の二点測定（#122）。** 同じ世界を `--unattended` 有り／無しで2回 dispatch し、`status` / `stop_reason` / `waves[]` / `drift_checks` / `blocking_reasons` / `completion_check` / `redactions` が**一致**し、差分は limitation の `unattended_mode` / `unattended_baseline` **だけ**であることを assert する（「緩めない」の機械的証明。self-report の boolean より強い） |
 | `d50-unattended-prompt-halts` | 無人でも prompt（exit 10）で止まり、`respond` を送らず `human_required: true` のままか。**無人だから human_required を false にする、はしない** |
 | `d51-unattended-not-judged` | 無人でも exit 99 を pass に丸めず、20 の再指示ループにも流さないか。フラグ無しの run との二点測定つき |
@@ -539,6 +553,17 @@ case directory を持たない 3 本が別に在る。
 その組み合わせ）は `acceptance-gates-conformance.mjs` も同時に赤くする ——
 planner の関数を書き換えると `PRODUCER_LAG` の patch が当たらなくなるためで、
 **記法の乖離が黙って増えない**ことの側からも押さえられている。
+
+`--max-turns` 到達の 3 分類（#220。`d110`〜`d116`）についても同じことを実測した
+（2026-08-20。各変異は 1 箇所だけ書き換えて suite を回し、戻した）。
+
+| 変異 | 赤くなった case |
+|---|---|
+| `lib.mjs` の上流エラー署名を**どれにも一致しないもの**に置き換える | d110（`worker_produced_nothing` に化ける）／ d111（同上。`trailing_identical_error_entries` が 13 → 0） |
+| hooks の `stop` 比較を反転する（`>=` → `<`） | d115 と d116 の**両方**（互いの code に入れ替わる） |
+| 転写した transcript を読まない（`read: false` を即返す） | d111 / d112（`worker_output_unreadable` と、pane 由来の弱い判定に落ちる） |
+| `TRANSCRIPT_ERROR_RUN_MIN` を 3 → 99 にする | d111（13 件連続が閾値に届かず `worker_output_unreadable`） |
+| ターンを閉じる `closeTurn()` を 1 箇所落とす | d110〜d116 の**全件**（`turn_durations_seconds` の要素数が `turns` と一致しなくなる。件数の不変条件は全 case にかかる） |
 
 ## Claude/Codex parity の確認
 

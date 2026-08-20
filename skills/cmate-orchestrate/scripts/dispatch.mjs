@@ -59,9 +59,9 @@
 
 import { parseArgs, promisify } from 'node:util';
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdirSync, existsSync, writeFileSync, readFileSync, appendFileSync, statSync, rmSync } from 'node:fs';
-import { hostname, tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { mkdirSync, existsSync, writeFileSync, readFileSync, appendFileSync, statSync, rmSync, readdirSync, openSync, readSync, closeSync, fstatSync, realpathSync } from 'node:fs';
+import { hostname, tmpdir, homedir } from 'node:os';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -70,6 +70,7 @@ import {
   SKILL_VERSION,
   SkillError,
   issueOf,
+  matchUpstreamFault,
   parseCliJson,
   parseGateLine,
   redact,
@@ -4364,6 +4365,20 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
   }
   const taskId = sent0.taskId;
   let turns = 1;
+  // How long each TURN took, in the order they ran (Issue #220). Recorded, never
+  // adjudicated: at the `--max-turns` cap it is what lets a human see at a glance
+  // that twelve "turns" burned 7s each — no model does twelve turns of real work
+  // in 84 seconds — without the runner having to decide what "too fast" is. A
+  // turn is closed by the send that opens the NEXT one, so `--auto-yes` answering
+  // a prompt mid-turn does not split it in two, and the array's length is exactly
+  // `turns`.
+  const turnDurations = [];
+  let turnStartedAtMs = Date.now();
+  const closeTurn = () => {
+    const now = Date.now();
+    turnDurations.push(Math.max(0, Math.round((now - turnStartedAtMs) / 1000)));
+    turnStartedAtMs = now;
+  };
   // The same reading for every later send in this loop (nudge, commit request,
   // re-instruction): a send the budget cut short is a stopped clock, not a
   // failed worker.
@@ -4499,6 +4514,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       previousScopeViolations = null; // this turn was not a scope-gate failure
       const asked = await sendAndConfirm(inputs, worktreeId, COMMIT_REQUEST_MESSAGE);
       if (!asked.sent) return budgetCutoff() ?? done('failed', `commit request failed: ${asked.note}`);
+      closeTurn();
       turns += 1;
       continue;
     }
@@ -4517,11 +4533,30 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
         ],
       };
       if (turns >= inputs.maxTurns) {
-        return done('failed', `no work evidence after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap`);
+        // One collection, here (Issue #220), for the same reason #179 reads the
+        // liveness at a wait timeout: this cap is either "the worker ran N turns
+        // and produced nothing" or "the worker never got a turn", the recoveries
+        // are opposite (split the Issue vs. wait and --resume), and nothing in
+        // the report could tell them apart. The adjudication is untouched — exit
+        // 21 is still a `fail`, `worker_state` is still `failed`; what is added
+        // is only WHY there is nothing.
+        // Read BEFORE `closeTurn` moves the marker: this is when the send that
+        // opened the LAST turn happened, and it is the instant a `stop` event
+        // has to be newer than for that turn to have completed.
+        const lastSendAtMs = turnStartedAtMs;
+        closeTurn();
+        const turnEvidence = await probeWorkerTurnEvidence(
+          inputs, worktreeId, worktreePath, turns, turnDurations, lastSendAtMs,
+        );
+        return {
+          ...done('failed', `no work evidence after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap; ${turnEvidenceNoteClause(turnEvidence)}`),
+          turnEvidence,
+        };
       }
       previousScopeViolations = null; // this turn was not a scope-gate failure
       const nudged = await sendAndConfirm(inputs, worktreeId, NUDGE_MESSAGE);
       if (!nudged.sent) return budgetCutoff() ?? done('failed', `nudge failed: ${nudged.note}`);
+      closeTurn();
       turns += 1;
       continue;
     }
@@ -4585,6 +4620,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       previousScopeViolations = scopeViolations;
       const resent = await sendAndConfirm(inputs, worktreeId, buildVerifyReinstruction(failing.failing));
       if (!resent.sent) return budgetCutoff() ?? done('failed', `re-instruction failed: ${resent.note}`);
+      closeTurn();
       turns += 1;
       continue;
     }
@@ -4820,6 +4856,414 @@ function livenessNoteClause(liveness) {
     ? `worker liveness at the timeout: ${LIVENESS_ALIVE} — capture still reported a live worker (${observed}) ${liveness.elapsed_seconds}s in, `
       + 'so the wait window ran out rather than the worker; wait for it to idle and re-judge with --reverify instead of re-dispatching'
     : `worker liveness at the timeout: ${LIVENESS_STALLED} — capture reported no running worker (${observed}) ${liveness.elapsed_seconds}s in`;
+}
+
+// =============================================================================
+// Why there is nothing at the --max-turns cap (Issue #220)
+// =============================================================================
+//
+// `--max-turns` bounds how many times this loop re-instructs a worker. When the
+// cap is reached on exit 21 — work-evidence found no commit and no uncommitted
+// change, every turn — the report used to say only
+//
+//     no work evidence after 12 turn(s); gave up at the --max-turns 12 cap
+//
+// and that one sentence covered two opposite worlds:
+//
+//   - the worker really took 12 turns and produced nothing (the Issue is too
+//     large or too vague → split it, re-plan)
+//   - the worker never got a single turn (the API was down → wait, then
+//     `--resume`; changing the Issue would be changing the wrong thing)
+//
+// MEASURED (Kewton/CommandMate#1834, from Kewton/BorderFreeKidsMap): `#231
+// worker=failed verify=fail … no work evidence after 12 turn(s)`. The worktree
+// held 0 commits and 0 uncommitted changes, `capture` said `isRunning: true /
+// sessionStatus: ready`, and all 1,001 pane lines were blank. The truth was in
+// `~/.claude/projects/<worktree>/*.jsonl`, read BY HAND: `API Error: 529
+// Overloaded`, 13 times in a row. Not one turn had run. The recovery was to wait
+// ten minutes and `--resume`, and the next attempt finished in one turn.
+//
+// Why the existing signals cannot see it (this is what picks the materials
+// below): `sendAndConfirm`'s "started" and `probeWorkerLiveness`'s "alive" both
+// read `isRunning || isGenerating || isPromptWaiting`, and CommandMate's
+// `isRunning` means "the tmux session exists and is healthy", not "a turn is in
+// flight" — so a live-but-inert session is always true. And `wait` returns
+// SUCCESS on the first poll that sees `sessionStatus === 'ready'`, so a worker
+// that bounces straight back to its prompt on an upstream error "completes" a
+// turn in 5–10s, which is how twelve turns burn in under two minutes.
+//
+// THE ADJUDICATION DOES NOT MOVE. `verification.outcome` stays `fail`, the exit
+// code stays 21, `worker_state` stays `failed`, and blocking `worker_failed`
+// still says why the run stopped. What is added is one optional object saying
+// WHY THERE IS NOTHING — the same shape #179 added for a wait timeout, for the
+// same reason and under the same rules.
+//
+// Three codes, and the third is again the one that has to exist:
+const TURN_EVIDENCE_UPSTREAM = 'worker_upstream_unavailable';
+const TURN_EVIDENCE_NOTHING = 'worker_produced_nothing';
+const TURN_EVIDENCE_UNREADABLE = 'worker_output_unreadable';
+//
+// Neither of the first two is a default. `worker_upstream_unavailable` needs
+// POSITIVE evidence that the upstream refused; `worker_produced_nothing` needs
+// POSITIVE evidence that a turn actually ran. With neither in hand the runner
+// says `worker_output_unreadable` and refuses to round — the rule merge.mjs
+// wrote for `change_evidence_unavailable` and #179 re-used for
+// `worker_liveness_unreadable`. Rounding "we could not look" to
+// `worker_produced_nothing` is exactly the report that sent an operator to split
+// a perfectly good Issue.
+
+// How many identical one-line errors at the END of a transcript count as "no
+// turn ran". Three, because two can be the tail of a turn that then succeeded;
+// the measured case had 13.
+const TRANSCRIPT_ERROR_RUN_MIN = 3;
+// The transcript is read from its END and bounded twice: by bytes (a long
+// session is tens of MB and this runs inside a supervision loop) and by entries.
+// Both bounds are stated in `detail` when they bite, because a bound nobody
+// mentions reads as "there was nothing else there".
+const TRANSCRIPT_TAIL_BYTES = 1024 * 1024;
+const TRANSCRIPT_MAX_ENTRIES = 2000;
+// What the operator runs to read the same file this runner read. Path-free on
+// purpose: absolute paths are redacted out of every artifact (§4 of the
+// contract), so a transcribed path would reach the report as [REDACTED-PATH] and
+// help nobody. This command recomputes it from the worktree instead.
+const MANUAL_TRANSCRIPT_COMMAND =
+  'cd <worktree> && ls -t "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(pwd | sed \'s/[^a-zA-Z0-9]/-/g\')"/*.jsonl | head -1';
+
+// Claude Code's transcript root. `CLAUDE_CONFIG_DIR` replaces `~/.claude`
+// wholesale when it is set, which is also what makes this measurable in a
+// fixture without writing into a developer's real home directory.
+function claudeProjectsDir() {
+  const configured = process.env.CLAUDE_CONFIG_DIR;
+  const root = typeof configured === 'string' && configured.length > 0 ? configured : join(homedir(), '.claude');
+  return join(root, 'projects');
+}
+
+// The last `maxBytes` of a file, as text, plus whether anything was cut.
+function readFileTail(path, maxBytes) {
+  const fd = openSync(path, 'r');
+  try {
+    const size = fstatSync(fd).size;
+    const length = Math.min(size, maxBytes);
+    const buffer = Buffer.alloc(length);
+    if (length > 0) readSync(fd, buffer, 0, length, size - length);
+    return { text: buffer.toString('utf8'), truncated: length < size };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+// One assistant entry, reduced to the two things that matter here: what it SAID,
+// and whether it used a tool. A tool call is the least deniable proof a turn ran
+// — an upstream that never answered cannot have produced one.
+function assistantEntryParts(entry) {
+  const content = entry?.message?.content ?? entry?.content;
+  if (typeof content === 'string') return { text: content, hasTool: false };
+  if (!Array.isArray(content)) return { text: '', hasTool: false };
+  const texts = [];
+  let hasTool = false;
+  for (const part of content) {
+    if (part?.type === 'tool_use') hasTool = true;
+    else if (typeof part?.text === 'string') texts.push(part.text);
+  }
+  return { text: texts.join('\n'), hasTool };
+}
+
+// Chrome the TUI draws whether or not anything happened. Without this filter
+// "the snippet is not blank" would be true of every live session and could never
+// be evidence of a turn: the frame, the composer caret and the footer hints are
+// there before the first token and after the last one. Only what survives this
+// counts as OUTPUT.
+const TUI_CHROME_LINE = /^(?:[\s─-╿▀-▟|+._=-]*|[>❯»]\s*|\?\s*for shortcuts.*|esc to interrupt.*|Press up to edit queued messages.*|⏵+.*|Bypassing Permissions.*)$/i;
+
+// The transcript half of the evidence. Returns the object the report carries
+// plus the sentences (if any) it supports. Nothing in here can FAIL the probe:
+// every unreadable path becomes `{ read: false, reason }`, which is a fact about
+// this run and not an error in it.
+function readWorkerTranscript(worktreePath, cliToolId) {
+  const notRead = (reason) => ({ record: { read: false, reason: redact(reason) }, upstream: null, turn: null, signature: null });
+  // dispatch is deliberately agent-agnostic — it drives worktrees, not CLIs — so
+  // the only thing that can name the agent is `capture --json`'s `cliToolId`.
+  // Not naming it is not permission to guess: Codex keeps rollouts under
+  // `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, a layout this runner does
+  // not read, and reading the wrong layout would produce confident nonsense.
+  if (typeof cliToolId !== 'string' || cliToolId.length === 0) {
+    return notRead('`commandmate capture <worktree-id> --json` did not name the CLI tool (`cliToolId`), so which agent\'s transcript layout to read is unknown');
+  }
+  if (cliToolId !== 'claude') {
+    return notRead(`this runner reads Claude Code's transcript layout only; \`cliToolId\` is "${excerpt(cliToolId, 24)}" (Codex keeps its rollouts under ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl)`);
+  }
+  let absolute;
+  try {
+    absolute = realpathSync(resolve(worktreePath));
+  } catch {
+    absolute = resolve(worktreePath);
+  }
+  // Claude Code's own encoding of a session cwd: every non-alphanumeric byte
+  // becomes a hyphen (`/Users/x/repo_a` → `-Users-x-repo-a`).
+  const dir = join(claudeProjectsDir(), absolute.replace(/[^a-zA-Z0-9]/g, '-'));
+  let names;
+  try {
+    names = readdirSync(dir).filter((name) => name.endsWith('.jsonl')).sort();
+  } catch {
+    return notRead('no Claude Code transcript directory exists for this worktree (CLAUDE_CONFIG_DIR/projects/<encoded cwd>)');
+  }
+  if (names.length === 0) return notRead('the Claude Code transcript directory for this worktree holds no *.jsonl file');
+  if (names.length > 1) {
+    // Picking "the newest" would be a guess dressed as a measurement: several
+    // sessions can share one worktree, and the wrong one answers a different
+    // question. The operator has the whole directory and can read them all.
+    return notRead(`the Claude Code transcript directory for this worktree holds ${names.length} *.jsonl files and this runner will not guess which session was this worker's (read them with: ${MANUAL_TRANSCRIPT_COMMAND})`);
+  }
+  const path = join(dir, names[0]);
+  let tail;
+  try {
+    tail = readFileTail(path, TRANSCRIPT_TAIL_BYTES);
+  } catch (error) {
+    return notRead(`the Claude Code transcript for this worktree could not be read: ${excerpt(error.message, 80)}`);
+  }
+  const lines = tail.text.split('\n').filter((line) => line.trim().length > 0);
+  // A tail read can start mid-entry; that first fragment is not a record.
+  if (tail.truncated && lines.length > 0) lines.shift();
+  const entries = [];
+  for (const line of lines.slice(-TRANSCRIPT_MAX_ENTRIES)) {
+    try {
+      entries.push(JSON.parse(line));
+    } catch {
+      // A line this runner cannot parse is not evidence of anything, in either
+      // direction. It is skipped, not counted.
+    }
+  }
+  if (entries.length === 0) return notRead('the Claude Code transcript for this worktree holds no readable JSONL entry');
+  const assistants = entries.filter((entry) => entry?.type === 'assistant').map(assistantEntryParts);
+  const bounded = tail.truncated || lines.length > TRANSCRIPT_MAX_ENTRIES
+    ? ` (only the last ${TRANSCRIPT_MAX_ENTRIES} entr(ies) of the final ${TRANSCRIPT_TAIL_BYTES} byte(s) were read)`
+    : '';
+
+  // (b) of the rule: a run of IDENTICAL one-line errors at the very end. Same
+  // text, no tool call, no multi-line answer — a CLI that bounced off the API
+  // and printed the same sentence again. Anything else ends the run, including
+  // one different error, because "several unrelated errors" is a different
+  // finding and this one is about a wall.
+  let trailing = 0;
+  let signature = null;
+  for (let i = assistants.length - 1; i >= 0; i -= 1) {
+    const { text, hasTool } = assistants[i];
+    const line = text.trim();
+    if (hasTool || line.length === 0 || line.includes('\n')) break;
+    if (matchUpstreamFault(line) === null) break;
+    if (signature === null) signature = line;
+    else if (signature !== line) break;
+    trailing += 1;
+  }
+  const record = {
+    read: true,
+    path: redact(path),
+    trailing_identical_error_entries: trailing,
+  };
+  if (trailing >= TRANSCRIPT_ERROR_RUN_MIN) {
+    return {
+      record,
+      upstream: `the worker's Claude Code transcript ends with ${trailing} identical one-line upstream errors in a row ("${excerpt(signature, 80)}")${bounded}`,
+      turn: null,
+      signature: excerpt(signature, 80),
+    };
+  }
+  // The other side: anything in the transcript that an upstream refusal could
+  // not have produced.
+  const toolTurn = assistants.some((entry) => entry.hasTool);
+  const spoken = assistants.find((entry) => entry.text.trim().length > 0 && matchUpstreamFault(entry.text) === null);
+  const turn = toolTurn
+    ? `the worker's Claude Code transcript contains at least one assistant tool call${bounded}`
+    : (spoken ? `the worker's Claude Code transcript contains non-error assistant output ("${excerpt(spoken.text, 80)}")${bounded}` : null);
+  return {
+    record,
+    upstream: null,
+    turn,
+    signature: trailing > 0 ? excerpt(signature, 80) : null,
+  };
+}
+
+// The hooks half. `structuredEvents` has been in `capture --json` since
+// CommandMate 0.24.0 and is the only signal that says "a turn ENDED" rather than
+// "a session exists": a `stop` event is emitted when the CLI finishes a turn.
+// Absent hooks are absent evidence, not evidence of absence — a repository with
+// no hooks installed yields no sentence at all here, which is how the run ends
+// up `worker_output_unreadable` instead of being labelled from nothing.
+function readStructuredEvents(payload, lastSendAtMs) {
+  const raw = payload?.structuredEvents;
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { record: null, upstream: null, turn: null };
+  }
+  const text = (value) => (typeof value === 'string' && value.length > 0
+    ? excerpt(value, 64)
+    : (typeof value === 'number' && Number.isFinite(value) ? String(value) : null));
+  // Epoch seconds, epoch milliseconds and ISO strings are all in the wild; a
+  // stamp this runner cannot read is null, which produces no sentence.
+  const millis = (value) => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value < 1e12 ? value * 1000 : value;
+    if (typeof value === 'string') {
+      const parsed = Date.parse(value);
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+    return null;
+  };
+  const record = {
+    last_event_type: text(raw.lastEventType),
+    last_event_at: text(raw.lastEventAt),
+    last_stop_event_at: text(raw.lastStopEventAt),
+  };
+  const lastEventMs = millis(raw.lastEventAt);
+  const lastStopMs = millis(raw.lastStopEventAt);
+  if (lastEventMs === null) return { record, upstream: null, turn: null };
+  if (lastStopMs !== null && lastStopMs >= lastSendAtMs) {
+    return {
+      record,
+      upstream: null,
+      turn: `hooks reported a \`stop\` event at ${record.last_stop_event_at} — after the send that opened the last turn — so that turn did end`,
+    };
+  }
+  return {
+    record,
+    upstream: `hooks are live (last event ${record.last_event_type ?? 'unknown'} at ${record.last_event_at}) but no \`stop\` event has come back since the send that opened the last turn (last stop: ${record.last_stop_event_at ?? 'never'}) — the turn was submitted and never completed`,
+    turn: null,
+  };
+}
+
+// CommandMate #1839 exposes its own `UPSTREAM_FAULTS` verdict as
+// `capture --json`'s `upstreamFault`. Used when it is there and never required:
+// an older CLI simply does not carry the field, and pinning this runner to the
+// new one would make old sessions unreadable rather than merely less informed.
+// The shape is read defensively for the same reason.
+function captureUpstreamFault(payload) {
+  const fault = payload?.upstreamFault;
+  if (fault === null || fault === undefined || fault === false) return null;
+  if (typeof fault === 'string') return fault.length > 0 ? excerpt(fault, 80) : null;
+  if (fault === true) return 'the CLI reported an upstream fault (no detail)';
+  if (typeof fault !== 'object' || Array.isArray(fault)) return null;
+  for (const key of ['signature', 'matched', 'matchedText', 'detail', 'message', 'id', 'kind', 'type']) {
+    if (typeof fault[key] === 'string' && fault[key].length > 0) return excerpt(fault[key], 80);
+  }
+  return 'the CLI reported an upstream fault (no readable detail)';
+}
+
+// The whole probe. ONE `capture`, then whatever else is readable from the
+// worktree, and never a second look — as in #179 this is a fact about the
+// instant the run gave up, not a poll.
+async function probeWorkerTurnEvidence(inputs, worktreeId, worktreePath, turns, turnDurations, lastSendAtMs) {
+  const capture = await runCmAsync(inputs, ['capture', worktreeId, '--json']);
+  let payload = null;
+  let captureFailure = null;
+  if (!capture.ok) {
+    captureFailure = `\`commandmate capture <worktree-id> --json\` exited ${capture.status ?? 'with an error'}`
+      + ` (${excerpt(capture.stderr || capture.stdout, 120) ?? 'no output'})`;
+  } else {
+    const parsed = parseCliJson(capture);
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) payload = parsed;
+    else captureFailure = '`commandmate capture <worktree-id> --json` printed no parseable JSON object';
+  }
+
+  const snippet = typeof payload?.realtimeSnippet === 'string' ? payload.realtimeSnippet : null;
+  const snippetBlank = snippet === null ? null : snippet.trim().length === 0;
+  const lineCount = Number.isInteger(payload?.lineCount) ? payload.lineCount : null;
+  const snippetFault = matchUpstreamFault(snippet);
+  // `realtimeSnippet` is the last ~100 lines of the PANE, not the turn. The
+  // chrome filter is what makes "not blank" mean something (see TUI_CHROME_LINE).
+  const snippetOutput = snippet === null
+    ? null
+    : (snippet.split('\n').find((line) => !TUI_CHROME_LINE.test(line.trim()) && matchUpstreamFault(line) === null) ?? null);
+
+  // A capture that could not be read says nothing about the AGENT either, and
+  // the transcript layout is per-agent — so the reason recorded here is the
+  // capture, not a missing field inside a payload that never arrived.
+  const transcript = payload === null
+    ? {
+      record: { read: false, reason: redact('the capture could not be read, so the worker\'s agent (and therefore which transcript layout to read) is unknown') },
+      upstream: null,
+      turn: null,
+      signature: null,
+    }
+    : readWorkerTranscript(worktreePath, payload.cliToolId);
+  const events = readStructuredEvents(payload, lastSendAtMs);
+  const cliFault = captureUpstreamFault(payload);
+
+  // The ladder. TRANSCRIPT first, in both directions, because it is the record
+  // of the conversation rather than a picture of a terminal — then the screen and
+  // the hooks. Within one source, UPSTREAM outranks TURN: the two can co-occur
+  // (a worker that read files and then hit a wall leaves both), and of the two
+  // readings only "the upstream refused" explains a cap with no work evidence at
+  // all. It is also the safer error: waiting and `--resume`-ing an Issue that was
+  // in fact too large costs one run, while splitting an Issue that was fine costs
+  // a human rewriting a correct Issue.
+  const upstreamEvidence = [transcript.upstream, snippetFault ? `the worker's pane matches an upstream-fault signature ("${excerpt(snippetFault.matched, 80)}")` : null, events.upstream, cliFault ? `\`capture --json\` itself reported an upstream fault ("${cliFault}")` : null].filter((entry) => entry !== null);
+  const turnEvidence = [transcript.turn, snippetOutput !== null ? `the worker's pane carries non-blank, non-error output ("${excerpt(snippetOutput, 80)}")` : null, events.turn].filter((entry) => entry !== null);
+
+  let code;
+  let because;
+  if (transcript.upstream !== null) {
+    code = TURN_EVIDENCE_UPSTREAM;
+    because = upstreamEvidence;
+  } else if (transcript.turn !== null) {
+    code = TURN_EVIDENCE_NOTHING;
+    because = turnEvidence;
+  } else if (upstreamEvidence.length > 0) {
+    code = TURN_EVIDENCE_UPSTREAM;
+    because = upstreamEvidence;
+  } else if (turnEvidence.length > 0) {
+    code = TURN_EVIDENCE_NOTHING;
+    because = turnEvidence;
+  } else {
+    code = TURN_EVIDENCE_UNREADABLE;
+    because = [];
+  }
+
+  const capClause = `the --max-turns ${inputs.maxTurns} cap was reached with \`commandmate wait --verify\` returning exit ${VERIFY_EXIT_NOT_STARTED} `
+    + `(work-evidence: no commit, no uncommitted change) on every one of ${turns} turn(s), which took ${turnDurations.join('/')}s`;
+  const standsClause = 'The adjudication is unchanged: verification really did fail (exit '
+    + `${VERIFY_EXIT_NOT_STARTED}), \`worker_state\` stays \`failed\` and blocking \`worker_failed\` still says why the run stopped; this entry says WHY THERE IS NOTHING`;
+  const detail = code === TURN_EVIDENCE_UPSTREAM
+    ? `${capClause}. Evidence that the UPSTREAM was unavailable: ${because.join('; ')}. `
+      + 'Do NOT split the Issue and do NOT re-plan: nothing about this Issue has been measured, because no turn ran. '
+      + `Wait for the upstream to recover, then re-dispatch the same plan with \`dispatch.mjs --plan <plan.json> --resume <this run's dispatch directory>\`. ${standsClause}.`
+    : code === TURN_EVIDENCE_NOTHING
+      ? `${capClause}. Evidence that turns really RAN: ${because.join('; ')}. `
+        + 'So the worker was working and still produced no commit and no uncommitted change: read the worker log, then split or re-write the Issue and re-plan. '
+        + `${standsClause}.`
+      : `${capClause}. NEITHER was measured: no positive evidence that the upstream was unavailable, and no positive evidence that any turn ran`
+        + `${captureFailure === null ? '' : ` (${captureFailure})`}`
+        + `${transcript.record.read === false ? ` (transcript: ${transcript.record.reason})` : ''}`
+        + `${events.record === null ? ' (no structuredEvents in the capture, so hook evidence was unavailable)' : ''}. `
+        + 'Read NEITHER "the worker produced nothing" NOR "the upstream was down" into this — it is not a weaker version of either. '
+        + `Check by hand with \`commandmate capture <worktree-id> --json\` and, for a Claude Code worker, its transcript: \`${MANUAL_TRANSCRIPT_COMMAND}\`. `
+        + 'An upstream wall reads as the same one-line error repeated; a real turn reads as tool calls. '
+        + `${standsClause}.`;
+
+  return {
+    code,
+    turns,
+    turn_durations_seconds: turnDurations,
+    snippet_blank: snippetBlank,
+    line_count: lineCount,
+    upstream_signature: transcript.signature ?? (snippetFault ? excerpt(snippetFault.matched, 80) : null) ?? cliFault ?? null,
+    structured_events: events.record,
+    transcript: transcript.record,
+    detail: redact(detail),
+  };
+}
+
+// The one-sentence version, for the `note` a human reads first. Rendered FROM
+// the recorded object rather than composed beside it (Issue #83's rule): two
+// independent claims about one fact drift.
+function turnEvidenceNoteClause(evidence) {
+  const turnsClause = `${evidence.turns} turn(s) took ${evidence.turn_durations_seconds.join('/')}s`;
+  if (evidence.code === TURN_EVIDENCE_UPSTREAM) {
+    return `why there is nothing: ${TURN_EVIDENCE_UPSTREAM} — the upstream was unavailable`
+      + `${evidence.upstream_signature === null ? '' : ` ("${evidence.upstream_signature}")`}`
+      + `, so this is not a measurement of the Issue; ${turnsClause}. Wait and --resume rather than splitting the Issue`;
+  }
+  if (evidence.code === TURN_EVIDENCE_NOTHING) {
+    return `why there is nothing: ${TURN_EVIDENCE_NOTHING} — turns really ran and produced no commit and no uncommitted change; ${turnsClause}`;
+  }
+  return `why there is nothing: ${TURN_EVIDENCE_UNREADABLE} — neither "the upstream was unavailable" nor "turns ran and produced nothing" was measured; ${turnsClause}. Read neither into it`;
 }
 
 // =============================================================================
@@ -5737,6 +6181,10 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     // Its ABSENCE is a fact too — "no probe was made" — so it is never written
     // as an empty or null-filled object.
     if (supervised.liveness) worker.worker_liveness = supervised.liveness;
+    // Only the workers that reached the --max-turns cap on exit 21 carry this
+    // (Issue #220), and for the same reason: its ABSENCE means no collection was
+    // made, which must never read as "there was nothing to find".
+    if (supervised.turnEvidence) worker.worker_turn_evidence = supervised.turnEvidence;
     if (supervised.autoResponded) autoResponded = true;
     if (supervised.scopeUnsatisfiable) scopeUnsatisfiable.set(worker.issue, supervised.scopeUnsatisfiable);
     if (supervised.state === 'prompt') {
@@ -5876,6 +6324,21 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
       report.blocking_reasons.push({
         code: liveness.code,
         detail: redact(`#${worker.issue}: ${liveness.detail}`),
+      });
+    }
+
+    // The same pass, for the same reason, over the --max-turns cap (Issue #220).
+    // Written BESIDE the existing `worker_failed` rather than in place of it:
+    // `worker_failed` answers "why did the run stop" and has not changed meaning,
+    // while this answers "why is there nothing", which is the question whose two
+    // answers demand opposite recoveries. In `workers` order and outside the
+    // concurrent loop, so two runs of the same plan order it the same way.
+    for (const worker of workers) {
+      const evidence = worker.worker_turn_evidence;
+      if (!evidence) continue;
+      report.blocking_reasons.push({
+        code: evidence.code,
+        detail: redact(`#${worker.issue}: ${evidence.detail}`),
       });
     }
   };
@@ -6943,6 +7406,19 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
     }
     if (report.blocking_reasons.some((reason) => reason.code === LIVENESS_UNREADABLE)) {
       lines.push('- next: timeout した worker の生死を**測れていない**（`capture` が失敗した / 出力が読めなかった。blocking の `worker_liveness_unreadable`）。**読めなかったことを「動いている」とも「止まっている」とも読み替えない。** `commandmate capture <worktree-id> --json` を手で叩いて確かめ、動いていれば idle 化を待って `--reverify`、止まっていれば worktree の作業証跡を確かめてから `--resume` で再 dispatch する（owner: operator）。');
+    }
+    // The three readings of one `--max-turns` cap (Issue #220). Separate lines
+    // for the same reason as the timeout trio above: they name OPPOSITE actions
+    // — `--resume` the same plan, or re-plan the Issue — and the third refuses
+    // to pick. The worker record's `worker_turn_evidence` carries the materials.
+    if (report.blocking_reasons.some((reason) => reason.code === TURN_EVIDENCE_UPSTREAM)) {
+      lines.push('- next: **`--max-turns` に到達したが、worker は1ターンも実行できていない**（上流が落ちていた。blocking の `worker_upstream_unavailable` と該当 worker の `worker_turn_evidence` を読む）。**Issue を分割しない・re-plan しない** —— この run は当該 Issue について何も測っていない。上流の復旧を待ってから `dispatch.mjs --plan <plan.json> --resume <この run の dispatch ディレクトリ>` で**同じ plan のまま**再開する（owner: operator）。');
+    }
+    if (report.blocking_reasons.some((reason) => reason.code === TURN_EVIDENCE_NOTHING)) {
+      lines.push('- next: **worker は実際にターンを回したうえで、commit も未 commit の変更も残していない**（blocking の `worker_produced_nothing`）。worker のログを読み、**Issue の粒度か指示の曖昧さ**を疑う。分割か書き直しをして re-plan する。`--resume` だけでは同じ所で止まる（owner: human）。');
+    }
+    if (report.blocking_reasons.some((reason) => reason.code === TURN_EVIDENCE_UNREADABLE)) {
+      lines.push('- next: `--max-turns` に到達した理由を**測れていない**（blocking の `worker_output_unreadable`）。**「ターンを回して何も出なかった」とも「上流が落ちていた」とも読み替えない。** `commandmate capture <worktree-id> --json` と、Claude worker なら `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/<cwd を非英数字ごと "-" にしたもの>/*.jsonl` の末尾を手で読んでから、上の2つのどちらかへ進む（owner: operator）。');
     }
     // Issue #161 / #162. Placed BEFORE the empty-scope line because the drop is
     // what emptied the scope whenever both fire on the same issue, and because

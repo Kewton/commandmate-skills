@@ -1,0 +1,70 @@
+{
+  "description": "[#220] **反対側（ターン成立の肯定的証拠）。** 同じ cap・同じ exit 21 だが、transcript に tool 使用と非エラーの assistant 出力があり、pane にも非空白・非エラーの出力がある。つまり worker は本当にターンを回したうえで commit も未 commit の変更も残していない —— **これが「Issue を分割 / 書き直して re-plan」が正しい唯一の世界**である。`upstream_signature` は `null`（署名が1つも一致していない）で、`transcript.trailing_identical_error_entries` は 0。d110 / d111 と裁定は完全に同じであり、違うのは `worker_turn_evidence.code` と、そこから出る next action だけである。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "233",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      233
+    ],
+    "worker_states": {
+      "233": "failed"
+    },
+    "verification_outcomes": {
+      "233": "fail"
+    },
+    "worker_turn_evidence": {
+      "233": {
+        "code": "worker_produced_nothing",
+        "turns": 3,
+        "snippet_blank": false,
+        "line_count": 320,
+        "upstream_signature": null,
+        "structured_events": null,
+        "transcript": {
+          "read": true,
+          "path": "[REDACTED-PATH]",
+          "trailing_identical_error_entries": 0
+        }
+      }
+    },
+    "worker_turn_evidence_detail_includes": {
+      "233": [
+        "Evidence that turns really RAN",
+        "assistant tool call",
+        "split or re-write the Issue"
+      ]
+    },
+    "blocking_codes": [
+      "worker_produced_nothing",
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_upstream_unavailable",
+      "worker_output_unreadable"
+    ],
+    "summary_includes": [
+      "`worker_produced_nothing`"
+    ]
+  }
+}

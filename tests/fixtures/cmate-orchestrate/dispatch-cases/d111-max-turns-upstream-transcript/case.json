@@ -1,0 +1,66 @@
+{
+  "description": "[#220] **実測そのもの（Kewton/CommandMate#1834 / 利用リポジトリ Kewton/BorderFreeKidsMap #231）。** worktree は commit 0・未 commit 0、`capture` は `isRunning: true / sessionStatus: ready`、pane は 1,001 行すべて空白 —— 画面には何も無い。真因は worker の transcript にあり、末尾が同一の 1 行エラー（`API Error: 529 Overloaded`）13 件連続である。**この世界で「12 ターン働いて成果物が無い」と報告したのが元の障害**であり、対処（待って `--resume`）は「Issue を分割」の正反対だった。`snippet_blank: true` と `line_count: 1001` は転記であって判定材料ではない —— 判定しているのは transcript の末尾である。transcript の `path` は **redaction 後**であり、絶対 path が artifact に出ないこと自体もここで固定する（対処は path ではなく detail の path-free なコマンドが案内する）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "232",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      232
+    ],
+    "worker_states": {
+      "232": "failed"
+    },
+    "verification_outcomes": {
+      "232": "fail"
+    },
+    "worker_turn_evidence": {
+      "232": {
+        "code": "worker_upstream_unavailable",
+        "turns": 3,
+        "snippet_blank": true,
+        "line_count": 1001,
+        "upstream_signature": "API Error: 529 Overloaded",
+        "structured_events": null,
+        "transcript": {
+          "read": true,
+          "path": "[REDACTED-PATH]",
+          "trailing_identical_error_entries": 13
+        }
+      }
+    },
+    "worker_turn_evidence_detail_includes": {
+      "232": [
+        "13 identical one-line upstream errors in a row",
+        "Do NOT split the Issue and do NOT re-plan"
+      ]
+    },
+    "blocking_codes": [
+      "worker_upstream_unavailable",
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_produced_nothing",
+      "worker_output_unreadable"
+    ]
+  }
+}

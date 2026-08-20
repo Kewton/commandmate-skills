@@ -1,0 +1,66 @@
+{
+  "description": "[#220] **d115 の双子（変数は timestamp の前後だけ）。** hooks は生きていて `user_prompt_submit` を最後に記録しているが、`lastStopEventAt` は**最後の send より古い** —— 投げたターンが終わっていない。pane も transcript も何も言っていないので、この1点だけで `worker_upstream_unavailable` になる。2 点測定の意味はここにある: `stop` の比較を反転する変異を入れると d115 は `worker_upstream_unavailable`、この case は `worker_produced_nothing` になり、**両方が赤くなる**（片側だけの case なら定数を裏返すだけで緑を保てる）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "236",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      236
+    ],
+    "worker_states": {
+      "236": "failed"
+    },
+    "verification_outcomes": {
+      "236": "fail"
+    },
+    "worker_turn_evidence": {
+      "236": {
+        "code": "worker_upstream_unavailable",
+        "turns": 3,
+        "snippet_blank": true,
+        "line_count": 60,
+        "upstream_signature": null,
+        "structured_events": {
+          "last_event_type": "user_prompt_submit",
+          "last_stop_event_at": "2020-01-01T00:00:00.000Z"
+        },
+        "transcript": {
+          "read": false
+        }
+      }
+    },
+    "worker_turn_evidence_detail_includes": {
+      "236": [
+        "no `stop` event has come back since the send that opened the last turn"
+      ]
+    },
+    "blocking_codes": [
+      "worker_upstream_unavailable",
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_produced_nothing",
+      "worker_output_unreadable"
+    ]
+  }
+}

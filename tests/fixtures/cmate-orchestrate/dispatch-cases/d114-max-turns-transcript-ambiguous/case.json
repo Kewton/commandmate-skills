@@ -1,0 +1,64 @@
+{
+  "description": "[#220] **「読めなかった」の2つ目の形: 候補が絞れない。** capture は答えるが pane は空白だけ（署名も出力も無い）、hooks は無く、transcript の directory には session が2つある。1つを選べば「一番新しいものが当該 worker のもの」という**推測を測定に見せかける**ことになるので、runner は選ばずに `read: false` と件数を名乗り、`worker_output_unreadable` に落ちる。**空白だけの pane は肯定的証拠ではない**（d111 では同じ空白の pane が transcript と組んで `worker_upstream_unavailable` になっており、判定していたのは pane ではないことがそこで分かる）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "235",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      235
+    ],
+    "worker_states": {
+      "235": "failed"
+    },
+    "verification_outcomes": {
+      "235": "fail"
+    },
+    "worker_turn_evidence": {
+      "235": {
+        "code": "worker_output_unreadable",
+        "turns": 3,
+        "snippet_blank": true,
+        "line_count": 88,
+        "upstream_signature": null,
+        "structured_events": null,
+        "transcript": {
+          "read": false
+        }
+      }
+    },
+    "worker_turn_evidence_detail_includes": {
+      "235": [
+        "holds 2 *.jsonl files and this runner will not guess",
+        "Read NEITHER"
+      ]
+    },
+    "blocking_codes": [
+      "worker_output_unreadable",
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_upstream_unavailable",
+      "worker_produced_nothing"
+    ]
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "description": "[#220] **上流障害の肯定的証拠が画面にある側。** `--max-turns 3` の cap に exit 21 で到達し、その時点の `capture --json` の `realtimeSnippet` が上流エラー署名（`529 Overloaded`）に一致する。`worker_turn_evidence.code` は `worker_upstream_unavailable` で、同じ code が blocking にも並ぶ。**裁定は1つも動かない** —— `verification.outcome` は `fail`、`worker_state` は `failed`、`worker_failed` もそのまま出る。transcript は存在しないので `read: false` であり、それは失敗ではない（判定は画面だけで足りている）。`turn_durations_seconds` の要素数は `turns` と一致する（harness が全 case で検査する不変条件）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "231",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      231
+    ],
+    "worker_states": {
+      "231": "failed"
+    },
+    "verification_outcomes": {
+      "231": "fail"
+    },
+    "worker_turn_evidence": {
+      "231": {
+        "code": "worker_upstream_unavailable",
+        "turns": 3,
+        "snippet_blank": false,
+        "line_count": 214,
+        "upstream_signature": "529 Overloaded",
+        "structured_events": null,
+        "transcript": {
+          "read": false,
+          "reason": "no Claude Code transcript directory exists for this worktree (CLAUDE_CONFIG_DIR/projects/<encoded cwd>)"
+        }
+      }
+    },
+    "worker_turn_evidence_detail_includes": {
+      "231": [
+        "Do NOT split the Issue and do NOT re-plan",
+        "--resume",
+        "The adjudication is unchanged"
+      ]
+    },
+    "worker_notes_include": {
+      "231": [
+        "gave up at the --max-turns 3 cap",
+        "why there is nothing: worker_upstream_unavailable"
+      ]
+    },
+    "blocking_codes": [
+      "worker_upstream_unavailable",
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_produced_nothing",
+      "worker_output_unreadable"
+    ],
+    "blocking_order": [
+      "worker_upstream_unavailable:#231"
+    ],
+    "summary_includes": [
+      "**Issue を分割しない・re-plan しない**"
+    ]
+  }
+}

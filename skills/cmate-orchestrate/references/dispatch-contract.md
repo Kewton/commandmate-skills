@@ -689,6 +689,95 @@ goal には `## Acceptance gates this issue defined` 節が足され、**id だ�
 契約経路（`superviseWithContract`）とフォールバック経路（`superviseUntilCommit`）の**両方**で行う。
 どちらの経路に乗ったかは CLI の版が決めることで、operator が選んだことではない（#136 と同じ理屈）。
 
+### 2.12 `--max-turns` 到達は「ターンが回って空だった」か「1ターンも回らなかった」か（[#220](https://github.com/Kewton/commandmate-skills/issues/220)）
+
+第2.11節が timeout について言ったのと同じことを、**cap について**言う節である。
+
+`--max-turns` は**再指示の回数**の上限であって、worker の能力の測定ではない。
+`wait --verify` が exit 21（work-evidence が commit も未 commit の変更も見つけない）を返し続けて
+cap に達したとき、report はこう書いていた。
+
+```
+no work evidence after 12 turn(s); gave up at the --max-turns 12 cap
+```
+
+この1文が**正反対の2つの世界**を覆っていた。
+
+- worker は本当に12ターン回って何も産まなかった（Issue が過大・指示が曖昧 → **分割か書き直して re-plan**）
+- worker は**1ターンも実行できなかった**（上流が落ちていた → **待って `--resume`**。Issue 側に直すものは無い）
+
+> **実測**（Kewton/CommandMate#1834、利用リポジトリ Kewton/BorderFreeKidsMap #231）:
+> `#231 worker=failed verify=fail / gates: work-evidence=fail`、
+> `note: no work evidence after 12 turn(s); gave up at the --max-turns 12 cap`。
+> worktree は commit 0・未 commit 変更 0、`capture` は `isRunning: true / sessionStatus: ready`、
+> pane は 1,001 行すべて空白。真因は `~/.claude/projects/<worktree>/*.jsonl` を**手で読んで**判明した ——
+> `API Error: 529 Overloaded` が13回連続、**1ターンも実行されていない**。
+> 対処は「10分待って `--resume`」で、次の1回で完走した。**report からこの見分けができなかった。**
+
+#### なぜ既存の signal では見えないか（判定材料を選ぶ根拠）
+
+- `sendAndConfirm` の「started」も `probeWorkerLiveness` の「alive」も `isRunning || isGenerating || isPromptWaiting`
+  しか見ない。CommandMate の `isRunning` は **tmux セッションが在って healthy** の意味であって
+  「ターン進行中」ではないので、**生きているが不活性な worker では常に真**である
+- CommandMate の `wait` は `sessionStatus === 'ready'` を見た最初のポーリングで SUCCESS を返す。
+  上流エラーで即プロンプトへ戻る worker は**1ターン5〜10秒で「完了」**するので、12ターンが2分で燃える
+- `capture --json` の `content` は `lastCapturedLine` 以降の**差分**であって画面ではない（空は正常時にも起きる）。
+  画面は `realtimeSnippet`（末尾約100行）、行数は `lineCount`
+
+したがって runner は、**exit 21 の cap 分岐で1回だけ**材料を集め、当該 worker の
+`worker_turn_evidence` に転記し、同じ code の blocking reason を1件出す。
+
+| code | 何を見たか（肯定的証拠） | 推奨 next action |
+|---|---|---|
+| `worker_upstream_unavailable` | transcript の末尾が**同一の1行エラー3件以上**／pane が上流エラー署名に一致／hooks が「投げたが `stop` が返っていない」／CLI 自身の `upstreamFault` | **Issue を分割しない・re-plan しない。** 上流の復旧を待って `--resume` で同じ plan を再開する |
+| `worker_produced_nothing` | transcript に **tool 使用**か非エラーの assistant 出力がある／最後の send のあとに `stop` が返っている／pane に（枠・footer ではない）非空白かつ非エラーの出力がある | worker ログを読み、**Issue の粒度か指示の曖昧さ**を直して re-plan する。`--resume` だけでは同じ所で止まる |
+| `worker_output_unreadable` | **どちらの肯定的証拠も無い**（capture 失敗／pane が空白だけ／transcript が読めない・候補2件以上／hooks 無し） | **どちらとも読み替えない。** `capture --json` と transcript の末尾を手で読んでから上2つのどちらかへ進む |
+
+規範は6つある。
+
+1. **1回だけ集める。** timeout の liveness と同じで、これは「run が諦めた瞬間の事実」であって polling ではない。
+2. **裁定を1つも動かさない。** `verification.outcome` は `fail` のまま（exit 21 は work-evidence ゲートが
+   判定して落とした結果である）、`worker_state` は `failed` のまま、blocking `worker_failed` もそのまま出る。
+   足すのは「**なぜ無いのか**」だけであり、`dispatch_schema_version` は 1 のまま・`worker_turn_evidence` は**任意 field** である。
+3. **どちらにも丸めない。** 3つ目の code が在るのはそのためである。「見られなかった」を
+   「働いて何も出なかった」と記録するのが元の障害の再発であり、その裏返しも同じ誤りである
+   （merge の `change_evidence_unavailable`・第2.11節の `worker_liveness_unreadable` と同型）。
+4. **`turn_durations_seconds` は判定に使わず、必ず記録する。** 全ターンが `wait` のポーリング間隔2回分以内なら
+   人間が読めば分かる。閾値を runner が決めれば、それはモデルの速度についての当て推量になる。
+5. **対象は exit 21 の cap 分岐だけである。** exit 20 の cap と「pass したが commit が無い」cap は**対象外**で、
+   どちらも**実作業が在る**（前者は判定されて落ちた変更、後者は未 commit の変更）ので、
+   問い（「なぜ何も無いのか」）自体が立たない。フォールバック経路（`superviseUntilCommit`）にも
+   exit 21 は存在しない（`--verify` を付けないので裁定が返らない）。
+6. **不在にも意味がある。** cap に到達していない worker には付かないし、前 attempt から転記された
+   record にも付かない。**不在を「何も見つからなかった」と読んではならない。**
+
+#### 材料の出どころと、読めなかったときの扱い
+
+- **署名**: 4つの上流エラー署名を `lib.mjs` の `UPSTREAM_FAULT_SIGNATURES` に持つ
+  （`5xx Overloaded` / `Retrying in Ns … attempt N/M` / `limit reached` / `API Error`）。
+  同じ集合は `cmate-orchestrate-monitor` の `monitor-lib.sh` と CommandMate 側にも在るが、
+  **shell と ES module は定数を共有できない**ので重複を許容する。CommandMate #1839 が
+  `capture --json` に露出した `upstreamFault` は**在れば使い、前提にはしない**
+  （古い CLI では field ごと存在しない。無いことを「上流は無事だった」と読まない）
+- **transcript**: Claude Code は `${CLAUDE_CONFIG_DIR:-~/.claude}/projects/<cwd の非英数字を "-" に置換>/<uuid>.jsonl`。
+  dispatch は agent を知らない設計なので、agent を名乗るのは `capture --json` の `cliToolId` だけである。
+  **Claude 以外・`cliToolId` が無い・directory が無い・候補が2つ以上・読めない**のいずれでも
+  `read: false` と理由を記録し、**失敗にしない**（Codex の `~/.codex/sessions/…` は読まない）。
+  末尾のみ・件数上限つきで読み、上限が効いたときは detail がそう言う
+- **hooks**: `capture --json` の `structuredEvents`（CommandMate 0.24.0 以降）。
+  `stop` は「セッションが在る」ではなく「**ターンが終わった**」を言う唯一の signal である。
+  hooks が無い repository では何の証拠も出ない —— それは**証拠の不在**であって不在の証拠ではない
+- **絶対 path は artifact に出さない**（第4節）。`transcript.path` は redaction 後であり、
+  代わりに detail が **path を含まない1行コマンド**で同じ file の在り処を案内する
+
+#### 判定の優先順（同点の作り方）
+
+**transcript を先に読み、次に画面と hooks。** transcript は会話の記録で、画面はその瞬間の絵だからである。
+同じ source の中では **upstream が turn に優先する** —— 2つは同時に成り立ちうるし
+（file を読んでから壁に当たった worker は両方を残す）、work evidence が1件も無い cap を説明できるのは
+上流側だけである。誤る向きとしても安全な側である: 実は過大だった Issue を待って `--resume` すれば run 1回を失うが、
+健全な Issue を分割させれば人間が正しい Issue を書き直すことになる。
+
 ## 3. 監督ループと gate
 
 ### 3.0 blocking pre-flight（`--out` を消費する前）
@@ -1023,6 +1112,9 @@ acceptance コマンドは `execFileSync` に `timeout` を渡さずに実行さ
    4. **ターン数が `--max-turns`（既定 8）に達しても未 commit** なら、当該 worker を
       `failed`（note に理由）とし、握りつぶさない。20 のまま上限に達し、かつ commit があるときは
       worker は `completed`・verification は `fail` として**別々に**記録する。
+      **21 のまま上限に達したときだけ**、材料を1回だけ集めて `worker_turn_evidence` と
+      同名の blocking reason に転記する（第2.12節）。裁定は動かない —— 足すのは
+      「なぜ何も無いのか」だけである。
 4. **Wave barrier** — Wave の **全 worker が `completed`（commit 検出）** でなければ次へ進まない。
 5. **verification gate** — `completed` の worker それぞれの裁定を集約する。契約経路では監督ループで
    得た exit code 由来の verdict をそのまま使い、**同じ worktree を弱い judge で測り直さない**。
@@ -1211,7 +1303,10 @@ pre-flight（第3.0節）で停止した failure は artifact を書かないの
 | `drift` | `worktree_unresolved` | 対象 Issue の worktree が解決できない。**未解決 Issue ごとに1件**出る（第3.1節） |
 | `drift` | `drift_<check>` | それ以外の blocking drift（`drift_cli_available`・`drift_repo_access`・`drift_base_resolvable`・`drift_branch_matches`） |
 | `human_required` | `human_input_required` | worker が prompt を出した（自動応答していない） |
-| `worker_failed` | `worker_failed` | worker が起動したが `--max-turns` までに commit しなかった |
+| `worker_failed` | `worker_failed` | worker が起動したが `--max-turns` までに commit しなかった。**なぜ無いのかは言っていない** —— 下3行を読む |
+| `worker_failed` | `worker_upstream_unavailable` | exit 21 で cap に到達した時点で、**1ターンも実行できていない肯定的証拠**があった（第2.12節）。`worker_failed` の**隣に**出る Issue ごとの1件で、「なぜ止まったか」ではなく「**なぜ何も無いのか**」を言う。**`stop_reason` の enum に値を足していない**。next action は「待って `--resume`」であり、Issue の分割ではない |
+| `worker_failed` | `worker_produced_nothing` | 同じ cap で、**ターンが成立した肯定的証拠**があった（第2.12節）。Issue ごとに1件。next action は Issue の分割か書き直しと re-plan |
+| `worker_failed` | `worker_output_unreadable` | 同じ cap で、**どちらの肯定的証拠も得られなかった**（第2.12節）。Issue ごとに1件。**どちらとも読み替えない**（merge の `change_evidence_unavailable` と同型） |
 | `timeout` | `worker_timeout` | `commandmate wait` が timeout した |
 | `timeout` | `wait_window_exhausted` | その timeout の時点で `capture` が**稼働中**を示した（第2.11節）。`worker_timeout` の**隣に**出る Issue ごとの1件で、「なぜ止まったか」ではなく「その timeout はどちらだったか」を言う。**`stop_reason` の enum に値を足していない**。next action は「待って `--reverify`」であり、再 dispatch ではない |
 | `timeout` | `worker_stalled` | 同じ時点で `capture` が答えたが、**稼働の証拠が無かった**（第2.11節）。Issue ごとに1件 |
@@ -1219,10 +1314,12 @@ pre-flight（第3.0節）で停止した failure は artifact を書かないの
 | `verification_failed` | `verification_failed` | completed した worker の裁定が pass でない |
 | `verification_failed` / `worker_failed` | `scope_unsatisfiable` | scope ゲートの違反 path が2ターン連続で同一だったため、再指示ループを収束しないと判定して打ち切った（第2.3.1節）。**`stop_reason` の enum に値を足していない**（commit があれば `verification_failed`、無ければ `worker_failed`）。detail に違反 path が入る。対処は Issue の対象ファイルへの追加と re-plan（owner: human） |
 
-timeout の生死3 code（`wait_window_exhausted` / `worker_stalled` / `worker_liveness_unreadable`）は
+timeout の生死3 code（`wait_window_exhausted` / `worker_stalled` / `worker_liveness_unreadable`）と
+cap の3 code（`worker_upstream_unavailable` / `worker_produced_nothing` / `worker_output_unreadable`）は
 **停止理由ではなく所見**である。したがって同じ wave に prompt や exit 99 が在って `stop_reason` が
-そちらに決まった run でも、timeout した worker が在れば出る —— 測った事実は、どの停止理由が勝ったかで
-消えない。上表で `timeout` の行に置いてあるのは、単独で出るときの典型的な組を示すためである。
+そちらに決まった run でも、該当する worker が在れば出る —— 測った事実は、どの停止理由が勝ったかで
+消えない。上表で `timeout` / `worker_failed` の行に置いてあるのは、単独で出るときの典型的な組を
+示すためである。
 
 ## 6. completion_check（report）
 

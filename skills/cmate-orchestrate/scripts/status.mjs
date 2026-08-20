@@ -315,9 +315,15 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   human_required: 'worker が人間の判断を求めている。capture の内容が report に出ているので自分で判断して答える（runner は自動応答しない）。',
   human_input_required: 'worker が人間の判断を求めている。capture の内容が report に出ているので自分で判断して答える（runner は自動応答しない）。',
   verification_not_judged: '誰も判定していない（exit 99）。再 dispatch では解けないので CommandMate 側のログを見る。判定していないものを worker に直させない。',
-  worker_failed: 'prompt / worker ログを読む。指示が過大なら Issue を分割して re-plan する。',
+  worker_failed: '**まず該当 worker の `worker_turn_evidence.code` を読む**（exit 21 で `--max-turns` cap に到達した run にだけ付く。#220）。`worker_upstream_unavailable` なら Issue を分割せず待って `--resume`、`worker_produced_nothing` なら worker ログを読んで Issue を分割か書き直して re-plan、`worker_output_unreadable` ならどちらとも決めつけず手で確かめる。field 自体が無いなら prompt / worker ログを読む。',
   timeout: 'worker が時間内に終わっていない。--wait-timeout / --max-turns と worker の詰まりを確認する。timeout は完了ではない。',
   worker_timeout: 'worker が時間内に終わっていない。--wait-timeout / --max-turns と worker の詰まりを確認する。timeout は完了ではない。',
+  // The three readings of one `--max-turns` cap (#220). Separate entries because
+  // they name OPPOSITE actions: `--resume` the same plan, or re-plan the Issue.
+  // The third names neither, on purpose.
+  worker_upstream_unavailable: '`--max-turns` に到達したが、**worker が1ターンも実行できていない肯定的証拠がある**（上流障害）。**Issue を分割しない・re-plan しない。** 上流の復旧を待って `--resume` で同じ plan を再開する。',
+  worker_produced_nothing: 'worker は実際にターンを回したうえで commit も未 commit の変更も残していない。worker ログを読み、Issue の粒度か指示の曖昧さを直して re-plan する。`--resume` だけでは同じ所で止まる。',
+  worker_output_unreadable: '`--max-turns` 到達の理由を**測れていない**。**「働いて何も出なかった」とも「上流が落ちていた」とも読み替えない。** `commandmate capture <worktree-id> --json` と worker の transcript 末尾を手で読んでから、上の2つのどちらかへ進む。',
   not_dispatched: 'dispatch されなかった Issue がある。worker の note（対象 file が空 / worktree 未解決）を読んで原因を潰す。',
   verification_failed: '判定して不合格である（exit 20 / 21）。落ちた gate を特定して worker へ再指示する。',
   wave_not_advanced: 'wave barrier が閉じている。同 wave の worker completion と verification の両方を確認する。',

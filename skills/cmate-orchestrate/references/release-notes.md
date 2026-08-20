@@ -1324,6 +1324,55 @@ fixture がこの分岐を両側から固定している。
 
 ---
 
+### #220 — `--max-turns` 到達が、「12ターン働いて空だった」と「1ターンも動けなかった」を同じ文で報告していた
+
+`--wait-timeout` 到達には #179 が3分類を入れたが、**`--max-turns` 到達には分類が無かった**。
+exit 21（work-evidence が commit も未 commit の変更も見つけない）が続いて cap に達すると report は
+`no work evidence after N turn(s); gave up at the --max-turns N cap` としか言わず、次の2つが
+**同じ1文**になった —— worker が本当にNターン回って何も産まなかった（Issue が過大・曖昧）と、
+worker が**1ターンも実行できなかった**（上流が落ちていた）。対処は「Issue を分割」と
+「ただ待って `--resume`」で**正反対**である。しかも `codes-and-recovery.md` の `worker_failed` 行は
+「指示が過大なら Issue を分割して re-plan する」と無条件に書いており、**上流障害のときに誤った対処へ
+誘導していた**。
+
+実測（CommandMate #1834 / 利用リポジトリ Kewton/BorderFreeKidsMap #231）: worktree は commit 0・
+未 commit 変更 0、`capture` は `isRunning: true / sessionStatus: ready`、pane は 1,001 行すべて空白。
+真因は `~/.claude/projects/<worktree>/*.jsonl` を**手で読んで**判明した —— `API Error: 529 Overloaded`
+が13回連続、1ターンも実行されていない。10分待って `--resume` したら次の1回で完走した。
+
+既存の signal では見えない理由が、材料を選ぶ根拠になっている。`sendAndConfirm` の「started」も
+`probeWorkerLiveness` の「alive」も `isRunning || isGenerating || isPromptWaiting` しか見ないが、
+CommandMate の `isRunning` は **tmux セッションが healthy** の意味であって「ターン進行中」ではない。
+そして `wait` は `sessionStatus === 'ready'` を見た最初のポーリングで成功を返すので、上流エラーで
+即プロンプトに戻る worker は**1ターン5〜10秒で「完了」**する。12ターンが2分で燃えるのはそのためで、
+**どちらの signal も「働いていた」と答えてしまう**。
+
+→ exit 21 の cap 分岐で**1回だけ**材料を集め、#179 と同型の任意 object `worker_turn_evidence` を
+worker record に足し、同じ code の blocking reason を Issue ごとに1件出す。**裁定は1つも動かない** ——
+`verification.outcome` は `fail`、`worker_state` は `failed`、blocking `worker_failed` もそのまま出る
+（「なぜ run が止まったか」の答えは変わっていない）。足したのは「**なぜ何も無いのか**」だけで、
+`dispatch_schema_version` は 1 のままである。
+
+**「測れなかった」をどちらにも丸めない**のが本件の中心規則である。`worker_upstream_unavailable` は
+上流障害の**肯定的証拠**（transcript 末尾の同一1行エラー3件以上／pane の署名一致／hooks が
+`stop` を返していない／CLI 自身の `upstreamFault`）を要求し、`worker_produced_nothing` は
+ターン成立の**肯定的証拠**（tool 使用・非エラー出力・send 後の `stop`）を要求する。
+どちらも無ければ `worker_output_unreadable` を名乗る —— merge の `change_evidence_unavailable`・
+#179 の `worker_liveness_unreadable` と同型で、**「見られなかった」を「何も無かった」に丸めない**。
+元の障害はまさにその丸めだった。
+
+`turn_durations_seconds` は**判定に使わず必ず記録する**。全ターンが `wait` のポーリング間隔2回分以内
+なら人間が読めば分かるし、閾値を runner が決めればモデルの速度についての当て推量になる。
+transcript は `cliToolId` が `claude` のときだけ読み、**候補が2つ以上あれば選ばない**（「一番新しい
+ものが当該 worker のもの」は推測を測定に見せかける）。CommandMate #1839 の `upstreamFault` は
+**在れば使い、前提にはしない** —— 古い CLI には field ごと無く、無いことは「上流は無事だった」ではない。
+上流エラー署名は `lib.mjs` に置いた。同じ集合が `monitor-lib.sh` と CommandMate 側にも在るが、
+**shell と ES module は定数を共有できない**ので重複を許容している。
+
+対象は exit 21 の cap 分岐だけである。exit 20 の cap と「pass したが commit が無い」cap は
+**どちらも実作業が在る**（判定されて落ちた変更／未 commit の変更）ので、「なぜ何も無いのか」という
+問い自体が立たない。
+
 ## merge（`scripts/merge.mjs`）
 
 ### #142 — 無人運転の段階 C（`merge --merge-prs`）

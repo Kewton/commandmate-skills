@@ -1,0 +1,69 @@
+{
+  "description": "[#220] **測れなかった側（受入条件3）。** `capture` の呼び出し自体が失敗するので、画面も `cliToolId` も hooks も1つも読めない。ここで `worker_produced_nothing` に丸めるのが元の障害の再発であり、`worker_upstream_unavailable` に丸めるのはその裏返しである。runner は `worker_output_unreadable` を名乗り、detail は **どちらとも読み替えない**ことと、手で確かめるコマンド（`commandmate capture` と、Claude worker の transcript を path-free に導く1行）を出す。転記できなかった field は `null` であって `false` ではない（`snippet_blank` / `line_count` / `structured_events`）。merge の `change_evidence_unavailable`・timeout の `worker_liveness_unreadable` と同じ規則である。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "234",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      234
+    ],
+    "worker_states": {
+      "234": "failed"
+    },
+    "verification_outcomes": {
+      "234": "fail"
+    },
+    "worker_turn_evidence": {
+      "234": {
+        "code": "worker_output_unreadable",
+        "turns": 3,
+        "snippet_blank": null,
+        "line_count": null,
+        "upstream_signature": null,
+        "structured_events": null,
+        "transcript": {
+          "read": false,
+          "reason": "the capture could not be read, so the worker's agent (and therefore which transcript layout to read) is unknown"
+        }
+      }
+    },
+    "worker_turn_evidence_detail_includes": {
+      "234": [
+        "Read NEITHER \"the worker produced nothing\" NOR \"the upstream was down\" into this",
+        "commandmate capture <worktree-id> --json",
+        "projects/$(pwd | sed 's/[^a-zA-Z0-9]/-/g')"
+      ]
+    },
+    "blocking_codes": [
+      "worker_output_unreadable",
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_upstream_unavailable",
+      "worker_produced_nothing"
+    ],
+    "summary_includes": [
+      "**「ターンを回して何も出なかった」とも「上流が落ちていた」とも読み替えない。**"
+    ]
+  }
+}

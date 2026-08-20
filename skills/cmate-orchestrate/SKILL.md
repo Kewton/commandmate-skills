@@ -615,7 +615,7 @@ report/artifact に残さない（redaction）。
 | dispatch `worker_method_unavailable` | **`commandmate skill install <skill-id>` で対象 worktree に入れ、同じコマンドを再実行する。** **re-plan は不要** |
 | dispatch exit 10（prompt 検出） | `capture` の内容が report に出ている。**自分で判断して答える。** runner は自動応答しない |
 | dispatch `verification_not_judged`（exit 99） | **再 dispatch では解けない。** CommandMate 側のログを見る |
-| dispatch `worker_failed` | prompt / worker ログを読む。指示が過大なら Issue を分割して re-plan する |
+| dispatch `worker_failed` | **まず `worker_turn_evidence.code` を読む**。上流障害なら分割せず `--resume` |
 | dispatch `wait_window_exhausted`（`stop_reason: timeout`） | `capture` は **worker が稼働中**だと答えている。**再 dispatch しない** —— idle 化を待って **`--reverify`**、必要なら `--wait-timeout` を実測に合わせる |
 | dispatch `worker_stalled`（同上） | `capture` に**稼働の証拠が無い**。worker ログと作業証跡を確かめてから `--resume` |
 | dispatch `worker_liveness_unreadable`（同上） | `capture` 自体が読めず**生死を測れていない**。**どちらとも読み替えない。** 手で `capture` を確かめる |

@@ -812,3 +812,53 @@ export function companionsForPath(rules, path) {
   }
   return out;
 }
+
+// =============================================================================
+// Upstream-fault signatures (Issue #220)
+// =============================================================================
+//
+// The text a CLI leaves on its own screen when the fault is UPSTREAM of it — the
+// API refused, is refusing, or is still being retried — as opposed to anything
+// the worker itself wrote. dispatch reads these at the `--max-turns` cap to tell
+// "the worker ran N turns and produced nothing" from "the worker never got a
+// turn", because the recovery for the two is opposite: split the Issue vs. wait
+// and `--resume` (MEASURED: Kewton/CommandMate#1834 — `API Error: 529 Overloaded`
+// 13 times in a row, reported as "12 turns, no work evidence").
+//
+// The same four signatures live in two other places and are deliberately COPIED
+// rather than shared:
+//   - skills/cmate-orchestrate-monitor/scripts/monitor-lib.sh (`ml_has_terminal_api_error`
+//     / `ml_has_rate_limit`) — shell, and CommandMate's sync-map pins its sha256
+//   - CommandMate's own `UPSTREAM_FAULTS` (canary expectations; since #1839 also
+//     `src/lib/detection/upstream-faults.ts`, surfaced as `capture --json`'s
+//     `upstreamFault`)
+// A shell script and an ES module cannot share a constant, and pinning this
+// runner to a CommandMate version that exposes the field would make an OLD CLI
+// unreadable rather than merely less informative. So: read `upstreamFault` when
+// the CLI offers it, and keep this list for when it does not.
+//
+// The monitor's BROADER banner list (`usage limit reached` / `rate_limit_error` /
+// `429 too many requests` / `1M context credits` / …) is not copied wholesale on
+// purpose. monitor.sh uses it to decide whether to SEND a key; this list decides
+// how to LABEL a run that already ended, and a wider net here would relabel a
+// worker that merely printed the words. `\blimit reached\b` already covers the
+// `usage limit reached` / `retry limit reached` wordings.
+export const UPSTREAM_FAULT_SIGNATURES = [
+  { id: 'overloaded', pattern: /\b5\d{2}\s+Overloaded\b/i },
+  { id: 'retrying', pattern: /\bRetrying in \d+s\b[^\n]{0,24}\battempt \d+\/\d+/i },
+  { id: 'limit_reached', pattern: /\blimit reached\b/i },
+  { id: 'api_error', pattern: /\bAPI Error(?::|\s+\d{3})/i },
+];
+
+// The FIRST signature that matches, with the text it matched — the matched text
+// is what a report transcribes, so `upstream_signature` quotes the CLI rather
+// than naming a regex the reader cannot see. Returns null when nothing matches;
+// a non-string is "nothing to read", never a match.
+export function matchUpstreamFault(text) {
+  if (typeof text !== 'string' || text.length === 0) return null;
+  for (const { id, pattern } of UPSTREAM_FAULT_SIGNATURES) {
+    const found = pattern.exec(text);
+    if (found !== null) return { id, matched: found[0] };
+  }
+  return null;
+}

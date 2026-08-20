@@ -1,0 +1,40 @@
+{
+  "issues": [
+    {
+      "number": 231,
+      "title": "feat: add the offline tile cache",
+      "body": "Add the offline tile cache in `src/tiles.ts`.\n\n## Acceptance criteria\n- [ ] `src/tiles.ts` caches a tile\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 232,
+      "title": "feat: add the route exporter",
+      "body": "Add the route exporter in `src/route.ts`.\n\n## Acceptance criteria\n- [ ] `src/route.ts` writes a route\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 233,
+      "title": "feat: add the marker clusterer",
+      "body": "Add the marker clusterer in `src/cluster.ts`.\n\n## Acceptance criteria\n- [ ] `src/cluster.ts` clusters markers\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 234,
+      "title": "feat: add the locale switcher",
+      "body": "Add the locale switcher in `src/locale.ts`.\n\n## Acceptance criteria\n- [ ] `src/locale.ts` switches locale\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 235,
+      "title": "feat: add the bookmark store",
+      "body": "Add the bookmark store in `src/bookmark.ts`.\n\n## Acceptance criteria\n- [ ] `src/bookmark.ts` stores a bookmark\n",
+      "labels": ["feature"]
+    },
+    {
+      "number": 236,
+      "title": "feat: add the geofence checker",
+      "body": "Add the geofence checker in `src/geofence.ts`.\n\n## Acceptance criteria\n- [ ] `src/geofence.ts` checks a fence\n",
+      "labels": ["feature"]
+    }
+  ]
+}
