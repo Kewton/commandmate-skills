@@ -838,7 +838,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.31.0",
+      "latest": "0.32.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -1910,6 +1910,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.31.0/cmate-orchestrate-0.31.0.tar.gz",
             "sha256": "903971eb850b7ba5558243f0f1d8eb7ad6f59e9b28511c84b4d665b9caa24648",
             "size": 672391,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.32.0",
+          "changelog": "cmate-orchestrate 0.32.0 — dispatch 前の点検を 2 段に広げ、merge 後の観測段を足し、scope と赤の帰属を実測に合わせた\n\nBorderFreeKidsMap で 25 Issue を 1 日通した運転（CommandMate #1831-#1836）で出た欠陥を\nまとめて塞いだ回である。planner が対象リポジトリを開かない不変条件は変えていない ——\nその不変条件が残す穴を、plan とは別の read-only runner で塞いだ。\n\n- #217: inspect.mjs --check-references。Issue 本文の path:line と行数主張を base の tree に\n  突き合わせる。実測では 16 件中 11 件で本文が実物とずれており、dispatch まで誰も\n  検知しなかった。何も書かず裁定せず、所見は warning・exit は 0 である\n- #218: inspect.mjs --evaluate-gates。宣言済み受入ゲートを base で 2 回先行実行し、\n  already_satisfied / failing_at_base / nondeterministic / not_evaluable に 4 分類する。\n  4 つ目が本体で、「測れなかった」を「通った」にも「落ちた」にも丸めない。実測では\n  機能しない受入条件が 1 日で 3 つ書かれていた（着手前から通る / 毎回不一致 / 到達不能）\n- #219: planner が glob とディレクトリ宣言を抽出する。契約と scope ゲートは #1546 以来\n  glob 対応済みで、制約は planner の抽出にあった（文字クラスが * ? { } , を含まず、\n  backtick 内だけが偶発的に通っていた）。file_conflict と merge の scopeMatches を\n  上流 globToRegExp の部分集合に揃え、解釈が 2 つに分かれる状態を解消した\n- #220: --max-turns 到達に worker_turn_evidence の 3 分類を足した。裁定は 1 つも変えない。\n  上流障害で 1 ターンも実行できなかった run が「12 ターン働いて成果物が無い」と読め、\n  codes-and-recovery の対処欄が「Issue を分割」と誤誘導していた。その行も書き換えた\n- #221: observe.mjs。merge 後の base で profile に宣言した観測を N 回集める。判定はしない。\n  中央値だけを見せず全 run を並べる（3 run と 8 run で結論が逆になった実測がある）\n- #222: merge run の前後で呼び出し元 worktree の index.lock を検査し記録する。削除はしない。\n  merge も統合検証も終わったあとの lock が「merge が壊れた」と読め、巻き戻すと二重に壊す\n- #223 / #224: GATE 行の語彙を lib.mjs に集約し、FLAKY を第 3 の verdict として転記する。\n  読む側は exit code を正として裁定をやり直さず、flaky を pass にも fail にも丸めない",
+          "published_at": "2026-08-20T15:04:54Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.32.0",
+            "commit": "09f6f7e4843615ab27a46953ca48dd876202d1bb"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.32.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.32.0/cmate-orchestrate-0.32.0.tar.gz",
+            "sha256": "def752978f28ca5eaed302a58b094037b13d14a308eb749e22b6386d938671ac",
+            "size": 801861,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
