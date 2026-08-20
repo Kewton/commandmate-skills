@@ -538,5 +538,121 @@ warning にならない verdict が2つある —— 照合できる識別子が
 
 `--check` は「**subprocess も network も使わない**」を性質として掲げている（第9.7節）。
 この runner は `--ref` 指定時に `git -C <repo-root> show <ref>:<path>` を呼ぶので、
-相乗りさせるとその性質が**黙って**変わる。後続の「宣言済み acceptance-gates の base 先行評価」
-（コマンド実行を伴う）も同じ runner に載る前提である。
+相乗りさせるとその性質が**黙って**変わる。第16節の `--evaluate-gates` は**コマンドそのものを
+実行する**ので、なおさらである。
+
+## 16. inspect: 宣言済み受入ゲートを base で先行評価する（`--evaluate-gates`）
+
+```
+inspect.mjs --evaluate-gates [--repo-root <path>] [--repeat <n>] [--base <rev>] <issue>...
+```
+
+`cmate-worker-development` は実装に**二点測定**を課す（適合状態で緑・変異状態で赤。
+`references/work-discipline.md` 規律2）。ところが**受入条件そのものには誰も同じことをしない。**
+受入条件は「**着手前に落ち、着手後に通る**」ものでなければゲートとして働かないが、その性質は
+dispatch まで一度も確かめられなかった —— dispatch は send 前に `require:` の id が worktree の
+`.commandmate/verify.yaml` に在ることを確認するだけで（第6節）、base で実行はしない。
+
+実測（CommandMate #1832 / Kewton/BorderFreeKidsMap）: 1 日で機能しない受入条件が3つ書かれ、
+いずれも dispatch まで誰も止めなかった。
+
+| 書いた条件 | 実際 |
+|---|---|
+| 候補 2,000 件で 100ms 未満 | 着手前の O(n²) 実装でも 0.4ms。直しても直らなくても緑 |
+| 出力の sha256 が着手前と一致 | 出力に `判定時刻 : <ISO8601>` を含み、実行のたびに必ず不一致 |
+| `wc -l` が 860 以下 | 移せる量を測らずに決めた閾値で到達不能（993 行で着地） |
+
+**どれも「着手前に1回（非決定性は2回）走らせる」だけで dispatch 前に分かる。**
+
+### 16.1 何を実行するか —— 宣言済み gate だけ
+
+対象は Issue 本文の ```acceptance-gates ブロックが宣言した gate**だけ**である。
+読み取りは **planner と同じ関数**（`orchestrate.mjs` の `readIssueAcceptanceGates`）で、
+32 件上限も `issue-<番号>-` 接頭辞も同じ判定を通る。**独自 parse を持たない。**
+
+- **`require: [lint, unit]`** —— `<repo-root>/.commandmate/verify.yaml` の同 id の `command` を
+  解決して実行する。解決は dispatch と**同じ関数**（`lib.mjs` の `readVerifyConfigGates`）である。
+- **`gates: [{id, command, timeoutSec}]`** —— その `command` をそのまま実行する。
+
+**散文の受入条件は対象外である。**「`grep -c X` が N である」のような文からコマンドを
+導出しない —— [acceptance-gates-notation.md](./acceptance-gates-notation.md) 第5節・第5.1節の
+fail-closed をこの runner も覆さない。閾値を測らせたいなら `gates:` に
+`test $(wc -l < path) -le 860` と書く（gate は exit 0 だけを pass とするので閾値は `test` で表す）。
+
+### 16.2 4つの outcome
+
+各 gate を `--repeat`（既定 **2**）回実行し、次のように分類する。
+
+| outcome | 条件 | severity |
+|---|---|---|
+| `already_satisfied` | 全回 exit 0 | **warning** —— 「着手前は不合格」のはずの条件が満たされている＝書き手の誤り |
+| `failing_at_base` | 全回 同じ非 0 | 期待どおり。**notice ですらない**（記録のみ） |
+| `nondeterministic` | 回ごとに判定が変わる、または非 0 のまま exit code が揺れる | **warning** |
+| `not_evaluable` | 実行できなかった（`reason` 付き） | **notice** |
+
+**`not_evaluable` は「通った」にも「落ちた」にも丸めない。** `reason` は6つあり、
+正本は [codes-and-recovery.md](./codes-and-recovery.md) 第6.3節である。
+
+判定順は **verdict の反転が先**である。Issue 本文は `failing_at_base` を「全回 非 0」、
+`nondeterministic` を「回ごとに exit code が違う」と定義していて、exit 1 → exit 2 の gate で
+2つが重なる。反転（0 と非 0 が混在）を先に見て、残った「安定して落ちるが code が揺れる」も
+`nondeterministic` と呼ぶ —— 1回目 127（binary 不在）で2回目 1 のコマンドは、著者が思っている
+ものを測っていない。
+
+**`--repeat 1` では `nondeterministic` に到達できない。** その run の `summary_markdown` は
+そう明記する（黙って「非決定性は無かった」に見せない）。
+
+### 16.3 実行の前提 —— clean な base で in-place
+
+**実行前に `--repo-root` が clean であることを確かめ、汚れていれば `invalid_input`（exit 3）で
+コマンドを1回も実行しない。** 汚れた tree での実測は双方向に無意味である（緑は誰かの未 commit の
+編集が緑なのかもしれず、赤も同じである）。git checkout でない `--repo-root`、commit の無い
+`--repo-root` も同じ理由で拒否する。`git rev-parse HEAD` を `evaluation.base_sha` に記録する。
+
+> Issue #218 本文はここを「`invalid_input` / exit 2」と書いているが、本 package では exit 2 は
+> `not_implemented` が取っており `invalid_input` は exit 3 である。**実装済みの規約を正とした。**
+
+`--base <rev>` は「この checkout はこの revision のはずだ」という宣言である。HEAD が違えば
+**全 gate を `not_evaluable`（`repo_root_not_base`）にし、1つも実行しない** —— 別の場所で
+取った実測は「着手前」の実測ではない。
+
+実行は **`--repo-root` で in-place** である。使い捨て worktree（`merge.mjs --integration-verify`
+が作る形）にしないのは、依存導入（`npm ci` 等）が要り重いからで、必要になったら `--isolated` を
+後から足す。コマンドは `sh -c` で、cwd は `--repo-root`、**stdout / stderr は捨てる** ——
+gate の判定は exit code であり（[acceptance-gates-notation.md](./acceptance-gates-notation.md)
+第4節）、出力を読み始めた瞬間に「ゲートが通った」と「出力が良さそうだった」が分岐する。
+
+`timeoutSec` は宣言どおりに守る。宣言が無ければ CommandMate 自身の既定（600 秒）である。
+**timeout した回でその gate の repeat を打ち切る** —— 分類は `not_evaluable` で確定しており、
+同じ待ち時間をもう一度払っても何も分からない。実行した回はすべて `runs[]` に残る。
+
+### 16.4 出力と exit
+
+envelope は `--check-references` と同じ規約で、`inspection` の代わりに `evaluation` を持つ
+（**両方を同時に持つことは無い**。片方は必ず `null` である）。
+
+```json
+"evaluation": {
+  "base_sha": "…", "repeat": 2, "verify_config": ".commandmate/verify.yaml",
+  "issues": [{ "number": 280, "declared": "yes", "gates": 1 }],
+  "gates": [{
+    "issue": 280, "gate_id": "issue-280-under-100ms", "source": "gates",
+    "command": "…", "timeout_sec": 60,
+    "runs": [{ "exit_code": 0, "duration_ms": 4, "timed_out": false, "spawn_error": null },
+             { "exit_code": 0, "duration_ms": 3, "timed_out": false, "spawn_error": null }],
+    "outcome": "already_satisfied", "reason": null, "detail": "…"
+  }]
+}
+```
+
+`runs[]` には**全回の exit code と所要時間**が残る（中央値にも1回目にも丸めない）。
+`summary_markdown` は同じ内容を表で出す。
+
+warning が1件でもあれば `status: partial`、notice だけなら `success`、**どちらも exit 0** である。
+`declared` は `yes` / `none` / `invalid` の3値で、**`none`（ブロックが無い）は所見ではない**
+——「宣言が無い」と「測れなかった」を混ぜないためである（同 notation 第7節）。
+
+**plan.json には1バイトも書かない。** 結果はこの runner の artifact（`--out`、既存なら
+`out_exists` / exit 4）と stdout にだけある。plan は Issue 本文と profile の純関数であり、
+`acceptance_criteria` は `string[]` のままである。後続の「merge 後の観測 runner」は、この
+artifact の値を「着手前」として読む。

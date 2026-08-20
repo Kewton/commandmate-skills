@@ -1,0 +1,8 @@
+version: 1
+gates:
+  - id: lint
+    command: "node gate-fake.mjs pass repo-lint"
+    timeoutSec: 60
+  - id: unit
+    command: "node gate-fake.mjs fail repo-unit"
+    timeoutSec: 60

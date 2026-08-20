@@ -631,7 +631,7 @@ const CONTRACT_BUILT_IN_GATE_IDS = ['work-evidence', 'scope'];
 // The YAML subset is the one cmate-verify's verify-run.sh awk parser accepts —
 // 2-space indent, single-line scalars, comments on their own line, no tabs, no
 // anchors, no flow collections, no block scalars — mirrored here so both readers
-// agree on what the file says. It is read-only and extracts ids only.
+// agree on what the file says.
 //
 // FAIL-CLOSED: anything the subset cannot read returns an error rather than a
 // partial id set. An unreadable config would otherwise make a required gate look
@@ -639,6 +639,13 @@ const CONTRACT_BUILT_IN_GATE_IDS = ['work-evidence', 'scope'];
 // complete when it is not. The file is read ONLY for issues that require a gate,
 // so a repository whose verify.yaml this cannot parse keeps its previous
 // behaviour everywhere else.
+//
+// `gates[]` — the command and the timeout beside each id — is carried because the
+// consumer reads them (`inspect.mjs --evaluate-gates` runs the command behind a
+// `require:` id at the base before dispatch, Issue #218). THIS package never runs
+// a gate, so nothing here reads that field. It is copied anyway: the copy is what
+// the conformance test pins, and a mirror that dropped the half it has no use for
+// would be a mirror that stopped proving the two sides read the same file.
 function checkoutGateIds(checkoutPath) {
   const path = join(checkoutPath, VERIFY_CONFIG_RELATIVE);
   let text;
@@ -654,9 +661,22 @@ function checkoutGateIds(checkoutPath) {
   }
   const bad = (reason) => ({ ok: false, reason: `${VERIFY_CONFIG_RELATIVE}: ${reason}` });
   const ids = [];
+  const gates = [];
   let section = '';
   let sawVersion = false;
   let gateOpen = false;
+  // One `key: value` of the gate entry that is currently open. Unknown keys
+  // (`mutex`, `retryOnFail`, `flakyIsPass`, anything upstream adds later) are
+  // carried by neither reader: this one runs the command, and none of them
+  // changes what the command IS.
+  const field = (key, rawValue) => {
+    const entry = gates[gates.length - 1];
+    if (entry === undefined) return;
+    const value = unquoteYaml(rawValue);
+    if (key === 'id') entry.id = value;
+    else if (key === 'command') entry.command = value;
+    else if (key === 'timeoutSec') entry.timeoutSec = /^[0-9]+$/.test(value) ? Number(value) : null;
+  };
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/\r$/, '');
     if (line.includes('\t')) return bad('tab characters are not allowed');
@@ -699,14 +719,19 @@ function checkoutGateIds(checkoutPath) {
       const first = body.slice(2).trim();
       const colon = first.indexOf(':');
       if (colon <= 0) return bad('expected "key: value" inside a gate');
-      if (first.slice(0, colon).trim() === 'id') ids.push(unquoteYaml(first.slice(colon + 1).trim()));
+      const key = first.slice(0, colon).trim();
+      gates.push({ id: null, command: null, timeoutSec: null });
+      if (key === 'id') ids.push(unquoteYaml(first.slice(colon + 1).trim()));
+      field(key, first.slice(colon + 1).trim());
       continue;
     }
     if (indent === 4) {
       if (!gateOpen) return bad('gate field outside of a list item');
       const colon = body.indexOf(':');
       if (colon <= 0) return bad('expected "key: value" inside a gate');
-      if (body.slice(0, colon).trim() === 'id') ids.push(unquoteYaml(body.slice(colon + 1).trim()));
+      const key = body.slice(0, colon).trim();
+      if (key === 'id') ids.push(unquoteYaml(body.slice(colon + 1).trim()));
+      field(key, body.slice(colon + 1).trim());
       continue;
     }
     return bad(`unexpected indentation (${indent} spaces)`);
@@ -716,7 +741,7 @@ function checkoutGateIds(checkoutPath) {
   for (const id of ids) {
     if (!ACCEPTANCE_GATE_ID_RE.test(id)) return bad(`declared gate id "${id}" does not match ${ACCEPTANCE_GATE_ID_RE.source}`);
   }
-  return { ok: true, ids };
+  return { ok: true, ids, gates };
 }
 
 // The single- or double-quoted scalar forms the subset allows. A value with no

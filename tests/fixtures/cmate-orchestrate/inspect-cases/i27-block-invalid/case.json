@@ -1,0 +1,25 @@
+{
+  "mode": "evaluate-gates",
+  "description": "a block the planner cannot read — evaluated as \"not measurable\", never as \"no gate\"",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [
+      "acceptance_gate_not_evaluable"
+    ],
+    "notices": 1,
+    "gates": [
+      {
+        "gate_id": null,
+        "source": null,
+        "outcome": "not_evaluable",
+        "reason": "block_invalid",
+        "exit_codes": [],
+        "timeout_sec": null,
+        "command": null
+      }
+    ],
+    "declared": "invalid",
+    "calls": {}
+  }
+}

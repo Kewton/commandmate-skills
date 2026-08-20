@@ -1821,6 +1821,74 @@ citation（`identifier_absent`）。後者を「移動した」と呼ぶのは�
 `--repo-root` 不在を `load_error` / 6 とするのは `profile-init` の既存 fixture と同じである。
 **受入条件が測っている性質（読めない入力は拒否し、点検結果を出さない）は fixture で固定してある。**
 
+### #218 — 受入条件そのものが「着手前に落ちる」かを、誰も確かめていなかった
+
+`cmate-worker-development` は実装に**二点測定**を課している（適合状態で緑・変異状態で赤。
+`references/work-discipline.md` 規律2）。ところが**受入条件そのものには誰も同じことをしない。**
+受入条件は「**着手前に落ち、着手後に通る**」ものでなければゲートとして働かないが、その性質は
+dispatch まで一度も確かめられなかった —— dispatch は send 前に `require:` の id が worktree の
+`.commandmate/verify.yaml` に**在ること**を確認するだけで、base で実行はしない。base 側で
+コマンドを回す唯一の経路は非契約 fallback の `verifyWorker` で、これは worker 完了**後**である。
+
+実測（CommandMate #1832 / Kewton/BorderFreeKidsMap）: オーケストレータが 1 日で機能しない
+受入条件を3つ書き、いずれも dispatch まで誰も止めなかった。
+
+| 書いた条件 | 実際 |
+|---|---|
+| 候補 2,000 件で 100ms 未満 | 着手前の O(n²) 実装でも 0.4ms。直しても直らなくても緑 |
+| 出力の sha256 が着手前と一致 | 出力に `判定時刻 : <ISO8601>` を含み、実行のたびに必ず不一致 |
+| `wc -l` が 860 以下 | 移せる量を測らずに決めた閾値で到達不能（993 行で着地） |
+
+**どれも「着手前に1回（非決定性は2回）走らせる」だけで分かる。**
+
+→ #217 の点検 runner に **mode を相乗り**させた（新設ではない）。`inspect.mjs --evaluate-gates`
+は Issue が ```acceptance-gates ブロックで宣言した gate を base で `--repeat`（既定 2）回
+先行実行し、`already_satisfied`（warning）/ `failing_at_base`（記録のみ）/
+`nondeterministic`（warning）/ `not_evaluable`（**notice**）に分類する。正本は
+[runner-operations.md](./runner-operations.md) 第16節、code は
+[codes-and-recovery.md](./codes-and-recovery.md) 第6.3節である。
+
+**4つ目の分類が本体である。** `not_evaluable` を置いたのは、**「測れなかった」を「通った」にも
+「落ちた」にも丸めないため**だけである。id が verify.yaml に無い／built-in でコマンドが無い／
+timeout／ブロックが読めない／`--repo-root` が base でない —— どれも受入条件についての所見では
+ないので notice であり、`status` を動かさない（planner の `severity: notice`（#199）と同じ規約）。
+
+**散文からは何も導出しない。** [acceptance-gates-notation.md](./acceptance-gates-notation.md)
+第5節の拒否理由4点（引用≠指示・binary 集合が profile 依存・決定性・未承認ゲート）は覆していない
+——**実行を伴う**この mode ではむしろ強く効く。散文から導出したコマンドを base で走らせるのは、
+誰も承認していないコマンドを他人のリポジトリで実行することである。閾値を測らせたい条件は
+`gates:` に `test $(wc -l < path) -le 860` と書く（同 notation 第5.1節に足し、
+`cmate-issue-authoring` の手引き第8節にミラーした）。
+
+**plan.json には1バイトも書かない。** plan の純関数性を壊すし、schema の `acceptance_criteria` は
+`string[]` のままである。結果は点検 runner の artifact にだけ載る。
+
+**parse を2つ持たない。** ブロックの読み取りは planner の `readIssueAcceptanceGates` を
+`orchestrate.mjs` から import する（32 件上限も `issue-<番号>-` 接頭辞も同じ判定）。
+`require:` の id を verify.yaml の command へ解決する reader は dispatch の
+`readWorktreeGateIds` を `lib.mjs` の `readVerifyConfigGates` へ**そのまま移した**もので、
+dispatch はその同じ関数を呼ぶ。**`ids` の順序も拒否メッセージも byte 単位で不変**であり、
+dispatch case 109 本が非回帰を測っている。2つ目の reader は、inspect が
+`gate_id_unresolved` と言う id を dispatch が平然と解決する状態を作れてしまう。
+
+**汚れた tree では1回も実行しない。** `git status --porcelain` が空でなければ
+`invalid_input`（**exit 3**）で拒否する —— 汚れた tree での実測は双方向に無意味である
+（緑は誰かの未 commit の編集が緑なのかもしれない）。fixture はこの「実行しなかった」を
+exit code ではなく **fake gate の呼び出し log が空であること**で測る。
+exit code は #217 と同じ理由で本文の提案（exit 2）ではなく package の既存語彙（exit 3）に
+合わせた。**exit 2 は `not_implemented` が取っている。**
+
+**`--repeat` の既定を 2 にした。** 1 回では `nondeterministic` に到達できないからである。
+`--repeat 1` は許すが、その run の `summary_markdown` は**到達できない分類がある**ことを
+明記する（黙って「非決定性は無かった」に見せない）。timeout した回でその gate の repeat は
+打ち切るが、**実行した回はすべて `runs[]` に残る**（中央値にも1回目にも丸めない）。
+
+**判定順は verdict の反転が先である。** Issue 本文は `failing_at_base` を「全回 非 0」、
+`nondeterministic` を「回ごとに exit code が違う」と定義していて、exit 1 → exit 2 の gate で
+2つが重なる。反転（0 と非 0 の混在）を先に見て、残った「安定して落ちるが code が揺れる」も
+`nondeterministic` と呼ぶ —— 1回目 127（binary 不在）で2回目 1 のコマンドは、著者が思っている
+ものを測っていない。**本文の定義との差はこれ1点である。**
+
 ---
 
 ## 設計（ADR のみ。実装は後続）

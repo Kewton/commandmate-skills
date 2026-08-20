@@ -72,8 +72,11 @@ ADR `adr-issue-acceptance-gates.md` 第 2.3 節は「散文からの推測生成
 
 ## 4. 出してはならないもの
 
-- **`gates:`（新規コマンドの宣言）。** 記法としては予約済みだが、消費側が段階 2 として
-  未実装であり、planner が `acceptance_gate_block_unsupported` で止める。次の形は出さない。
+- **`gates:`（新規コマンドの宣言）。** 記法としては実装済みで、**消費側（planner / dispatch）は
+  受理する**（正本 第 6 節、[#125](https://github.com/Kewton/commandmate-skills/issues/125)）。
+  止めるのは**この package 自身の validator** であり（`acceptance_gate_block_unsupported` →
+  `acceptance_gates_no_new_commands`）、理由は「自分が renderer で出せない記法を本文に書かない」
+  という起案側の判断である（正本 第 6.3 節）。次の形は出さない。
 
   ```text
   version: 1
@@ -131,3 +134,29 @@ warning が持つ。起案側は壊れたブロックを出さないことでこ
 関数本体の byte 一致（rename と comment を除く）・corpus での挙動一致に加えて、
 **この package が出す形が正本の例と byte 一致すること**を確かめている。install 先の
 package に conformance テストは含まれない（`files:` に無いものは artifact に入らない）。
+
+## 8. 閾値を「着手前に落ちる」形で書く（[#218](https://github.com/Kewton/commandmate-skills/issues/218)）
+
+受入条件は「**着手前に落ち、着手後に通る**」ものでなければゲートとして働かない。
+`inspect.mjs --evaluate-gates` は dispatch の前にこれを base で実測するが、**見るのは
+ブロックが宣言した gate だけ**である（正本 第 5.1 節）。散文に書いた閾値は
+——「`wc -l` が 860 以下」「2,000 件で 100ms 未満」—— **誰も先行評価しない。**
+第 3 節・第 4 節の fail-closed をこの runner も覆さないからである。
+
+起案側にできることは 2 つある。
+
+1. **閾値を名乗る前に測る。** 実測 [CommandMate#1832](https://github.com/Kewton/CommandMate/issues/1832):
+   移せる量を測らずに「860 行以下」と書いた Issue が 993 行で着地した。
+   同じ run で「2,000 件で 100ms 未満」は着手前の O(n²) 実装ですら 0.4ms で、
+   直しても直らなくても緑だった。**現在値を本文に書き、そこからどれだけ動かすのかを書く。**
+   `path:line` と行数の主張は `inspect.mjs --check-references` が実物と突き合わせる
+   （[#217](https://github.com/Kewton/commandmate-skills/issues/217)）。
+2. **機械に測らせたい閾値は `gates:` の形で書く。** gate は exit 0 だけを pass とするので、
+   閾値は `test` で表す —— `test $(wc -l < web/src/lib/repository.ts) -le 860`。
+   **この package の renderer は `gates:` を出さない**（第 4 節）ので、この形が要る Issue では
+   ブロックを人が書き、レビュアーが読む。出す形は正本 第 6 節が持つ。
+
+出力に時刻・乱数・並び順が混ざるコマンドは、**着手後も通らない**（実測: 出力の sha256 を
+受入条件にした Issue が、出力の `判定時刻 : <ISO8601>` のせいで毎回不一致になった）。
+`--evaluate-gates` はこれを `nondeterministic` として base で見つけるが、そもそも
+そういうコマンドを受入条件にしない方が早い。

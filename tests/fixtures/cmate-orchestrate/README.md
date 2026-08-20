@@ -49,6 +49,9 @@ inspect-cases/<id>/case.json    warning code 列・references[]/line_claims[] �
                                 ambiguous/dropped の期待値。`found_at` と `measured` は
                                 **harness が repo/ の bytes から独立に計算して**照合するので、
                                 case が「runner 自身と一致しているだけ」で緑になることはない
+inspect-cases/gate-fake.mjs     `--evaluate-gates` の case で gate の代わりに走る fake。呼び出しを
+                                $CMATE_GATE_FAKE_LOG（**checkout の外**）に記録し、spec で
+                                pass / fail / flip（1回目だけ緑）/ codes / hang を出し分ける
 fake-cli.mjs                    commandmate/git/gh を模した stub（failure injection）。`workers.<n>.capture_extra`
                                 は `capture --json` の payload に混ぜる field（`realtimeSnippet` /
                                 `lineCount` / `structuredEvents` / `cliToolId` / `upstreamFault`。#220）。
@@ -532,6 +535,69 @@ case directory を持たない 3 本が別に在る。
 - `inspect does not reach the plan` —— ずれだらけの同じ本文が**従来どおり plan でき**、
   plan に `reference_*` の語彙が 1 つも入らないこと。byte 単位の非回帰は
   `cases/*/expected-plan.json` の golden 側が持つ
+
+## evaluate-gates case 一覧（[#218](https://github.com/Kewton/commandmate-skills/issues/218)）
+
+`inspect-cases/` の case のうち **`case.json` の `mode` が `evaluate-gates`** のものは、
+`inspect.mjs --evaluate-gates`（Issue が宣言した受入ゲートを base で先行実行する mode）へ回る。
+harness は case の `repo/` を **temp へ複写して `git init` + commit** し、`gate-fake.mjs` を
+その checkout に置いてから走らせる —— この mode は `--repo-root` が clean であることを
+要求するので、fixture tree（＝このリポジトリの一部）をそのまま渡すことはできない。
+
+**呼び出し回数は fake の log から独立に照合する。** report が「2 回走らせた」と言い、
+fake が「2 回呼ばれた」と言うのは別の主張である。log は checkout の外に書かれるので、
+「走らせたあとの checkout が byte 一致のまま」という assert と両立する。
+
+各 case について確かめるのは次のとおりである。
+
+- warning code 列が期待と**完全一致**すること、`notice` の件数と、**notice が status を動かさない**こと
+- `runs[]` の exit code が**全回・順序どおり**であること（件数でも中央値でも 1 回目でもない）
+- gate ごとに `detail` が空でないこと（outcome だけ言って理由を言わない報告を許さない）
+- fake の呼び出し回数が期待と一致すること
+- 走らせたあとの checkout が **byte 一致**で、`git status --porcelain` が空のままであること
+
+| case | 何を見るための case か |
+|---|---|
+| `i20-gate-already-satisfied` | `gates:` の command が base で全回 exit 0。**`already_satisfied`（warning）・`status: partial`・exit 0** —— 直しても直らなくても緑になる条件はゲートではない |
+| `i21-gate-nondeterministic` | 1 回目 exit 0 / 2 回目 exit 1 の fake。`nondeterministic`（`verdict_flipped`）。**1 回しか走らせない実装・「1 回でも緑なら緑」の実装はここで赤くなる** |
+| `i22-gate-failing-at-base` | 全回 非 0。`failing_at_base`・**warning 0 件・`status: success`** —— 期待どおりの状態は所見ではない |
+| `i23-gate-id-unresolved` | `require:` の id が `.commandmate/verify.yaml` に無い。`not_evaluable`（`gate_id_unresolved`）の **notice**、`status` は `success` のまま |
+| `i24-gate-timeout` | `timeoutSec: 1` を超えて終わらない fake。`not_evaluable`（`timeout`）で、**repeat はそこで打ち切られる**（`runs[]` は 1 件、fake の呼び出しも 1 回） |
+| `i25-require-resolved-and-builtin` | `require:` の id を **verify.yaml の command から解決して実行**する（dispatch と同じ `readVerifyConfigGates`）。`work-evidence` は解決できる id だが走らせるコマンドが無いので `gate_id_builtin` —— **解決できることと測れることは別である** |
+| `i26-no-declared-block` | 散文の受入条件だけの本文。**gate 0 件・warning 0 件・`declared: none`** —— 散文からコマンドを導出しないことと、「宣言が無い」を「測れなかった」に丸めないこと |
+| `i27-block-invalid` | planner が読めないブロック（`command` の無い `gates:` entry）。`not_evaluable`（`block_invalid`）で `declared: invalid` —— 「ブロックが無い」と**別の状態**として残る |
+
+case directory を持たない 2 本が別に在る。
+
+- `evaluate-gates input handling` —— **dirty な `--repo-root` は `invalid_input`（exit 3）で
+  拒否し、gate を 1 回も実行しない**（untracked file / tracked file の編集の両方。
+  「実行しなかった」は exit code ではなく **fake の log が空であること**で測る）。
+  `--base` が HEAD と違えば全 gate が `not_evaluable`（`repo_root_not_base`）で**何も走らず**、
+  `--base HEAD` なら通常どおり走る。`--repeat 3` は実行も log も 3 回になり、`--repeat 1` では
+  `nondeterministic` に到達できないことを `summary_markdown` が明記する。mode を 2 つ /
+  `--ref` と併用 / `--repeat` を `--check-references` と併用 / `--repeat 0` / 非整数 /
+  git でない `--repo-root` は `invalid_input`、解決しない `--base` は `load_error`（exit 6）で、
+  **どれも `evaluation` は `null`**
+- `evaluate-gates does not reach the plan` —— ブロックを持つ同じ本文が**従来どおり plan でき**、
+  plan に `already_satisfied` / `failing_at_base` / `nondeterministic` / `not_evaluable` /
+  `base_sha` の語彙が 1 つも入らないこと
+
+### 空振り検査の実測（2026-08-20）
+
+**「緑になった」はテストが効いている証拠にならない。** 上の case が本当に何かを測っていることを、
+`scripts/inspect.mjs` に **7 通りの変異を 1 箇所ずつ注入して赤くなることで**確かめた
+（各回とも注入 → 実行 → 復元。復元後は緑に戻ることも確認した）。最初の 2 つは
+[#218](https://github.com/Kewton/commandmate-skills/issues/218) 本文が名指しした変異である。
+
+| 変異 | 赤くなった case と assert |
+|---|---|
+| `already_satisfied` を「**1 回でも exit 0**」に緩める | i21（`warning codes ["acceptance_gate_already_satisfied"] != ["acceptance_gate_nondeterministic"]`・`gate[0].reason is null, expected "verdict_flipped"`） |
+| `--repeat` の既定を **1 に固定**する | i20（`runs exit codes [0] != [0,0]`・`the fake was called {"issue-280-under-100ms":1}`）と i21（`outcome is "already_satisfied"`） |
+| clean tree の検査を外す（dirty でも実行する） | `evaluate-gates input handling`（`a dirty --repo-root should exit 3, exited 0`。**fake の log が空でないことで**「実行してしまった」を捕まえる） |
+| `timeout` を `failing_at_base` に丸める | i24（`warning codes [] != ["acceptance_gate_not_evaluable"]`・completion check の `runs_recorded` が false） |
+| `not_evaluable` の `severity: notice` を落とす | i23 / i24 / i27（`status partial != success`・`0 notice(s), expected 1`） |
+| `runs[]` を **1 回目だけ**に丸める | i20 / i21 / i22 / i25（`runs exit codes [0] != [0,0]`・`runs_recorded` が false） |
+| `--repeat 1` の注記を出さなくする | `evaluate-gates input handling`（`at --repeat 1 the summary must say which outcome it can no longer reach`） |
 
 ## 受入ゲートの `gates:` — 空振り検査の実測（[#125](https://github.com/Kewton/commandmate-skills/issues/125)）
 

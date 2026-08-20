@@ -1,0 +1,52 @@
+{
+  "mode": "evaluate-gates",
+  "description": "require: ids resolved to the repository's own commands, plus a built-in that has no command to run",
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "acceptance_gate_already_satisfied",
+      "acceptance_gate_not_evaluable"
+    ],
+    "notices": 1,
+    "gates": [
+      {
+        "gate_id": "unit",
+        "source": "require",
+        "outcome": "failing_at_base",
+        "reason": null,
+        "exit_codes": [
+          1,
+          1
+        ],
+        "timeout_sec": 60,
+        "command": "node gate-fake.mjs fail repo-unit"
+      },
+      {
+        "gate_id": "lint",
+        "source": "require",
+        "outcome": "already_satisfied",
+        "reason": null,
+        "exit_codes": [
+          0,
+          0
+        ],
+        "timeout_sec": 60,
+        "command": "node gate-fake.mjs pass repo-lint"
+      },
+      {
+        "gate_id": "work-evidence",
+        "source": "require",
+        "outcome": "not_evaluable",
+        "reason": "gate_id_builtin",
+        "exit_codes": [],
+        "timeout_sec": null,
+        "command": null
+      }
+    ],
+    "calls": {
+      "repo-unit": 2,
+      "repo-lint": 2
+    }
+  }
+}

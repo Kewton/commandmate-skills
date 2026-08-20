@@ -1,0 +1,24 @@
+{
+  "mode": "evaluate-gates",
+  "description": "a require: id the repository does not declare — not measurable, and not rounded to pass or fail",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [
+      "acceptance_gate_not_evaluable"
+    ],
+    "notices": 1,
+    "gates": [
+      {
+        "gate_id": "e2e",
+        "source": "require",
+        "outcome": "not_evaluable",
+        "reason": "gate_id_unresolved",
+        "exit_codes": [],
+        "timeout_sec": null,
+        "command": null
+      }
+    ],
+    "calls": {}
+  }
+}

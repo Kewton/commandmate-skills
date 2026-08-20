@@ -1,0 +1,8 @@
+[
+  {
+    "number": 233,
+    "title": "timeoutSec を超える gate",
+    "labels": [],
+    "body": "重い e2e を受入条件にする\n\n## 背景\n実測で機能しなかった受入条件の再現である。\n\n## 受入条件\n- [ ] `web/src/lib/repository.ts` が 860 行以下になる\n\n```acceptance-gates\nversion: 1\ngates:\n  - id: issue-233-slow\n    command: \"node gate-fake.mjs hang issue-233-slow\"\n    timeoutSec: 1\n```\n"
+  }
+]

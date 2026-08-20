@@ -1,0 +1,27 @@
+{
+  "mode": "evaluate-gates",
+  "description": "a declared gate that does not finish inside its own timeoutSec",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [
+      "acceptance_gate_not_evaluable"
+    ],
+    "notices": 1,
+    "gates": [
+      {
+        "gate_id": "issue-233-slow",
+        "source": "gates",
+        "outcome": "not_evaluable",
+        "reason": "timeout",
+        "exit_codes": [
+          null
+        ],
+        "timeout_sec": 1
+      }
+    ],
+    "calls": {
+      "issue-233-slow": 1
+    }
+  }
+}

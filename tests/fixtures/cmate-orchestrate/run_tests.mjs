@@ -5324,12 +5324,12 @@ function profileInitCheckTest() {
 //   the discipline    exit is 0 whatever it finds, the tree is byte-unchanged
 //                     afterwards, and two runs produce the same bytes
 
-function runInspect(args) {
+function runInspect(args, env = {}) {
   try {
     const stdout = execFileSync('node', [INSPECT_RUNNER, ...args], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: baseEnv(),
+      env: { ...baseEnv(), ...env },
     });
     return { exit: 0, stdout };
   } catch (error) {
@@ -5702,6 +5702,390 @@ function inspectDoesNotReachPlanTest() {
     !JSON.stringify(result.plan).includes('inspect'),
     'the plan mentions the inspection runner; the plan is a pure function of the issue body and the profile',
   );
+}
+
+// =============================================================================
+// evaluate-gates cases (Issue #218)
+// =============================================================================
+//
+// `cmate-worker-development` makes the implementation measure twice — green in
+// the fitting state, red in a mutated one. Nothing did that to the ACCEPTANCE
+// CONDITION, and CommandMate#1832 measured what that costs: three conditions
+// written in one day that could not judge anything, none of them stopped before
+// dispatch. One was already green on the code the issue existed to replace; one
+// hashed output carrying a timestamp, so it disagreed with itself; one named a
+// line ceiling nobody had measured.
+//
+// `inspect.mjs --evaluate-gates` runs the gates the body DECLARES against the
+// base and sorts them. What is asserted here is what makes that worth having:
+//
+//   the four outcomes  each fires on a fixture built to earn it, and
+//                      `already_satisfied` needs EVERY run to pass — the
+//                      `flip` fake passes the first and fails the second, so a
+//                      runner that stopped after one run, or that scored "one
+//                      pass is a pass", calls it satisfied and this case goes
+//                      red
+//   the runs           `runs[]` holds every execution's own exit code and
+//                      duration, and the fake's call log — written outside the
+//                      checkout — says the same number independently
+//   the notice         a gate nobody could measure is a NOTICE: it does not
+//                      move the status, and it is never filed as pass or fail
+//   the refusal        a dirty --repo-root is refused BEFORE anything runs, and
+//                      "nothing ran" is measured from the call log rather than
+//                      inferred from the exit code
+//   the discipline     exit is 0 whatever it finds, the checkout is
+//                      byte-unchanged afterwards, and the plan never hears
+//                      about any of it
+
+// A checkout the mode will accept: the case's `repo/` template plus the fake
+// gate, committed, so `git status --porcelain` is empty. Built per case in a
+// temp directory because the fixture tree lives inside THIS repository, whose
+// own status is whatever the developer's working tree happens to be.
+function makeGateCheckout(caseDir) {
+  const dir = mkdtempSync(join(tmpdir(), 'cmate-gates-'));
+  const repoDir = join(dir, 'repo');
+  mkdirSync(repoDir, { recursive: true });
+  copyTree(join(caseDir, 'repo'), repoDir);
+  writeFileSync(join(repoDir, 'gate-fake.mjs'), readFileSync(join(INSPECT_CASES_DIR, 'gate-fake.mjs'), 'utf8'));
+  execFileSync('git', ['init', '-q', repoDir], { stdio: 'ignore' });
+  const git = (...args) => execFileSync('git', ['-C', repoDir, ...args], { stdio: 'ignore' });
+  git('config', 'user.email', 'fixture@example.invalid');
+  git('config', 'user.name', 'fixture');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'fixture base');
+  return { dir, repoDir, log: join(dir, 'gate-calls.log') };
+}
+
+function copyTree(from, to) {
+  for (const entry of readdirSync(from, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const source = join(from, entry.name);
+    const target = join(to, entry.name);
+    if (entry.isDirectory()) {
+      mkdirSync(target, { recursive: true });
+      copyTree(source, target);
+    } else {
+      writeFileSync(target, readFileSync(source));
+    }
+  }
+}
+
+// How many times each tag was invoked, straight out of the fake's own log. This
+// is the harness's second opinion on `runs[]`: the report says how many times it
+// ran a gate, and this says how many times a gate was actually entered. A runner
+// that reported two runs and performed one would pass the first check and fail
+// this one.
+function gateCallCounts(log) {
+  if (!existsSync(log)) return {};
+  const counts = {};
+  for (const line of readFileSync(log, 'utf8').split('\n')) {
+    if (line === '') continue;
+    counts[line] = (counts[line] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function runEvaluateGatesCase(caseId) {
+  const caseDir = join(INSPECT_CASES_DIR, caseId);
+  const spec = JSON.parse(readFileSync(join(caseDir, 'case.json'), 'utf8'));
+  log(`  ${caseId}: ${spec.description}`);
+
+  const { repoDir, log: callLog } = makeGateCheckout(caseDir);
+  const before = treeDigest(repoDir);
+  const args = [
+    '--evaluate-gates',
+    '--repo-root', repoDir,
+    '--issue-json', join(caseDir, 'issues.json'),
+    ...(spec.args ?? []),
+  ];
+  const run = runInspect(args, { CMATE_GATE_FAKE_LOG: callLog });
+  const expect = spec.expect ?? {};
+  if (!check(run.exit === expect.exit, `exit ${run.exit} != ${expect.exit}: ${run.stdout.slice(0, 400)}`)) return;
+
+  let result;
+  try {
+    result = JSON.parse(run.stdout);
+  } catch {
+    check(false, 'the envelope on stdout is not JSON');
+    return;
+  }
+
+  check(result.mode === 'evaluate-gates', `mode ${result.mode} != evaluate-gates`);
+  check(result.status === expect.status, `status ${result.status} != ${expect.status}`);
+  check(result.inspection === null, 'the gate report carries a --check-references inspection it never made');
+  check(result.errors.length === 0, `a readable input must raise no error: ${JSON.stringify(result.errors)}`);
+  check(result.completion_check.passed === true, `the completion check should pass: ${JSON.stringify(result.completion_check.checks.filter((c) => !c.passed))}`);
+  check(
+    deepEqual(result.warnings.map((warning) => warning.code), expect.warning_codes ?? []),
+    `warning codes ${JSON.stringify(result.warnings.map((w) => w.code))} != ${JSON.stringify(expect.warning_codes ?? [])}`,
+  );
+  // A finding never changes the exit code, and a NOTICE never changes the
+  // status. The second half is the one that is easy to lose: "we could not
+  // measure this gate" is not a defect in the issue, and colouring the run for
+  // it would teach the reader to skip the colour.
+  check(run.exit === 0, `a finding must not change the exit code, exited ${run.exit}`);
+  const notices = result.warnings.filter((warning) => warning.severity === 'notice');
+  check(notices.length === (expect.notices ?? 0), `${notices.length} notice(s), expected ${expect.notices ?? 0}`);
+  check(
+    notices.every((warning) => warning.code === 'acceptance_gate_not_evaluable'),
+    `a notice may only be a not_evaluable: ${JSON.stringify(notices.map((w) => w.code))}`,
+  );
+  const blocking = result.warnings.filter((warning) => warning.severity !== 'notice');
+  check(
+    (result.status === 'partial') === (blocking.length > 0),
+    `status ${result.status} does not follow from ${blocking.length} blocking warning(s)`,
+  );
+
+  const gates = result.evaluation.gates;
+  check(
+    gates.length === (expect.gates ?? []).length,
+    `${gates.length} gate(s) reported, expected ${(expect.gates ?? []).length}: ${JSON.stringify(gates.map((g) => g.gate_id))}`,
+  );
+  for (const [index, wanted] of (expect.gates ?? []).entries()) {
+    const actual = gates[index] ?? {};
+    for (const [field, value] of Object.entries(wanted)) {
+      if (field === 'exit_codes') continue;
+      check(
+        deepEqual(actual[field], value),
+        `gate[${index}].${field} is ${JSON.stringify(actual[field])}, expected ${JSON.stringify(value)}`,
+      );
+    }
+    // EVERY run's exit code, in order. Not a count, not a median, not the first
+    // one: a gate that passed once and failed once has to be readable as such
+    // out of the artifact alone.
+    check(
+      deepEqual((actual.runs ?? []).map((entry) => entry.exit_code), wanted.exit_codes),
+      `gate[${index}].runs exit codes ${JSON.stringify((actual.runs ?? []).map((r) => r.exit_code))} != ${JSON.stringify(wanted.exit_codes)}`,
+    );
+    check(
+      (actual.runs ?? []).every((entry) => Number.isInteger(entry.duration_ms) && entry.duration_ms >= 0),
+      `gate[${index}].runs is missing a duration: ${JSON.stringify(actual.runs)}`,
+    );
+    check(
+      (actual.detail ?? '') !== '',
+      `gate[${index}] has no detail, so the report says an outcome without saying why`,
+    );
+  }
+  if (expect.declared !== undefined) {
+    check(
+      result.evaluation.issues.every((issue) => issue.declared === expect.declared),
+      `declared ${JSON.stringify(result.evaluation.issues.map((i) => i.declared))} != ${expect.declared}`,
+    );
+  }
+
+  // ---- the call count is the fake's, not the runner's ----------------------
+  check(
+    deepEqual(gateCallCounts(callLog), expect.calls ?? {}),
+    `the fake was called ${JSON.stringify(gateCallCounts(callLog))}, expected ${JSON.stringify(expect.calls ?? {})}`,
+  );
+
+  // ---- the checkout is untouched, and the plan never hears about it --------
+  check(treeDigest(repoDir) === before, 'evaluating the gates changed the checkout they ran in');
+  check(
+    execFileSync('git', ['-C', repoDir, 'status', '--porcelain'], { encoding: 'utf8' }).trim() === '',
+    'evaluating the gates left the checkout dirty',
+  );
+  check(
+    !JSON.stringify(result.evaluation).includes('"plan"'),
+    'the gate report carries a plan',
+  );
+}
+
+// The refusals and the flags, measured where a case cannot reach: a dirty
+// checkout, a --repo-root that is not the base, and the argument combinations
+// that would make one report answer two questions.
+function evaluateGatesInputTest() {
+  log('  evaluate-gates input handling');
+  const caseDir = join(INSPECT_CASES_DIR, 'i20-gate-already-satisfied');
+  const issuesPath = join(caseDir, 'issues.json');
+
+  // ---- dirty is refused, and NOTHING runs ---------------------------------
+  //
+  // The exit code alone would not prove it: a runner that ran the gates and
+  // then refused would exit 3 too. The fake's log is the evidence, and it is
+  // the whole point of this case — a gate measured over somebody's uncommitted
+  // edit says nothing about the base in either direction.
+  const dirty = makeGateCheckout(caseDir);
+  writeFileSync(join(dirty.repoDir, 'scratch.txt'), 'an uncommitted file\n');
+  const refused = runInspect(
+    ['--evaluate-gates', '--repo-root', dirty.repoDir, '--issue-json', issuesPath],
+    { CMATE_GATE_FAKE_LOG: dirty.log },
+  );
+  check(refused.exit === 3, `a dirty --repo-root should exit 3, exited ${refused.exit}`);
+  const refusedResult = JSON.parse(refused.stdout);
+  check(refusedResult.status === 'failure', `a dirty --repo-root should report failure, got ${refusedResult.status}`);
+  check(
+    refusedResult.errors.some((error) => error.code === 'invalid_input'),
+    `a dirty --repo-root should fail with invalid_input: ${JSON.stringify(refusedResult.errors)}`,
+  );
+  check(refusedResult.evaluation === null, 'a refused run produced an evaluation it never made');
+  check(refusedResult.mode === 'evaluate-gates', 'a refused run should still name the mode it was asked for');
+  check(
+    deepEqual(gateCallCounts(dirty.log), {}),
+    `a dirty --repo-root ran a gate: ${JSON.stringify(gateCallCounts(dirty.log))}`,
+  );
+
+  // A tracked file edited in place is dirty too, not only an untracked one.
+  const edited = makeGateCheckout(caseDir);
+  writeFileSync(join(edited.repoDir, '.commandmate', 'verify.yaml'), 'version: 1\n');
+  const refusedEdit = runInspect(
+    ['--evaluate-gates', '--repo-root', edited.repoDir, '--issue-json', issuesPath],
+    { CMATE_GATE_FAKE_LOG: edited.log },
+  );
+  check(refusedEdit.exit === 3, `an edited tracked file should exit 3, exited ${refusedEdit.exit}`);
+  check(deepEqual(gateCallCounts(edited.log), {}), 'an edited tracked file ran a gate');
+
+  // ---- a checkout that is not the base -------------------------------------
+  //
+  // Not a refusal: the operator asked a question this runner can answer with
+  // "that is not where you think it is". Every gate becomes not_evaluable and
+  // none of them runs, because a measurement taken somewhere else is not a
+  // measurement of the base — and rounding it to pass or fail would be the
+  // exact confusion the fourth outcome exists to prevent.
+  const moved = makeGateCheckout(caseDir);
+  const baseSha = execFileSync('git', ['-C', moved.repoDir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  writeFileSync(join(moved.repoDir, 'later.txt'), 'a later commit\n');
+  execFileSync('git', ['-C', moved.repoDir, 'add', '-A'], { stdio: 'ignore' });
+  execFileSync('git', ['-C', moved.repoDir, 'commit', '-q', '-m', 'later'], { stdio: 'ignore' });
+  const offBase = runInspect(
+    ['--evaluate-gates', '--repo-root', moved.repoDir, '--issue-json', issuesPath, '--base', baseSha],
+    { CMATE_GATE_FAKE_LOG: moved.log },
+  );
+  check(offBase.exit === 0, `an off-base checkout should still exit 0, exited ${offBase.exit}`);
+  const offBaseResult = JSON.parse(offBase.stdout);
+  check(offBaseResult.status === 'success', `an off-base checkout raises only notices, got ${offBaseResult.status}`);
+  check(
+    offBaseResult.evaluation.gates.every((gate) => gate.outcome === 'not_evaluable' && gate.reason === 'repo_root_not_base'),
+    `off-base gates ${JSON.stringify(offBaseResult.evaluation.gates.map((g) => [g.outcome, g.reason]))}`,
+  );
+  check(deepEqual(gateCallCounts(moved.log), {}), 'an off-base checkout ran a gate');
+  // The same checkout with --base naming where it actually is runs normally, so
+  // the flag is not a blanket refusal of every checkout that has moved on.
+  const onBase = runInspect(
+    ['--evaluate-gates', '--repo-root', moved.repoDir, '--issue-json', issuesPath, '--base', 'HEAD'],
+    { CMATE_GATE_FAKE_LOG: join(moved.dir, 'on-base.log') },
+  );
+  check(
+    JSON.parse(onBase.stdout).evaluation.gates.every((gate) => gate.outcome === 'already_satisfied'),
+    '--base HEAD should evaluate normally',
+  );
+
+  // ---- --repeat ------------------------------------------------------------
+  //
+  // The default is 2 and the flag moves it. A run at 3 must show three exit
+  // codes and three calls: this is the assertion a "measure once and repeat the
+  // answer" implementation cannot satisfy.
+  const thrice = makeGateCheckout(caseDir);
+  const repeated = runInspect(
+    ['--evaluate-gates', '--repo-root', thrice.repoDir, '--issue-json', issuesPath, '--repeat', '3'],
+    { CMATE_GATE_FAKE_LOG: thrice.log },
+  );
+  const repeatedResult = JSON.parse(repeated.stdout);
+  check(repeatedResult.evaluation.repeat === 3, `--repeat 3 recorded as ${repeatedResult.evaluation.repeat}`);
+  check(
+    repeatedResult.evaluation.gates[0].runs.length === 3,
+    `--repeat 3 produced ${repeatedResult.evaluation.gates[0].runs.length} run(s)`,
+  );
+  check(
+    gateCallCounts(thrice.log)['issue-280-under-100ms'] === 3,
+    `--repeat 3 called the gate ${gateCallCounts(thrice.log)['issue-280-under-100ms']} time(s)`,
+  );
+
+  // At --repeat 1 the nondeterministic outcome is unreachable by construction,
+  // and the report says so rather than reporting a verdict it could not have
+  // reached.
+  const once = makeGateCheckout(join(INSPECT_CASES_DIR, 'i21-gate-nondeterministic'));
+  const single = runInspect(
+    ['--evaluate-gates', '--repo-root', once.repoDir, '--issue-json', join(INSPECT_CASES_DIR, 'i21-gate-nondeterministic', 'issues.json'), '--repeat', '1'],
+    { CMATE_GATE_FAKE_LOG: once.log },
+  );
+  const singleResult = JSON.parse(single.stdout);
+  check(
+    singleResult.evaluation.gates[0].outcome === 'already_satisfied',
+    `at --repeat 1 the flipping gate looks satisfied, got ${singleResult.evaluation.gates[0].outcome}`,
+  );
+  check(
+    singleResult.summary_markdown.includes('--repeat 1'),
+    'at --repeat 1 the summary must say which outcome it can no longer reach',
+  );
+
+  // ---- the flags that would make one report answer two questions -----------
+  const clean = makeGateCheckout(caseDir);
+  const bad = [
+    {
+      label: 'both modes at once',
+      args: ['--check-references', '--evaluate-gates', '--repo-root', clean.repoDir, '--issue-json', issuesPath],
+    },
+    {
+      label: '--ref with --evaluate-gates',
+      args: ['--evaluate-gates', '--repo-root', clean.repoDir, '--issue-json', issuesPath, '--ref', 'HEAD'],
+    },
+    {
+      label: '--repeat with --check-references',
+      args: ['--check-references', '--repo-root', clean.repoDir, '--issue-json', issuesPath, '--repeat', '2'],
+    },
+    {
+      label: '--base with --check-references',
+      args: ['--check-references', '--repo-root', clean.repoDir, '--issue-json', issuesPath, '--base', 'HEAD'],
+    },
+    {
+      label: '--repeat 0',
+      args: ['--evaluate-gates', '--repo-root', clean.repoDir, '--issue-json', issuesPath, '--repeat', '0'],
+    },
+    {
+      label: '--repeat that is not a number',
+      args: ['--evaluate-gates', '--repo-root', clean.repoDir, '--issue-json', issuesPath, '--repeat', 'twice'],
+    },
+    {
+      label: 'a --base that does not resolve',
+      args: ['--evaluate-gates', '--repo-root', clean.repoDir, '--issue-json', issuesPath, '--base', 'no-such-rev'],
+      code: 'load_error',
+      exit: 6,
+    },
+    {
+      label: 'a --repo-root that is not a git checkout',
+      args: ['--evaluate-gates', '--repo-root', tmpdir(), '--issue-json', issuesPath],
+    },
+  ];
+  for (const scenario of bad) {
+    const run = runInspect(scenario.args, { CMATE_GATE_FAKE_LOG: clean.log });
+    check(run.exit === (scenario.exit ?? 3), `${scenario.label} should exit ${scenario.exit ?? 3}, exited ${run.exit}`);
+    const result = JSON.parse(run.stdout);
+    check(result.status === 'failure', `${scenario.label} should report failure, got ${result.status}`);
+    check(
+      result.errors.some((error) => error.code === (scenario.code ?? 'invalid_input')),
+      `${scenario.label} should fail with ${scenario.code ?? 'invalid_input'}: ${JSON.stringify(result.errors)}`,
+    );
+    check(result.evaluation === null, `${scenario.label} produced an evaluation it had no input for`);
+  }
+  check(deepEqual(gateCallCounts(clean.log), {}), 'a refused argument list ran a gate');
+}
+
+// The gate mode is the one that RUNS things, so it is the one where "nothing
+// reaches the plan" has to be measured rather than asserted. The plan goldens
+// hold the byte-level half; this holds the behavioural one — the same body, with
+// a block whose gate is already green at the base, plans exactly as it did and
+// carries no evaluation vocabulary.
+function evaluateGatesDoesNotReachPlanTest() {
+  log('  evaluate-gates does not reach the plan');
+  const caseDir = join(INSPECT_CASES_DIR, 'i20-gate-already-satisfied');
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-gates-plan-'));
+  const planned = runRunner([
+    '280',
+    '--issue-json', join(caseDir, 'issues.json'),
+    '--profile-json', NODE_FAKE_PROFILE,
+    '--allow-unverified',
+    '--runs-dir', runsDir,
+  ]);
+  if (!check(planned.exit === 0, `the same body should still plan, exited ${planned.exit}: ${planned.stdout.slice(0, 300)}`)) return;
+  const result = JSON.parse(planned.stdout);
+  check(
+    deepEqual(result.plan.issues[0].acceptance_gates.gates.map((gate) => gate.id), ['issue-280-under-100ms']),
+    'the planner should carry the declared gate unchanged',
+  );
+  const text = JSON.stringify(result.plan);
+  for (const vocabulary of ['already_satisfied', 'failing_at_base', 'nondeterministic', 'not_evaluable', 'base_sha']) {
+    check(!text.includes(vocabulary), `the plan carries the evaluation vocabulary "${vocabulary}"`);
+  }
 }
 
 // =============================================================================
@@ -6672,10 +7056,24 @@ function main() {
   const inspectIds = existsSync(INSPECT_CASES_DIR)
     ? readdirSync(INSPECT_CASES_DIR).filter((name) => existsSync(join(INSPECT_CASES_DIR, name, 'case.json'))).sort()
     : [];
-  for (const caseId of inspectIds) runInspectCase(caseId);
+  // One directory of cases, two modes. The mode is read out of `case.json`
+  // rather than out of the directory name: the runner's own contract is that a
+  // report names the mode that produced it, and a harness that decided from a
+  // path would not be checking the same thing the operator reads.
+  const gateIds = [];
+  for (const caseId of inspectIds) {
+    const spec = JSON.parse(readFileSync(join(INSPECT_CASES_DIR, caseId, 'case.json'), 'utf8'));
+    if (spec.mode === 'evaluate-gates') gateIds.push(caseId);
+    else runInspectCase(caseId);
+  }
   inspectInputTest();
   inspectRefTest();
   inspectDoesNotReachPlanTest();
+
+  log('  -- evaluate-gates cases --');
+  for (const caseId of gateIds) runEvaluateGatesCase(caseId);
+  evaluateGatesInputTest();
+  evaluateGatesDoesNotReachPlanTest();
 
   log('  -- contract parity --');
   parityTest();
@@ -6716,7 +7114,7 @@ function main() {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases + --check, ${inspectIds.length} inspect cases + input/--ref/plan isolation, run id vs profile, contract parity, launcher resolution, worktree-setup input, reverify input, auto-yes arming, unattended input + exclusivity + merge, unattended stage C (gates + merge-prs + uat)`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases + --check, ${inspectIds.length - gateIds.length} inspect cases + input/--ref/plan isolation, ${gateIds.length} evaluate-gates cases + input/plan isolation, run id vs profile, contract parity, launcher resolution, worktree-setup input, reverify input, auto-yes arming, unattended input + exclusivity + merge, unattended stage C (gates + merge-prs + uat)`);
 }
 
 main();

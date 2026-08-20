@@ -1,0 +1,28 @@
+{
+  "mode": "evaluate-gates",
+  "description": "a declared gate that already passes at the base — the condition is not a gate",
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "acceptance_gate_already_satisfied"
+    ],
+    "notices": 0,
+    "gates": [
+      {
+        "gate_id": "issue-280-under-100ms",
+        "source": "gates",
+        "outcome": "already_satisfied",
+        "reason": null,
+        "exit_codes": [
+          0,
+          0
+        ],
+        "timeout_sec": 60
+      }
+    ],
+    "calls": {
+      "issue-280-under-100ms": 2
+    }
+  }
+}
