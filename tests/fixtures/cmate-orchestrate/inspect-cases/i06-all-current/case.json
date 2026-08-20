@@ -1,0 +1,48 @@
+{
+  "description": "a body whose every claim still holds: success, zero warnings, exit 0",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "references": [
+      {
+        "path": "src/api/handler.ts",
+        "line": 9,
+        "identifier": "resolveLauncher",
+        "verdict": "ok"
+      },
+      {
+        "path": "src/api/handler.ts",
+        "line": 4,
+        "identifier": "DEFAULT_LAUNCHER",
+        "verdict": "ok"
+      },
+      {
+        "path": "src/api/handler.ts",
+        "line": 12,
+        "identifier": null,
+        "verdict": "unchecked",
+        "measured_lines": 12
+      },
+      {
+        "path": "src/api/config.ts",
+        "line": 2,
+        "identifier": "readConfig",
+        "verdict": "ok"
+      }
+    ],
+    "line_claims": [
+      {
+        "path": "src/api/handler.ts",
+        "claimed": 12,
+        "verdict": "ok"
+      },
+      {
+        "path": "src/api/config.ts",
+        "claimed": 4,
+        "verdict": "ok"
+      }
+    ],
+    "measured_is_wc": true
+  }
+}

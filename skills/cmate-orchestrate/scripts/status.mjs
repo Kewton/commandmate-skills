@@ -384,6 +384,20 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   unattended_cwd_detached: 'invocation cwd が detached HEAD である。再merge（`git merge --no-ff`）はどの branch にも残らないのに成功と報告されるため、fix worktree を1つも作らずに停止した。integration branch を checkout してから再実行する。',
   unattended_cwd_branch_mismatch: 'invocation cwd の branch が `--expect-branch` と違う。再merge はその branch に入る（base branch なら review を経ずに入り、push 済みなら不可逆）ため、fix worktree を1つも作らずに停止した。integration branch を checkout してから再実行する。',
 
+  // ---- inspect --check-references（#217）------------------------------------
+  //
+  // These never appear in a run directory: `inspect.mjs` has no run artifacts to
+  // write and this runner reads nothing else. They are here anyway, because the
+  // fallback for an unknown code is UNKNOWN_CODE_HINT — and that would make "a
+  // code nobody has classified yet" and "a code with no view to show it in" the
+  // same thing. An operator who pastes a code into `hintFor` gets the same
+  // sentence codes-and-recovery.md §6.2 gives them.
+  reference_file_missing: '本文が引く file が対象 tree に無い。path の綴りか、その file を動かした先行 Issue を確認して本文を直し、re-plan する。',
+  reference_line_out_of_range: '本文の行番号が実測の行数を超えている。先行 Issue がその file を縮めている。実測を正として本文の行番号を取り直す。',
+  reference_identifier_moved: '本文が指す行に識別子が無く、別の行にある。`found_at` が実測行なので、本文の `:N` をそこへ直す。',
+  reference_line_count_stale: '本文の「N 行」が実測と違う。受入条件が「着手前と同じ N」の形になっていないかを確かめる（なっていれば、直さない限り先行 Issue の追加を消すのが正解になる）。',
+  reference_claim_inconsistent: '本文の中で主張が食い違っている（同一 path に2つの行数主張、または同一 path:line に2つの識別子）。どちらが意図かは runner には決められないので、実測を正として本文を1つに畳む。',
+
   // ---- shared --------------------------------------------------------------
   no_eligible_issues: 'dispatch report に completed かつ verification pass の Issue が無い。まず dispatch を通す。',
   completion_check_failed: 'completion check のどれかが passed でない。report の completion_check を読む。',

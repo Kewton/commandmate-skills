@@ -22,8 +22,9 @@
 import { parseArgs } from 'node:util';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   REDACTIONS,
@@ -3686,4 +3687,62 @@ function main() {
   }
 }
 
-main();
+// =============================================================================
+// The planner as a module (Issue #217)
+// =============================================================================
+//
+// scripts/inspect.mjs checks the `path:line` and "N 行" claims an issue body
+// makes against a real checkout, and it has to read that body WITH THE PLANNER'S
+// OWN EYES: a citation the planner never turns into a candidate is a citation
+// the plan never carried, and reporting it would be reporting about a different
+// document than the one that was planned. So the extraction is imported from
+// here rather than copied — the third copy is the one nobody would keep in step,
+// and the two that exist (this file and cmate-issue-authoring's mirror) already
+// need a conformance test to stay identical.
+//
+// Nothing above MOVED. The mirrored region
+// (`firstNonEmptyLine` … `isSafeRepoPath`, plus `classifyFileCandidates`) is
+// byte-unchanged and stays where tests/fixtures/cmate-issue-authoring/
+// mirror-conformance.mjs reads it from, which is also why these are re-exported
+// in a block instead of by prefixing each declaration with `export`: that test
+// matches `^const NAME = ...;` and a prefixed constant would read as a constant
+// that had disappeared.
+//
+// The pattern SOURCES are exported alongside the function because inspect.mjs
+// reports which citations were DROPPED before becoming candidates (a `..` escape,
+// an absolute path, a URL host), and the only honest way to name those is to run
+// the same three patterns and subtract what the extraction kept.
+export {
+  extractFileCandidates,
+  classifyFileCandidates,
+  loadIssuesFromFixture,
+  fetchIssueWithGh,
+  isSafeRepoPath,
+  FILE_EXT,
+  PATH_START,
+  CANDIDATE_BACKTICK,
+  CANDIDATE_KNOWN_ROOT,
+  CANDIDATE_WITH_EXT,
+};
+
+// The planner PLANS when it is the program, and only then. An `import` of this
+// module must not write a run directory, so the entry point is guarded rather
+// than unconditional.
+//
+// Compared through realpathSync on both sides because Node resolves the main
+// entry through symlinks (`process.argv[1]` may be the link, `import.meta.url`
+// the target) and a mismatch here would silently turn `orchestrate.mjs` into a
+// program that plans nothing. It cannot be silent for long — every plan fixture
+// would fail on the empty stdout — but comparing real paths is what keeps it
+// from happening at all.
+function invokedAsProgram() {
+  const entry = process.argv[1];
+  if (entry === undefined) return false;
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (invokedAsProgram()) main();

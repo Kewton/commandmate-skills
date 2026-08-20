@@ -1,0 +1,16 @@
+{
+  "description": "the last line of a file that does not end in a newline is still a line",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "line_claims": [
+      {
+        "path": "src/api/short.ts",
+        "claimed": 3,
+        "verdict": "ok"
+      }
+    ],
+    "measured_is_wc": true
+  }
+}

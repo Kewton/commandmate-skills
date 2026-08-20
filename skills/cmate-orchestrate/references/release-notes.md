@@ -1641,6 +1641,78 @@ report から丸ごと消える。`conditions` は「人が閉じるべき残件
 
 ---
 
+## inspect（`scripts/inspect.mjs`）
+
+### #217 — 本文が主張する事実が古いことを、dispatch までの経路で誰も検知しなかった
+
+planner の入力は Issue の number / title / body / labels だけで、**対象リポジトリを開かない**
+（`orchestrate.mjs` の `loadIssues`、profile-contract 第9.1節）。これは設計上の不変条件であり、
+本件でも変えていない。問題はその不変条件が**残す穴**のほうだった —— 本文が主張する事実
+（`path:line`・「N 行」）が古くなっていることを、**dispatch まで誰も機械的に検知しない**。
+`orchestrate.mjs` / `lib.mjs` に行番号や行数を突き合わせる処理は無く（根拠節の `path:line` は
+context 扱いになるだけ）、下流の `cmate-worker-development` 規律4「行番号が食い違ったら実測を
+正とする」と `cmate-issue-refinement` Step 4 は**どちらも LLM 手順**で、dispatch 前に走る script は
+1つも無かった。
+
+実測（CommandMate #1831 / Kewton/BorderFreeKidsMap）では、epic 配下 16 Issue を 1 日で連続
+dispatch して **16 件中 11 件**で本文が実物とずれていた。前日に起票し、その間に先行 Issue が
+同じ file を動かしたためである。`repository.ts` は本文 1,070 行に対し実測 1,129 行で根拠の
+行番号 5 点すべてがずれ（`:979` → `:1038` 等）、`AreaMap.tsx` は 1,411 対 1,668、
+`validators.ts` の `:392` / `:488` は実測 `:443` / `:513`。いちばん高くついたのは
+**e2e の test 件数**で、受入条件が「着手前と同じ 130」と書かれていたのに実測は 136 —— 直さない限り
+**「先行 Issue が足した 6 件を消す」が受入条件の正しい読み**になる。回避策は人間が 16 件ぶん
+手で照合することだった。
+
+→ plan とは**別の read-only 点検 runner** `scripts/inspect.mjs --check-references` を足した。
+`profile-init.mjs --check`（#197）と同じ規律である ——
+
+- **何も書かない。** plan.json には 1 byte も書かず、`--out` を名指したときだけそこに書く
+  （既存なら `out_exists`）。stdout と `--out` は**同じ byte**である。
+- **裁定しない。** 所見は5つとも warning で（`reference_file_missing` /
+  `reference_line_out_of_range` / `reference_identifier_moved` / `reference_line_count_stale` /
+  `reference_claim_inconsistent`）、1件でも出れば `status: partial`、**exit は 0** である。
+  本文が古いことは「dispatch してはいけない」ことではない。
+- **読めない入力は点検しない**（無視ではなく拒否）。`--repo-root` が無い / Issue が取れない /
+  `--ref` が解決しないは `load_error`（exit 6）、引数不正は `invalid_input`（exit 3）で止まり、
+  envelope の `inspection` は `null` になる。**「見て何も無かった」と「見られなかった」を
+  同じ形にしない。**
+
+**候補抽出を2箇所に持たない。** 抽出（`extractFileCandidates` と3本の pattern）は planner の
+ものを `orchestrate.mjs` から **import** する。planner が候補にしない citation は plan が
+運んでいない citation なので、それを点検すると「計画された文書とは別の文書についての報告」に
+なる。**移動はしていない** —— `firstNonEmptyLine` から `isSafeRepoPath` までのミラー領域は
+byte 単位で不変で、`cmate-issue-authoring` の `mirror-conformance.mjs` が読む位置も
+`^const NAME = ...;` の形も変わらない。追加したのは file 末尾の `export { … }` ブロックと、
+`main()` を「このファイルが**プログラムであるとき**だけ実行する」ガードだけである
+（import が run directory を書いてはならないため）。**plan の golden は 1 byte も変わらない。**
+
+**`profile-init.mjs --check` に相乗りさせなかった理由**は、`--check` が
+「**subprocess も network も使わない**」を性質として掲げている（第9.7節）ことである。
+本 runner は `--ref` 指定時に `git show` を呼ぶので、相乗りは その性質を黙って変える。
+後続の「宣言済み acceptance-gates の base 先行評価」（コマンド実行を伴う）も同じ runner に載る。
+
+**境界を明示した。** 本文の**意味的な**矛盾（「決定事項 対 受入条件」など）は対象外で、
+`cmate-issue-refinement` Step 4 の仕事である。報告する食い違いは**機械的な部分集合**だけ ——
+同一 path に2つの行数主張、同一 `path:line` に2つの識別子。表記ゆれ（`web/src/lib/filter.ts` と
+`src/lib/filter.ts`）の検出も既存の `ambiguous_file_candidate` に任せ、そう判定された候補は
+**点検せず件数だけ名乗る**（どちらが対象かは著者しか決められない）。
+
+実装で決めたことが2つある。**「N 行」の数え方を固定した** —— 末尾改行のある file は `wc -l` と
+同じで、**末尾改行の無い最終行も1行として数える**（`wc -l` より1多い）。数え方が読み手ごとに
+違う警告は、誰も対処できない警告である。**warning にしない verdict を2つ置いた** ——
+照合できる識別子が同じ行に無い citation（`unchecked`）と、識別子が file 内に1度も現れない
+citation（`identifier_absent`）。後者を「移動した」と呼ぶのは、その語がこの file の識別子だという
+**前提そのものが測れていない**まま下す裁定である。
+
+**exit code は本 Issue 本文の提案（`invalid_input` / exit 2）ではなく、package の既存語彙に
+合わせた。** 本 package では `invalid_input` は 6 runner すべてで exit **3** であり、
+**exit 2 は `not_implemented`** が既に取っている（codes-and-recovery 第1節）。SKILL.md 第4節は
+準備 runner にも同じ規約（`invalid_input` 3 / `out_exists` 4 / `load_error` 6）を課しており、
+`--repo-root` 不在を `load_error` / 6 とするのは `profile-init` の既存 fixture と同じである。
+**受入条件が測っている性質（読めない入力は拒否し、点検結果を出さない）は fixture で固定してある。**
+
+---
+
 ## 設計（ADR のみ。実装は後続）
 
 ### #103 — 「ワーカーが Issue を受け取ってから何をするか」を持つ Skill が無かった

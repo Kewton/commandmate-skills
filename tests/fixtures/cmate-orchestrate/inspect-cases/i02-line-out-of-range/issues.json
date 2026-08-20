@@ -1,0 +1,8 @@
+[
+  {
+    "number": 231,
+    "title": "fixture issue",
+    "body": "handler を読む。\n\n## 根拠\n- `src/api/handler.ts:400` — `handle` の分岐\n- `src/api/handler.ts:10-40` — 末尾\n- `src/api/handler.ts:13` — 実測より1行だけ後ろ",
+    "labels": []
+  }
+]

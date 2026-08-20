@@ -1,0 +1,23 @@
+{
+  "description": "a path:line whose file is not in the tree at all",
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "reference_file_missing"
+    ],
+    "references": [
+      {
+        "path": "src/api/handler.ts",
+        "line": 6,
+        "verdict": "ok"
+      },
+      {
+        "path": "src/api/legacy.ts",
+        "line": 12,
+        "verdict": "file_missing",
+        "measured_lines": null
+      }
+    ]
+  }
+}

@@ -25,6 +25,7 @@ const MERGE_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', '
 const UAT_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'uat.mjs');
 const STATUS_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'status.mjs');
 const PROFILE_INIT_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'profile-init.mjs');
+const INSPECT_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'inspect.mjs');
 const SCHEMA_DIR = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'schemas');
 const CASES_DIR = join(HERE, 'cases');
 const DISPATCH_CASES_DIR = join(HERE, 'dispatch-cases');
@@ -33,6 +34,7 @@ const MERGE_CASES_DIR = join(HERE, 'merge-cases');
 const UAT_CASES_DIR = join(HERE, 'uat-cases');
 const STATUS_CASES_DIR = join(HERE, 'status-cases');
 const PROFILE_INIT_CASES_DIR = join(HERE, 'profile-init-cases');
+const INSPECT_CASES_DIR = join(HERE, 'inspect-cases');
 const PROFILES_DIR = join(HERE, 'profiles');
 const FAKE_CLI = join(HERE, 'fake-cli.mjs');
 // The dispatch/merge/uat runners execute the profile baseline INSIDE each
@@ -5179,6 +5181,414 @@ function profileInitCheckTest() {
 }
 
 // =============================================================================
+// inspect cases (Issue #217)
+// =============================================================================
+//
+// The planner reads an issue body and never opens the repository that body is
+// about. Nothing downstream checked whether the body's `path:line` citations and
+// "N 行" claims were still TRUE: measured in CommandMate#1831, 11 of 16 bodies
+// dispatched in one day disagreed with the tree, and one of the 11 made "delete
+// the six tests an earlier issue added" the literal reading of an acceptance
+// criterion.
+//
+// `inspect.mjs --check-references` is the read-only runner that says so. What is
+// asserted here is what makes it worth having rather than merely present:
+//
+//   the findings      each of the five codes fires on a body built to earn it,
+//                     and `found_at` / `claimed` / `measured` are compared
+//                     against the fixture's OWN bytes — read here, independently
+//                     of the runner — so a case cannot pass by agreeing with
+//                     itself
+//   the silence       a body whose every claim still holds is `success` with
+//                     zero warnings, and the two verdicts that are NOT findings
+//                     (nothing to check against; the identifier is nowhere in
+//                     the file) stay out of the warning list
+//   the refusals      input it cannot read is refused and NOTHING is inspected —
+//                     `inspection` is null, not an empty report
+//   the discipline    exit is 0 whatever it finds, the tree is byte-unchanged
+//                     afterwards, and two runs produce the same bytes
+
+function runInspect(args) {
+  try {
+    const stdout = execFileSync('node', [INSPECT_RUNNER, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: baseEnv(),
+    });
+    return { exit: 0, stdout };
+  } catch (error) {
+    return { exit: error.status ?? 1, stdout: error.stdout ? error.stdout.toString() : '' };
+  }
+}
+
+// Every file under `dir`, path and bytes. The read-only claim is measured, not
+// believed: this is taken before and after each case and must not change.
+function treeDigest(dir) {
+  const parts = [];
+  const walk = (current, prefix) => {
+    for (const name of readdirSync(current).sort()) {
+      const full = join(current, name);
+      if (statSync(full).isDirectory()) walk(full, `${prefix}${name}/`);
+      else parts.push(`${prefix}${name} ${readFileSync(full, 'utf8')}`);
+    }
+  };
+  walk(dir, '');
+  return parts.join('');
+}
+
+// The harness's own reading of "how many lines does this file have", written
+// from the rule the runner documents (`wc -l`, plus the final line when the file
+// does not end in a newline) rather than imported from it.
+function addressableLines(text) {
+  if (text === '') return 0;
+  const newlines = (text.match(/\n/g) ?? []).length;
+  return text.endsWith('\n') ? newlines : newlines + 1;
+}
+
+function firstLineContaining(text, needle) {
+  const at = text.split('\n').findIndex((line) => line.includes(needle));
+  return at === -1 ? null : at + 1;
+}
+
+function runInspectCase(caseId) {
+  const caseDir = join(INSPECT_CASES_DIR, caseId);
+  const spec = JSON.parse(readFileSync(join(caseDir, 'case.json'), 'utf8'));
+  const repoDir = join(caseDir, 'repo');
+  const issuesPath = join(caseDir, 'issues.json');
+  log(`  ${caseId}: ${spec.description}`);
+
+  const before = treeDigest(repoDir);
+  const args = ['--check-references', '--repo-root', repoDir, '--issue-json', issuesPath, ...(spec.args ?? [])];
+  const run = runInspect(args);
+  const expect = spec.expect ?? {};
+  if (!check(run.exit === expect.exit, `exit ${run.exit} != ${expect.exit}: ${run.stdout.slice(0, 400)}`)) return;
+
+  let result;
+  try {
+    result = JSON.parse(run.stdout);
+  } catch {
+    check(false, 'the envelope on stdout is not JSON');
+    return;
+  }
+
+  check(result.mode === 'check-references', `mode ${result.mode} != check-references`);
+  check(result.status === expect.status, `status ${result.status} != ${expect.status}`);
+  check(result.errors.length === 0, `a readable input must raise no error: ${JSON.stringify(result.errors)}`);
+  check(result.completion_check.passed === true, 'the inspection completion check should pass');
+  check(
+    deepEqual(result.warnings.map((warning) => warning.code), expect.warning_codes ?? []),
+    `warning codes ${JSON.stringify(result.warnings.map((w) => w.code))} != ${JSON.stringify(expect.warning_codes ?? [])}`,
+  );
+  // The whole point of the runner: a finding is a WARNING. Nothing it can find
+  // changes the exit code, and nothing it finds is an error.
+  check(run.exit === 0, `a finding must not change the exit code, exited ${run.exit}`);
+
+  const issue = result.inspection.issues[0];
+  if (!check(issue !== undefined, 'the report names no issue')) return;
+
+  if (expect.references !== undefined) {
+    check(
+      issue.references.length === expect.references.length,
+      `${issue.references.length} references reported, expected ${expect.references.length}: ${JSON.stringify(issue.references)}`,
+    );
+    for (const [index, wanted] of expect.references.entries()) {
+      const actual = issue.references[index] ?? {};
+      for (const [field, value] of Object.entries(wanted)) {
+        check(
+          deepEqual(actual[field], value),
+          `reference[${index}].${field} is ${JSON.stringify(actual[field])}, expected ${JSON.stringify(value)}`,
+        );
+      }
+    }
+  }
+  if (expect.line_claims !== undefined) {
+    check(
+      issue.line_claims.length === expect.line_claims.length,
+      `${issue.line_claims.length} line claims reported, expected ${expect.line_claims.length}: ${JSON.stringify(issue.line_claims)}`,
+    );
+    for (const [index, wanted] of expect.line_claims.entries()) {
+      const actual = issue.line_claims[index] ?? {};
+      for (const [field, value] of Object.entries(wanted)) {
+        check(
+          deepEqual(actual[field], value),
+          `line_claims[${index}].${field} is ${JSON.stringify(actual[field])}, expected ${JSON.stringify(value)}`,
+        );
+      }
+    }
+  }
+  if (expect.ambiguous !== undefined) {
+    check(
+      deepEqual(issue.ambiguous, expect.ambiguous),
+      `ambiguous ${JSON.stringify(issue.ambiguous)} != ${JSON.stringify(expect.ambiguous)}`,
+    );
+  }
+  for (const path of expect.inspected_excludes ?? []) {
+    check(
+      !issue.references.some((reference) => reference.path === path)
+        && !issue.line_claims.some((claim) => claim.path === path),
+      `${path} is a spelling the runner may not choose between, yet it was inspected`,
+    );
+  }
+  if (expect.dropped !== undefined) {
+    check(
+      deepEqual(issue.dropped, expect.dropped),
+      `dropped ${JSON.stringify(issue.dropped)} != ${JSON.stringify(expect.dropped)}`,
+    );
+  }
+  for (const wanted of expect.warning_fields ?? []) {
+    const warning = result.warnings.find((item) => item.code === wanted.code);
+    if (!check(warning !== undefined, `no warning with code ${wanted.code}`)) continue;
+    for (const [field, value] of Object.entries(wanted)) {
+      if (field === 'code') continue;
+      check(
+        deepEqual(warning[field], value),
+        `warning ${wanted.code}.${field} is ${JSON.stringify(warning[field])}, expected ${JSON.stringify(value)}`,
+      );
+    }
+  }
+
+  // ---- the numbers are the fixture's, not the runner's ---------------------
+  //
+  // `found_at` and `measured` are re-derived HERE from the bytes on disk. A case
+  // that only compared the runner against itself would keep passing after the
+  // measurement broke, which is the failure this whole runner exists to stop.
+  for (const reference of issue.references) {
+    if (reference.verdict !== 'identifier_moved') continue;
+    const text = readFileSync(join(repoDir, reference.path), 'utf8');
+    check(
+      reference.found_at === firstLineContaining(text, reference.identifier),
+      `found_at ${reference.found_at} for \`${reference.identifier}\` is not the line it is really on `
+        + `(${firstLineContaining(text, reference.identifier)})`,
+    );
+  }
+  if (expect.measured_is_wc) {
+    for (const claim of issue.line_claims) {
+      if (claim.measured === null) continue;
+      const text = readFileSync(join(repoDir, claim.path), 'utf8');
+      check(
+        claim.measured === addressableLines(text),
+        `measured ${claim.measured} for ${claim.path} != ${addressableLines(text)} lines on disk`,
+      );
+    }
+  }
+
+  // ---- read-only, and the same bytes twice ---------------------------------
+  check(treeDigest(repoDir) === before, 'the inspection changed the tree it inspected');
+  const again = runInspect(args);
+  check(again.stdout === run.stdout, 'two inspections of the same body and tree produced different output');
+}
+
+// Input this runner cannot read is REFUSED, and the refusal carries no
+// inspection. "We looked and found nothing" and "we could not look" must not
+// come back in the same envelope — that is the confusion the whole feature
+// exists to remove, so it is not allowed to reappear in its own error path.
+function inspectInputTest() {
+  log('  inspect input handling');
+  const caseDir = join(INSPECT_CASES_DIR, 'i01-file-missing');
+  const repoDir = join(caseDir, 'repo');
+  const issuesPath = join(caseDir, 'issues.json');
+  const dir = mkdtempSync(join(tmpdir(), 'cmate-inspect-input-'));
+
+  const notAList = join(dir, 'not-a-list.json');
+  writeFileSync(notAList, '{"issue": 1}\n');
+  const badEntry = join(dir, 'bad-entry.json');
+  writeFileSync(badEntry, '[{"title": "no number"}]\n');
+  const notJson = join(dir, 'not-json.json');
+  writeFileSync(notJson, 'this is not JSON\n');
+
+  const bad = [
+    {
+      label: 'a --repo-root that is not there',
+      args: ['--check-references', '--repo-root', join(dir, 'does-not-exist'), '--issue-json', issuesPath],
+      code: 'load_error',
+      exit: 6,
+    },
+    {
+      label: 'an --issue-json that is not a fixture',
+      args: ['--check-references', '--repo-root', repoDir, '--issue-json', notAList],
+      code: 'load_error',
+      exit: 6,
+    },
+    {
+      label: 'an --issue-json entry with no number',
+      args: ['--check-references', '--repo-root', repoDir, '--issue-json', badEntry],
+      code: 'load_error',
+      exit: 6,
+    },
+    {
+      label: 'an --issue-json that is not JSON',
+      args: ['--check-references', '--repo-root', repoDir, '--issue-json', notJson],
+      code: 'load_error',
+      exit: 6,
+    },
+    {
+      label: 'an --issue-json that does not hold the requested issue',
+      args: ['--check-references', '--repo-root', repoDir, '--issue-json', issuesPath, '999'],
+      code: 'load_error',
+      exit: 6,
+    },
+    {
+      label: 'no mode',
+      args: ['--repo-root', repoDir, '--issue-json', issuesPath],
+      code: 'invalid_input',
+      exit: 3,
+    },
+    {
+      label: 'no issue and no fixture',
+      args: ['--check-references', '--repo-root', repoDir],
+      code: 'invalid_input',
+      exit: 3,
+    },
+    {
+      label: 'an issue number that is not a number',
+      args: ['--check-references', '--repo-root', repoDir, '--issue-json', issuesPath, '231abc'],
+      code: 'invalid_input',
+      exit: 3,
+    },
+    {
+      label: 'a flag this runner does not have',
+      args: ['--check-references', '--repo-root', repoDir, '--issue-json', issuesPath, '--approve'],
+      code: 'invalid_input',
+      exit: 3,
+    },
+  ];
+  for (const scenario of bad) {
+    const run = runInspect(scenario.args);
+    check(run.exit === scenario.exit, `${scenario.label} should exit ${scenario.exit}, exited ${run.exit}`);
+    let result;
+    try {
+      result = JSON.parse(run.stdout);
+    } catch {
+      check(false, `${scenario.label}: the failure envelope on stdout is not JSON`);
+      continue;
+    }
+    check(result.status === 'failure', `${scenario.label} should report status failure, got ${result.status}`);
+    check(
+      result.errors.some((error) => error.code === scenario.code),
+      `${scenario.label} should fail with ${scenario.code}, got ${JSON.stringify(result.errors)}`,
+    );
+    check(result.inspection === null, `${scenario.label} produced an inspection it had no input for`);
+    check(result.warnings.length === 0, `${scenario.label} reported findings it never measured`);
+  }
+
+  // --out writes the report and refuses to clobber, the same way profile-init's
+  // does. The bytes written and the bytes on stdout are the same bytes.
+  const outPath = join(dir, 'report.json');
+  const written = runInspect(['--check-references', '--repo-root', repoDir, '--issue-json', issuesPath, '--out', outPath]);
+  check(written.exit === 0, `--out should exit 0, exited ${written.exit}`);
+  check(existsSync(outPath) && readFileSync(outPath, 'utf8') === written.stdout, '--out and stdout disagree');
+  check(
+    JSON.parse(written.stdout).artifacts.length === 1,
+    'the report does not name the file it wrote',
+  );
+  const clobber = runInspect(['--check-references', '--repo-root', repoDir, '--issue-json', issuesPath, '--out', outPath]);
+  check(clobber.exit === 4, `a second --out to the same path should exit 4, exited ${clobber.exit}`);
+  check(
+    JSON.parse(clobber.stdout).errors.some((error) => error.code === 'out_exists'),
+    '--out over an existing file should fail with out_exists',
+  );
+  check(JSON.parse(clobber.stdout).inspection === null, 'a refused --out still produced an inspection');
+}
+
+// `--ref` is the reason this is a new runner rather than a mode of
+// `profile-init.mjs --check`: it shells out to git, and `--check` holds "no
+// subprocess" as a property. Measured against a tree that really has moved —
+// the committed file and the working copy differ — so reading the wrong one
+// cannot pass.
+function inspectRefTest() {
+  log('  inspect --ref');
+  const dir = mkdtempSync(join(tmpdir(), 'cmate-inspect-ref-'));
+  const repoDir = join(dir, 'repo');
+  mkdirSync(join(repoDir, 'src'), { recursive: true });
+  const target = join(repoDir, 'src', 'grown.ts');
+  const committed = Array.from({ length: 12 }, (unused, index) => `const line${index + 1} = ${index + 1};`).join('\n');
+  writeFileSync(target, `${committed}\n`);
+  execFileSync('git', ['init', '-q', repoDir], { stdio: 'ignore' });
+  const git = (...args) => execFileSync('git', ['-C', repoDir, ...args], { stdio: 'ignore' });
+  git('config', 'user.email', 'fixture@example.invalid');
+  git('config', 'user.name', 'fixture');
+  git('add', 'src/grown.ts');
+  git('commit', '-q', '-m', 'fixture');
+  const head = execFileSync('git', ['-C', repoDir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  // The working tree grows by eight lines AFTER the commit, exactly the way the
+  // issues in #1831 went stale.
+  writeFileSync(target, `${committed}\n${Array.from({ length: 8 }, (unused, index) => `const extra${index} = 0;`).join('\n')}\n`);
+
+  const issuesPath = join(dir, 'issues.json');
+  writeFileSync(issuesPath, `${JSON.stringify([{
+    number: 231,
+    title: 'grown',
+    body: '状況を読む。\n\n## 現状\n- `src/grown.ts`（12 行）\n',
+    labels: [],
+  }], null, 2)}\n`);
+
+  const atRef = runInspect(['--check-references', '--repo-root', repoDir, '--ref', head, '--issue-json', issuesPath]);
+  check(atRef.exit === 0, `--ref should exit 0, exited ${atRef.exit}: ${atRef.stdout.slice(0, 300)}`);
+  const atRefResult = JSON.parse(atRef.stdout);
+  check(atRefResult.status === 'success', `at the commit the claim still holds, got ${atRefResult.status}`);
+  check(atRefResult.inspection.source === 'ref', `source ${atRefResult.inspection.source} != ref`);
+  check(atRefResult.inspection.resolved_ref === head, 'the report does not name the commit it read');
+  check(
+    atRefResult.inspection.issues[0].line_claims[0].measured === 12,
+    `at the commit the file is 12 lines, reported ${atRefResult.inspection.issues[0].line_claims[0].measured}`,
+  );
+
+  const atWorktree = runInspect(['--check-references', '--repo-root', repoDir, '--issue-json', issuesPath]);
+  check(atWorktree.exit === 0, `the working tree run should exit 0, exited ${atWorktree.exit}`);
+  const worktreeResult = JSON.parse(atWorktree.stdout);
+  check(worktreeResult.status === 'partial', `in the working tree the claim is stale, got ${worktreeResult.status}`);
+  check(
+    deepEqual(worktreeResult.warnings.map((warning) => warning.code), ['reference_line_count_stale']),
+    `warning codes ${JSON.stringify(worktreeResult.warnings.map((w) => w.code))}`,
+  );
+  check(worktreeResult.warnings[0].measured === 20, `measured ${worktreeResult.warnings[0].measured} != 20`);
+  check(worktreeResult.warnings[0].claimed === 12, `claimed ${worktreeResult.warnings[0].claimed} != 12`);
+  check(worktreeResult.inspection.source === 'worktree', 'the working-tree run should say so');
+  check(worktreeResult.inspection.head === head, 'the working-tree run should record the commit it was sitting on');
+
+  // A revision git will not resolve is refused rather than silently read from
+  // the working tree, which would report the wrong tree's numbers under the
+  // operator's ref.
+  const badRef = runInspect(['--check-references', '--repo-root', repoDir, '--ref', 'no-such-ref', '--issue-json', issuesPath]);
+  check(badRef.exit === 6, `an unresolvable --ref should exit 6, exited ${badRef.exit}`);
+  const badRefResult = JSON.parse(badRef.stdout);
+  check(
+    badRefResult.errors.some((error) => error.code === 'load_error'),
+    `an unresolvable --ref should fail with load_error: ${JSON.stringify(badRefResult.errors)}`,
+  );
+  check(badRefResult.inspection === null, 'an unresolvable --ref still produced an inspection');
+}
+
+// The planner is not touched by any of this, and this is where that is measured
+// from the other side. The plan goldens hold the byte-level version of the claim
+// (a planner change would move them); this holds the behavioural one — a body
+// full of stale citations plans exactly as it did, and no inspection vocabulary
+// reaches the plan.
+function inspectDoesNotReachPlanTest() {
+  log('  inspect does not reach the plan');
+  const caseDir = join(INSPECT_CASES_DIR, 'i04-line-count-stale');
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-inspect-plan-'));
+  const planned = runRunner([
+    '231',
+    '--issue-json', join(caseDir, 'issues.json'),
+    '--profile-json', NODE_FAKE_PROFILE,
+    '--allow-unverified',
+    '--runs-dir', runsDir,
+  ]);
+  if (!check(planned.exit === 0, `the same body should still plan, exited ${planned.exit}: ${planned.stdout.slice(0, 300)}`)) return;
+  const result = JSON.parse(planned.stdout);
+  const codes = (result.plan.warnings ?? []).map((warning) => warning.code);
+  check(
+    !codes.some((code) => code.startsWith('reference_')),
+    `the planner emitted an inspection code: ${JSON.stringify(codes)}`,
+  );
+  check(
+    !JSON.stringify(result.plan).includes('inspect'),
+    'the plan mentions the inspection runner; the plan is a pure function of the issue body and the profile',
+  );
+}
+
+// =============================================================================
 // Self-test of the validator: it must reject a broken plan, not wave it through.
 // =============================================================================
 
@@ -6142,6 +6552,15 @@ function main() {
   profileInitInputTest();
   profileInitCheckTest();
 
+  log('  -- inspect cases --');
+  const inspectIds = existsSync(INSPECT_CASES_DIR)
+    ? readdirSync(INSPECT_CASES_DIR).filter((name) => existsSync(join(INSPECT_CASES_DIR, name, 'case.json'))).sort()
+    : [];
+  for (const caseId of inspectIds) runInspectCase(caseId);
+  inspectInputTest();
+  inspectRefTest();
+  inspectDoesNotReachPlanTest();
+
   log('  -- contract parity --');
   parityTest();
 
@@ -6181,7 +6600,7 @@ function main() {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases + --check, run id vs profile, contract parity, launcher resolution, worktree-setup input, reverify input, auto-yes arming, unattended input + exclusivity + merge, unattended stage C (gates + merge-prs + uat)`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases + --check, ${inspectIds.length} inspect cases + input/--ref/plan isolation, run id vs profile, contract parity, launcher resolution, worktree-setup input, reverify input, auto-yes arming, unattended input + exclusivity + merge, unattended stage C (gates + merge-prs + uat)`);
 }
 
 main();

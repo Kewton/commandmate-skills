@@ -1,0 +1,33 @@
+{
+  "description": "the body claims two different line counts for the same path",
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "reference_claim_inconsistent"
+    ],
+    "line_claims": [
+      {
+        "path": "src/api/handler.ts",
+        "claimed": 20,
+        "verdict": "inconsistent"
+      },
+      {
+        "path": "src/api/handler.ts",
+        "claimed": 30,
+        "verdict": "inconsistent"
+      }
+    ],
+    "warning_fields": [
+      {
+        "code": "reference_claim_inconsistent",
+        "claimed": [
+          20,
+          30
+        ],
+        "measured": 12
+      }
+    ],
+    "measured_is_wc": true
+  }
+}

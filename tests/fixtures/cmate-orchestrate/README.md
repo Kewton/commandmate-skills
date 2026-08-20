@@ -41,6 +41,12 @@ status-cases/<id>/run/          checked-in の run directory。実 runner の出
 profile-init-cases/<id>/repo/   profile-init に読ませる小さな fixture リポジトリ
 profile-init-cases/<id>/case.json           provenance source・todo/warning code の期待値
 profile-init-cases/<id>/expected-profile.json  golden な draft profile。byte 一致で照合
+inspect-cases/<id>/repo/        inspect.mjs --check-references に突き合わせさせる小さな fixture リポジトリ
+inspect-cases/<id>/issues.json  点検対象の Issue fixture（planner に渡すものと同形）
+inspect-cases/<id>/case.json    warning code 列・references[]/line_claims[] の期待値・
+                                ambiguous/dropped の期待値。`found_at` と `measured` は
+                                **harness が repo/ の bytes から独立に計算して**照合するので、
+                                case が「runner 自身と一致しているだけ」で緑になることはない
 fake-cli.mjs                    commandmate/git/gh を模した stub（failure injection）
 profiles/                       独自 profile の例（unverified）
 run_tests.mjs                   fixture test harness（Node stdlib のみ）
@@ -458,6 +464,54 @@ checked-in artifact が古い形のまま緑になり続けることを防ぐた
   一致する**こと。ローダを2つ持ったら最初に落ちるのがこの 2 本である
 - **`--check` は mode である** —— `--out` / `--emit` / `--repo` / `--id` と併用すると
   `invalid_input`（exit 3）で、`--out` の file は作られないこと
+
+## inspect case 一覧（[#217](https://github.com/Kewton/commandmate-skills/issues/217)）
+
+`inspect-cases/<id>/repo/` は、`inspect.mjs --check-references` に突き合わせさせる**小さな
+本物のリポジトリ**である。`issues.json` はその tree について何かを主張する Issue 本文で、
+harness は「主張と実物のずれ」が期待どおりに出るか（**出ないか**）を見る。
+
+**`found_at` と `measured` は harness が `repo/` の bytes から独立に計算して照合する。**
+case.json に期待値として書き写すのではなく、`readFileSync` して数え直す —— そうしないと
+case は「runner が自分自身と一致していること」しか測らず、測定が壊れたあとも緑のままになる。
+それは本 runner が消しに来た失敗そのものである。
+
+各 case について確かめるのは次のとおりである。
+
+- warning code 列が期待と**完全一致**すること、`errors` が空で `completion_check.passed` が true であること
+- **何を見つけても exit は 0** であること（所見は warning であって裁定ではない）
+- `references[]` / `line_claims[]` が期待どおりの `verdict` を持つこと
+- 走らせたあとの `repo/` が **byte 一致のまま**であること（read-only を信じるのではなく測る）
+- 2 回実行して stdout が **byte 一致**すること
+
+| case | 何を見るための case か |
+|---|---|
+| `i01-file-missing` | 本文が引く `path:line` の file が tree に無い。同じ本文の**実在する**引用は `ok` のまま残る（片方のずれが全体を汚染しない） |
+| `i02-line-out-of-range` | 行番号が実測行数を超える。`:N` と `:N-M`（範囲の終端が超える形）の両方 |
+| `i03-identifier-moved` | 同じ行の backtick 識別子が `:N` に無い。**`found_at` が実測行と一致する**（harness が file を数え直して照合する） |
+| `i04-line-count-stale` | `<path>（N 行）` の N が実測とずれる。`claimed` / `measured` が warning に載る |
+| `i05-claim-inconsistent` | 同一 path に 2 つの行数主張が併存する。**stale は出さない** —— どちらが著者の意図かは runner には決められないので、`reference_claim_inconsistent` 1 本に畳んで実測を detail に載せる |
+| `i06-all-current` | 本文の主張がすべて実物と一致する。**`status: success`・warning 0 件・exit 0**（この runner が「何も言わない」状態） |
+| `i07-ambiguous-and-dropped` | 表記ゆれの pair（`web/src/lib/filter.ts` と `src/lib/filter.ts`）は**どちらも点検しない**（planner の `ambiguous_file_candidate` の担当）。`..` / system root は候補になる前に落ち、`dropped[]` として**名乗る** |
+| `i08-citation-two-identifiers` | 同一 `path:line` が 2 つの識別子と結び付いている。両方ともその行に**在る**ので、出るのは不整合 1 本だけである |
+| `i09-unchecked-and-absent` | **warning にしない 2 つの verdict。** 照合できる識別子が同じ行に無い citation（`unchecked`）と、識別子が file に 1 度も現れない citation（`identifier_absent`）。後者を「移動した」と呼ぶのは、その語がこの file の識別子だという前提が測れていないまま下す裁定である |
+| `i10-no-trailing-newline` | 「N 行」の数え方の固定。**末尾改行の無い最終行も 1 行**として数える（`wc -l` より 1 多い） |
+
+case directory を持たない 3 本が別に在る。
+
+- `inspect input handling` —— 読めない入力は**点検せずに拒否**する。`--repo-root` 不在 /
+  fixture が JSON でない / entry に `number` が無い / 要求した Issue が fixture に無いは
+  `load_error`（exit 6）、mode 無し / 対象 Issue 無し / 番号が整数でない / 未知 flag は
+  `invalid_input`（exit 3）。**どの失敗でも `inspection` は `null`、`warnings` は空**である ——
+  「見て何も無かった」と「見られなかった」が同じ形で返ることを許さない。`--out` は既存 file を
+  上書きせず `out_exists`（exit 4）で拒否し、書いた bytes は stdout と一致する
+- `inspect --ref` —— 本当に動いた tree に対して測る。12 行で commit してから working tree を
+  20 行に伸ばし、`--ref <sha>` では `success`（実測 12）・省略時は `partial`（`claimed` 12 /
+  `measured` 20）になること。working tree 経路は `git rev-parse HEAD` を envelope に記録し、
+  解決できない `--ref` は `load_error` で**拒否**する（working tree に黙って落ちない）
+- `inspect does not reach the plan` —— ずれだらけの同じ本文が**従来どおり plan でき**、
+  plan に `reference_*` の語彙が 1 つも入らないこと。byte 単位の非回帰は
+  `cases/*/expected-plan.json` の golden 側が持つ
 
 ## 受入ゲートの `gates:` — 空振り検査の実測（[#125](https://github.com/Kewton/commandmate-skills/issues/125)）
 
