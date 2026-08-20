@@ -1,0 +1,56 @@
+{
+  "description": "Issue #219（受入条件1）: `## 対象ファイル` に素書きした glob（`data/geo/landmarks/*.json`）・backtick の glob（`data/geo/**/*.json`）・末尾スラッシュのディレクトリ（`data/geo/stations/`）の3つが、いずれも `suspected_files` に入る。0.31.0 では素書きの2つは**警告も出さずに落ちて**おり、backtick のものだけが CANDIDATE_BACKTICK の `[^`\\s]+` を偶然通っていた —— 契約も scope ゲートも CommandMate #1546 以来 glob 対応済みなのに、planner の抽出だけが対応していなかった（実測 Kewton/BorderFreeKidsMap #243: 46 file を手で列挙）。宣言された pattern は `scope_pattern_declared` が**列挙**する（plan は展開しない＝ADR 不変条件3。展開しない以上、可視にできるのは宣言そのものである）。notice なので `status` は success のままである: 著者が成果物見出しの下に書いた宣言を理由に plan を落とすのは、この機能が受け入れるためにある宣言を拒むことになる。`src/regen.ts` の test 伴走（L1）は pattern ではないので notice には出ない。",
+  "args": [
+    "500",
+    "--profile",
+    "node-commandmate"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [
+      "scope_pattern_declared"
+    ],
+    "warning_severities": [
+      "notice"
+    ],
+    "warning_details_include": [
+      "`data/geo/landmarks/*.json`",
+      "`data/geo/**/*.json`",
+      "`data/geo/stations/`"
+    ],
+    "waves": [
+      [
+        500
+      ]
+    ],
+    "merge_order": [
+      500
+    ],
+    "dependencies": [],
+    "classifications": {
+      "500": "independent"
+    },
+    "risk_level": "low",
+    "suspected_files": {
+      "500": [
+        "data/geo/**/*.json",
+        "src/regen.ts",
+        "data/geo/landmarks/*.json",
+        "data/geo/stations/",
+        "src/regen.test.ts",
+        "src/regen.spec.ts",
+        "src/__tests__/regen.ts",
+        "src/__tests__/regen.test.ts"
+      ]
+    },
+    "scope_defaults": {
+      "500": [
+        "src/regen.test.ts",
+        "src/regen.spec.ts",
+        "src/__tests__/regen.ts",
+        "src/__tests__/regen.test.ts"
+      ]
+    }
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "description": "Issue #219（受入条件6）: PR 本文の対比表が、上流 `src/lib/verification/scope-gate.ts` `globToRegExp`（CommandMate #1546）と**同じ解釈**で判定する。0.31.0 の `scopeMatches` は `*` と `**` だけを解釈し、それ以外は literal だったので、上流が許可する3つの形をすべて違反として数えていた: ディレクトリ前置（`src/lib` は配下すべてを指す）・`?`（1文字、`/` は跨がない）・`{a,b}`（選択）。#520 は6件変更し、3件だけが宣言外である —— `docs/ab.md` は `?` が1文字であること、`src/c/x.ts` は `{a,b}` が選択であること、`src/lib2/note.ts` は前置が segment 境界で切れることの、それぞれ**逆側**の証拠であり、これが無いと「全部 in-scope と答える matcher」でも緑になる。#521 は pattern を1つも持たない対照で、変わっていないことを示す。",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "merge-cases/issues-scope-patterns.json",
+    "orchestrate_args": [
+      "520",
+      "521",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "dispatch_scenario": {
+    "cli_available": true,
+    "git": {
+      "branch": "feature/integration",
+      "dirty": false
+    },
+    "gh": {
+      "repo_access": true
+    },
+    "workers": {
+      "520": {
+        "state": "completed",
+        "verify": "pass"
+      },
+      "521": {
+        "state": "completed",
+        "verify": "pass"
+      }
+    }
+  },
+  "merge_args": [
+    "--approve"
+  ],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": {
+      "repo_access": true
+    },
+    "git": {
+      "base_resolvable": true
+    },
+    "prs": {
+      "520": {
+        "create": "ok"
+      },
+      "521": {
+        "create": "ok"
+      }
+    },
+    "diff": {
+      "520": {
+        "files": [
+          "src/lib/verification/scope-gate.ts",
+          "docs/a.md",
+          "docs/ab.md",
+          "src/a/x.ts",
+          "src/c/x.ts",
+          "src/lib2/note.ts"
+        ]
+      }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "targets_outcome": {
+      "520": "pr_created",
+      "521": "pr_created"
+    },
+    "completion_passed": true,
+    "limitation_codes": [
+      "branch_changed_outside_declared_scope"
+    ],
+    "pr_bodies_contain": {
+      "520": [
+        "- Out-of-scope changes: **3** — changed but NOT declared: `docs/ab.md`, `src/c/x.ts`, `src/lib2/note.ts`.",
+        "| `src/lib/verification/scope-gate.ts` | yes | yes |",
+        "| `docs/a.md` | yes | yes |",
+        "| `docs/ab.md` | **no** | yes |",
+        "| `src/a/x.ts` | yes | yes |",
+        "| `src/c/x.ts` | **no** | yes |",
+        "| `src/lib2/note.ts` | **no** | yes |"
+      ],
+      "521": [
+        "- Out-of-scope changes: **0** — every one of the 1 changed file(s) is inside the declared scope.",
+        "| `src/plain.ts` | yes | yes |"
+      ]
+    },
+    "eligible": [
+      520,
+      521
+    ],
+    "pr_create_calls": 2
+  }
+}

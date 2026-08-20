@@ -49,6 +49,7 @@ import {
   redactionsList,
   safeBranch,
   validateDispatch,
+  scopeMatches,
 } from './lib.mjs';
 
 const MERGE_SCHEMA_VERSION = 1;
@@ -645,29 +646,13 @@ function declaredScope(issue) {
   return [...new Set(cleaned)].sort();
 }
 
-function escapeRegExp(text) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-// Is a changed path inside one declared scope entry? Entries are normally plain
-// repository paths, but the contract accepts patterns, so `*` (within a segment)
-// and `**` (across segments) are honored. Treating a pattern as a literal would
-// report an in-scope change as a violation — the one thing this comparison must
-// not get wrong, since it is the human-readable half of `requireScopeClean`.
-function scopeMatches(pattern, path) {
-  if (pattern === path) return true;
-  if (!pattern.includes('*')) return false;
-  const source = pattern
-    .split('**')
-    .map((part) => part.split('*').map(escapeRegExp).join('[^/]*'))
-    .join('.*');
-  try {
-    return new RegExp(`^${source}$`).test(path);
-  } catch {
-    return false;
-  }
-}
-
+// Is a changed path inside one declared scope entry? `scopeMatches` is the port
+// of CommandMate's `globToRegExp` (lib.mjs, Issue #219). It replaced a local
+// three-line version that honoured `*` and `**` and NOTHING else: a directory
+// entry (`src/lib`, how people write a directory), `?`, and `{a,b}` all read as
+// literals here while the gate upstream honoured them, so this table called an
+// in-scope change a violation — the one thing this comparison must not get
+// wrong, since it is the human-readable half of `requireScopeClean`.
 function inDeclaredScope(scope, path) {
   return scope.some((pattern) => scopeMatches(pattern, path));
 }

@@ -1,0 +1,45 @@
+{
+  "description": "Issue #219（受入条件2）: 根拠節に書いた glob / ディレクトリは `suspected_files` に入らない。glob は「誰も列挙していない file 集合に対する権限」なので、#177 がハーネスに引いたのと同じ規則 —— **明示の宣言が言及に優る** —— を適用し、成果物見出しの下でだけ honour する。0.31.0 では backtick の glob は本文のどこに書いても scope.allow まで届いていたので、黙って落とすと誰かの scope が黙って狭まる: `scope_pattern_dropped`（notice）が落とした pattern を名指しし、書きたいなら `## 対象ファイル` へ移せと言う。**`unrecognized_file_extension` には落とさない** —— `.json` は既知拡張子であり、綴りを直せと言うのは誤診である。`src/regen.ts` は従来どおり抽出されるので、これは「抽出が止まった」ではなく「pattern だけが宣言を要求する」ことの case である。",
+  "args": [
+    "501",
+    "--profile",
+    "node-commandmate"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [
+      "scope_pattern_dropped"
+    ],
+    "warning_severities": [
+      "notice"
+    ],
+    "warning_details_include": [
+      "`data/geo/landmarks/*.json`",
+      "`data/geo/stations/`",
+      "deliverable heading"
+    ],
+    "waves": [
+      [
+        501
+      ]
+    ],
+    "merge_order": [
+      501
+    ],
+    "dependencies": [],
+    "classifications": {
+      "501": "independent"
+    },
+    "risk_level": "low",
+    "suspected_files": {
+      "501": [
+        "src/regen.ts",
+        "src/regen.test.ts",
+        "src/regen.spec.ts",
+        "src/__tests__/regen.ts",
+        "src/__tests__/regen.test.ts"
+      ]
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "description": "Issue #219（受入条件4）: `data/geo/**` を書く Issue と `data/geo/landmarks/13101.json` を書く Issue は同一 Wave に入らない。0.31.0 の `sharedFiles` は `suspected_files` の**完全一致集合の交差**だったので、この2件は「file を共有していない」と判定され、同じ wave に並んで**同じ file を2人の worker が書く**ことになっていた。判定は CommandMate の scope ゲートと同じ関係（lib.mjs `scopeEntriesOverlap`）に置き換えてある。決められない組は「重なる」と答える —— 偽陽性は wave 1本分の並列度で済むが、偽陰性は統合で壊れる（#175 の教訓）。この case は case 04 の glob 版であり、`classification` が両方 `conflicting` になることまで固定する（wave 分割だけを見ると、依存 edge で分かれた場合と区別できない）。",
+  "args": [
+    "503",
+    "504",
+    "--profile",
+    "node-commandmate",
+    "--max-parallel",
+    "3"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [
+      "scope_pattern_declared"
+    ],
+    "warning_severities": [
+      "notice"
+    ],
+    "waves": [
+      [
+        503
+      ],
+      [
+        504
+      ]
+    ],
+    "merge_order": [
+      503,
+      504
+    ],
+    "dependencies": [],
+    "classifications": {
+      "503": "conflicting",
+      "504": "conflicting"
+    },
+    "risk_level": "moderate",
+    "suspected_files": {
+      "503": [
+        "data/geo/**"
+      ],
+      "504": [
+        "data/geo/landmarks/13101.json"
+      ]
+    }
+  }
+}

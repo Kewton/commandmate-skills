@@ -150,6 +150,30 @@ scope gate に弾かれて構造的に解決不能だった）。
 加え、加えた分を plan の `scope_defaults` に明示する（Issue #44 / CommandMate
 #1678 B-2）。lockfile を Issue 本文に書き並べる必要はない。
 
+**glob とディレクトリで書ける（planner Issue #219）。** 生成物が何十件もある Issue で、
+対象ファイルの見出しに 46 行並べる必要はない。**成果物の見出しの配下でだけ**、次が
+path と同じように `suspected_files` に入り、実行契約の `scope.allow` へ綴りのまま運ばれる。
+
+- glob: `data/geo/landmarks/*.json`・`` `data/geo/**/*.json` ``・`docs/?.md`・`src/{a,b}/x.ts`
+  （backtick は必須ではない）
+- 末尾スラッシュのディレクトリ: `data/geo/stations/`（配下すべてを指す）
+
+解釈は CommandMate の scope ゲートと同じである: `**` は階層を跨ぐ（**0 段も跨ぐ**ので
+`**/*.md` は repository 直下の `README.md` にも一致する）、`*` と `?` は `/` を跨がない、
+`{a,b}` は選択、`[` と `]` は **literal**、ディレクトリは配下すべて。
+
+**成果物の見出しの外に書いた glob は scope に入らない。** 根拠・参考の配下も、見出しの外の
+散文も同じである。glob は「誰も列挙していない file 集合に対する権限」なので、明示の宣言
+としてしか受け取らない。落ちた分は plan の `warnings` に `scope_pattern_dropped` として
+出る（黙っては消えない）ので、書きたければ見出しの下へ移して re-plan すること。
+
+**repository 全体を意味する pattern（`**` / `*` / `.`）は拒まれる**（`over_broad`）。
+それを載せた契約は決して失敗しない scope ゲートを持つ、つまりゲートが無いのと同じである。
+また **`/` を含まない glob（`*.md`）は拾われない** —— Markdown の強調（`**bold**`）と
+区別できないためである。repository 直下も含めたいなら `**/*.md` と書く。
+日本語の散文に隙間なく続けて書いた pattern（`data/geo/stations/配下`）も拾われないので、
+その位置では backtick で囲むこと。
+
 ### 2.4 依存
 
 `depend` / `dependenc` / `prerequisite` / `requires` / `依存` / `前提` を含む見出しの

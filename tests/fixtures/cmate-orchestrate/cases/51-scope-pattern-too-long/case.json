@@ -15,7 +15,7 @@
       "#492: the dispatch runner's execution contract cannot carry 1 of the 2 path(s)",
       "(too_long x1)",
       "too_long `segment00xxxxxxxxxxxxxxx/segment01xxxxxxxxxxxxxxx/",
-      "write it as a plain repository-relative path of at most 200 characters"
+      "write it as a repository-relative path or glob of at most 200 characters"
     ],
     "waves": [
       [

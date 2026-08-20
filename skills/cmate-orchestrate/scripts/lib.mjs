@@ -862,3 +862,165 @@ export function matchUpstreamFault(text) {
   }
   return null;
 }
+
+// scope patterns — the glob vocabulary CommandMate's scope gate adjudicates by
+// (Issue #219)
+// =============================================================================
+//
+// A third entry that was never a copy, for the same reason `resolveLauncher` and
+// the `scope_companions` matcher are here: the answer to "is this changed path
+// inside the declared scope?" is given TWICE in this package — merge.mjs prints
+// it in the PR body, and the planner uses the same relation to decide which two
+// issues may not share a wave — and it is adjudicated a THIRD time, upstream, by
+// CommandMate's scope gate. Three implementations of one relation is three
+// verdicts that can disagree, and the disagreement is silent in the direction
+// that costs the most: merge reporting a change as in-scope that the gate then
+// fails, or the planner putting two issues that write the same files into one
+// wave because it compared their declarations as literal strings.
+//
+// So the subset below is a PORT, not an invention. It follows
+// CommandMate `src/lib/verification/scope-gate.ts` `globToRegExp` (#1546), whose
+// semantics are fixed in that repository's `docs/design/task-contract.md` §2.2:
+//
+//   * `**` as a whole segment crosses directory boundaries, including zero of
+//     them: `a/**` matches `a/b` and `a/b/c`; `**` that is not a whole segment
+//     (`a**b`) collapses to a single-segment wildcard.
+//   * `*` and `?` never cross `/`.
+//   * `{a,b}` is alternation and nests. UNBALANCED braces are literal, as in a
+//     shell — `src/{a` is a path with a brace in it, not a syntax error.
+//   * `[` and `]` are LITERAL. Next.js routes (`src/app/[...path]/page.tsx`) are
+//     the shape that decided it upstream: reading those as character classes
+//     makes the pattern that names them match nothing, and a silent no-match is
+//     the failure this relation exists to prevent.
+//   * A pattern that matches a directory matches everything beneath it, so
+//     `src/lib`, `src/lib/` and `src/lib/**` all mean the same thing. Without
+//     this, `allow: ["src/lib"]` — how people write a directory — would put
+//     every file inside it out of scope.
+//
+// What is NOT here: expansion. Nothing in this package opens a working tree to
+// enumerate what a pattern covers (ADR §2, invariant 3 — the contract is a pure
+// function of the plan). Every comparison below is string against string.
+const SCOPE_PATTERN_META_RE = /[*?{]/;
+
+// Compiled per call. The lists this package compares are an issue's declared
+// scope (bounded by MAX_SCOPE_PATTERNS) against one change set, so caching would
+// buy a table to invalidate and nothing else; CommandMate caches because it
+// evaluates the same declaration against thousands of paths.
+function globToRegExp(rawPattern) {
+  // A trailing slash carries no information once the directory rule applies.
+  const pattern = rawPattern.replace(/\/+$/, '');
+  let depth = 0;
+  let balanced = 0;
+  for (const char of pattern) {
+    if (char === '{') balanced += 1;
+    else if (char === '}') { balanced -= 1; if (balanced < 0) break; }
+  }
+  const bracesBalanced = balanced === 0;
+
+  let source = '';
+  let i = 0;
+  while (i < pattern.length) {
+    const char = pattern[i];
+    if (char === '*') {
+      let end = i;
+      while (pattern[end] === '*') end += 1;
+      const isGlobstar = end - i > 1;
+      const atSegmentStart = i === 0 || pattern[i - 1] === '/';
+      if (isGlobstar && atSegmentStart && pattern[end] === '/') {
+        // The following slash is consumed too: `a/**/b` has to match `a/b`.
+        source += '(?:[^/]*/)*';
+        i = end + 1;
+        continue;
+      }
+      if (isGlobstar && atSegmentStart && end === pattern.length) {
+        source += '.*';
+        i = end;
+        continue;
+      }
+      source += '[^/]*';
+      i = end;
+      continue;
+    }
+    if (char === '?') { source += '[^/]'; i += 1; continue; }
+    if (bracesBalanced && char === '{') { depth += 1; source += '(?:'; i += 1; continue; }
+    if (bracesBalanced && char === '}' && depth > 0) { depth -= 1; source += ')'; i += 1; continue; }
+    if (bracesBalanced && char === ',' && depth > 0) { source += '|'; i += 1; continue; }
+    source += char.replace(/[.*+?^${}()|[\]\\]/, '\\$&');
+    i += 1;
+  }
+  return new RegExp(`^${source}(?:/.*)?$`);
+}
+
+// Is `path` inside the single scope entry `pattern`? The entry may be a plain
+// path, a directory, or a glob; `path` is a repository-root-relative POSIX path
+// as git reports it.
+export function scopeMatches(pattern, path) {
+  if (pattern === path) return true;
+  try {
+    return globToRegExp(pattern).test(path);
+  } catch {
+    // A pattern this port cannot compile is not a pattern that matches
+    // everything. Refusing here is the fail-closed direction: the caller reports
+    // an out-of-scope change or an absent conflict, both of which a human sees.
+    return false;
+  }
+}
+
+// The literal prefix a pattern can never escape: everything before its first
+// metacharacter, cut back to the last `/` so the prefix ends on a segment
+// boundary. A metacharacter-free entry is its own prefix plus `/`, because such
+// an entry is also a directory (the rule above). `**/x.ts` has no static prefix
+// at all and therefore yields `''`, which is a prefix of everything.
+function scopeStaticPrefix(pattern) {
+  const meta = pattern.search(SCOPE_PATTERN_META_RE);
+  if (meta === -1) return `${pattern}/`;
+  const cut = pattern.lastIndexOf('/', meta);
+  return cut === -1 ? '' : pattern.slice(0, cut + 1);
+}
+
+// Can two scope entries name the same file? Used to decide whether two issues
+// may share a wave, so the two failure directions are NOT symmetric: a false
+// positive costs one wave of parallelism, a false negative sends two workers at
+// one file and the damage surfaces at merge (#175). Undecidable pairs therefore
+// answer "yes".
+//
+//   * plain vs plain — equality, or one is a directory containing the other.
+//     This is the relation the planner already had, plus the directory case it
+//     did not (`src/lib` beside `src/lib/a.ts` used to read as disjoint).
+//   * glob vs plain — the glob matches the plain entry, or the plain entry is a
+//     directory the glob's static prefix sits under (`src` beside `src/**/*.ts`:
+//     the glob matches nothing named `src`, yet every file it covers is inside).
+//   * glob vs glob — undecidable in general without a tree, so static prefix
+//     containment decides it. `data/geo/**` and `data/geo/landmarks/*.json`
+//     conflict; `data/geo/landmarks/*.json` and `data/geo/stations/*.json` do
+//     not.
+export function scopeEntriesOverlap(left, right) {
+  const a = String(left).replace(/\/+$/, '');
+  const b = String(right).replace(/\/+$/, '');
+  if (a === b) return true;
+  const aGlob = SCOPE_PATTERN_META_RE.test(a);
+  const bGlob = SCOPE_PATTERN_META_RE.test(b);
+  if (!aGlob && !bGlob) return a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+  if (aGlob !== bGlob) {
+    const glob = aGlob ? a : b;
+    const plain = aGlob ? b : a;
+    return scopeMatches(glob, plain) || scopeStaticPrefix(glob).startsWith(`${plain}/`);
+  }
+  const prefixA = scopeStaticPrefix(a);
+  const prefixB = scopeStaticPrefix(b);
+  return prefixA.startsWith(prefixB) || prefixB.startsWith(prefixA);
+}
+
+// Does this entry grant the whole repository? `**`, `*`, `**/*`, `.` and `./`
+// all compile to a regex that matches every path, so a contract carrying one has
+// no scope gate at all — the entry is refused rather than sent (`over_broad`).
+//
+// The rule is deliberately about the WHOLE entry: `src/**` keeps its meaning,
+// and `**/*.json` is a real declaration (every JSON file) rather than a blanket
+// one. Only an entry whose every segment is `*` or `**` — or which is the
+// repository root written as `.` — is refused.
+export function isOverBroadScope(pattern) {
+  const trimmed = String(pattern).replace(/\/+$/, '');
+  if (trimmed === '' || trimmed === '.') return true;
+  return trimmed.split('/').every((segment) => segment === '*' || segment === '**');
+}

@@ -1,0 +1,12 @@
+{
+  "issues": [
+    {
+      "number": 520,
+      "title": "chore: regenerate the per-ward GeoJSON",
+      "body": "区ごとの生成物を `npm run regen` で作り直す。\n\n## 対象ファイル\n- `data/geo/**/*.json`\n- data/geo/stations/\n- `src/regen.ts`\n\n## Acceptance criteria\n- [ ] `npm run regen` のあと `git diff --exit-code` が exit 0\n",
+      "labels": [
+        "chore"
+      ]
+    }
+  ]
+}

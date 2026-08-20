@@ -19,6 +19,24 @@ install 先で走らせるよう案内している箇所は無い。
 
 ## Changelog
 
+### 未リリース — 対象ファイル節に glob / ディレクトリを書けるようにした（planner Issue #219）
+
+- **planner の抽出に4つ目の source（`CANDIDATE_PATTERN`）が入ったので、mirror も同時に更新した。**
+  冒頭の同期規約どおり、`PATTERN_SEGMENT` / `CANDIDATE_PATTERN` / `SCOPE_PATTERN_RE` の3定数は
+  planner 本体と byte 同一であり、`plannerFileCandidates` の分岐も同じである。
+- **これが消しに来た事象**: 契約も CommandMate の scope ゲートも CommandMate #1546 以来
+  glob 対応済みだったのに、`## 対象ファイル` に glob を書く方法が無かった。文字クラス
+  `[A-Za-z0-9_.-]` は `* ? { } ,` を含まないので素書きの `data/geo/landmarks/*.json` は
+  黙って落ち、backtick の中だけが `[^`\s]+` を偶然通っていた。実測（Kewton/BorderFreeKidsMap
+  #243）では区ごとの生成物 46 file を手で列挙する羽目になっている。
+- **成果物見出しの配下でだけ**受け取る。glob は「誰も列挙していない file 集合に対する権限」なので、
+  明示の宣言としてしか読まない（planner #177 がハーネスに引いたのと同じ線）。見出しの外に書いた
+  pattern は落ち、planner は `scope_pattern_dropped`（notice）でそれを報告する。
+- 書き方は [issue-body-contract.md](./issue-body-contract.md) 第 2.3 節に 1 段落で足した
+  （`**` は 0 段も跨ぐ・`/` を含まない glob は拾わない・repository 全体を意味する pattern は拒まれる）。
+- **この package の rule は1つも変わっていない。** `planner_ready` が見るのは
+  「`suspected_files` が空でないか」であり、pattern はその判定に新しい形の答えを増やしただけである。
+
 ### 0.8.0 — 未決の問いを起案本文に埋める（Issue #209）
 
 - **`open-questions` ブロックを起案する本文そのものに埋めるようにした。** 記法の正本は

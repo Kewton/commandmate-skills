@@ -125,8 +125,8 @@ files:
     executable: false
     script: false
   - path: references/adr-scope-derivation.md
-    sha256: 5ef4d501cceba3c1f45dd6c9055def485c726857a9e14ef162527c97c5bb6d8f
-    size: 80222
+    sha256: f6a57febf576c60c64e95c1942b67bb05d5ad90b595d648c4d05c892bcb36a95
+    size: 85186
     kind: instruction
     executable: false
     script: false
@@ -155,8 +155,8 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: b57e4653979abd81e0f6b183437f2cd08b009eb83d15ffee7a50865752a3d091
-    size: 84071
+    sha256: 482e4e681c9e8c4bb7b9fc78e1196f8e1d9c9c757bc06008ad08e601133e49b7
+    size: 87941
     kind: instruction
     executable: false
     script: false
@@ -167,8 +167,8 @@ files:
     executable: false
     script: false
   - path: references/merge-contract.md
-    sha256: 67e06447a3b8a072a9a382ef38ead27f14880ee4a530f767f2bab418313b98d2
-    size: 48401
+    sha256: 2947165360f3604719606a64425a106ef3b9a0c94514f18736f75be03940ed0c
+    size: 50938
     kind: instruction
     executable: false
     script: false
@@ -179,8 +179,8 @@ files:
     executable: false
     script: false
   - path: references/plan-contract.md
-    sha256: 4f5dd298bedfd8722c4b222d11918271f9cbb9dacd165e9b8c20ad5266b1ceb6
-    size: 61560
+    sha256: dd9073b06e10d07cc1ffc37498afc6a020d6b31eea730505743020de18e9aa1f
+    size: 67631
     kind: instruction
     executable: false
     script: false
@@ -191,8 +191,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: d217a4441915453550f2f3180c3b483fdcd68f0cbdf92aa3e1e12facf8312956
-    size: 205427
+    sha256: 177a6949dde1d045d585df5833119d6c7b83cda1604ba0038d0bbb2828a050ba
+    size: 210287
     kind: instruction
     executable: false
     script: false
@@ -221,8 +221,8 @@ files:
     executable: false
     script: false
   - path: schemas/execution-plan.v2.json
-    sha256: 29b383abc3cb383ece816a316f9f87d8fb077ea1b6c55923587e96d5195f0b4b
-    size: 27225
+    sha256: e9aefc40dbbb45b406d4fea9aa91ea7d85f369c3789f37bd70f20f6e46ac2e34
+    size: 28567
     kind: asset
     executable: false
     script: false
@@ -245,8 +245,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: 64a61b4e3c81b125521017e5632ddc7a9f1ee2f66935b713e86f28bafd426c36
-    size: 456831
+    sha256: '0b74e15d85786329d3bd1c7ad9a978dd5503e322620f94d6b6476d0f39fe1bda'
+    size: 457354
     kind: script
     executable: true
     script: true
@@ -257,20 +257,20 @@ files:
     executable: true
     script: true
   - path: scripts/lib.mjs
-    sha256: 5c333738c583eabd6c45d38e88a65a6cacf95dcd563e24f01878e06ca27eaeaf
-    size: 45968
+    sha256: 7d03b6e6ac87e75aa7438e0e0873904e59b0f7fb9af30410c96f6493b7e40dc9
+    size: 54022
     kind: script
     executable: false
     script: true
   - path: scripts/merge.mjs
-    sha256: 4660b1a1b54f1ec38103212584f0666560ee891d01d6c089ad90eae907f65122
-    size: 110189
+    sha256: 9973b44a23b44aea2e89e70029ec56dc58f163c1decacbe118fdf25074142944
+    size: 109919
     kind: script
     executable: true
     script: true
   - path: scripts/orchestrate.mjs
-    sha256: 70a6fe5de32597875bfc798932da7a61edea6f526219ba53bfb6e107256d9102
-    size: 188556
+    sha256: a60b68d215d648bcb9f7b631d48f25a67f92bb1b370b684b5c9fed5d81134ab7
+    size: 200158
     kind: script
     executable: true
     script: true
@@ -281,8 +281,8 @@ files:
     executable: true
     script: true
   - path: scripts/status.mjs
-    sha256: a5107ee330ded71c632bb5474871bc150ff7c4ac1309303950277b5d8b8b976b
-    size: 67813
+    sha256: 0954e644e743c4dfcdfc89303e14f929ad30dca48795cfd231526ec5eec0be16
+    size: 68240
     kind: script
     executable: true
     script: true

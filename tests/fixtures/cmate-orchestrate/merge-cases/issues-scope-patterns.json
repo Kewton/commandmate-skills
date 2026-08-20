@@ -1,0 +1,20 @@
+{
+  "issues": [
+    {
+      "number": 520,
+      "title": "feat: honour scope patterns in the PR body",
+      "body": "上流の scope ゲートと同じ解釈で対比表を出せることを測る Issue。\n\n## 対象ファイル\n- `src/lib`\n- `docs/?.md`\n- `src/{a,b}/x.ts`\n\n## Acceptance criteria\n- [ ] `npm test` が exit 0\n",
+      "labels": [
+        "feature"
+      ]
+    },
+    {
+      "number": 521,
+      "title": "feat: a plain-path control",
+      "body": "対照。pattern を1つも宣言しない Issue。\n\n## 対象ファイル\n- `src/plain.ts`\n\n## Acceptance criteria\n- [ ] `npm test` が exit 0\n",
+      "labels": [
+        "feature"
+      ]
+    }
+  ]
+}

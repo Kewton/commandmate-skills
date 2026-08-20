@@ -800,6 +800,26 @@ const CANDIDATE_BACKTICK = '`([^`\\s]+\\.(?:' + FILE_EXT + '))`';
 const CANDIDATE_KNOWN_ROOT = PATH_START + '((?:src|tests|test|scripts|docs|lib|app|pkg|internal|cmd|\\.github)/[A-Za-z0-9_./-]+)\\b';
 const CANDIDATE_WITH_EXT = PATH_START + '([A-Za-z0-9_.-]+/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\\.(?:' + FILE_EXT + '))\\b';
 
+// The fourth candidate source (planner Issue #219). A glob or a directory is a
+// declaration the execution contract has accepted since CommandMate #1546, and
+// the three sources above cannot express one: `[A-Za-z0-9_.-]` holds no `*`,
+// `?`, `{`, `}` or `,`. `,` is accepted only inside a brace group, because
+// outside one it is prose punctuation. A pattern reaches `suspected_files` only
+// from under a deliverable heading (see plannerFileCandidates), which is why
+// this source — unlike the three above — does not consult FILE_EXT.
+const PATTERN_SEGMENT = '(?:[A-Za-z0-9_.*?-]|\\{[A-Za-z0-9_.,*?-]+\\})+';
+
+// A bare-wildcard token (`**`, `*`, `**/*`) is matched so the planner can refuse
+// it by name (`over_broad`); everything else must carry a `/`, or `**bold**` —
+// Markdown emphasis — would read as a scope pattern. The trailing lookahead also
+// refuses a non-ASCII follower: without it the directory shape reduces
+// `docs/企画書.md` to `docs/`, granting a whole directory for one document.
+const CANDIDATE_PATTERN = PATH_START + '(?<![*?}])(\\*{1,2}(?:/\\*{1,2})*|(?:' + PATTERN_SEGMENT + '/)+(?:' + PATTERN_SEGMENT + ')?)(?![A-Za-z0-9_.*?{/-]|[^\\x00-\\x7f])';
+
+// Which candidates the deliverable-heading rule governs, on candidates from
+// every source: the backtick source has always matched patterns too.
+const SCOPE_PATTERN_RE = /[*?{]|\/$/;
+
 // Headings under which a path is the Issue's product, not its context
 // (planner Issue #50). Byte-identical to the planner's.
 const DELIVERABLE_HEADING_RE = /(deliverable|成果物|対象ファイル|変更対象|変更ファイル|作成ファイル|編集対象|出力ファイル|生成ファイル|affected files|target files|output files|files to (?:change|edit|create|write|add))/i;
@@ -834,10 +854,14 @@ const plannerContextSpans = (text) =>
   plannerHeadingSpans(text, (line) => !DELIVERABLE_HEADING_RE.test(line) && CONTEXT_HEADING_RE.test(line));
 
 function plannerFileCandidates(text) {
-  const patterns = [
-    new RegExp(CANDIDATE_BACKTICK, 'g'),
-    new RegExp(CANDIDATE_KNOWN_ROOT, 'g'),
-    new RegExp(CANDIDATE_WITH_EXT, 'g'),
+  // The fourth source is PATTERN-ONLY: CANDIDATE_PATTERN also matches plain
+  // paths the three closed sources deliberately refuse (`vendor/n`), so anything
+  // it finds that is not a scope pattern is discarded (planner Issue #219).
+  const sources = [
+    { pattern: new RegExp(CANDIDATE_BACKTICK, 'g'), patternsOnly: false },
+    { pattern: new RegExp(CANDIDATE_KNOWN_ROOT, 'g'), patternsOnly: false },
+    { pattern: new RegExp(CANDIDATE_WITH_EXT, 'g'), patternsOnly: false },
+    { pattern: new RegExp(CANDIDATE_PATTERN, 'g'), patternsOnly: true },
   ];
   const spans = plannerDeliverableSpans(text);
   const cSpans = plannerContextSpans(text);
@@ -846,10 +870,18 @@ function plannerFileCandidates(text) {
   const inContext = new Set();
   const outsideContext = new Set();
   const found = [];
-  for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
+  for (const source of sources) {
+    for (const match of text.matchAll(source.pattern)) {
       const candidate = match[1].trim();
       if (!plannerIsSafeRepoPath(candidate)) continue;
+      const isPattern = SCOPE_PATTERN_RE.test(candidate);
+      if (source.patternsOnly && !isPattern) continue;
+      // A pattern is permission over files nobody has enumerated, so the planner
+      // honours it only where the Issue declares it as a product. Cited under
+      // 根拠 / 参考 or written in passing prose it is dropped — and the planner
+      // says so (`scope_pattern_dropped`), which this validator does not need to
+      // repeat: what it decides is whether `suspected_files` comes out empty.
+      if (isPattern && !spans.some(([start, end]) => match.index >= start && match.index < end)) continue;
       if (spans.some(([start, end]) => match.index >= start && match.index < end)) deliverable.add(candidate);
       if (cSpans.some(([start, end]) => match.index >= start && match.index < end)) inContext.add(candidate);
       else outsideContext.add(candidate);
