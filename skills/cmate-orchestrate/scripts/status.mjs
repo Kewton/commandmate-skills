@@ -364,6 +364,12 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   preflight_cli_available: 'CLI を実行可能にしてから再実行する。',
   preflight_repo_access: 'gh の認証と repo 到達性を復旧してから再実行する。',
   preflight_base_resolvable: 'base ref が解決できる状態（fetch 済み）にしてから再実行する。',
+  // ---- merge: 呼び出し元 worktree の index.lock（#222）----------------------
+  // どちらも notice であり、裁定を1つも変えない。hint の先頭が「merge は壊れていない」
+  // なのは実測どおりの読み順である —— 症状（merge 後の `git pull` が index.lock で落ちる）
+  // を「merge が壊れた」と読んで巻き戻すのが、この2 code が消そうとしている二次被害である。
+  caller_index_lock_pre_existing: '呼び出し元 worktree の `index.lock` が **run の開始前から** 在った。**merge は壊れていない**（この runner は呼び出し元の index を読み書きしない）。裁定は `integration_verify.outcome` と各 target の `merged` を読む。lock は **runner が消さない** —— size 0 かつ `pgrep -fl \'git \'` に該当が無ければ stale なので人間が手で消す。原因はこの run の外に在る。',
+  caller_index_lock_appeared: '呼び出し元 worktree の `index.lock` が **run の実行中に出現した**（この runner が作ったという主張ではない。merge runner に呼び出し元の index を書く git verb は無い）。**merge と統合検証の裁定は変わらない。まず `integration_verify.outcome` と `merged` を読み、merge 済みのものを巻き戻さない。** lock は runner が消さない —— size 0・mtime が run 中・`pgrep -fl \'git \'` に該当なし、の3つが揃うときだけ人間が手で消す。',
 
   // ---- uat -----------------------------------------------------------------
   uat_failed: 'UAT 不合格である。--create-uat-fix-worktrees の修正ループを回すか、不合格の内容を読んで人間が直す。',

@@ -1,0 +1,54 @@
+{
+  "description": "#222 (b) — the other half: the caller worktree is clean when the run starts, and a 0-byte `.git/index.lock` APPEARS in it while the run is in flight (the fake drops it at `git worktree remove`, the last git the merge runner makes). The run is a success with a green integration verification and it stays one: `caller_index_lock_appeared` is a limitation, never a stop, because turning a landed-and-verified merge into a failure is exactly the misreading this Issue is about. `caller_index_lock_pre_existing` must NOT be recorded — the two are told apart by the OPENING reading, and conflating them would tell the operator this run inherited a lock it did not. `index_lock_after` carries the size and the mtime, and the file is still on disk when the harness looks: nothing in the runner unlinks it. The record is not a claim that this runner created it — no git verb in merge.mjs writes the caller's index — only that it was not there before and is there now.",
+  "phase": "merge-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--approve", "--integration-verify"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" },
+      "201": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" }
+    },
+    "integration": { "verify": "pass", "caller_index_lock": "appear" }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "merged", "200": "merged" },
+    "pr_merge_calls": 2,
+    "completion_passed": true,
+    "limitation_codes": ["caller_index_lock_appeared"],
+    "absent_limitation_codes": ["caller_index_lock_pre_existing", "integration_verify_not_run", "integration_verify_tree_left"],
+    "absent_blocking_codes": ["caller_index_lock_appeared", "integration_verify_failed", "integration_verify_unavailable"],
+    "caller_worktree": {
+      "index_lock_before": null,
+      "index_lock_after": { "path": ".git/index.lock", "size": 0 }
+    },
+    "caller_index_lock_remains": true,
+    "integration_verify": {
+      "requested": true,
+      "ran": true,
+      "outcome": "pass",
+      "merged_issues": [201, 200],
+      "source": "baseline",
+      "tree_removed": true
+    },
+    "git_calls": { "fetch": 1, "worktree": 2 },
+    "summary_contains": [
+      "## 呼び出し元 worktree の index.lock",
+      "run の実行中に出現した",
+      "これは merge の失敗ではない",
+      "runner はこの lock を消さない"
+    ],
+    "summary_absent": ["run の開始前から在った"]
+  }
+}

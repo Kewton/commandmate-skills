@@ -1,5 +1,5 @@
 {
-  "description": "With explicit approval, --create-prs pushes each verification-passed branch and opens a PR; both eligible issues get a PR and the phase succeeds.",
+  "description": "With explicit approval, --create-prs pushes each verification-passed branch and opens a PR; both eligible issues get a PR and the phase succeeds. #222: the caller worktree probe is phase-agnostic — `--create-prs` runs `git push` and `git diff` from the same cwd — so this report carries `caller_worktree` too, with both readings null.",
   "phase": "create-prs",
   "plan": {
     "issues_fixture": "cases/02-explicit-dependency/issues.json",
@@ -26,6 +26,7 @@
     "push_calls": 2,
     "pr_create_calls": 2,
     "pr_merge_calls": 0,
-    "completion_passed": true
+    "completion_passed": true,
+    "caller_worktree": { "index_lock_before": null, "index_lock_after": null }
   }
 }
