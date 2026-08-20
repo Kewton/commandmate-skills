@@ -1,0 +1,72 @@
+{
+  "description": "Issues #223 / #224 の端から端まで: Issue が `gates:` で宣言した `retryOnFail: 1` / `flakyIsPass: true` が、**契約に載り、実際に効く**ことを 1 本の run で測る。ゲートのコマンドは 1 回目に marker を置いて exit 1、2 回目は marker を見て exit 0 —— つまり同一 tree の再実行でだけ 緑になる。fake CLI は契約の `verify.gateDefinitions` を読んで本当にそれを実行するので、緑は 「fake がそう言うよう指示された」ではなく **契約が運んだ 3 行が効いた**ことの証拠である。assert するのは 3 点。(1) 契約に `retryOnFail: 1` と `flakyIsPass: true` が **宣言どおりの形で** 書かれている（上流は verify.yaml の `gates[]` と契約の `gateDefinitions` を同じ validator で 検査するので、受理集合はここでも同一である）。(2) report の gates はそのゲートを `flaky` として 残す —— `pass` に丸めれば「この緑は 1 回赤かった」が消える。(3) 裁定は wait の exit code (0) に 従う。**再実行を宣言しただけの run で `.commandmate/verify.yaml` は 1 バイトも変わらない** —— #1791 の経路を採った理由そのものなので byte 単位で assert する。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-acceptance-gates-flaky.json",
+    "orchestrate_args": [
+      "330",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      330
+    ],
+    "worker_states": {
+      "330": "completed"
+    },
+    "verification_outcomes": {
+      "330": "pass"
+    },
+    "verification_gates": {
+      "330": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "lint",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "issue-330-flaky-probe",
+          "verdict": "flaky",
+          "origin": "issue"
+        }
+      ]
+    },
+    "contract_issues": [
+      330
+    ],
+    "contract_contains": {
+      "330": [
+        "verify:\n  gateDefinitions:\n    - id: \"issue-330-flaky-probe\"\n      command: \"sh -c 'if [ -f .flake-seen ]; then exit 0; fi; : > .flake-seen; exit 1'\"\n      timeoutSec: 120\n      retryOnFail: 1\n      flakyIsPass: true\n"
+      ]
+    },
+    "worktree_files_unchanged": [
+      ".commandmate/verify.yaml"
+    ],
+    "verify_calls": 0,
+    "wait_verify_calls_min": 1
+  }
+}

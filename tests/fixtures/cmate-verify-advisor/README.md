@@ -4,9 +4,9 @@
 package には含まれない（配布物は `skills/cmate-verify-advisor/` の下だけ）。
 
 ```bash
-bash tests/fixtures/cmate-verify-advisor/run_tests.sh            # 80 assertions
-bash tests/fixtures/cmate-verify-advisor/run_tests.sh --mutants  # 15 mutants, 0 survivors
-bash tests/fixtures/cmate-verify-advisor/parser-parity.sh        # 18 assertions（単体でも動く）
+bash tests/fixtures/cmate-verify-advisor/run_tests.sh            # 113 assertions
+bash tests/fixtures/cmate-verify-advisor/run_tests.sh --mutants  # 22 mutants, 0 survivors
+bash tests/fixtures/cmate-verify-advisor/parser-parity.sh        # 59 assertions（単体でも動く）
 ```
 
 bash・node・git だけで動く。ネットワークは使わない（`commandmate` は shim である）。
@@ -18,7 +18,7 @@ bash・node・git だけで動く。ネットワークは使わない（`command
 | `commandmate verify` | `.commandmate/verify.yaml` の `verify-advisor-fixtures` ゲート |
 | GitHub Actions | `.github/workflows/validate.yml` の `runner-suites` job |
 
-どちらも `--mutants` を付けない既定の run（80 assertions）を回す。変異注入は所要 30 秒台で、
+どちらも `--mutants` を付けない既定の run（113 assertions）を回す。変異注入は所要 1 分前後で、
 ガードを触ったときに手で回すもの。**Issue #69 まで、この suite はどちらにも登録されて
 いなかった** — #57 の parser-parity テストは在るのに一度も実行されていなかった。
 
@@ -27,7 +27,7 @@ bash・node・git だけで動く。ネットワークは使わない（`command
 | path | 役割 |
 |---|---|
 | `run_tests.sh` | suite 本体。`--mutants` で変異注入ドライバになる |
-| `parser-parity.sh` | verify.yaml パーサ 2 実装（awk / JS）の options キー集合が一致することを検査する。`run_tests.sh` の末尾から 1 assertion として呼ばれるが、単体でも実行できる |
+| `parser-parity.sh` | verify.yaml パーサ 2 実装（awk / JS）の **gates キー集合と options キー集合**が、互いにも CommandMate の `verify-config.ts` にも一致することを検査する。値域（`retryOnFail` は 0 か 1 等）も同じであることを両パーサに実際に食わせて確認する。`run_tests.sh` の末尾から 1 assertion として呼ばれるが、単体でも実行できる |
 | `mutate.mjs` | アナライザのガードを 1 つずつ壊した複製を作る |
 | `make-cases.mjs` | `cases/*.json` の生成器。`node make-cases.mjs cases` で再生成できる |
 | `cases/*.yaml` | 入力になる verify.yaml |
@@ -51,6 +51,8 @@ bash・node・git だけで動く。ネットワークは使わない（`command
 | `empty.json` | 履歴 0 件。exit 3 |
 | `layer2-mixed.json` | 層 2 の提案（追加＝強化 / 削除＝弱体化 / ログ縮小＝弱体化）。**どれも適用されない** |
 | `require-commit.yaml` | `options.requireCommit: true` を持つ設定。Issue #57（advisor が正当な設定を exit 2 で拒否していた）の回帰ケース |
+| `flaky-measured.json` | `steady.json` と同じ 8 run に `[flaky]` アンカーを載せたもの。run 103 は **outcome=flaky**（構造化 `gates[].flaky` 経由）、run 106 は **outcome=fail**（ログのアンカー経由）—— 読み取り経路の両方と、flakiness の分母を 1 つの fixture で持つ |
+| `mutex-wait.json` | `steady.json` と**同じ duration** に `[mutex] … waited=` を載せたもの。二点測定の相方であり、`timeout:unit` の短縮提案が消えることを測る |
 
 ## 何を証明しているか
 
@@ -68,15 +70,24 @@ bash・node・git だけで動く。ネットワークは使わない（`command
    `OBSERVATION proposed-config-invalid` で報告する
 6. **書いたものがまだ verify.yaml である** — `--apply` 後のファイルを
    `cmate-verify` の実ランナー（`verify-run.sh`）に読ませ、`invalid config` にならないこと
-7. **2 つのパーサが同じ options キーを受理する** — `verify.yaml` は awk（`verify-run.sh`）と
+7. **2 つのパーサが同じキーを受理する** — `verify.yaml` は awk（`verify-run.sh`）と
    JS（`verify-advisor.mjs`）の 2 実装で読まれる。片方だけが知る key は、正当な設定に対する
-   exit 2 になる（Issue #57 の `requireCommit`）。`parser-parity.sh` が
-   **キー名の抽出**（awk の accept リスト / shell の dispatch / `OPTION_KEYS` の 3 つ）と
-   **実際に両パーサへ食わせる振る舞い**の両面で一致を要求する
+   exit 2 になる（Issue #57 の `requireCommit`、Issues #223 / #224 の
+   `mutex` / `retryOnFail` / `flakyIsPass` / `requireEnvClean`）。`parser-parity.sh` が
+   **キー名の抽出**（awk の accept リスト / shell の dispatch / `GATE_KEYS` / `OPTION_KEYS`）と
+   **実際に両パーサへ食わせる振る舞い**の両面で一致を要求し、さらに **CommandMate 本体の
+   `verify-config.ts` の集合そのもの**とも突き合わせる —— 3 実装が同時に同じキーを落とせば
+   対称性だけでは検出できないため
+8. **`waited` は duration ではない**（Issue #223）— `mutex` 待ちが観測されたゲートの
+   timeout を短くする提案は出さない。`mutex-wait.json` と `steady.json` は duration が同一で、
+   違いは待ちの有無だけである（二点測定）
+9. **FLAKY は推定ではなく実測である**（Issue #224）— `[flaky]` アンカー（と `--json` の
+   構造化 field）を読み、`flake-observed` として分母つきで報告する。同じゲートについては
+   弱いほうの `flake-candidate`（run をまたいだ fail→pass の推定）を並べない
 
 ## 変異注入
 
-`--mutants` は `mutate.mjs` が定義する 15 の変異それぞれについて suite 全体を回し、
+`--mutants` は `mutate.mjs` が定義する 22 の変異それぞれについて suite 全体を回し、
 **赤が出ること**を要求する。生き残った変異は「誰もテストしていないガード」である。
 
 変異は正確な文字列置換であり、置換対象が見つからなければ**エラーで止まる**。

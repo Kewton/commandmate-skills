@@ -41,6 +41,7 @@ import {
   SKILL_ID,
   SKILL_VERSION,
   SkillError,
+  isFlakyVerdict,
   issueOf,
   loadJson,
   parseCliJson,
@@ -600,6 +601,16 @@ function verificationLines(worker) {
     if (gates.dropped > 0) {
       lines.push('');
       lines.push(droppedNote(gates.dropped, 'gate(s)'));
+    }
+    // A FLAKY row is the one line in this table a reviewer must not read as a
+    // rounding of PASS or FAIL, so it is explained where it appears (Issue #224).
+    // The explanation deliberately does NOT say what the run counted it as: the
+    // Verdict line above is the run's exit code and it already answered that.
+    // Re-deriving it here from the word would get `flakyIsPass` wrong in both
+    // directions, since the declaration that decides it is not in this report.
+    if (gates.shown.some((gate) => gate && isFlakyVerdict(gate.verdict))) {
+      lines.push('');
+      lines.push('_**FLAKY** means the gate failed and then passed on a re-run against the same tree (CommandMate #1772). It is neither a pass nor a failure on its own: whether the run counted it as one is the gate\'s own `flakyIsPass` declaration, and the result is already in the **Verdict** line above._');
     }
   }
 

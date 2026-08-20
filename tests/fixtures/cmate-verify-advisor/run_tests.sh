@@ -381,6 +381,40 @@ assert_contains 'a fail-then-pass pair is surfaced as a candidate' "$OUT" 'OBSER
 assert_contains 'the flake candidate names the evidence gap' "$OUT" 'verify history carries no commit sha'
 assert_absent 'a flake candidate never becomes a proposal' "$OUT" 'PROPOSAL'
 
+printf '\n== FLAKY is a measurement, not an inference (Issue #224) ==\n'
+# The gate declared retryOnFail and the runner really re-ran it in the same tree,
+# so the "did the tree change between these runs" gap that makes the section
+# above a CANDIDATE does not exist here.
+advise "$CASES/flaky-measured.json"
+assert_contains 'a recorded FLAKY outcome is reported as observed' "$OUT" 'OBSERVATION flake-observed gate unit'
+assert_contains 'the observation carries the denominator, not just the flakes' "$OUT" '1 FLAKY (failed then passed, 0 of them counted as a pass by flakyIsPass), 1 failed twice'
+assert_contains 'the observation says the two runs judged the same tree' "$OUT" 'This is measured, not inferred'
+assert_contains 'the FLAKY run is named' "$OUT" 'both runs judged the same tree (run 103)'
+# The weaker claim is not printed beside the stronger one for the same gate.
+assert_absent 'the inference is suppressed where the measurement spoke' "$OUT" 'OBSERVATION flake-candidate gate unit'
+assert_absent 'a FLAKY observation never becomes a proposal' "$OUT" 'PROPOSAL log:'
+# The marker lives at the head of a gate log, and a gate log is still data.
+assert_absent 'reading the marker does not carry the log body out with it' "$OUT" "$CANARY"
+advise "$CASES/flaky-measured.json" --json
+assert_contains 'the --json report carries the observation too' "$OUT" '"flake-observed"'
+assert_absent 'the --json report carries no log body either' "$OUT" "$CANARY"
+
+printf '\n== a mutex wait is not a duration (Issue #223) ==\n'
+# Two points. `steady.json` and `mutex-wait.json` hold the SAME durations for
+# `unit` against the same 1800s declaration, and differ only in that every run in
+# the second queued behind a lock. Without the two-point pair the assertion below
+# could pass because no proposal was ever generated.
+advise "$CASES/steady.json"
+assert_contains 'the same durations without a lock do propose a shorter timeout' "$OUT" 'PROPOSAL timeout:unit'
+advise "$CASES/mutex-wait.json"
+assert_contains 'a gate seen queueing for its mutex is reported' "$OUT" 'OBSERVATION mutex-wait-observed gate unit queued for its mutex in 8 run(s)'
+assert_contains 'the observation names the longest wait' "$OUT" 'longest 80000ms'
+assert_absent 'no shorter timeout is argued for a gate whose timeout is also its lock-wait budget' "$OUT" 'PROPOSAL timeout:unit'
+# The wait must not be folded into the duration either: `unit` ran ~39-41s in
+# both fixtures, and the reorder evidence quotes the median it was ranked on.
+assert_contains 'the wait is excluded from the duration statistics' "$OUT" 'gate=unit fail-rate 25.0% over 8 run(s), median 40200ms'
+assert_absent 'the mutex marker does not carry the log body out with it' "$OUT" "$CANARY"
+
 printf '\n== what is written is still a verify.yaml ==\n'
 # cmate-verify's own runner is the reader that matters. Point it at the file the
 # advisor wrote, in a directory that is not a git repository: it must fail on the

@@ -192,6 +192,10 @@ const PRODUCER_LAG = {
       what: 'the end-of-block checks over BOTH lists',
       planner: '  const commandless = defined.find((gate) => gate.command === null);\n'
         + '  if (commandless !== undefined) return bad(\'acceptance_gate_block_invalid\', `gate "${commandless.id}" declares no command; a gate that runs nothing cannot judge anything`);\n'
+        + '  const unfirable = defined.find((gate) => gate.flakyIsPass === true && gate.retryOnFail !== MAX_ACCEPTANCE_GATE_RETRY_ON_FAIL);\n'
+        + '  if (unfirable !== undefined) {\n'
+        + '    return bad(\'acceptance_gate_block_invalid\', `gate "${unfirable.id}" declares flakyIsPass: true without retryOnFail: ${MAX_ACCEPTANCE_GATE_RETRY_ON_FAIL}; without a retry a gate can never be FLAKY, so the declaration could never take effect`);\n'
+        + '  }\n'
         + '  const declaredIds = new Set();\n'
         + '  for (const id of [...value.require, ...defined.map((gate) => gate.id)]) {\n'
         + '    if (declaredIds.has(id)) return bad(\'acceptance_gate_block_invalid\', `duplicate gate id "${id}"`);\n'

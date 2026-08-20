@@ -431,6 +431,24 @@ diff できる —— なので、**推奨している対処法の入り口が�
 
 ---
 
+### #223 / #224 — `mutex` / `retryOnFail` / `flakyIsPass` を宣言した Issue の block を planner が拒んでいた
+
+上流 CommandMate は **verify.yaml の `gates[]` と実行契約の `verify.gateDefinitions` を同じ
+validator**（`verify-config.ts` の `validateGateEntries`）で検査する。#1771 / #1772 がその
+validator に 3 field を足したので、`gates:` に `mutex: e2e-port` と書いた Issue は
+`send --contract` に受理される —— が、この planner の block reader はキーを閉じた集合として
+持っており、**その block を `acceptance_gate_block_invalid` で拒んでいた**。著者は上流が受理する
+受入条件を書けず、しかも planner の停止として現れるので原因が上流にあるようには見えない。
+
+3 field を受理集合に足し、**値域も上流と同じにした**（`retryOnFail` は 0 か 1、`mutex` は path
+segment として安全な名前、`flakyIsPass: true` は `retryOnFail: 1` を伴わなければエラー）。
+検査だけは 1 箇所だけ形が違う: `flakyIsPass` と `retryOnFail` の対応関係は **entry を読み終えて
+から**見る。この reader は行単位だが YAML の mapping に順序は無いので、行の並びを理由に拒むと
+**上流が受理する block を拒む**ことになるためである（`86-acceptance-gate-definition-range` の
+4 件目がその対照になっている）。
+
+---
+
 ## dispatch（`scripts/dispatch.mjs`）
 
 ### CommandMate #1447 — 公式経路は public `commandmate` である（ADR）
@@ -1281,6 +1299,30 @@ planner の path 語彙（`SYSTEM_ROOTS`。cmate-issue-authoring が byte 単位
 した。`--check` は同じリテラルを「実在しない path」として warning に出し、planner は profile を
 読んだ時点で `load_error` にする —— **許可を与えるのは planner だけなので、拒否も planner が持つ。**
 fixture がこの分岐を両側から固定している。
+
+### #224 — `GATE <id> FLAKY` を読めない reader は、裁定を 2 方向に間違える
+
+上流 #1772 は GATE 行に**第 3 の語** `FLAKY` を足した（1 回目 fail → 同一 tree の 2 回目 pass）。
+`PASS|FAIL` しか知らない reader にとってこの行は**存在しない行**なので、`verification.gates` から
+そのゲートが黙って消える —— #47 が塞いだ穴（report 単体で pass の根拠が読めない）にそのまま戻る。
+
+語彙を `lib.mjs` に置いた。読む側が 4 つ（dispatch / merge / status / uat）在るので、
+1 つに語を足して他に足さない形は、同じ run が PR 本文では `unknown`・マトリクスでは `fail` に
+見える report を作る。合わせて 3 つの規律を書き下した:
+
+1. **転記であって再判定ではない。** verdict は `wait --verify` の exit code が正であり、
+   `FLAKY` が 1 本混ざっていることを理由に `verification.outcome` を動かさない。それを決める
+   `flakyIsPass` は verify.yaml 側の宣言で、**GATE 行にも report にも載っていない** ——
+   行から裁定を再計算する実装は、`flakyIsPass: true` の run を fail に、`false` の run を pass に、
+   **両方向に**間違える。
+2. **`flaky` を「失敗を意味する status」の集合に足さない。** #1772 は DB マイグレーションを
+   伴わないので `verification_gate_results.status` は `passed` / `failed` のままで、FLAKY は
+   その上に重なる LABEL である。足すと、`flakyIsPass: true` で緑になった run が失敗ゲートを
+   持つことになる。
+3. **detail は解釈しない。** 製品 CLI は括弧形式・standalone runner は空白区切りで**元から別物**
+   （#1544 以来）なので、detail を解析する実装は片方の句読点を契約と読み違えている。
+
+---
 
 ## merge（`scripts/merge.mjs`）
 

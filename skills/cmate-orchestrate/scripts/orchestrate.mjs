@@ -1814,6 +1814,16 @@ const ACCEPTANCE_GATE_RESERVED_IDS = ['work-evidence', 'scope', 'env-clean'];
 // DEFINES. Transcribed rather than derived for the same reason the id pattern is.
 const MIN_ACCEPTANCE_GATE_TIMEOUT_SEC = 1;
 const MAX_ACCEPTANCE_GATE_TIMEOUT_SEC = 7200;
+// The #1771 / #1772 fields a gate entry may also carry (Issues #223 / #224).
+// Upstream runs ONE validator over both `.commandmate/verify.yaml` gates and a
+// contract's `verify.gateDefinitions` (verify-config.ts `validateGateEntries`),
+// so a key accepted there is accepted here, with the same value domains: a
+// resource name that is safe as a path segment, a retry ceiling of exactly 1
+// because the ceiling is the feature, and a `flakyIsPass` that cannot be
+// declared where no retry can ever produce a FLAKY to reclassify.
+const ACCEPTANCE_GATE_MUTEX_RE = /^[A-Za-z0-9_.-]+$/;
+const MAX_ACCEPTANCE_GATE_MUTEX_LENGTH = 64;
+const MAX_ACCEPTANCE_GATE_RETRY_ON_FAIL = 1;
 
 // Removing the block before the prose extractors run is NOT tidiness — it is a
 // correctness fix measured on the current regexes (ADR §10 item 3). The fence
@@ -1933,6 +1943,14 @@ function parseAcceptanceGatesBlock(raw) {
   // block ends.
   const commandless = defined.find((gate) => gate.command === null);
   if (commandless !== undefined) return bad('acceptance_gate_block_invalid', `gate "${commandless.id}" declares no command; a gate that runs nothing cannot judge anything`);
+  // The other rule that cannot be seen line by line (Issue #224): a declaration
+  // that can never fire is a config error, not a preference. Without a retry the
+  // gate has no FLAKY outcome for `flakyIsPass` to reclassify, so the line reads
+  // as "flakes are tolerated here" while changing nothing at all.
+  const unfirable = defined.find((gate) => gate.flakyIsPass === true && gate.retryOnFail !== MAX_ACCEPTANCE_GATE_RETRY_ON_FAIL);
+  if (unfirable !== undefined) {
+    return bad('acceptance_gate_block_invalid', `gate "${unfirable.id}" declares flakyIsPass: true without retryOnFail: ${MAX_ACCEPTANCE_GATE_RETRY_ON_FAIL}; without a retry a gate can never be FLAKY, so the declaration could never take effect`);
+  }
   // `require` and `gates[].id` share ONE id space: a definition is selected by
   // the same `verify.gates` list a `require` id goes into, and the upstream
   // parser refuses a duplicate there. Checking both lists together is also what
@@ -2012,7 +2030,42 @@ function readAcceptanceGateDefinition(entries, indent, content) {
     entry.timeoutSec = seconds;
     return null;
   }
-  return `unknown key "${key}" inside a gate (a gate declares only id, command, timeoutSec)`;
+  if (key === 'mutex') {
+    if (entry.mutex !== undefined) return `gate "${entry.id}" declares "mutex" twice`;
+    const name = unquoteAcceptanceGateScalar(rest);
+    if (name === '') return `gate "${entry.id}" declares an empty mutex`;
+    if (name.length > MAX_ACCEPTANCE_GATE_MUTEX_LENGTH) {
+      return `gate "${entry.id}" declares a mutex of ${name.length} characters, and at most ${MAX_ACCEPTANCE_GATE_MUTEX_LENGTH} are allowed`;
+    }
+    if (!ACCEPTANCE_GATE_MUTEX_RE.test(name)) {
+      return `gate "${entry.id}" declares mutex "${name}", which must match ${ACCEPTANCE_GATE_MUTEX_RE.source} — both runners turn the name into a lock path, so it has to be safe as a path segment`;
+    }
+    entry.mutex = name;
+    return null;
+  }
+  if (key === 'retryOnFail') {
+    if (entry.retryOnFail !== undefined) return `gate "${entry.id}" declares "retryOnFail" twice`;
+    // Not "at most N": the range IS the contract. Enough re-runs turn any red
+    // green, so a gate allowed three attempts has stopped being a gate.
+    if (rest !== '0' && rest !== String(MAX_ACCEPTANCE_GATE_RETRY_ON_FAIL)) {
+      return `gate "${entry.id}" declares retryOnFail "${rest}", and only 0 or ${MAX_ACCEPTANCE_GATE_RETRY_ON_FAIL} are allowed`;
+    }
+    entry.retryOnFail = Number(rest);
+    return null;
+  }
+  if (key === 'flakyIsPass') {
+    if (entry.flakyIsPass !== undefined) return `gate "${entry.id}" declares "flakyIsPass" twice`;
+    if (rest !== 'true' && rest !== 'false') {
+      return `gate "${entry.id}" declares flakyIsPass "${rest}", which is not true or false`;
+    }
+    // The pairing rule it has to satisfy is checked once the whole entry has
+    // been read, not here: a mapping has no order, and refusing an entry that
+    // wrote flakyIsPass above retryOnFail would refuse a block CommandMate's own
+    // parser accepts.
+    entry.flakyIsPass = rest === 'true';
+    return null;
+  }
+  return `unknown key "${key}" inside a gate (a gate declares only id, command, timeoutSec, mutex, retryOnFail, flakyIsPass)`;
 }
 
 // The single- or double-quoted scalar forms the subset allows, mirroring

@@ -30,11 +30,12 @@
 #   validate-fixtures              0.13s   (2026-08-01)
 #   selftest                       0.86s   (2026-08-01)
 #   monitor-fixtures              18.5s    (2026-08-01)
-#   verify-selftest                4.9s    (2026-08-05)
+#   verify-selftest               15s      (2026-08-20; #223/#224 added the mutex
+#                                           contention cases, which really wait)
 #   bash-syntax                   <0.1s    (2026-08-01)
-#   orchestrate-fixtures          54s      (2026-08-05)
+#   orchestrate-fixtures         240s      (2026-08-20)
 #   issue-authoring-fixtures       2s      (2026-08-05)
-#   verify-advisor-fixtures        2.3s    (2026-08-05)
+#   verify-advisor-fixtures        4s      (2026-08-20)
 #   repository-analysis-fixtures   0.3s    (2026-08-05)
 #
 # The runner reads a YAML subset: 2-space indent, single-line scalars, no inline

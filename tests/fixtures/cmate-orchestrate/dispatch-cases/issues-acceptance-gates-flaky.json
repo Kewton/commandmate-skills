@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 330,
+      "title": "feat: a contract gate that opts into one retry",
+      "body": "The unit gate this issue defines is red the first time and green the second.\n\n## 対象ファイル\n- `docs/adr.md`\n\n## Acceptance criteria\n- [ ] the retry is carried by the contract\n\n```acceptance-gates\nversion: 1\ngates:\n  - id: issue-330-flaky-probe\n    command: \"sh -c 'if [ -f .flake-seen ]; then exit 0; fi; : > .flake-seen; exit 1'\"\n    timeoutSec: 120\n    retryOnFail: 1\n    flakyIsPass: true\n```\n",
+      "labels": []
+    }
+  ]
+}

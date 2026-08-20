@@ -339,7 +339,7 @@ run ディレクトリの JSON の中にしか無い状態を残さない。
 | 載せるもの | 出どころ |
 |---|---|
 | verdict（`verification.outcome`）と、走っていない場合（`ran: false`）の明示 | dispatch report の当該 worker |
-| gate 名・合否・exit code の表 | 同 `verification.gates` / `checks`（`gate <id>: … (exit n)` から exit を拾う） |
+| gate 名・合否・exit code の表 | 同 `verification.gates` / `checks`（`gate <id>: … (exit n)` から exit を拾う）。合否は `pass` / `fail` / `flaky` の 3 値（[#224](https://github.com/Kewton/commandmate-skills/issues/224)） |
 | 宣言 scope（`scope.allow` = plan の対象 file）と実変更 file の対比表、**scope 外変更の件数** | plan の `suspected_files` と、worktree で実行した `git diff --name-only -z <base>...<branch>` |
 | diff 規模（file 数・追加/削除行数）1行 | 同 worktree の `git diff --numstat -z` |
 
@@ -350,6 +350,14 @@ run ディレクトリの JSON の中にしか無い状態を残さない。
 - **読めなかったものを pass に丸めない。** worktree が既に片付いていて diff が読めなければ
   「読めなかった」と本文に書き、limitation `change_evidence_unavailable` を記録する。
   `ran: false` の verdict も同様に「検証は走っていない」と明示する。
+- **`flaky` を pass にも fail にも丸めない**（[#224](https://github.com/Kewton/commandmate-skills/issues/224)
+  / CommandMate #1772）。1 回目 fail → 同一 tree の 2 回目 pass であって、どちらの語もその gate に
+  ついて真ではない。丸めればレビュアが最も見るべき事実が消え、「本当に 2 回落ちた run」とも
+  区別できなくなる。`flaky` の行が 1 つでも在れば、その語の意味を表の隣に 1 文で書く ——
+  `| unit | flaky | 1 |` だけを見た人は pass の一種か fail の一種かを判断できず、判断しようと
+  すれば間違える。決めているのは verify.yaml の `flakyIsPass` であり、それは PR 本文にも
+  dispatch report にも載っていない。**注記は「どう数えたか」を言わず、`Verdict` 行
+  （runner の exit code）を指す** —— 語から裁定を再計算する実装は両方向に間違える。
 - **黙って切り詰めない。** gh の本文上限（65536 字）に収めるため gates/checks/path の一覧は
   上限件数で打ち切るが、**打ち切った件数を本文に明記する**。
 - 実変更が宣言 scope の外に出ていれば本文でその path を名指しし、limitation

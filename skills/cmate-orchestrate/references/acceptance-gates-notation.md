@@ -74,7 +74,8 @@ require:
 | 禁止 | anchor / alias（`&` `*`）・flow collection（`[` `{`）・block scalar（`|` `>`）・複数行文字列・`---` / `...` |
 | gate id | `^[a-z0-9][a-z0-9-]{0,31}$`。CommandMate の `GATE_ID_PATTERN` と同一。**引用符は付けない**（付けたら値の一部） |
 | `gates[].id` | 上記に加えて **`issue-<Issue 番号>-` で始まる**こと（第 6.1 節）。予約 id（`work-evidence` / `scope` / `env-clean`）は不可 |
-| `gates[]` の key | `id`（**entry の先頭**）・`command`（必須・非空）・`timeoutSec`（任意・整数・1..7200）。**閉じた集合** |
+| `gates[]` の key | `id`（**entry の先頭**）・`command`（必須・非空）・`timeoutSec`（任意・整数・1..7200）・`mutex`（任意・`^[A-Za-z0-9_.-]+$` / 64 文字以内）・`retryOnFail`（任意・**`0` か `1` のみ**）・`flakyIsPass`（任意・`true` / `false`）。**閉じた集合** |
+| `gates[].flakyIsPass` | `true` は **`retryOnFail: 1` を同じ entry に伴わなければ syntax error**（entry 内の記述順は問わない）。再実行が無ければ FLAKY は発生しないので、その宣言は「ここでは flake を許す」と読めて何も変えない |
 | `gates[].command` | 単一行。`"` / `'` で囲ってよい（囲えば外側の引用符は値に含まれない）。verify.yaml の書き方と同じ |
 | 個数上限 | `require` と `gates[].id` を合わせて最大 32 件。重複は error（2 つのリストは**同じ id 空間**である） |
 | 空ブロック | `require` も `gates` も空なら syntax error |
@@ -89,6 +90,13 @@ require:
 
 `timeoutSec` を書かなかった entry は**契約でも書かれない**。CommandMate 自身の既定
 （`DEFAULT_TIMEOUT_SEC` = 600 秒）が効き、runner が勝手に決めた数が混ざらない。
+`mutex` / `retryOnFail` / `flakyIsPass`（[#223](https://github.com/Kewton/commandmate-skills/issues/223) /
+[#224](https://github.com/Kewton/commandmate-skills/issues/224)、CommandMate #1771 / #1772）も同じで、
+**宣言した entry にだけ書かれる** —— 使っていない Issue の契約は、これらの key が存在しなかった頃と
+byte 一致する。上流は verify.yaml の `gates[]` と契約の `verify.gateDefinitions` を**同じ validator**
+（`verify-config.ts` の `validateGateEntries`）で検査するので、受理集合はここでも同一である。
+意味（マシン全体の排他 / 同一 tree の 1 回だけの再実行 / FLAKY の裁定）は
+[cmate-verify の SKILL.md](../../cmate-verify/SKILL.md) が正本。
 
 ---
 

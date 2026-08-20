@@ -1,0 +1,28 @@
+{
+  "issues": [
+    {
+      "number": 371,
+      "title": "fix: retry twice",
+      "labels": [],
+      "body": "## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\ngates:\n  - id: issue-371-unit\n    command: \"npm run test:unit\"\n    retryOnFail: 2\n```\n"
+    },
+    {
+      "number": 372,
+      "title": "fix: tolerate a flake that cannot happen",
+      "labels": [],
+      "body": "## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\ngates:\n  - id: issue-372-unit\n    command: \"npm run test:unit\"\n    flakyIsPass: true\n```\n"
+    },
+    {
+      "number": 373,
+      "title": "fix: a mutex name that is not a path segment",
+      "labels": [],
+      "body": "## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\ngates:\n  - id: issue-373-e2e\n    command: \"npm run test:e2e\"\n    mutex: e2e/port\n```\n"
+    },
+    {
+      "number": 374,
+      "title": "fix: flakyIsPass declared before its retry",
+      "labels": [],
+      "body": "## 対象ファイル\n- `src/gates.ts`\n\n## Acceptance criteria\n- [ ] it works\n\n```acceptance-gates\nversion: 1\ngates:\n  - id: issue-374-unit\n    command: \"npm run test:unit\"\n    flakyIsPass: true\n    retryOnFail: 1\n```\n"
+    }
+  ]
+}

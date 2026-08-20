@@ -1,0 +1,59 @@
+{
+  "description": "Issue #224: PR 本文の Verification 表に `flaky` がそのまま載り、その意味が表の隣で説明される。#201 の verification は `unit` を `verdict: flaky` として運び、run 自体は pass で終わっている（同一 tree の再実行で fail→pass し、その gate の `flakyIsPass` によって pass に数えられた世界）。merge がここで守るのは 2 点。(1) 転記であって再判定ではない —— `flaky` を `pass` にも `fail` にも書き換えない。書き換えれば、レビュアが最も見るべき事実（この緑は 1 回赤かった）が本文から消える。(2) `FLAKY` という語が本文の中で説明される。`| unit | flaky | 1 |` だけを見たレビュアは、それが pass の一種なのか fail の一種なのかを判断できず、判断しようとして間違える —— 決めているのは verify.yaml の `flakyIsPass` であり、それはこの PR 本文にも dispatch report にも載っていない。だから注記は「run がどう数えたか」を言わず、`Verdict` 行（= runner の exit code）が既にその答えである、と指す。`flaky` を持たない #200 側の本文にはこの注記が出ないことも同時に assert する —— 使っていない repository の本文は 1 バイトも変わらない。",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "dispatch_scenario": {
+    "cli_available": true,
+    "cli_contract": true,
+    "git": { "branch": "feature/integration", "dirty": false },
+    "gh": { "repo_access": true },
+    "workers": {
+      "201": {
+        "state": "completed",
+        "verify_exits": [0],
+        "gate_lines_raw": [
+          "GATE work-evidence PASS (commits=1, uncommitted=0)",
+          "GATE unit FLAKY (exit=1,0, 45.0s,44.0s)",
+          "GATE e2e PASS exit=0 duration=190s waited=42s"
+        ]
+      },
+      "200": { "state": "completed", "verify_exits": [0] }
+    }
+  },
+  "merge_args": ["--approve"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": { "200": { "create": "ok" }, "201": { "create": "ok" } }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "pr_create_calls": 2,
+    "pr_bodies_contain": {
+      "201": [
+        "- Verdict: **pass**",
+        "| Gate | Verdict | Exit |",
+        "| work-evidence | pass | — |",
+        "| unit | flaky | — |",
+        "| e2e | pass | — |",
+        "**FLAKY** means the gate failed and then passed on a re-run against the same tree (CommandMate #1772)."
+      ],
+      "200": [
+        "- Verdict: **pass**",
+        "| work-evidence | pass | — |"
+      ]
+    },
+    "pr_bodies_absent": {
+      "201": ["| unit | pass |", "| unit | fail |"],
+      "200": ["**FLAKY** means"]
+    }
+  }
+}

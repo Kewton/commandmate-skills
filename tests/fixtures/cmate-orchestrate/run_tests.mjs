@@ -2956,6 +2956,13 @@ function runStatusCase(caseId) {
       const gates = issue.dispatch.gates.map((gate) => `${gate.id}=${gate.verdict}`);
       check(deepEqual(gates, dispatch.gates), `#${number} gates ${JSON.stringify(gates)} !== ${JSON.stringify(dispatch.gates)}`);
     }
+    // Asserted separately from `gates` (Issue #224): a FLAKY gate has to be
+    // findable without reading a comma-separated line token by token, and an
+    // empty list has to stay empty for every run that had none.
+    if (dispatch.flaky_gates !== undefined) {
+      check(deepEqual(issue.dispatch.flaky_gates, dispatch.flaky_gates),
+        `#${number} flaky_gates ${JSON.stringify(issue.dispatch.flaky_gates)} !== ${JSON.stringify(dispatch.flaky_gates)}`);
+    }
   }
   for (const [number, merge] of Object.entries(expect.merge ?? {})) {
     const issue = issueOfView(Number(number));

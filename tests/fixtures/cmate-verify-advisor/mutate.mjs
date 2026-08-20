@@ -135,6 +135,37 @@ const MUTATIONS = {
       '  const argv = [raw];',
     ]],
   },
+  // Issues #223 / #224. Each mutation restores exactly the behaviour the parity
+  // work removed, so the new assertions are shown to be load-bearing rather than
+  // green because nothing ever fires them.
+  'ignore-mutex-wait': {
+    describes: 'a shorter timeout may again be argued for a gate whose timeout is also its lock-wait budget',
+    edits: [[
+      '    if (target < current && stat.waitedBy.length > 0) continue;',
+      '    // mutex-wait guard removed by mutation',
+    ]],
+  },
+  'fold-waited-into-duration': {
+    describes: 'the lock wait is added into the duration series the timeout arithmetic reads',
+    edits: [[
+      '      if (gate.durationMs !== null) stat.durationsMs.push(gate.durationMs);',
+      '      if (gate.durationMs !== null) stat.durationsMs.push(gate.durationMs + (gate.waitedMs ?? 0));',
+    ]],
+  },
+  'ignore-flaky-marker': {
+    describes: 'a recorded FLAKY outcome is never read, so measured flakiness degrades back to inference',
+    edits: [[
+      '        flaky: parseFlaky(extra ? extra.flaky : null, logTail),',
+      '        flaky: null,',
+    ]],
+  },
+  'flaky-without-denominator': {
+    describes: 'the marker is read only on the flaky half, so every retried gate looks flaky',
+    edits: [[
+      "        if (gate.flaky.outcome === 'flaky') stat.flakyRuns.push(record);\n        else stat.flakyFailRuns.push(record);",
+      "        if (gate.flaky.outcome === 'flaky') stat.flakyRuns.push(record);",
+    ]],
+  },
   'accept-shell-syntax': {
     describes: 'a launcher carrying shell syntax is accepted and handed to spawn as literal argv',
     edits: [[

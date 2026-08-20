@@ -1,0 +1,44 @@
+{
+  "description": "Issues #223 / #224: the `gates:` notation carries CommandMate #1771 / #1772's three fields. Upstream runs ONE validator over both `.commandmate/verify.yaml` gates and a contract's `verify.gateDefinitions` (verify-config.ts `validateGateEntries`), so a key accepted there has to be accepted here — a block the planner refuses is an acceptance condition its author cannot state, and a block the planner accepts and `send --contract` refuses is an exit 2 about a worker that never ran. The transcription is a COPY, as everywhere in this notation: author order, `flakyIsPass: false` written out because the author wrote it (it is the default made explicit, which is legal), and `timeoutSec` still ABSENT on the entries that declared none. `flakyIsPass: true` is accepted here because the same entry declares `retryOnFail: 1`; case 86 is the other side of that rule.",
+  "args": [
+    "370",
+    "--profile",
+    "node-commandmate",
+    "--max-parallel",
+    "3",
+    "--run-id",
+    "fixture",
+    "--no-infer"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "acceptance_gates": {
+      "370": {
+        "version": 1,
+        "require": [],
+        "gates": [
+          {
+            "id": "issue-370-e2e",
+            "command": "npm run test:e2e",
+            "timeoutSec": 1800,
+            "mutex": "e2e-port"
+          },
+          {
+            "id": "issue-370-unit",
+            "command": "npm run test:unit",
+            "retryOnFail": 1,
+            "flakyIsPass": true
+          },
+          {
+            "id": "issue-370-explicit-default",
+            "command": "npm run lint",
+            "retryOnFail": 0,
+            "flakyIsPass": false
+          }
+        ]
+      }
+    }
+  }
+}

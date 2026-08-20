@@ -55,10 +55,35 @@ git show --stat <sha>
 **確度が足りないときは提案しない。** 変える理由がない日に変更を発明しないこと（提案 0 件は
 正常な出力である）。
 
-## 2. flake 疑い
+## 2. flake の実績と疑い
 
-層 1 が `OBSERVATION flake-candidate` として列挙する。同一 worktree・同一ゲートで
-fail → pass が並んだペアである。
+層 1 が 2 段で出す。**強いほうを先に読むこと** —— 片方しか無い履歴では、弱いほうが唯一の
+入力になる。
+
+### 2.0 `OBSERVATION flake-observed` — 実測（Issue #224 / CommandMate #1772）
+
+`retryOnFail: 1` を宣言したゲートが**同一 tree で実際に再実行され**、2 ラン が食い違った、
+という**記録**である（ランナーが `log_tail` の行頭に置く `[flaky]` アンカー、または
+`verify show --json` の `gates[].flaky`）。下の §2.1 が抱える「2 ラン の間に木が変わったかも
+しれない」という穴が、ここには**無い**。
+
+```
+OBSERVATION flake-observed gate unit was re-run in the same tree 3 time(s):
+  2 FLAKY (failed then passed, 0 of them counted as a pass by flakyIsPass), 1 failed twice
+```
+
+- **分母を読むこと。** 「2 回とも fail」はその日の flakiness に対する**反証**である。
+  ランナーは `outcome=fail` のときもアンカーを書く —— flaky 側にしか印が無ければ、
+  再実行したゲートは全て flaky に見える。
+- **やることは §2.1 と同じである。** 実測であっても**自動隔離はしない**（下記）。
+  flake と間欠バグの区別は「同じ木で再現しなかった」からは出てこない ——
+  間欠バグはまさに「同じ木で再現しないことがある」バグである。
+- 実測が在るゲートについて層 1 は §2.1 の推定を出さない。強い主張の隣に弱い主張を
+  同格で並べないためで、**推定が消えたことを「flake が減った」と読まないこと**。
+
+### 2.1 `OBSERVATION flake-candidate` — 推定
+
+同一 worktree・同一ゲートで fail → pass が並んだペアである。
 
 **これは flake の証明ではない。** `verify history` に commit sha が無い以上、2 つの run が
 同じ木を見ていたかは分からない。間の commit で本当に直った可能性の方が普通は高い。
@@ -77,6 +102,14 @@ flake と間欠バグは履歴からは同じに見える。隔離した相手�
 
 flake 疑いに対して層 2 が出してよい提案があるとすれば、**隠れている非決定性を可視化する
 ゲートの追加**（`add-gate`）である。取り除く方向の提案ではない。
+
+`retryOnFail: 1` を足す提案も**この Skill は出さない**。再実行そのものは隔離ではない
+（既定では FLAKY は fail のままで、ゲートは 1 bit も弱くならない）が、`gates[].retryOnFail` は
+層 1 が書ける 3 種類の変更に含まれておらず、**書けない変更を提案しても人間が verify.yaml を
+編集するだけ**である。伝えるべきことは提案ではなく事実で足りる: 「このゲートは fail→pass の
+候補が N 件ある。`retryOnFail: 1` を宣言すれば、次からは推定ではなく実測になる」。
+`flakyIsPass: true` は**それとは別の話**で、これは本物の弱体化（FLAKY を pass と数える）で
+あり、非対称ルールにより層 2 の提案としても書き込まれない。
 
 ## 3. 担保されない受入条件の洗い出し（coverage 対応付け）
 

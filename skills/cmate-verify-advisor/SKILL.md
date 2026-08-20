@@ -74,6 +74,26 @@ node .claude/skills/cmate-verify-advisor/scripts/verify-advisor.mjs \
 調整するのは `timeoutSec`・ゲート並び順・`maxLogTailBytes` の 3 つで、**式・下限・黙り込む
 条件の正本は** [`references/layer1-adjustments.md`](references/layer1-adjustments.md)。
 
+**ロック待ちは duration ではない**（Issue #223 / CommandMate #1771）。`mutex` を宣言した
+ゲートの `log_tail` 先頭には `[mutex] name=<name> waited=<n.n>s lock=<path>` が置かれる。
+advisor はその数値を duration 系列から**外したまま**別に集計し、次の 2 つを守る。
+
+- **`waited` を duration に足さない。** 足すと「このゲートが遅くなった」の判断も p99 も、
+  マシンがどれだけ混んでいたかで歪む。
+- **ロック待ちが観測されたゲートの timeout を短くする提案は出さない。** `mutex` 付きゲートの
+  `timeoutSec` は**コマンドの予算であると同時にロック待ちの予算**である。待ちを除いた duration
+  から短い数字を出すと、混雑が `GATE <id> SKIP reason=mutex-wait`（＝裁定に到達しないゲート）
+  に化ける —— 削った余裕より確実に悪い。理由は `OBSERVATION mutex-wait-observed` に出る。
+
+### キーの受理集合
+
+`.commandmate/verify.yaml` の受理集合は cmate-verify のランナー・CommandMate 本体と**同一**で
+なければならない（片方だけが知らないキーは、正しい設定を exit 2 で拒否する）。正本は
+[cmate-verify の SKILL.md のキー表](../cmate-verify/SKILL.md)、機械的な固定は
+`tests/fixtures/cmate-verify-advisor/parser-parity.sh`。`gates[]` の
+`mutex` / `retryOnFail` / `flakyIsPass` と `options.requireEnvClean` は**値域まで**同じに検査する
+（`retryOnFail` は 0 か 1、`flakyIsPass: true` は `retryOnFail: 1` を伴わなければ設定エラー）。
+
 ### 2.2 層 2 — 検証の意味を変える変更（分析・**提案のみ**）
 
 判断が要るので Agent が行う。**手順の正本は**
@@ -81,8 +101,16 @@ node .claude/skills/cmate-verify-advisor/scripts/verify-advisor.mjs \
 
 - **すり抜け検出**（同 §1）— 検証 PASS の後に revert / fix / CI 赤の対象になった変更を
   `git log` と `gh pr list` で突き合わせ、穴を塞ぐゲート追加を提案する
-- **flake 疑い**（同 §2）— 同一 worktree・同一ゲートの fail→pass を証跡つきで人間に提示する。
-  **自動隔離はしない**（flake と間欠バグは履歴からは区別できない）
+- **flake の実績と疑い**（同 §2）— 2 段ある。**強いほう**は `OBSERVATION flake-observed`:
+  `retryOnFail: 1` を宣言したゲートが**同一 tree で実際に再実行され**、2 ラン が食い違った
+  という記録（`[flaky]` アンカー、または `verify show --json` の `gates[].flaky`）である。
+  ここには「2 ラン の間に tree が変わったかもしれない」という穴が無い。**弱いほう**は
+  従来の `OBSERVATION flake-candidate`: 別々の run をまたいだ fail→pass の**推定**で、
+  `verify history` は commit sha を持たないので同一 tree だったとは言えない。
+  実績が在るゲートについては推定を出さない（強い主張の隣に弱い主張を同格で並べない）。
+  実績側には**分母**も出る —— 2 回とも落ちたゲートは flakiness に対する反証であり、
+  ランナーはそのためにこそ `outcome=fail` でもアンカーを書く。
+  どちらも **自動隔離はしない**（flake と間欠バグは履歴からは区別できない）
 - **担保されない受入条件の洗い出し（coverage 対応付け）**（同 §3）— 受入条件それぞれに
   「どのゲートが担保するか」を対応付け、どのゲートにも対応しない条件を明示的に列挙する。
   対応の無い条件を黙って落とさない — それがすり抜けの正体である

@@ -95,8 +95,8 @@ risk_rationale: >-
   commandmate CLI が local の API を叩くだけなので host は固定しない。
 files:
   - path: SKILL.md
-    sha256: 26701eaa152e184301a802a17c712b7ccf27ccf6e727737991ed12be2638665e
-    size: 14117
+    sha256: 26c76ad8150872a8030303d86c1eb4e1c87ac00f2ce330cdf2a1d79a60a5a2ac
+    size: 16646
     kind: skill_md
     executable: false
     script: false
@@ -107,14 +107,14 @@ files:
     executable: false
     script: false
   - path: references/layer1-adjustments.md
-    sha256: 07014f0ddd7911a4f20b5fe59a9fd44fe249e4861786e32d5ec0ef400e7bccc4
-    size: 4437
+    sha256: 4fc078456c071d8ec17e963529a7ccdebf2dc6dfa8e2effd114a28d1df330e34
+    size: 5368
     kind: instruction
     executable: false
     script: false
   - path: references/layer2-review.md
-    sha256: aef9648038dd9a3b4c7246860e029a158ce50d503b5590c3bab6109887bc3384
-    size: 7488
+    sha256: 77765ed57bdd3ab3859ef186a69ffea9a1234aa8309c1016ccb61a31a9ea4785
+    size: 9955
     kind: instruction
     executable: false
     script: false
@@ -125,8 +125,8 @@ files:
     executable: false
     script: false
   - path: scripts/verify-advisor.mjs
-    sha256: 30416d7f9d23ef9ef1a810d78c6c1fc5818ab1969b8d110e1a2a286b6b3ef36f
-    size: 73663
+    sha256: 07d12e7eb5965b41e52ba01c70e6319b1300594c29c61fe9aea4477126812ffb
+    size: 86176
     kind: script
     executable: false
     script: true

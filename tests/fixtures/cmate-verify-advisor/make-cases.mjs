@@ -39,7 +39,10 @@ function gate(gateId, status, exitCode, durationMs) {
   return { gateId, status, exitCode, durationMs };
 }
 
-function detailOf(run, tails) {
+// `extras` adds per-gate fields the CLI carries beside the stored columns —
+// today only `flaky`, which `verify show --json` structures out of the log
+// marker (verification-config.md section 10.4).
+function detailOf(run, tails, extras = {}) {
   return {
     ...run,
     gates: run.gates.map((g, n) => ({
@@ -53,6 +56,7 @@ function detailOf(run, tails) {
       logTail: Object.prototype.hasOwnProperty.call(tails, g.gateId) ? tails[g.gateId](g) : null,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,
+      ...(Object.prototype.hasOwnProperty.call(extras, g.gateId) ? extras[g.gateId](g, run) : {}),
     })),
   };
 }
@@ -183,6 +187,58 @@ const flake = [
 writeFileSync(
   `${OUT}/flake.json`,
   `${JSON.stringify({ history: [...flake].reverse(), details: flake.map((r) => detailOf(r, {})) }, null, 2)}\n`
+);
+
+// --- flaky-measured: `unit` declared retryOnFail and was really re-run --------
+//
+// Two markers, on purpose (CommandMate #1772): run 103 failed then passed
+// (outcome=flaky) and run 106 failed twice (outcome=fail). The second is what
+// gives the ratio a denominator — a marker written only on the flaky half makes
+// every retried gate look flaky.
+//
+// Run 103 also carries the STRUCTURED `flaky` field the CLI's --json exposes and
+// run 106 carries only the log marker, so both readers are exercised by one
+// fixture and neither can be the only one that works.
+const FLAKY_MARKER = (outcome, verdict, exits, durations) =>
+  `[flaky] runs=2 outcome=${outcome} exit=${exits} duration=${durations} verdict=${verdict}\n` +
+  `--- [flaky] run 1/2: failed exit=1 duration=${durations.split(',')[0]} ---\n` +
+  `${INJECTION}--- [flaky] run 2/2: ${outcome === 'flaky' ? 'passed exit=0' : 'failed exit=1'} duration=${durations.split(',')[1]} ---\n`;
+
+const flakyTail = (g, run) => {
+  if (g.gateId !== 'unit' || g.status !== 'failed') return null;
+  return run.id === 103
+    ? FLAKY_MARKER('flaky', 'fail', '1,0', '39.2s,38.9s')
+    : FLAKY_MARKER('fail', 'fail', '1,1', '39.5s,39.1s');
+};
+const flakyExtra = (g, run) => {
+  if (g.gateId !== 'unit' || run.id !== 103) return {};
+  return { flaky: { runs: 2, outcome: 'flaky', exitCodes: [1, 0], durationsMs: [39200, 38900], verdict: 'fail' } };
+};
+const flakyMeasuredDetails = steady.map((r) =>
+  detailOf(r, { unit: (g) => flakyTail(g, r) }, { unit: (g) => flakyExtra(g, r) })
+);
+writeFileSync(
+  `${OUT}/flaky-measured.json`,
+  `${JSON.stringify({ history: [...steady].reverse(), details: flakyMeasuredDetails }, null, 2)}\n`
+);
+
+// --- mutex-wait: the same durations, all of them queued behind a lock ---------
+//
+// `unit` runs for ~39s against a declared 1800s timeout, so without the wait the
+// arithmetic argues for a much SHORTER timeout. Every run also queued for its
+// mutex, and for a mutexed gate `timeoutSec` is the lock-wait budget as well as
+// the command budget (#1771) — so the shortening must not be proposed, and the
+// wait must never be added into the durations either.
+const mutexTail = (run) =>
+  `[mutex] name=e2e-port waited=${(40 + (run.id % 5) * 10).toFixed(1)}s lock=/home/dev/.commandmate/locks/e2e-port.lock\n` +
+  `${INJECTION}`;
+writeFileSync(
+  `${OUT}/mutex-wait.json`,
+  `${JSON.stringify(
+    { history: [...steady].reverse(), details: steady.map((r) => detailOf(r, { unit: () => mutexTail(r) })) },
+    null,
+    2
+  )}\n`
 );
 
 // --- empty: the CLI answered, and there is nothing in the window -------------

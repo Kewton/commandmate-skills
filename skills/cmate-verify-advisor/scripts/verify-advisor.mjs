@@ -57,18 +57,38 @@ const DEFAULT_MAX_LOG_TAIL_BYTES = 8192;
 const MAX_LOG_TAIL_BYTES_LIMIT = 1048576;
 const DEFAULT_SKIP_IN_PRIMARY_CHECKOUT = 'true';
 const DEFAULT_REQUIRE_COMMIT = 'false';
+const DEFAULT_REQUIRE_ENV_CLEAN = 'false';
 const GATE_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
-const RESERVED_GATE_IDS = new Set(['work-evidence', 'scope']);
+// `env-clean` joined the built-ins in CommandMate #1740, alongside work-evidence
+// and scope. Reserved here for the same reason the other two are: a repository
+// gate that takes the name would be shadowed by the built-in.
+const RESERVED_GATE_IDS = new Set(['work-evidence', 'scope', 'env-clean']);
 const TOP_LEVEL_KEYS = new Set(['version', 'gates', 'options']);
-const GATE_KEYS = new Set(['id', 'command', 'timeoutSec']);
-// Must stay identical to the set cmate-verify's runner accepts
-// (`skills/cmate-verify/scripts/verify-run.sh`, the `KV_K == ...` chain inside
-// the awk parser). A key the runner accepts and this parser does not turns a
-// perfectly valid repository config into exit 2 here — which is how
-// `requireCommit` (CommandMate #1642) was rejected until Issue #57. The two
-// parsers are separate implementations in separate languages, so the agreement
-// is pinned by a test: `tests/fixtures/cmate-verify-advisor/parser-parity.sh`.
-const OPTION_KEYS = new Set(['baseRef', 'skipInPrimaryCheckout', 'maxLogTailBytes', 'requireCommit']);
+// Both key sets must stay identical to what cmate-verify's runner accepts
+// (`skills/cmate-verify/scripts/verify-run.sh`, the `KV_K == ...` chains inside
+// the awk parser) and to what CommandMate's own loader accepts
+// (`src/lib/verification/verify-config.ts`, GATE_KEYS / OPTION_KEYS). A key one
+// accepts and another does not turns a perfectly valid repository config into
+// exit 2 here — which is how `requireCommit` (CommandMate #1642) was rejected
+// until Issue #57, and how `mutex` (#1771), `retryOnFail` / `flakyIsPass`
+// (#1772) and `requireEnvClean` (#1740) were rejected until Issues #223 / #224.
+// The implementations are separate, in separate languages, so the agreement is
+// pinned by a test: `tests/fixtures/cmate-verify-advisor/parser-parity.sh`.
+const GATE_KEYS = new Set(['id', 'command', 'timeoutSec', 'mutex', 'retryOnFail', 'flakyIsPass']);
+const OPTION_KEYS = new Set([
+  'baseRef',
+  'skipInPrimaryCheckout',
+  'maxLogTailBytes',
+  'requireCommit',
+  'requireEnvClean',
+]);
+
+// Value domains mirrored from the same two implementations.
+const GATE_MUTEX_RE = /^[A-Za-z0-9_.-]+$/;
+const MAX_GATE_MUTEX_LENGTH = 64;
+// The ceiling is the feature, not a tuning parameter: enough re-runs turn any
+// red green, so 2 is a config error rather than a longer retry.
+const MAX_RETRY_ON_FAIL = 1;
 
 // What the runner uses when the key is absent, as strings, so "set it to the
 // value it already has" is recognised as a change to nothing rather than as a
@@ -78,6 +98,7 @@ const OPTION_DEFAULTS = new Map([
   ['skipInPrimaryCheckout', DEFAULT_SKIP_IN_PRIMARY_CHECKOUT],
   ['maxLogTailBytes', String(DEFAULT_MAX_LOG_TAIL_BYTES)],
   ['requireCommit', DEFAULT_REQUIRE_COMMIT],
+  ['requireEnvClean', DEFAULT_REQUIRE_ENV_CLEAN],
 ]);
 
 // --- tunables ---------------------------------------------------------------
@@ -330,7 +351,7 @@ function parseConfig(text, path) {
           continue;
         }
         flush();
-        current = { id: null, command: null, timeoutSec: null, lineOf: new Map(), start: i, end: i, index: gates.length };
+        current = { id: null, command: null, timeoutSec: null, mutex: null, retryOnFail: null, flakyIsPass: null, lineOf: new Map(), start: i, end: i, index: gates.length };
         readGateField(body.slice(2).trim(), lineNo, i, current, errors);
         continue;
       }
@@ -388,6 +409,39 @@ function parseConfig(text, path) {
       gate.effectiveTimeoutSec = value;
       gate.timeoutIsDefault = false;
     }
+
+    // A mutex names a RESOURCE, so its pattern is wider than a gate id's — and
+    // narrow enough to be safe as a path segment, because both runners turn it
+    // into `<lock-root>/<name>.lock` (CommandMate #1771).
+    if (gate.mutex !== null) {
+      if (gate.mutex.length > MAX_GATE_MUTEX_LENGTH) {
+        errors.push(`line ${gate.start + 1}: mutex must be at most ${MAX_GATE_MUTEX_LENGTH} characters (gate ${gate.id}, got: ${gate.mutex.length})`);
+      } else if (!GATE_MUTEX_RE.test(gate.mutex)) {
+        errors.push(`line ${gate.start + 1}: invalid mutex name: ${gate.mutex} (gate ${gate.id}, must match ${GATE_MUTEX_RE.source})`);
+      }
+    }
+
+    let retryOnFail = 0;
+    if (gate.retryOnFail !== null) {
+      if (gate.retryOnFail !== '0' && gate.retryOnFail !== String(MAX_RETRY_ON_FAIL)) {
+        // Not "at most N": the range is the contract, so the message states it.
+        errors.push(`line ${gate.start + 1}: retryOnFail must be 0 or ${MAX_RETRY_ON_FAIL} (gate ${gate.id}, got: ${gate.retryOnFail})`);
+      } else {
+        retryOnFail = Number(gate.retryOnFail);
+      }
+    }
+    gate.effectiveRetryOnFail = retryOnFail;
+
+    if (gate.flakyIsPass !== null) {
+      if (gate.flakyIsPass !== 'true' && gate.flakyIsPass !== 'false') {
+        errors.push(`line ${gate.start + 1}: flakyIsPass must be true or false (gate ${gate.id}, got: ${gate.flakyIsPass})`);
+      } else if (gate.flakyIsPass === 'true' && retryOnFail !== MAX_RETRY_ON_FAIL) {
+        // A knob that can never fire is a config bug, not a preference: without
+        // a retry the gate has no FLAKY outcome for this to reclassify.
+        errors.push(`line ${gate.start + 1}: flakyIsPass: true requires retryOnFail: ${MAX_RETRY_ON_FAIL} (gate ${gate.id}, without a retry a gate can never be FLAKY)`);
+      }
+    }
+    gate.effectiveFlakyIsPass = gate.flakyIsPass === 'true';
   }
 
   const maxTail = options.get('maxLogTailBytes');
@@ -408,6 +462,10 @@ function parseConfig(text, path) {
   const requireCommit = options.get('requireCommit');
   if (requireCommit && requireCommit.value !== 'true' && requireCommit.value !== 'false') {
     errors.push(`line ${requireCommit.line + 1}: options.requireCommit must be true or false (got: ${requireCommit.value})`);
+  }
+  const requireEnvClean = options.get('requireEnvClean');
+  if (requireEnvClean && requireEnvClean.value !== 'true' && requireEnvClean.value !== 'false') {
+    errors.push(`line ${requireEnvClean.line + 1}: options.requireEnvClean must be true or false (got: ${requireEnvClean.value})`);
   }
 
   if (errors.length > 0) {
@@ -628,6 +686,13 @@ function classifyChange(change) {
         // true -> false drops that demand, so it is a weakening.
         return String(change.to) === 'true' ? STRENGTHEN : WEAKEN;
       }
+      if (change.key === 'requireEnvClean') {
+        if (String(change.to) === String(change.from)) return null;
+        // Turning it off switches the built-in env-clean gate off for the whole
+        // repository (CommandMate #1740), i.e. one fewer judge. Same direction
+        // rule as requireCommit; neither is ever WRITTEN, see assertNoWeakening.
+        return String(change.to) === 'true' ? STRENGTHEN : WEAKEN;
+      }
       // baseRef moves what "changed" means. It can be right, and it can never be
       // shown to be a strengthening from history alone.
       return WEAKEN;
@@ -700,6 +765,22 @@ function assertNoWeakening(before, after) {
   // ever written. The guard is on the key, not on the direction.
   if (optionOf(before, 'requireCommit', DEFAULT_REQUIRE_COMMIT) !== optionOf(after, 'requireCommit', DEFAULT_REQUIRE_COMMIT)) {
     throw new AdvisorError(EXIT_ERROR, 'internal guard: --apply would change options.requireCommit');
+  }
+  if (optionOf(before, 'requireEnvClean', DEFAULT_REQUIRE_ENV_CLEAN) !== optionOf(after, 'requireEnvClean', DEFAULT_REQUIRE_ENV_CLEAN)) {
+    throw new AdvisorError(EXIT_ERROR, 'internal guard: --apply would change options.requireEnvClean');
+  }
+  // The #1771 / #1772 gate fields are not layer-1 territory either. `mutex` is a
+  // statement about a machine resource, `retryOnFail` / `flakyIsPass` about what
+  // a red means — none of the three is derivable from durations and exit codes,
+  // and dropping a `mutex` or raising `flakyIsPass` would be a weakening this
+  // tool must never write. The guard is on the keys, not on the direction.
+  for (const gate of before.gates) {
+    const next = after.gates.find((g) => g.id === gate.id);
+    for (const key of ['mutex', 'retryOnFail', 'flakyIsPass']) {
+      if (String(gate[key] ?? '') !== String(next[key] ?? '')) {
+        throw new AdvisorError(EXIT_ERROR, `internal guard: --apply would change gates[${gate.id}].${key}`);
+      }
+    }
   }
 }
 
@@ -836,6 +917,12 @@ function normaliseRuns(history, details, filters) {
         hasDetail: Boolean(extra),
         logTailBytes: logTail === null ? null : Buffer.byteLength(logTail, 'utf8'),
         summaryDetected: logTail === null ? null : hasSummaryShape(logTail),
+        // Kept BESIDE durationMs and never added to it: the duration is what the
+        // gate's command took, the wait is what the machine made it queue for
+        // (#1771). Folding them together would hide contention inside the one
+        // number every timeout proposal below is computed from.
+        waitedMs: parseWaitedMs(logTail),
+        flaky: parseFlaky(extra ? extra.flaky : null, logTail),
       };
     });
 
@@ -882,6 +969,57 @@ function hasSummaryShape(text) {
 }
 
 // =============================================================================
+// Machine-readable markers inside a gate's log tail
+// =============================================================================
+//
+// `verification_gate_results` has one status, one exit code and one duration per
+// gate and no column for a lock wait, so CommandMate's runner carries both of
+// #1771's and #1772's extra facts as a LINE-ANCHORED first line of the log tail
+// (verification-config.md sections 9.3 / 10.3). cmate-verify's standalone runner
+// writes the same two markers.
+//
+// Reading them does not break the "log bodies are never interpreted" rule this
+// tool is built on. The patterns are anchored at the start of a line, so a gate
+// whose own output happens to print `waited=` cannot supply the number; every
+// captured group is converted to a NUMBER or to one of two fixed words, and no
+// matched text is ever stored, printed or forwarded. A log the patterns do not
+// match reads as "no marker", which changes nothing.
+const MUTEX_WAITED_PATTERN = /^\[mutex\] [^\n]*?\bwaited=([0-9]+(?:\.[0-9]+)?)s/m;
+const FLAKY_PATTERN = /^\[flaky\] runs=(\d+) outcome=(flaky|fail) exit=(\S+) duration=(\S+) verdict=(pass|fail)$/m;
+
+/** Milliseconds a gate spent queued for its `mutex`, or null when it declared none. */
+function parseWaitedMs(logTail) {
+  if (typeof logTail !== 'string') return null;
+  const match = MUTEX_WAITED_PATTERN.exec(logTail);
+  return match ? Math.round(Number(match[1]) * 1000) : null;
+}
+
+/**
+ * What a retried gate's two runs amounted to (Issue #224 / CommandMate #1772).
+ *
+ * The structured field wins when the CLI supplied one (`verify show --json`
+ * exposes the marker as `gates[].flaky`); the log marker is the fallback for a
+ * runner or a snapshot that carries only the text.
+ *
+ * @returns {{runs:number, outcome:'flaky'|'fail', verdict:'pass'|'fail'}|null}
+ *          null for every gate that was never retried — which is every gate that
+ *          did not declare `retryOnFail: 1` and every one that passed first time.
+ */
+function parseFlaky(structured, logTail) {
+  if (structured && typeof structured === 'object') {
+    const outcome = String(structured.outcome ?? '');
+    const verdict = String(structured.verdict ?? '');
+    if ((outcome === 'flaky' || outcome === 'fail') && (verdict === 'pass' || verdict === 'fail')) {
+      return { runs: Number.isFinite(structured.runs) ? Number(structured.runs) : 2, outcome, verdict };
+    }
+  }
+  if (typeof logTail !== 'string') return null;
+  const match = FLAKY_PATTERN.exec(logTail);
+  if (!match) return null;
+  return { runs: Number(match[1]), outcome: match[2], verdict: match[5] };
+}
+
+// =============================================================================
 // Statistics
 // =============================================================================
 
@@ -908,6 +1046,14 @@ function summarise(runs, config) {
       censoredBy: [],
       truncatedFailures: [],
       detailedRuns: 0,
+      // #1771 / #1772 evidence, collected separately from the duration series on
+      // purpose. `waitedBy` is what a lock cost this gate; `flakyRuns` /
+      // `flakyFailRuns` are the two halves of the flakiness ratio — the runner
+      // writes the marker for a gate that failed TWICE as well, precisely so the
+      // denominator exists and every retried gate does not look flaky.
+      waitedBy: [],
+      flakyRuns: [],
+      flakyFailRuns: [],
     });
   }
   const undeclared = new Map();
@@ -929,6 +1075,13 @@ function summarise(runs, config) {
       worktrees.set(run.worktreeId, (worktrees.get(run.worktreeId) || 0) + 1);
       if (gate.status === 'failed') stat.failed += 1;
       if (gate.durationMs !== null) stat.durationsMs.push(gate.durationMs);
+      // NOT pushed into durationsMs. See the field comment above.
+      if (gate.waitedMs !== null) stat.waitedBy.push({ runId: run.id, at: run.finishedAt, waitedMs: gate.waitedMs });
+      if (gate.flaky !== null) {
+        const record = { runId: run.id, at: run.finishedAt, verdict: gate.flaky.verdict, runs: gate.flaky.runs };
+        if (gate.flaky.outcome === 'flaky') stat.flakyRuns.push(record);
+        else stat.flakyFailRuns.push(record);
+      }
       stat.samples.push({ runId: run.id, at: run.finishedAt || run.startedAt, worktreeId: run.worktreeId, ...gate });
 
       // A run that reached its own timeout censors the duration distribution:
@@ -954,6 +1107,8 @@ function summarise(runs, config) {
     stat.p99Ms = percentile(sorted, 0.99);
     stat.maxMs = sorted.length > 0 ? sorted[sorted.length - 1] : null;
     stat.failRate = stat.executed > 0 ? stat.failed / stat.executed : 0;
+    stat.maxWaitedMs = stat.waitedBy.length > 0 ? Math.max(...stat.waitedBy.map((w) => w.waitedMs)) : null;
+    stat.retriedRuns = stat.flakyRuns.length + stat.flakyFailRuns.length;
     stat.samples.sort((a, b) => b.runId - a.runId);
   }
   return { stats, undeclared, worktrees };
@@ -1016,6 +1171,14 @@ function proposeTimeouts(config, stats, minSamples) {
 
     // Never shorten a timeout on evidence the timeout itself produced.
     if (target < current && stat.censoredBy.length > 0) continue;
+    // Never shorten the timeout of a gate that has been seen queueing for a
+    // `mutex` either (Issue #223 / CommandMate #1771). For such a gate
+    // `timeoutSec` is TWO budgets — the lock wait and then the command — and the
+    // durations this proposal is computed from deliberately exclude the wait. A
+    // shorter number derived from them would start turning contention into
+    // `GATE <id> SKIP reason=mutex-wait`, which is a gate that reached no
+    // verdict at all: strictly worse than the slack it removed.
+    if (target < current && stat.waitedBy.length > 0) continue;
 
     const direction = classifyChange({ kind: 'set-timeout', to: target, from: current });
     if (direction === null) continue;
@@ -1031,7 +1194,12 @@ function proposeTimeouts(config, stats, minSamples) {
         `p99 of ${stat.executed} executed run(s) is ${stat.p99Ms}ms (slowest ${stat.maxMs}ms); ` +
         `p99 x ${TIMEOUT_HEADROOM}, floored at the slowest run, gives ${target}s ` +
         `against the ${gate.timeoutIsDefault ? 'default' : 'declared'} ${current}s` +
-        (stat.censoredBy.length > 0 ? ` (${stat.censoredBy.length} run(s) hit the current timeout, so the distribution is censored)` : ''),
+        (stat.censoredBy.length > 0 ? ` (${stat.censoredBy.length} run(s) hit the current timeout, so the distribution is censored)` : '') +
+        // Stated, not folded in: the reader has to be able to see that the wait
+        // was excluded from the number and is still part of the budget.
+        (stat.waitedBy.length > 0
+          ? ` (mutex wait excluded from every duration above: ${stat.waitedBy.length} run(s) queued, longest ${stat.maxWaitedMs}ms)`
+          : ''),
       evidence: stat.samples.slice(0, 5).map(citation(gate.id)),
       change: { kind: 'set-timeout', gateId: gate.id, from: current, to: target },
     });
@@ -1376,6 +1544,15 @@ function buildReport(config, runs, analysis, proposals, options) {
         detail: `gate ${stat.id} has ${stat.executed} executed run(s), below the --min-samples ${options.minSamples} threshold`,
       });
     }
+    if (stat.waitedBy.length > 0) {
+      observations.push({
+        code: 'mutex-wait-observed',
+        detail:
+          `gate ${stat.id} queued for its mutex in ${stat.waitedBy.length} run(s) (longest ${stat.maxWaitedMs}ms). ` +
+          'The wait is excluded from every duration above and from the timeout arithmetic, and no SHORTER timeout is ' +
+          'proposed for it: for a mutexed gate timeoutSec is the lock-wait budget as well as the command budget',
+      });
+    }
     if (stat.censoredBy.length > 0) {
       observations.push({
         code: 'timeout-censored',
@@ -1405,13 +1582,47 @@ function buildReport(config, runs, analysis, proposals, options) {
       detail: `${errored.length} run(s) ended with status=error (run ${errored.map((r) => r.id).join(', ')}); those are runner failures, not gate failures, and are not counted as such`,
     });
   }
+  // Layer 2's flakiness input, in two tiers, and they are NOT the same claim.
+  //
+  //  1. `flake-observed` is a MEASUREMENT. The runner re-ran the gate in the
+  //     same tree and the two runs disagreed, so the "did the tree change
+  //     between these runs" gap that makes tier 2 a candidate does not exist
+  //     here (Issue #224 / CommandMate #1772). The denominator is reported with
+  //     it: a gate that failed twice is evidence AGAINST flakiness, and the
+  //     runner writes the marker for that case too so the ratio can be read.
+  //  2. `flake-candidate` is an INFERENCE — fail then pass across two separate
+  //     runs, which `verify history` cannot tie to one commit.
+  //
+  // Both are kept. Tier 1 only exists for gates that opted into `retryOnFail`,
+  // so dropping tier 2 would make every repository that has not opted in look
+  // flake-free; and reporting tier 2 for a gate that has tier 1 evidence would
+  // present the weaker claim beside the stronger one as though they ranked the
+  // same. So tier 2 is suppressed per gate exactly where tier 1 spoke.
+  const measuredFlaky = new Set();
+  for (const stat of [...stats.values()].sort((a, b) => a.declaredIndex - b.declaredIndex)) {
+    if (stat.retriedRuns === 0) continue;
+    measuredFlaky.add(stat.id);
+    const tolerated = stat.flakyRuns.filter((entry) => entry.verdict === 'pass').length;
+    observations.push({
+      code: stat.flakyRuns.length > 0 ? 'flake-observed' : 'flake-refuted',
+      detail:
+        `gate ${stat.id} was re-run in the same tree ${stat.retriedRuns} time(s): ` +
+        `${stat.flakyRuns.length} FLAKY (failed then passed${stat.flakyRuns.length > 0 ? `, ${tolerated} of them counted as a pass by flakyIsPass` : ''})` +
+        `, ${stat.flakyFailRuns.length} failed twice` +
+        (stat.flakyRuns.length > 0
+          ? `. This is measured, not inferred: both runs judged the same tree (run ${stat.flakyRuns.map((entry) => entry.runId).join(', ')})`
+          : '. Two failures in the same tree are evidence AGAINST flakiness, which is why the marker is written for them too'),
+    });
+  }
   for (const candidate of flakeCandidates(runs, new Set(config.gates.map((g) => g.id)))) {
+    if (measuredFlaky.has(candidate.gateId)) continue;
     observations.push({
       code: 'flake-candidate',
       detail:
         `gate ${candidate.gateId} failed in run ${candidate.failedRun.runId} and passed in run ${candidate.passedRun.runId} ` +
         `on worktree ${candidate.worktreeId}. verify history carries no commit sha, so this is a CANDIDATE for layer 2 to correlate ` +
-        'against git log — not a flake, and never auto-quarantined',
+        'against git log — not a flake, and never auto-quarantined. Declaring `retryOnFail: 1` on this gate would turn the ' +
+        'inference into a measurement (CommandMate #1772)',
     });
   }
 

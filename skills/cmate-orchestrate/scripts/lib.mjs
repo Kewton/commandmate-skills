@@ -182,6 +182,79 @@ export function issueOf(plan, number) {
 }
 
 // =============================================================================
+// The GATE line vocabulary (Issue #224 / CommandMate #1772)
+// =============================================================================
+//
+// `commandmate wait --verify` and cmate-verify's standalone runner both report
+// one `GATE <id> <WORD>` line per executed gate, and three runners in this Skill
+// read those lines or the verdicts transcribed from them: dispatch parses them,
+// merge renders them into the PR body, status renders them into the matrix. (uat
+// reads the same report but only `verification.outcome`, which is the exit code
+// and not a word from this vocabulary.) The vocabulary lives here so there is one
+// definition of what the words mean rather than one per reader — a third word
+// added to one reader and not the others is how `FLAKY` would have arrived as
+// "unknown" in one place and `fail` in another.
+//
+// `FLAKY` means the gate failed and then passed on a re-run against the same
+// tree. It is a THIRD word, not a decoration on PASS or FAIL: neither of those
+// was true of the gate. Whether the run COUNTED it as a pass is decided by the
+// gate's own `flakyIsPass`, and that decision is already in the runner's exit
+// code — which is the verdict (dispatch-contract.md section 2.6). Nothing here
+// re-adjudicates it.
+//
+// The regex matches the word and stops. Both spellings carry a detail after it
+// and they differ — the product CLI parenthesises (`GATE unit FLAKY (exit=1,0,
+// 45.0s,44.0s)`) and the standalone runner does not (`GATE unit FLAKY exit=1,0
+// duration=45s,44s waited=42s`) — so a reader that parsed the detail would be
+// reading one runner's punctuation as a contract. `\b` after the word is what
+// keeps `waited=` and a two-valued `exit=` from breaking the match.
+export const GATE_LINE_RE = /^GATE\s+(\S+)\s+(PASS|FAIL|FLAKY)\b/;
+
+/** The report's spelling of each GATE word. */
+export const GATE_VERDICT_BY_LABEL = new Map([
+  ['PASS', 'pass'],
+  ['FAIL', 'fail'],
+  ['FLAKY', 'flaky'],
+]);
+
+/**
+ * Verdicts that are not a clean pass.
+ *
+ * `flaky` is in here for DISPLAY and ordering — a report that has to cut its
+ * gate list keeps these first, because they are what the reader opened it for.
+ * It is NOT a claim that the run failed: a `flakyIsPass: true` gate is FLAKY and
+ * the run passed. The exit code says which, and it always did.
+ */
+export const NON_PASS_GATE_VERDICTS = new Set(['fail', 'flaky']);
+
+/**
+ * The gate id and verdict of one GATE line, or null when the line is not one.
+ *
+ * @param {string} line one line of a runner's output, already trimmed
+ */
+export function parseGateLine(line) {
+  const match = GATE_LINE_RE.exec(String(line ?? ''));
+  if (!match) return null;
+  return { id: match[1], verdict: GATE_VERDICT_BY_LABEL.get(match[2]) };
+}
+
+/** The report's word for a gate whose two runs disagreed. */
+export const FLAKY_GATE_VERDICT = 'flaky';
+
+/**
+ * Was this gate FLAKY?
+ *
+ * Asked by name rather than by a bare string comparison at each call site,
+ * because every one of them has to resist the same temptation: the answer is NOT
+ * "therefore the run failed" or "therefore it passed". `flakyIsPass` decided
+ * that, the runner's exit code carries the decision, and neither is on the gate
+ * line this verdict came from.
+ */
+export function isFlakyVerdict(verdict) {
+  return String(verdict ?? '') === FLAKY_GATE_VERDICT;
+}
+
+// =============================================================================
 // Subprocess output
 // =============================================================================
 

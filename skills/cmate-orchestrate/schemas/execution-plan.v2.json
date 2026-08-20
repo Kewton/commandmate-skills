@@ -276,7 +276,7 @@
       "type": "array",
       "minItems": 1,
       "maxItems": 32,
-      "description": "New command gates the issue DEFINES, in the author's order. Shape, bounds and reserved ids are CommandMate's own gate entry (validateGateEntries in verify-config, shared with the contract's verify.gateDefinitions since #1791), so an entry here is one `send --contract` accepts. The id is issue-scoped — `issue-<number>-<what>` — which is checked, never rewritten. `timeoutSec` is absent when the author did not state one, and the contract stays silent about it too, so CommandMate's own default (600s) applies rather than a number this planner invented.",
+      "description": "New command gates the issue DEFINES, in the author's order. Shape, bounds and reserved ids are CommandMate's own gate entry (validateGateEntries in verify-config, shared with the contract's verify.gateDefinitions since #1791), so an entry here is one `send --contract` accepts \u2014 including the #1771 / #1772 fields `mutex` / `retryOnFail` / `flakyIsPass`, which are written only when the author declared them (Issues #223 / #224). The id is issue-scoped — `issue-<number>-<what>` — which is checked, never rewritten. `timeoutSec` is absent when the author did not state one, and the contract stays silent about it too, so CommandMate's own default (600s) applies rather than a number this planner invented.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -296,6 +296,21 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 7200
+          },
+          "mutex": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_.-]+$",
+            "description": "OPTIONAL (Issue #223 / CommandMate #1771). Name of a machine-wide lock this gate must hold while it runs: only one gate declaring this name runs on the machine at a time. Declares what command and timeout cannot \u2014 a fixed port, a local database, an emulator \u2014 so two parallel worktrees running the gate at once stop producing a `GATE e2e FAIL exit=1` that reads exactly like the change being broken. Wider than a gate id because it names a RESOURCE rather than a gate (two repositories binding port 60303 may agree on `port.60303`), and narrow enough to be safe as a path segment because both runners turn it into `<lock-root>/<name>.lock`. ABSENT means this gate is exclusive of nothing."
+          },
+          "retryOnFail": {
+            "enum": [0, 1],
+            "description": "OPTIONAL (Issue #224 / CommandMate #1772). Re-run this gate once, in the same tree, when its command exits non-zero. Only 0 and 1: the ceiling IS the feature, because enough re-runs turn any red green, and one retry answers the one question worth asking \u2014 does this reproduce in the same tree. A timeout is never retried (the gate already spent its whole budget). ABSENT means the gate runs exactly once, which is what every gate did before this field existed."
+          },
+          "flakyIsPass": {
+            "type": "boolean",
+            "description": "OPTIONAL (Issue #224 / CommandMate #1772). Whether a FLAKY outcome \u2014 failed, then passed on the retry \u2014 counts as a pass. Default false: opting into a retry does not make the gate weaker, it only gives what happened a name. Declared per gate rather than per repository because it is a statement about THIS gate\u0027s failure mode. `true` requires `retryOnFail: 1` in the same entry, which the planner checks: without a retry there is no FLAKY for it to reclassify, so the declaration could never take effect."
           }
         }
       }
