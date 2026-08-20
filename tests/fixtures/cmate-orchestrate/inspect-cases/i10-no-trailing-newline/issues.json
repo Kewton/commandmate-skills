@@ -1,0 +1,8 @@
+[
+  {
+    "number": 231,
+    "title": "fixture issue",
+    "body": "短い file を読む。\n\n## 現状\n- `src/api/short.ts`（3 行）",
+    "labels": []
+  }
+]

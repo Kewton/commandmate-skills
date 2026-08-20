@@ -26,7 +26,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | 第4節 limitation code | 第3節 |
 | 第5節 停止したとき、人間が何をするか（対処表） | 第4節 |
 | 第5節 無人 run を取り消す | 第5節 |
-| （run の語彙ではない）profile-init `--check` の warning code | 第6節 |
+| （run の語彙ではない）準備 runner の warning code（profile-init `--check` / inspect `--check-references`） | 第6節 |
 
 ---
 
@@ -419,7 +419,14 @@ status runner はそちらの hint（conflict の解消 / gh・base の復旧）
 dispatch report の `summary_markdown` には上表と同じ next action が出ている。
 
 
-## 6. profile-init `--check` の warning code（[#197](https://github.com/Kewton/commandmate-skills/issues/197)）
+## 6. 準備 runner（read-only）の warning code
+
+`profile-init.mjs --check` と `inspect.mjs --check-references` は run を進めない
+**準備 runner** である。読むものが run artifact ではない（前者は profile、後者は Issue 本文と
+対象リポジトリの tree）ので、上の5節までとは別の語彙を持つ。**両方に共通する規律は
+「所見は warning であって error ではない」「exit code を1つも変えない」「裁定しない」**である。
+
+### 6.1 profile-init `--check` の warning code（[#197](https://github.com/Kewton/commandmate-skills/issues/197)）
 
 `profile-init.mjs --check <profile.json>` は run artifact ではなく **profile** を読む
 準備 runner なので、上の5節（run の停止と復帰）とは別の語彙を持つ。**この節の code は
@@ -438,3 +445,38 @@ file を見越した宣言はありうる —— ので、`status` は `partial`
 
 `--check` は run directory を持たないので、**`status.mjs` はこれらの code を表示しない。**
 profile のレビュー時に envelope（または `summary_markdown`）を直接読むものである。
+
+### 6.2 inspect `--check-references` の warning code（[#217](https://github.com/Kewton/commandmate-skills/issues/217)）
+
+`inspect.mjs --check-references` は run artifact でも profile でもなく **Issue 本文と
+対象リポジトリの tree** を読む準備 runner なので、これも run の語彙とは別である。
+**この節の code も1つも exit code を変えない。**
+
+| code | 意味 | 人間が何をするか |
+|---|---|---|
+| `reference_file_missing` | 本文が引く `path:line`（または行数を主張している path）の **file が対象 tree に無い** | path の綴りか、その file を動かした先行 Issue を確認する。**本文を直して re-plan する**（run_id は本文を含む hash なので自動的に別 run になる） |
+| `reference_line_out_of_range` | `path:N` の N が**実測の行数を超えている**（`measured` 付き） | 先行 Issue がその file を縮めている。実測を正として本文の行番号を取り直す |
+| `reference_identifier_moved` | 同じ行の backtick 識別子が **N 行目に無く、別の行にある**（`found_at` 付き） | `found_at` が実測行である。本文の `:N` をそこへ直す。**完全一致は要求していない**ので、識別子が近傍へ移っただけでも出る |
+| `reference_line_count_stale` | `<path>（N 行）` の N が実測と違う（`claimed` / `measured` 付き） | 受入条件が「着手前と同じ N」の形になっていないかを確かめる。**なっていれば、直さない限り「先行 Issue が足した分を消す」が正解になる** |
+| `reference_claim_inconsistent` | **本文の中で主張が食い違っている**（同一 path に2つの行数主張、または同一 `path:line` に2つの識別子） | どちらが著者の意図かは runner には決められない。本文を読み、実測を正として1つに畳む |
+
+**5つとも warning であって error ではない。** 本文が古いことは「dispatch してはいけない」
+ことではない —— 人間が読んで決めることである。`status` は `partial` になるが **exit は 0**
+である。**読めない入力**（`--repo-root` が無い / Issue が取れない / `--ref` が解決しない）は
+これらとは別で、`load_error`（exit 6）か `invalid_input`（exit 3）で**点検せずに拒否**し、
+envelope の `inspection` は `null` になる（「見て何も無かった」と「見られなかった」を
+同じ形にしない）。
+
+出さない所見が2つある。**同じ行に照合できる識別子が無い citation**（`unchecked`）と、
+**識別子が file の中に1度も現れない citation**（`identifier_absent`）は、件数として
+report には出るが warning にはならない。後者で「移動した」と言うのは、その語が
+この file の識別子だという**前提そのものが測れていない**まま下す裁定である。
+
+**本文の意味的な矛盾は対象外である**（上の `reference_claim_inconsistent` が見るのは
+機械的な部分集合だけである）。「決定事項」と「受入条件」が矛盾している類は
+`cmate-issue-refinement` Step 4 が読む。
+
+`--check-references` は run directory を持たないので、**`status.mjs` はこれらの code を
+run view に表示しない。** ただし `NEXT_ACTION_HINTS` には5件とも入っている ——
+表に無い code は `UNKNOWN_CODE_HINT` に落ちるので、「まだ誰も分類していない code」と
+「表示する場所がまだ無い code」が同じ形になってしまうためである。

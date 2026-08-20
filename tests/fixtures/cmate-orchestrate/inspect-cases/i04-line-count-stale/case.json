@@ -1,0 +1,24 @@
+{
+  "description": "the body claims a line count the file no longer has, in all three spellings",
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "reference_line_count_stale",
+      "reference_line_count_stale"
+    ],
+    "line_claims": [
+      {
+        "path": "src/api/handler.ts",
+        "claimed": 20,
+        "verdict": "stale"
+      },
+      {
+        "path": "src/api/config.ts",
+        "claimed": 9,
+        "verdict": "stale"
+      }
+    ],
+    "measured_is_wc": true
+  }
+}

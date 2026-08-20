@@ -1,0 +1,8 @@
+[
+  {
+    "number": 231,
+    "title": "fixture issue",
+    "body": "handler が長すぎるので分割する。\n\n## 現状\n- `src/api/handler.ts`（20 行）が肥大化している。\n- `src/api/config.ts` は 9 行。",
+    "labels": []
+  }
+]

@@ -1,0 +1,23 @@
+{
+  "description": "a citation with nothing to check it against, and one whose identifier is nowhere in the file",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "references": [
+      {
+        "path": "src/api/handler.ts",
+        "line": 3,
+        "line_end": 5,
+        "identifier": null,
+        "verdict": "unchecked"
+      },
+      {
+        "path": "src/api/handler.ts",
+        "line": 6,
+        "identifier": "vanishedHelper",
+        "verdict": "identifier_absent"
+      }
+    ]
+  }
+}

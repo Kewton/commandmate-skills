@@ -1,0 +1,8 @@
+[
+  {
+    "number": 231,
+    "title": "fixture issue",
+    "body": "filter を直す。\n\n## 対象ファイル\n- `web/src/lib/filter.ts`\n- `src/lib/filter.ts`\n\n## 根拠\n- `src/lib/filter.ts:999` — 表記ゆれ側なので点検しない\n- `../outside/secret.ts:3` — リポジトリの外\n- `users/someone/notes.ts:4` — system root\n- `src/api/handler.ts:6` — `handle` はここ",
+    "labels": []
+  }
+]

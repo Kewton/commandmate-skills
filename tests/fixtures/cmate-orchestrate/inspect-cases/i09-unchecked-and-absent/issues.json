@@ -1,0 +1,8 @@
+[
+  {
+    "number": 231,
+    "title": "fixture issue",
+    "body": "handler を読む。\n\n## 根拠\n- `src/api/handler.ts:3-5` — この範囲\n- `src/api/handler.ts:6` — `vanishedHelper` を探している",
+    "labels": []
+  }
+]

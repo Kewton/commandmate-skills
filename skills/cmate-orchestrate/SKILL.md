@@ -36,9 +36,9 @@ runner は決定的なので、この文書が述べるのは「いつ使うか�
 | status | `scripts/status.mjs` | run directory の artifact を突き合わせ、phase × Issue のマトリクスを出す | **なし（read-only）** |
 
 `scripts/lib.mjs` は共有ヘルパーで、単体では起動しない。
-`scripts/profile-init.mjs` は phase ではなく、**read-only の準備 runner** である
-（profile draft の起案と、`--check` による `scope_companions` の点検。第3.5節・
-[profile-contract.md](./references/profile-contract.md) 第7節・第9.7節）。
+`scripts/profile-init.mjs`（profile の起案と点検。第3.5節）と `scripts/inspect.mjs`（Issue 本文の
+主張を tree に突き合わせる点検。第3.6節）は phase ではなく **read-only の準備 runner** で、
+**どちらも何も書かず裁定せず、所見は warning・exit は 0 である。**
 
 ## 1. いつ使うか / 使わないか
 
@@ -443,16 +443,50 @@ plan に渡すには `--allow-unverified` が要る）。
 すれば止まる、が正しい壊れ方）。
 
 **`--check` は起案の逆向き**で、既にある profile の `scope_companions` を tree に突き合わせ、
-規則ごとに `when` の一致件数と `add` の実在件数を出す（**構文として正しいまま何にも一致
-しない規則**を plan の前に見るため）。**0 件一致は warning であって error では
-ない**（exit 0。**裁定しない**）。何も書かず、一致判定は planner と**同じ関数**（`lib.mjs`）で、
-**planner はリポジトリを開かない**（第9.1節）も不変である。
+規則ごとに `when` の一致件数と `add` の実在件数を出す（**構文として正しいまま何にも一致しない
+規則**を plan の前に見るため）。**0 件一致は warning であって error ではない**（exit 0。
+**裁定しない**）。一致判定は planner と**同じ関数**（`lib.mjs`）である。
 
 全文は [runner-operations.md](./references/runner-operations.md) 第13節、正本は
 [profile-contract.md](./references/profile-contract.md) 第7節（起案）・第8節
 （`verified: true` の条件）・第9.7節（`--check`）。
 
-### 3.6 status（run の横断ビュー。read-only）
+### 3.6 inspect（Issue 本文の主張を実物に突き合わせる。plan の前。read-only）
+
+```
+inspect.mjs --check-references [--repo-root <path>] [--ref <rev>] <issue>...
+inspect.mjs --check-references [--repo-root <path>] --issue-json <path>
+```
+
+**planner は対象リポジトリを開かない**（第9.1節）。この runner はそれを変えず、その不変条件が
+**残す穴**を塞ぐ —— 本文の主張（`path:line`・「N 行」）が古いことを dispatch まで誰も検知
+しなかった（実測 16 件中 11 件。CommandMate #1831）。
+
+| flag | 既定 | 効果 |
+|---|---|---|
+| `--check-references` | — | **必須。** 突き合わせる mode（現状これ1つ） |
+| `--repo-root <path>` | cwd | 突き合わせ先の checkout |
+| `--ref <rev>` | — | working tree ではなくこの revision を読む（`git show`）。解決できなければ拒否 |
+| `--issues <n>` / 裸の番号 | — | 対象 Issue（反復可・カンマ可） |
+| `--issue-json <path>` | — | Issue fixture（第1.1節と同形。GitHub 不要）。`--issues` 省略時は全 Issue |
+| `--repo <owner/name>` | origin | fixture が無いとき Issue を読む先 |
+| `--out <path>` | — | 報告の書き出し先。**既存なら `out_exists`（exit 4）** |
+
+押さえるべき点は4つ。**何も書かない**（plan.json には 1 byte も書かない）。
+**裁定しない**（所見は5つとも warning、`status` は `partial`、**exit は 0**）。
+**読めない入力は点検しない**（`load_error` 6 / `invalid_input` 3 で拒否し、envelope の
+`inspection` は `null`。「見て何も無かった」と「見られなかった」を同じ形にしない）。
+**候補抽出は planner と同じ関数**（`orchestrate.mjs` の `extractFileCandidates` を import する）。
+
+**見ないものが2つある。本文の意味的な矛盾**（「決定事項 対 受入条件」など）は対象外で、
+`cmate-issue-refinement` Step 4 の仕事である。**表記ゆれ**の検出も planner の
+`ambiguous_file_candidate` に任せ、そう判定された候補は**点検せず件数だけ名乗る**。
+
+判定範囲・行数の数え方・warning にしない verdict は
+[runner-operations.md](./references/runner-operations.md) 第15節、code は
+[codes-and-recovery.md](./references/codes-and-recovery.md) 第6.2節が正本である。
+
+### 3.7 status（run の横断ビュー。read-only）
 
 ```
 status.mjs --run <run-dir> [--json]
@@ -468,8 +502,8 @@ status.mjs --run <run-dir> [--json]
 どの Issue が何待ちか」に答えるには複数の JSON を突き合わせる必要があった。それをやるのがこの
 runner で、**それ以外は何もしない。**
 
-**完全 read-only である。** run directory 配下の file を読むだけで、`commandmate` / `git` / `gh`
-を一度も呼ばず、network も使わない。何も書かないので、走っている run に向けても安全である。
+**完全 read-only である。** run directory 配下の file を読むだけで `commandmate` / `git` / `gh` を
+呼ばず、何も書かないので、走っている run に向けても安全である。
 
 **証跡に無い状態は推測しない。** artifact が無い phase は `未実行`、読めない phase は `読取不能`、
 report は読めたがその Issue の記録が無い場合は `記録なし` になる。`partial` / `blocked` /
@@ -493,7 +527,7 @@ profile-init も同じ規約で、status は `success` / `partial`（雛形か w
 （`--emit profile` のときだけ stdout は draft JSON。失敗時は常に envelope が出る）。
 envelope の `mode` が `draft` / `check` を名乗り、**`--check` も同じ規約**である。
 
-**まず run 全体を見るなら `status.mjs --run <run-dir>`**（第3.6節）。以下の status / code /
+**まず run 全体を見るなら `status.mjs --run <run-dir>`**（第3.7節）。以下の status / code /
 limitation は個々の report の語彙で、status runner はそれらを phase × Issue のマトリクスに
 並べ、code を第5節の対処表へマップして見せる。
 
@@ -554,7 +588,7 @@ report/artifact に残さない（redaction）。
 **runner が止まったら、それは「押し通す」合図ではなく「読む」合図である。**
 `blocking_reasons` の code と `summary_markdown` を読み、次の対応を取る。
 
-`status.mjs --run <run-dir>`（第3.6節）は**対処表を機械的に引いた結果**を、どの Issue の話かを
+`status.mjs --run <run-dir>`（第3.7節）は**対処表を機械的に引いた結果**を、どの Issue の話かを
 添えて出す。JSON を自分で突き合わせる前に、まずこれを読めばよい。
 
 **対処表の正本は [references/codes-and-recovery.md](./references/codes-and-recovery.md) 第4節**
@@ -565,28 +599,28 @@ report/artifact に残さない（redaction）。
 | 止まり方 | 人間がすること |
 |---|---|
 | plan `no_acceptance_criteria` / `no_suspected_files` | **Issue 本文に受入条件と対象 file を書いて re-plan する** |
-| plan `open_question_declared` | Issue 本文の ```open-questions ブロックが「まだ決めていない」と宣言している（著者の申告であり、推論ではない）。**その問いを決めて答えを本文へ畳み込み、ブロックを消して re-plan する。** `--allow-questions` は「決めていないことを worker に決めさせる」という判断である |
-| plan `open_question_block_invalid` | ```open-questions ブロックを読めなかった。**構文を直すか、ブロックごと消して re-plan する。** 「ブロックが無かった」には丸めていない（warning detail が壊れ方を名指しする） |
-| plan `harness_path_in_scope` | Issue が `## 対象ファイル` に agent ハーネス（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）の path を書いたので scope に入れた（既定は「入れない」）。**その Issue の成果物が本当にハーネスなのかを読んで決める。** 違うなら成果物見出しから外して散文か参考見出しへ移し、re-plan する |
-| plan `ambiguous_file_candidate` | 同じ file の2つの綴り（例: `data/demo/facilities.json` と `web/public/dist/data/demo/facilities.json`）が本文に在る。**どちらが対象かを決めて、もう片方を本文から消して re-plan する。** 両方とも対象なら `--allow-questions`（両方 scope に入っている） |
-| plan `unconfirmed_lexical_dependency` | 語彙は共有するが file は共有しない2 Issue が在る。**順序が要るなら本文に `depends on #N` を書くか `--depends <consumer>:<producer>` を渡す。** 独立なら `--allow-questions` で進めてよい。**`--no-infer` はこの答えではない**（推論を丸ごと切るだけである） |
+| plan `open_question_declared` | 著者が「まだ決めていない」と申告している（推論ではない）。**問いを決めて本文へ畳み込み、ブロックを消して re-plan する。** `--allow-questions` は「worker に決めさせる」判断である |
+| plan `open_question_block_invalid` | ブロックを読めなかった。**構文を直すか消して re-plan する。** 「無かった」には丸めていない（detail が壊れ方を名指しする） |
+| plan `harness_path_in_scope` | Issue が成果物見出しに agent ハーネスの path を書いたので scope に入れた（既定は「入れない」）。**本当に成果物なのかを読んで決める。** 違うなら見出しから外して re-plan する |
+| plan `ambiguous_file_candidate` | 同じ file の2つの綴りが本文に在る。**どちらが対象かを決めて、もう片方を消して re-plan する。** 両方とも対象なら `--allow-questions`（両方 scope に入っている） |
+| plan `unconfirmed_lexical_dependency` | 語彙だけを共有する2 Issue が在る。**順序が要るなら `depends on #N` か `--depends`。** 独立なら `--allow-questions`。**`--no-infer` はこの答えではない** |
 | plan `cycle_detected` / `override_incomplete` / `dependency_order_violation` | `dependency-plan.md` の edge `reason` を見て、Issue 本文か `--depends` を直す |
 | plan `run_exists` | 既存の `plan.json` と突き合わせ、違うなら本文か profile を直す。同じでよいなら `--run-id <new-id>` / `--runs-dir <dir>` を渡す |
 | plan `profile_repository_mismatch` | `--profile` / `--profile-json` / `--repo` のどれかを渡して意図を明示する |
 | dispatch `open_questions` + `human_required` | blocking reason に出ている質問の答えを Issue 本文に書いて re-plan する |
 | dispatch `drift` | drift の内容を確認し、必要なら re-plan する。**drift の上に dispatch しない** |
 | dispatch `worktree_unresolved` | **`cmate-worktree-setup` で worktree を作り、同じコマンドを再実行する。** plan と同じ profile を使う。**re-plan は不要** |
-| dispatch `blocked_by_upstream_failure` / `schedule_halted_unattended`（`--schedule dag`） | 上流が green にならず**下流だけ**（無人では全部）投入しなかった。**上流を直して `--resume`** |
-| dispatch `worktree_setup_unavailable` / `worktree_setup_failed` / `worktree_profile_mismatch` | provider を install する / `--worktree-setup <launcher>` で呼び出し口を渡す / plan と**同じ profile** を渡す。**作成済みの worktree は消していない** |
+| dispatch `blocked_by_upstream_failure` / `schedule_halted_unattended`（`--schedule dag`） | 上流が green にならず投入しなかった。**上流を直して `--resume`** |
+| dispatch `worktree_setup_unavailable` / `worktree_setup_failed` / `worktree_profile_mismatch` | provider を install する / `--worktree-setup <launcher>` を渡す / plan と**同じ profile** を渡す。**作成済みの worktree は消していない** |
 | dispatch `worker_method_unavailable` | **`commandmate skill install <skill-id>` で対象 worktree に入れ、同じコマンドを再実行する。** **re-plan は不要** |
 | dispatch exit 10（prompt 検出） | `capture` の内容が report に出ている。**自分で判断して答える。** runner は自動応答しない |
 | dispatch `verification_not_judged`（exit 99） | **再 dispatch では解けない。** CommandMate 側のログを見る |
 | dispatch `worker_failed` | prompt / worker ログを読む。指示が過大なら Issue を分割して re-plan する |
-| dispatch `wait_window_exhausted`（`stop_reason: timeout`。`worker_timeout` の隣） | `--wait-timeout` は **wait の1回あたりの上限**で、worker の1ターンより短かっただけ。timeout 時の `capture` は **worker が稼働中**だと答えている（`worker_liveness`）。**再 dispatch しない** —— idle 化を待って **`--reverify`** で送らずに裁定だけ取り直し、必要なら `--wait-timeout` を実測に合わせて上げる |
-| dispatch `worker_stalled`（同上） | 同じ timeout だが `capture` に**稼働の証拠が無い**。worker ログと worktree の作業証跡を確かめてから `--resume`。**「動いていない」は「作業が無い」ではない** |
-| dispatch `worker_liveness_unreadable`（同上） | `capture` 自体が読めず、**生死を測れていない**。**どちらとも読み替えない。** `commandmate capture <worktree-id> --json` を手で確かめてから上2つのどちらかへ進む |
+| dispatch `wait_window_exhausted`（`stop_reason: timeout`） | `capture` は **worker が稼働中**だと答えている。**再 dispatch しない** —— idle 化を待って **`--reverify`**、必要なら `--wait-timeout` を実測に合わせる |
+| dispatch `worker_stalled`（同上） | `capture` に**稼働の証拠が無い**。worker ログと作業証跡を確かめてから `--resume` |
+| dispatch `worker_liveness_unreadable`（同上） | `capture` 自体が読めず**生死を測れていない**。**どちらとも読み替えない。** 手で `capture` を確かめる |
 | dispatch で**一部の Issue だけ**落ちた | 落ちた分を直して **`--resume <その run の dispatch ディレクトリ>`**。pass 済みは再 dispatch されない。**re-plan は不要** |
-| dispatch `resume_plan_mismatch` / `resume_invalid` | その plan 自身の dispatch ディレクトリを指すか、`--out` で新規 run にする。**壊れた report を半分だけ信じて引き継がない** |
+| dispatch `resume_plan_mismatch` / `resume_invalid` | その plan 自身の dispatch ディレクトリを指すか `--out` で新規 run にする。**壊れた report を半分だけ信じない** |
 | dispatch `resume_no_work`（`status: success`） | 停止ではない。その attempt の report をそのまま merge / uat に渡す |
 | dispatch `contract_unsupported` + `require` | CommandMate を 0.17.0 以上に上げる。**`--unattended` の run では `auto` は選べない** |
 | dispatch `contract_scope_unknown`（`--unattended`） | **Issue 本文に対象ファイルを書いて re-plan する** |
@@ -595,15 +629,15 @@ report/artifact に残さない（redaction）。
 | merge `ci_failed` / `ci_pending` | CI を直す。**green 無しに merge しない** |
 | merge `pr_missing` / `merge_failed` | PR の状態を確認し、conflict は手で解消する |
 | merge `issue_autoclose_not_default_branch` | merge 後に **Issue を手動でクローズする** |
-| merge `integration_verify_failed`（`--integration-verify`。`stop_reason: merge_failed` / `partial`） | **合流後の統合ブランチが赤い。既に merge 済みなので phase の再実行では戻らない。** 統合ブランチを green にする（前進修正か revert）まで**次の wave を dispatch しない**。file 重なりに出ない**意味的衝突**の徴候なので、同 wave の Issue が同じデータ・同じ前提を別方向へ動かしていないかを読む |
-| merge `integration_verify_unavailable`（同上） | 統合検証を実行できなかった。**profile に `baseline` が無い場合は1件も merge していない**ので、profile に書いて再実行する。merge 後の probe 失敗（fetch / checkout）なら、**merge は済んでいるのに結果を測れていない** —— 原因を直し、統合ブランチで baseline を手で1回通してから次の wave へ進む |
+| merge `integration_verify_failed`（`--integration-verify`） | **合流後の統合ブランチが赤い。merge 済みなので phase 再実行では戻らない。** green にするまで**次の wave を dispatch しない** |
+| merge `integration_verify_unavailable`（同上） | **`baseline` が無ければ1件も merge していない**（profile に書いて再実行）。probe 失敗なら**merge 済みで測れていない** —— 手で1回通してから進む |
 | uat `acceptance_conditional` | **条件を読んで人間が判断する。** 自動修正の対象ではない |
 | uat `blocked` / `max_attempts_reached` | `unresolved_issues` と `next_actions` を読む。**success に丸めない** |
 | uat `acceptance_not_run` | cmate-acceptance-test を入れて result を用意し、必要なら `--require-acceptance` で必須にする |
-| merge `change_evidence_unavailable`（`--unattended` のとき。`stop_reason: pr_create_failed` / `partial`） | その Issue の worktree で `git diff <base>...<branch>` が答えず、PR 本文に実変更を載せられない。**その PR は作っていない**。**worktree を復旧してから同じコマンドを再実行する**（片付け済みなら `cmate-worktree-setup` で作り直す）。**「読めなかった」を「scope 内だった」と読み替えない** |
-| dispatch `verification_gates_unrecorded`（`--unattended` のとき。`stop_reason: dispatch_error` / `partial`） | 契約 pass なのに `GATE` 行を読めず、**pass の根拠を report が名指しできない**。裁定は pass のまま、次の wave を dispatch せずに停止した。**まず runner の版を確かめる** —— 0.26.0 までは `GATE` 行（**stderr に出る**）を読み落としていたので、**その版では再実行しても必ず同じ所で止まる**（#160 で修正済み）。修正版でも空なら、CLI がその run で本当に `GATE` 行を出していないので、`commandmate wait <id> --verify` を手で回して出力を確かめる（`--unattended` を外せば従来どおり limitation として続行する） |
-| merge `acceptance_gates_required` / `no_acceptance_criteria`（`--unattended --merge-prs`。`stop_reason: preflight_failed` / `failure`） | 対象 Issue に**受入ゲートブロック／受入条件が無い**。**1つも merge していない**（条件を満たす Issue も含めて）。**Issue 本文に書いて re-plan する。** 該当 Issue だけを除外して回す道は用意していない |
-| uat `unattended_cwd_detached` / `unattended_cwd_branch_mismatch`（`--unattended --create-uat-fix-worktrees`。`stop_reason: preflight_failed` / `failure`） | 再merge が入る先（invocation cwd の branch）が detached / `--expect-branch` と違う。**fix worktree を1つも作っていない。** **cwd を integration branch に checkout してから再実行する** |
+| merge `change_evidence_unavailable`（`--unattended`） | `git diff <base>...<branch>` が答えず**その PR は作っていない**。worktree を復旧して再実行する。**「読めなかった」を「scope 内だった」と読み替えない** |
+| dispatch `verification_gates_unrecorded`（`--unattended`） | 契約 pass なのに `GATE` 行を読めず、**pass の根拠を report が名指しできない**。**まず runner の版を確かめる**（0.26.0 以前は `GATE` 行が **stderr に出る**のを読み落とす。#160）。修正版でも空なら `commandmate wait <id> --verify` を手で確かめる |
+| merge `acceptance_gates_required` / `no_acceptance_criteria`（`--unattended --merge-prs`） | 受入ゲート／受入条件が無い。**1つも merge していない。Issue 本文に書いて re-plan する**（除外して回す道は無い） |
+| uat `unattended_cwd_detached` / `unattended_cwd_branch_mismatch`（`--unattended`） | 再merge の入り先（cwd の branch）が detached / `--expect-branch` と違う。**fix worktree を1つも作っていない。** cwd を checkout して再実行する |
 
 **無人 run の取り消し**は、`limitations` の `unattended_baseline`（**branch 名と短縮 SHA**）を起点に
 **上流から順に**行う —— `git reset --hard <sha>`、worktree が既に片付いていれば
@@ -643,4 +677,4 @@ report/artifact に残さない（redaction）。
 [uat-report.v1](./schemas/uat-report.v1.json)。意味ゲートの入力は
 [acceptance-result.v1](../cmate-acceptance-test/schemas/acceptance-result.v1.json)（別 package）。
 status runner の `--json` は artifact ではなく view なので（何も書かない）`schemas/` に対応する
-file を持たない。field は第3.6節が正本である。
+file を持たない。field は第3.7節が正本である。

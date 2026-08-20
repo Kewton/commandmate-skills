@@ -1,0 +1,33 @@
+{
+  "description": "the same path:line is bound to two different identifiers in one body",
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "reference_claim_inconsistent"
+    ],
+    "references": [
+      {
+        "path": "src/api/handler.ts",
+        "line": 9,
+        "identifier": "resolveLauncher",
+        "verdict": "ok"
+      },
+      {
+        "path": "src/api/handler.ts",
+        "line": 9,
+        "identifier": "readConfig",
+        "verdict": "ok"
+      }
+    ],
+    "warning_fields": [
+      {
+        "code": "reference_claim_inconsistent",
+        "identifiers": [
+          "resolveLauncher",
+          "readConfig"
+        ]
+      }
+    ]
+  }
+}

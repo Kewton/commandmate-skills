@@ -1,0 +1,33 @@
+{
+  "description": "a path:line past the end of the file, a range whose end is past it, and the off-by-one boundary",
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "reference_line_out_of_range",
+      "reference_line_out_of_range",
+      "reference_line_out_of_range"
+    ],
+    "references": [
+      {
+        "path": "src/api/handler.ts",
+        "line": 400,
+        "verdict": "line_out_of_range",
+        "measured_lines": 12
+      },
+      {
+        "path": "src/api/handler.ts",
+        "line": 10,
+        "line_end": 40,
+        "verdict": "line_out_of_range",
+        "measured_lines": 12
+      },
+      {
+        "path": "src/api/handler.ts",
+        "line": 13,
+        "verdict": "line_out_of_range",
+        "measured_lines": 12
+      }
+    ]
+  }
+}

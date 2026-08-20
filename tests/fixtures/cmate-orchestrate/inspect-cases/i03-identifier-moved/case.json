@@ -1,0 +1,33 @@
+{
+  "description": "the identifier the body binds to a line is somewhere else in the file; found_at is the FIRST line it appears on",
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "reference_identifier_moved",
+      "reference_identifier_moved"
+    ],
+    "references": [
+      {
+        "path": "src/api/handler.ts",
+        "line": 3,
+        "identifier": "resolveLauncher",
+        "verdict": "identifier_moved"
+      },
+      {
+        "path": "src/api/handler.ts",
+        "line": 5,
+        "identifier": "readConfig",
+        "verdict": "identifier_moved",
+        "found_at": 2
+      },
+      {
+        "path": "src/api/handler.ts",
+        "line": 6,
+        "identifier": "handle",
+        "verdict": "ok"
+      }
+    ],
+    "found_at_is_measured": true
+  }
+}

@@ -29,7 +29,8 @@
 | 第3.2節 dispatch（monitor との境界） | 第11節 |
 | 第3.3節 merge（PR 本文） | 第12節 |
 | 第3.5節 profile-init（押さえるべき3点・`--check`） | 第13節 |
-| 第3.6節 status（read-only の契約と表示規則） | 第14節 |
+| 第3.6節 inspect（`--check-references` の判定範囲と境界） | 第15節 |
+| 第3.7節 status（read-only の契約と表示規則） | 第14節 |
 
 ---
 
@@ -463,3 +464,79 @@ path のうち何件が実在するかを出す。**構文として正しいま�
 `issues[].next_actions[]` / `next_actions[]` / `unreadable[]` / `redactions[]` を持つ。
 `state` の語彙は `ok` / `not_run` / `unreadable` / `no_record`（phase 単位ではさらに
 `partial_read`）である。
+---
+
+
+## 15. inspect: 本文の主張を base の tree に突き合わせる（`--check-references`）
+
+planner の入力は Issue の number / title / body / labels だけで、**対象リポジトリを開かない**
+（[profile-contract.md](./profile-contract.md) 第9.1節）。これは設計上の不変条件であり、
+この runner はそこに触れない。閉じるのは**その不変条件が残す穴**である ——
+本文が主張する事実が古くなっていることを、dispatch までの経路で誰も機械的に検知しない。
+
+実測（CommandMate #1831 / Kewton/BorderFreeKidsMap）では、epic 配下 16 Issue を 1 日で連続
+dispatch して **16 件中 11 件**で本文が実物とずれていた（前日に起票し、その間に先行 Issue が
+同じ file を動かした）。`repository.ts` は本文 1,070 行に対し実測 1,129 行、根拠の行番号 5 点
+すべてがずれ（`:979` → `:1038` 等）、e2e の test 件数を「着手前と同じ 130」と書いた受入条件は
+実測 136 に対して**「先行 Issue が足した 6 件を消す」が正解**になっていた。回避策は人間が
+16 件ぶん手で照合することだった。
+
+### 15.1 何を突き合わせるか
+
+**機械的に判定できるものに限る。**
+
+1. **`path:line` 参照** —— planner と**同じ候補抽出**（`orchestrate.mjs` の
+   `extractFileCandidates` を import する。2つ目の読み口を作らない）で拾った path に `:N`
+   （`:N-M` も可）が続くもの。判定は3点 ——
+   (a) file が無い / (b) N が実測行数を超える /
+   (c) **同じ行**の backtick 内トークン（識別子）が N 行目に無い。(c) は file 内でその識別子が
+   **最初に現れる行**を `found_at` で返す。**完全一致は要求しない**（識別子が近傍へ移っただけでも出る）。
+2. **行数の主張** —— `<path>（N 行）` / `<path> N 行` / `<path> は N 行` の3形。
+   **数え方は固定してある**: 末尾改行のある file は `wc -l` と同じ、**末尾改行の無い最終行も
+   1 行として数える**（`wc -l` より 1 多くなる）。空 file は 0 行。
+3. **本文内の不一致（機械的な部分集合のみ）** —— 同一 path について異なる行数の主張が併存する、
+   または同一 `path:line` が異なる識別子と結び付いている。
+
+### 15.2 何を突き合わせないか
+
+**本文の意味的な矛盾は対象外である。**「決定事項 対 受入条件」のような矛盾は
+`cmate-issue-refinement` Step 4（仮定を `path:line` で confirmed/refuted 判定する LLM 手順）の
+仕事であり、ここで真似ると「読めていないものを読んだことにした報告」になる。
+
+**表記ゆれの検出もしない。** `web/src/lib/filter.ts` と `src/lib/filter.ts` が併存する形は
+planner の `ambiguous_file_candidate`（[plan-contract.md](./plan-contract.md) 第5.4節）が
+著者に訊く。この runner は**そう判定された候補を点検せず**、`ambiguous[]` として件数と綴りを
+名乗る —— どちらが対象かは著者しか決められないからである。
+
+**`--repo-root` の外は読まない。** `..` / 絶対 path / system root / URL host は planner と
+同じ規則（`isSafeRepoPath`）で候補になる前に落ち、落としたことを `dropped[]` に出す。
+**黙って無視はしない。**
+
+### 15.3 出力と exit
+
+`--out` 未指定なら stdout に JSON envelope、指定すればそこにも**同じ byte**を書く
+（既存なら `out_exists` / exit 4）。**plan.json には何も書かない。**
+
+envelope は `--check` と同じ規約で、`status` / `warnings[]` / `summary_markdown` と、
+対象ごとの `references[]` / `line_claims[]` / `ambiguous[]` / `dropped[]` を持つ。
+`inspection.source` は `worktree` か `ref`、`--ref` 省略時は working tree を読み
+`git rev-parse HEAD` を `inspection.head` に記録する。
+
+**所見は5つの warning code**（[codes-and-recovery.md](./codes-and-recovery.md) 第6.2節）で、
+1件でも出れば `status: partial`、無ければ `success`、**どちらも exit 0** である。
+warning にならない verdict が2つある —— 照合できる識別子が同じ行に無い citation
+（`unchecked`）と、識別子が file 内に1度も現れない citation（`identifier_absent`）。
+後者で「移動した」と言うのは、その語がこの file の識別子だという**前提そのものが
+測れていない**まま下す裁定である。
+
+**読めない入力は点検しない**（無視ではなく拒否）。`--repo-root` が無い / Issue が取れない /
+`--ref` が解決しないは `load_error`（exit 6）、引数が読めないものは `invalid_input`（exit 3）で
+止まり、envelope の `inspection` は **`null`** になる。「見て何も無かった」と「見られなかった」を
+同じ形にしないためである。
+
+### 15.4 なぜ `profile-init.mjs --check` に相乗りさせないか
+
+`--check` は「**subprocess も network も使わない**」を性質として掲げている（第9.7節）。
+この runner は `--ref` 指定時に `git -C <repo-root> show <ref>:<path>` を呼ぶので、
+相乗りさせるとその性質が**黙って**変わる。後続の「宣言済み acceptance-gates の base 先行評価」
+（コマンド実行を伴う）も同じ runner に載る前提である。

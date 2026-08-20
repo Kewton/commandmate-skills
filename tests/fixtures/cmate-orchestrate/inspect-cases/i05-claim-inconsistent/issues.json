@@ -1,0 +1,8 @@
+[
+  {
+    "number": 231,
+    "title": "fixture issue",
+    "body": "handler を分割する。\n\n## 現状\n- `src/api/handler.ts` は 20 行ある。\n\n## 決定事項\n- `src/api/handler.ts`（30 行）を2つに割る。",
+    "labels": []
+  }
+]

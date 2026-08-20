@@ -1,0 +1,8 @@
+[
+  {
+    "number": 231,
+    "title": "fixture issue",
+    "body": "launcher の解決を直す。\n\n## 根拠\n- `src/api/handler.ts:3` — `resolveLauncher` がここで launcher を決める\n- `src/api/handler.ts:5` — `readConfig` を呼んでいる\n- `src/api/handler.ts:6` — `handle` はここ",
+    "labels": []
+  }
+]

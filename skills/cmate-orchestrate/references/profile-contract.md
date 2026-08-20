@@ -282,7 +282,11 @@ repo には planner が知りようのない規約がある。
 
 この原則は第9.7節の `--check` でも**変わらない**。tree を開くのは planner ではなく、
 **人間が profile をレビューするときに叩く別 runner**（`profile-init.mjs`）であり、
-plan 経路は1 byte も tree を読まない。
+plan 経路は1 byte も tree を読まない。`scripts/inspect.mjs --check-references`
+（[#217](https://github.com/Kewton/commandmate-skills/issues/217)。Issue 本文が主張する
+`path:line` と行数を tree に突き合わせる）も同じ位置に在る —— **planner が開かないことの
+代償は、本文の主張が古くても誰も気づかないことであり、それを払うのは plan ではなく
+その隣に立つ read-only runner である。**
 
 ### 9.2 形
 
@@ -470,6 +474,15 @@ node scripts/profile-init.mjs --check .commandmate/profile.json --repo-root .
   `scripts/lib.mjs` にあり、**planner と `--check` は同じ関数を呼ぶ**。`--check` が独自の解釈を
   持てば「`--check` は通るが planner は一致しない」という、この節が消しに来た事象の変種を
   自分で作ることになる
+
+**「subprocess を使わない」は性質であって都合ではない。** 読み取り以外を一切しないので、
+`--check` は走っている run の隣で何回呼んでも安全であり、同じ tree からは byte 一致の
+報告が出る。だから、**コマンドを走らせる read-only 点検は `--check` に相乗りさせない** ——
+Issue 本文の `path:line` を base の tree に突き合わせる `scripts/inspect.mjs --check-references`
+（[#217](https://github.com/Kewton/commandmate-skills/issues/217)）は `--ref` 指定時に
+`git show` を呼ぶので、別 runner として置いた。規律（何も書かない・裁定しない・warning は
+`partial` のまま exit 0・読めない入力は拒否する）は本節と同じである。全文は
+[runner-operations.md](./runner-operations.md) 第15節。
 
 **`--check` は profile を承認しない。** 契約適合の裁定は planner 側にある。ひとつだけ
 `--check` が判定しないのは `require[].add` のリテラルが repo の外を指していないか

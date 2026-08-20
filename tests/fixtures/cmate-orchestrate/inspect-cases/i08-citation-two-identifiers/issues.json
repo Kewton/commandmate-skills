@@ -1,0 +1,8 @@
+[
+  {
+    "number": 231,
+    "title": "fixture issue",
+    "body": "handler を読む。\n\n## 根拠\n- `src/api/handler.ts:9` — `resolveLauncher` はここ\n\n## 背景\n- `src/api/handler.ts:9` — `readConfig` はここ",
+    "labels": []
+  }
+]

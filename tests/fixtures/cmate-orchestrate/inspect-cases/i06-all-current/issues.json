@@ -1,0 +1,8 @@
+[
+  {
+    "number": 231,
+    "title": "fixture issue",
+    "body": "launcher の解決を読む。\n\n## 現状\n- `src/api/handler.ts`（12 行）\n- `src/api/config.ts` は 4 行\n\n## 根拠\n- `src/api/handler.ts:9` — `resolveLauncher` の定義\n- `src/api/handler.ts:4` — `DEFAULT_LAUNCHER` の既定値\n- `src/api/handler.ts:12` — 最終行。**実測ちょうど**なので範囲外ではない\n- `src/api/config.ts:2` — `readConfig` の定義",
+    "labels": []
+  }
+]

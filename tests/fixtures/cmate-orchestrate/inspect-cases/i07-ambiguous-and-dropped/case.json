@@ -1,0 +1,30 @@
+{
+  "description": "a shadowed spelling pair is not inspected, and unsafe candidates are reported as dropped",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "ambiguous": [
+      {
+        "path": "src/lib/filter.ts",
+        "covered_by": "web/src/lib/filter.ts"
+      }
+    ],
+    "inspected_excludes": [
+      "src/lib/filter.ts",
+      "web/src/lib/filter.ts"
+    ],
+    "dropped": [
+      "../outside/secret.ts",
+      "users/someone/notes.ts"
+    ],
+    "references": [
+      {
+        "path": "src/api/handler.ts",
+        "line": 6,
+        "identifier": "handle",
+        "verdict": "ok"
+      }
+    ]
+  }
+}
