@@ -1,0 +1,12 @@
+{
+  "issues": [
+    {
+      "number": 501,
+      "title": "fix: 生成ロジックの丸め誤差",
+      "body": "`src/regen.ts` の生成ロジックを直す。\n\n## 根拠\n- `data/geo/landmarks/*.json` は前回の生成物であり、今回は触らない\n- data/geo/stations/ も同じ\n\n## 対象ファイル\n- `src/regen.ts`\n\n## 受入条件\n- [ ] `npm test` が exit 0\n",
+      "labels": [
+        "bug"
+      ]
+    }
+  ]
+}

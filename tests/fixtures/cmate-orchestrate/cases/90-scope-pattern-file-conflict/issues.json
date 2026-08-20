@@ -1,0 +1,20 @@
+{
+  "issues": [
+    {
+      "number": 503,
+      "title": "chore: 全区の GeoJSON を再生成する",
+      "body": "全区の GeoJSON を作り直す。\n\n## 対象ファイル\n- `data/geo/**`\n\n## 受入条件\n- [ ] 再生成後に `git diff --exit-code` が exit 0\n",
+      "labels": [
+        "chore"
+      ]
+    },
+    {
+      "number": 504,
+      "title": "feat: 千代田区にランドマークを追加する",
+      "body": "千代田区のランドマークを1件足す。\n\n## 対象ファイル\n- `data/geo/landmarks/13101.json`\n\n## 受入条件\n- [ ] `data/geo/landmarks/13101.json` が valid GeoJSON\n",
+      "labels": [
+        "feature"
+      ]
+    }
+  ]
+}

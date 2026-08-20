@@ -1,0 +1,48 @@
+{
+  "description": "Issue #219（受入条件3）: 単独 `**` は `over_broad` として契約から落とされ、落ちたことが報告される。全 segment が `*` / `**` の pattern（と `.`）は上流の `globToRegExp` で**あらゆる path に一致する**正規表現になるので、それを載せた契約は scope ゲートを持っていないのと同じである。落とすのであって狭めない: `**` が何を指すつもりだったかを planner が推測するのは ADR 不変条件1（導出元は必ず宣言済み file）が禁じている導出そのものである。plan は `contract_scope_dropped` で件数・pattern・理由を名指しし、`src/lint.ts` は残るので「scope が空になった」（`contract_scope_unknown`）とは別の欠陥として読める。`**` は `suspected_files` には載る —— dispatch の `contractScopeReview` が同じ判定で落とすのが権限の真の境界であり、plan 側は**送る前に**同じことを言う側である。",
+  "args": [
+    "502",
+    "--profile",
+    "node-commandmate"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "contract_scope_dropped",
+      "scope_pattern_declared"
+    ],
+    "warning_severities": [
+      null,
+      "notice"
+    ],
+    "warning_details_include": [
+      "over_broad x1",
+      "over_broad `**`",
+      "`over_broad` means the pattern grants the whole repository"
+    ],
+    "waves": [
+      [
+        502
+      ]
+    ],
+    "merge_order": [
+      502
+    ],
+    "dependencies": [],
+    "classifications": {
+      "502": "independent"
+    },
+    "risk_level": "low",
+    "suspected_files": {
+      "502": [
+        "src/lint.ts",
+        "**",
+        "src/lint.test.ts",
+        "src/lint.spec.ts",
+        "src/__tests__/lint.ts",
+        "src/__tests__/lint.test.ts"
+      ]
+    }
+  }
+}

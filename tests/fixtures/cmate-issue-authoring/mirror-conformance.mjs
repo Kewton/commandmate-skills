@@ -71,6 +71,9 @@ const MIRRORED_CONSTANTS = [
   'CANDIDATE_BACKTICK',
   'CANDIDATE_KNOWN_ROOT',
   'CANDIDATE_WITH_EXT',
+  'PATTERN_SEGMENT',
+  'CANDIDATE_PATTERN',
+  'SCOPE_PATTERN_RE',
   'DELIVERABLE_HEADING_RE',
   'CONTEXT_HEADING_RE',
 ];
@@ -309,6 +312,47 @@ const CORPUS = [
     ].join('\n'),
   },
   {
+    name: 'a scope pattern under a deliverable heading is a deliverable',
+    text: [
+      '区ごとの生成物を作り直す。',
+      '',
+      '## 対象ファイル',
+      '- data/geo/landmarks/*.json',
+      '- `data/geo/**/*.json`',
+      '- data/geo/stations/',
+      '- `src/{a,b}/x.ts`',
+      '- docs/?.md',
+      '',
+      '## 受入条件',
+      '- [ ] 再生成が差分ゼロ',
+    ].join('\n'),
+  },
+  {
+    name: 'a scope pattern outside every deliverable heading is dropped',
+    text: [
+      '`data/geo/**` を作り直す。',
+      '',
+      '## 根拠',
+      '- `data/geo/landmarks/*.json` は前回の生成物',
+      '- data/geo/stations/ も同様',
+      '',
+      '## 対象ファイル',
+      '- `src/regen.ts`',
+    ].join('\n'),
+  },
+  {
+    name: 'markdown emphasis is not a scope pattern',
+    text: [
+      '強調が候補にならないこと。',
+      '',
+      '## 対象ファイル',
+      '- `src/emphasis.ts` は **NOT** 変更対象外である',
+      '- **bold** や **NOT** のような強調は path ではない',
+      '- vendor/n には拡張子も既知 root も無いので候補にしない',
+      '- 単独の `**` は宣言として受け取る（planner が over_broad で落とす）',
+    ].join('\n'),
+  },
+  {
     name: 'an empty body extracts nothing',
     text: '',
   },
@@ -371,6 +415,45 @@ const LIVENESS = [
   {
     name: 'the corpus reaches the objective extraction',
     holds: (results) => results.some((entry) => entry.planner.objective !== ''),
+  },
+  // Planner Issue #219. Three assertions, because the rule has three halves that
+  // can each rot on their own: a declared pattern is TAKEN, the same pattern
+  // outside a deliverable heading is NOT, and Markdown emphasis is not a pattern
+  // at all. Without the last one a mirror that dropped the `/` requirement from
+  // CANDIDATE_PATTERN would still look synchronised.
+  {
+    name: 'the corpus reaches a declared scope pattern',
+    holds: (results) =>
+      results.some(
+        (entry) =>
+          entry.planner.suspected.includes('data/geo/landmarks/*.json') &&
+          entry.planner.suspected.includes('data/geo/**/*.json') &&
+          entry.planner.suspected.includes('data/geo/stations/') &&
+          entry.planner.suspected.includes('src/{a,b}/x.ts') &&
+          entry.planner.suspected.includes('docs/?.md'),
+      ),
+  },
+  {
+    name: 'the corpus reaches a dropped scope pattern',
+    holds: (results) =>
+      results.some(
+        (entry) =>
+          entry.planner.suspected.includes('src/regen.ts') &&
+          !entry.planner.paths.includes('data/geo/**') &&
+          !entry.planner.paths.includes('data/geo/landmarks/*.json') &&
+          !entry.planner.paths.includes('data/geo/stations/'),
+      ),
+  },
+  {
+    name: 'the corpus reaches markdown emphasis and refuses it',
+    holds: (results) =>
+      results.some(
+        (entry) =>
+          entry.planner.paths.includes('src/emphasis.ts') &&
+          entry.planner.paths.includes('**') &&
+          !entry.planner.paths.some((path) => path.includes('bold')) &&
+          !entry.planner.paths.includes('vendor/n'),
+      ),
   },
 ];
 

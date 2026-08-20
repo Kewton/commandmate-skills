@@ -330,6 +330,13 @@ Wave 生成の規則は次の3つ。
 
 `merge_order` は Wave を先頭から平坦化したものである。
 
+規則2の「重なる」は**文字列の一致ではない**（[#219](https://github.com/Kewton/commandmate-skills/issues/219)）。
+`suspected_files` の entry は pattern でもディレクトリでもありうるので、判定は上流の scope ゲートと
+同じ関係（`lib.mjs` の `scopeEntriesOverlap`）で行う: pattern 対 path は一致、pattern 対 pattern は
+静的 prefix の包含、path 対 path は一致か**ディレクトリ前置**（`src/lib` と `src/lib/a.ts` は重なる）。
+**決められない組は「重なる」と答える** —— 偽陽性は Wave 1本分の並列度で済むが、偽陰性は
+2人の worker が同じ file を書いた状態で統合に届く（[#175](https://github.com/Kewton/commandmate-skills/issues/175)）。
+
 ## 5. issue の classification
 
 | 値 | 意味 |
@@ -625,7 +632,7 @@ Kewton/BorderFreeKidsMap#63）: 「未決の問い」3件を本文に残した�
 | 項目 | 規範 |
 |---|---|
 | **既定** | `blocking`。`severity` を持たない entry は blocking である |
-| **notice 集合** | `harness_path_in_scope`（#199）と `profile_repository_override`（#210）の **2件** |
+| **notice 集合** | `harness_path_in_scope`（#199）、`profile_repository_override`（#210）、`scope_pattern_declared` と `scope_pattern_dropped`（[#219](https://github.com/Kewton/commandmate-skills/issues/219)。第5.7節）の **4件** |
 | **emit 規則** | planner は **notice の entry にだけ** `severity` を書く。blocking は暗黙のまま |
 | **required か** | **いいえ。** `note_entry` の `required` には入れない |
 | **envelope** | `orchestrate-result.v1` の `warnings` は code と detail だけを運ぶ（`severity` は載せない） |
@@ -638,9 +645,11 @@ Kewton/BorderFreeKidsMap#63）: 「未決の問い」3件を本文に残した�
 
 分けるのは「宣言されたか」ではなく「**何が**宣言されたか」である。`open_question_declared` は
 著者自身の宣言だが、宣言している内容が「まだ決めていない」なので blocking である。
-notice 集合の2件は、片方が**著者**の宣言（成果物見出しに書いたハーネス path）の報告、
-もう片方が **operator** の宣言（`--repo` と `--allow-unverified` の2 flag）の報告であり、
-同じ原理の同じ側にある。
+notice 集合の4件は、3件が**著者**の宣言（成果物見出しに書いたハーネス path、および
+成果物見出しの内／外に書いた scope pattern）の報告、1件が **operator** の宣言
+（`--repo` と `--allow-unverified` の2 flag）の報告であり、同じ原理の同じ側にある。
+`scope_pattern_dropped` も同じ側である —— 報告しているのは「planner が読めなかった」ではなく
+「**宣言として読まなかった**」、つまり著者が書いた位置についての事実だからである。
 
 **なぜ fail-closed か。** 誤分類の事故は2方向に起こりうるが、対称ではない。
 blocking を notice と誤れば **run が黙って `partial` でなくなる**（読み手は気づかない）。
@@ -676,6 +685,59 @@ dispatch runner はその field だけを読む）、`plan.status` を読んで�
 `dependency-plan.md` の `## Warnings` にも `(notice)` の印つきで出て、
 [codes-and-recovery.md](./codes-and-recovery.md) 第4節の対処表にも在る。
 **落としたのは色だけで、記録は落としていない。**
+
+## 5.7 著者が宣言した scope pattern（`scope_pattern_declared` / `scope_pattern_dropped`）
+
+**規範。** Issue 本文が**成果物見出しの下**に書いた glob（`*` / `**` / `?` / `{a,b}`）と
+末尾スラッシュのディレクトリは、path とまったく同じ経路で `suspected_files` に入り、
+dispatch の実行契約の `scope.allow` へ**綴りのまま**運ばれる
+（[#219](https://github.com/Kewton/commandmate-skills/issues/219)）。
+
+| 書いた場所 | 行き先 | 報告 |
+|---|---|---|
+| 成果物見出しの配下（`## 対象ファイル` / `## 成果物` / `## Deliverables` … `DELIVERABLE_HEADING_RE`） | `suspected_files` | `scope_pattern_declared`（notice。pattern を列挙する） |
+| それ以外（`## 根拠` / `## 参考` の配下、および見出しの外の散文） | **どこにも入らない** | `scope_pattern_dropped`（notice。落とした pattern を列挙する） |
+| 全 segment が `*` / `**`、または `.`（`**` / `*` / `**/*` / `.` / `./`） | `suspected_files` には入るが**契約には入らない** | `contract_scope_dropped` の理由 `over_broad`（blocking） |
+
+**なぜ成果物見出しの下だけか。** glob は「**誰も列挙していない file 集合に対する権限**」である。
+path の言及は「この file の話をしている」で足りるが、pattern の言及は権限の宣言としてしか読めない。
+[#177](https://github.com/Kewton/commandmate-skills/issues/177) が agent ハーネスに引いたのと同じ
+規則 —— **明示の宣言が言及に優る** —— をここでも使う。副次的な効果として、pattern は
+`FILE_EXT` の検査を受けない: 閉じた拡張子集合は「散文の token が書き込み権限になる」ことを
+防ぐためのものであり、成果物見出しの下の宣言にはその前提が無い。
+
+**なぜ落としたことを報告するか。** 0.31.0 までは backtick の中の glob だけが
+`CANDIDATE_BACKTICK` の `[^`\s]+` を偶然通り、本文のどこに書いても `scope.allow` まで
+届いていた。黙って落とすと、その書き方をしていた Issue の scope が**黙って狭くなる** ——
+#43 / #56 / #182 が繰り返し塞いできた失敗と同じ形である。`scope_pattern_dropped` は
+「書きたいなら成果物見出しへ移せ」という 1 文であり、それが唯一の直し方である。
+なお **`unrecognized_file_extension` には落とさない**: `.json` は既知拡張子であり、
+綴りを直せと言うのは誤診である。
+
+**なぜ notice か。** 第5.6節の原理に従う。どちらの code も「**著者が本文に書いて決めたこと**の
+報告」であり、planner が読めなかったことの報告ではない。宣言を honour した記録
+（`scope_pattern_declared`）と、宣言として読まなかった記録（`scope_pattern_dropped`）の
+両方が、`harness_path_in_scope` と同じ側にある。
+
+**展開はしない。** plan も dispatch も working tree を開かないので（[ADR](./adr-scope-derivation.md)
+不変条件3）、`data/geo/**` が何 file を指すかは plan から読めない。**だから宣言そのものを
+列挙する** —— `scope_pattern_declared` の detail は pattern を綴りのまま並べ、上流の解釈
+（`**` は階層を跨ぐ・`*` と `?` は跨がない・`{a,b}` は選択・`[` `]` は literal・
+ディレクトリは配下すべて）を 1 行で添える。レビュアが重さを測る対象は**展開結果ではなく
+pattern そのもの**である。変更 file ごとにどの allow pattern が許可したかは、
+**裁定を行う CommandMate の scope ゲート側**に残る（Kewton/CommandMate#1841）。
+
+**Wave の衝突判定も pattern を読む。** 2つの Issue が同じ wave に入れるかは
+`suspected_files` の完全一致集合の交差ではなく、上流の scope ゲートと同じ関係
+（`lib.mjs` の `scopeEntriesOverlap`）で決まる（第4節）。`data/geo/**` と
+`data/geo/landmarks/13101.json` は衝突する。決められない組は「衝突する」と答える ——
+偽陽性は wave 1本分の並列度で済むが、偽陰性は統合で壊れる（[#175](https://github.com/Kewton/commandmate-skills/issues/175)）。
+
+**書けない形。** repository 直下だけを指す glob（`*.md`）は抽出されない。`/` を含まない
+token を pattern として受けると Markdown の強調（`**bold**`）が scope になるためである。
+repository 直下も含めて全 Markdown を指すなら `**/*.md` と書く（`**` は 0 段も跨ぐ）。
+また、日本語の散文に隙間なく続けて書いた pattern（`data/geo/stations/配下`）は抽出されない ——
+backtick で囲めば拾われる。
 
 ## 6. risk
 

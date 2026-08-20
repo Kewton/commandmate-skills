@@ -423,6 +423,38 @@ merge と統合検証が終わった run を failure に落とすのは**本節�
   **残っていること**をファイルシステムの事実として確かめる —— limitation が同じでも、unlink する
   実装なら赤くなる。
 
+## 5.6 宣言 scope の判定（`scopeMatches`）
+
+PR 本文の「Declared scope vs. actual changes」節（第5.2節）は、変更 file 1件ごとに
+「宣言 scope の内側か」を判定して out-of-scope 件数と対比表を作る。この判定は
+**CommandMate の scope ゲートと同じ関係**でなければならない —— ここが本文に出る
+「違反」であり、上流のゲートが下す「不合格」と食い違えば、レビュアは実在しない違反を
+読むか、実在する違反を見落とす。
+
+**実装は移植である。** `lib.mjs` の `scopeMatches` は CommandMate
+`src/lib/verification/scope-gate.ts` の `globToRegExp`（CommandMate #1546、設計正本は
+同 repository の `docs/design/task-contract.md` 第2.2節）の部分集合を、Node stdlib だけで
+写したものである（[#219](https://github.com/Kewton/commandmate-skills/issues/219)）。
+
+| 記法 | 意味 |
+|---|---|
+| `**`（segment 全体） | 階層を跨ぐ。**0 段も跨ぐ**ので `a/**` は `a/b` にも `a/b/c` にも一致し、`**/*.ts` は `x.ts` に一致する |
+| `a**b`（segment 全体でない） | segment 内 wildcard に潰れる（階層は跨がない） |
+| `*` / `?` | segment 内。`/` は跨がない |
+| `{a,b}` | 選択。入れ子可。**括弧が閉じていなければ literal**（shell と同じ。`src/{a` は `{` を含む path） |
+| `[` `]` | **literal。** Next.js の `src/app/[...path]/` を文字クラスとして読むと、その path を名指した pattern が何にも一致しなくなる |
+| ディレクトリ | 配下すべてに一致する。`src/lib` / `src/lib/` / `src/lib/**` は同じ意味である |
+
+**0.31.0 までは `*` と `**` だけを解釈し、それ以外は literal だった。** 上流が許可する
+3つの形 —— ディレクトリ前置（`src/lib`。人がディレクトリを書く綴り）・`?`・`{a,b}` ——
+がすべて「一致しない」と判定され、in-scope の変更が違反として数えられていた。
+移植で消えたのはこの食い違いだけであり、判定の**置き場所**は変わっていない:
+`requireScopeClean` を下すのは上流のゲートであって、この runner ではない（第5.2節）。
+
+**同じ関数を planner も使う。** 2つの Issue が同じ wave に入れるかの判定
+（`scopeEntriesOverlap`）は同じ移植の上に載っている。1つの関係に対する実装が
+package 内に2つあれば、その2つは黙って食い違う。
+
 ## 6. 停止と status / stop_reason / exit
 
 failure・blocked は途中で **停止** し、`blocking_reasons` と該当 target に記録する。停止後の

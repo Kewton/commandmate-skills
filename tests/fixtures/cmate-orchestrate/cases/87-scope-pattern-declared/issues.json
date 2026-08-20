@@ -1,0 +1,12 @@
+{
+  "issues": [
+    {
+      "number": 500,
+      "title": "chore: 区ごとの GeoJSON を再生成する",
+      "body": "区ごとの生成物を再生成する。\n\n## 対象ファイル\n- data/geo/landmarks/*.json\n- `data/geo/**/*.json`\n- data/geo/stations/\n- `src/regen.ts`\n\n## 受入条件\n- [ ] `npm run regen` を流したあと `git diff --exit-code` が exit 0\n",
+      "labels": [
+        "chore"
+      ]
+    }
+  ]
+}

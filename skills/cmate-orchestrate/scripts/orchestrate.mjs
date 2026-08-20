@@ -36,6 +36,8 @@ import {
   normalizeScopeCompanions,
   compileScopeCompanions,
   companionsForPath,
+  scopeEntriesOverlap,
+  isOverBroadScope,
 } from './lib.mjs';
 
 const PLAN_SCHEMA_VERSION = 2;
@@ -967,6 +969,66 @@ const CANDIDATE_BACKTICK = '`([^`\\s]+\\.(?:' + FILE_EXT + '))`';
 const CANDIDATE_KNOWN_ROOT = PATH_START + '((?:src|tests|test|scripts|docs|lib|app|pkg|internal|cmd|\\.github)/[A-Za-z0-9_./-]+)\\b';
 const CANDIDATE_WITH_EXT = PATH_START + '([A-Za-z0-9_.-]+/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\\.(?:' + FILE_EXT + '))\\b';
 
+// The fourth candidate source (Issue #219). The three above cannot express a
+// declaration the execution contract has accepted since CommandMate #1546:
+// `[A-Za-z0-9_.-]` holds no `*`, `?`, `{`, `}` or `,`, so a plainly written
+// `data/geo/landmarks/*.json` — and the directory `data/geo/stations/` — matched
+// nothing and was dropped without a word. Backticks were the one way through,
+// and only by accident: CANDIDATE_BACKTICK's `[^`\s]+` accepts any byte, so
+// `` `data/geo/**/*.json` `` reached scope.allow while the same pattern one line
+// below, unquoted, did not. Measured in Kewton/BorderFreeKidsMap #243: 46
+// generated files listed BY HAND under `## 対象ファイル`, because the one line
+// that says what the issue means could not be written.
+//
+// A segment is the plain path alphabet plus `*` and `?`, or a brace group. `,`
+// is accepted ONLY inside braces: outside them it is prose punctuation, and a
+// segment that swallowed it would read "a/b.ts, c/d.ts" as one token.
+//
+// Unlike the three sources above this one does NOT consult FILE_EXT. The closed
+// extension set is what keeps a bare prose token from becoming write permission;
+// a pattern reaches here only from under a deliverable heading (see
+// extractFileCandidates), which is a declaration rather than a mention, and
+// gating it on the extension set would refuse `data/tiles/*.mbtiles` for a
+// reason that no longer applies.
+//
+// Mirrored byte for byte in cmate-issue-authoring scripts/validate-plan.mjs,
+// like the three sources above.
+const PATTERN_SEGMENT = '(?:[A-Za-z0-9_.*?-]|\\{[A-Za-z0-9_.,*?-]+\\})+';
+
+// Two shapes, and what separates the second from prose is a `/`. A bare-wildcard
+// token (`**`, `*`, `**/*`) is matched so that it can be REFUSED as `over_broad`
+// with the pattern named rather than ignored; everything else must carry a
+// slash, because without that requirement `**bold**` — Markdown emphasis, which
+// every issue body has — is a scope pattern.
+//
+// The trailing lookahead pins the token's end the way PATH_START pins its start,
+// and `(?<![*?}])` extends PATH_START over the metacharacters PATH_START does
+// not know about. Both are needed for the same one line of prose: in
+// `**bold** y`, the CLOSING `**` is preceded by `d` (PATH_START refuses it) but
+// its second `*` is preceded by `*`, which PATH_START allows — so without this
+// the bare-wildcard shape matched a lone `*` at the end of every bold run.
+//
+// The trailing lookahead also refuses a NON-ASCII follower, which PATH_START has
+// no counterpart for. Without it the directory shape ate the ASCII head of every
+// non-ASCII filename: `docs/企画書_都知事杯2026_改訂版.md` — a real deliverable
+// in the fixtures — matched `(?:SEGMENT/)+` as `docs/` and an empty last
+// segment, so declaring one Japanese-named document silently granted the whole
+// of `docs/`. The cost is that a pattern written flush against Japanese prose
+// (`data/geo/stations/配下`) is not extracted; write it in backticks, which is
+// this vocabulary's convention anyway, and it is.
+//
+// Known and accepted: `**a**/**b**` — emphasis on both sides of a slash — is a
+// syntactically valid glob and IS extracted. It is only ever read under a
+// deliverable heading, where "the files I produce" is not a place that sentence
+// occurs; refusing it would need the extraction to know Markdown.
+const CANDIDATE_PATTERN = PATH_START + '(?<![*?}])(\\*{1,2}(?:/\\*{1,2})*|(?:' + PATTERN_SEGMENT + '/)+(?:' + PATTERN_SEGMENT + ')?)(?![A-Za-z0-9_.*?{/-]|[^\\x00-\\x7f])';
+
+// Which candidates the deliverable-heading rule governs: a glob metacharacter,
+// or the trailing slash that declares a directory. Applied to candidates from
+// EVERY source, not only CANDIDATE_PATTERN, because the backtick source has
+// always matched patterns too — that is the accident this issue regularises.
+const SCOPE_PATTERN_RE = /[*?{]|\/$/;
+
 // Headings under which a path is the issue's PRODUCT rather than its context
 // (Issue #50). See classifyFileCandidates for why the extension alone cannot
 // decide that. Mirrored in cmate-issue-authoring scripts/validate-plan.mjs.
@@ -1021,15 +1083,23 @@ function inSpans(spans, index) {
   return spans.some(([start, end]) => index >= start && index < end);
 }
 
-// Returns { paths, deliverable, contextOnly, shadowed }: the de-duplicated
-// candidates in order of first appearance, the subset a deliverable heading
-// covers, the subset that appears ONLY under a context heading, and the pairs
-// where one candidate is a path-boundary suffix of another.
+// Returns { paths, deliverable, contextOnly, shadowed, droppedPatterns }: the
+// de-duplicated candidates in order of first appearance, the subset a
+// deliverable heading covers, the subset that appears ONLY under a context
+// heading, the pairs where one candidate is a path-boundary suffix of another,
+// and the scope patterns no deliverable heading claimed.
 function extractFileCandidates(text) {
-  const patterns = [
-    new RegExp(CANDIDATE_BACKTICK, 'g'),
-    new RegExp(CANDIDATE_KNOWN_ROOT, 'g'),
-    new RegExp(CANDIDATE_WITH_EXT, 'g'),
+  // The fourth source is PATTERN-ONLY. CANDIDATE_PATTERN also matches plain
+  // paths — including shapes the first three deliberately refuse, such as
+  // `vendor/n`, which has neither a known root nor a recognised extension — so
+  // anything it finds that is not a scope pattern is discarded rather than let
+  // in through a side door. The three closed sources stay exactly as strict as
+  // they were.
+  const sources = [
+    { pattern: new RegExp(CANDIDATE_BACKTICK, 'g'), patternsOnly: false },
+    { pattern: new RegExp(CANDIDATE_KNOWN_ROOT, 'g'), patternsOnly: false },
+    { pattern: new RegExp(CANDIDATE_WITH_EXT, 'g'), patternsOnly: false },
+    { pattern: new RegExp(CANDIDATE_PATTERN, 'g'), patternsOnly: true },
   ];
   const spans = deliverableSpans(text);
   const cSpans = contextSpans(text);
@@ -1038,10 +1108,26 @@ function extractFileCandidates(text) {
   const inContext = new Set();
   const outsideContext = new Set();
   const found = [];
-  for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
+  const droppedPatterns = [];
+  for (const source of sources) {
+    for (const match of text.matchAll(source.pattern)) {
       const candidate = match[1].trim();
       if (!isSafeRepoPath(candidate)) continue;
+      const isPattern = SCOPE_PATTERN_RE.test(candidate);
+      if (source.patternsOnly && !isPattern) continue;
+      // A pattern is permission over files nobody has enumerated, so it is
+      // honoured only where the issue DECLARES it as a product — the same "an
+      // explicit declaration outranks an incidental mention" rule #177 drew for
+      // the harness, and the reason a pattern needs no FILE_EXT check. A pattern
+      // cited under 根拠 / 参考, or written in passing prose, is not a target.
+      // It is dropped and REPORTED (`scope_pattern_dropped`): a backtick pattern
+      // used to reach scope.allow from anywhere in the body, so a silent drop
+      // here would narrow somebody's scope without telling them — the failure
+      // this extraction has now been fixed for three times (#43, #56, #182).
+      if (isPattern && !inSpans(spans, match.index)) {
+        if (!droppedPatterns.includes(candidate)) droppedPatterns.push(candidate);
+        continue;
+      }
       // A path written as context in one place and as a deliverable in another
       // is a deliverable: the stronger statement wins.
       if (inSpans(spans, match.index)) deliverable.add(candidate);
@@ -1059,7 +1145,15 @@ function extractFileCandidates(text) {
   // the instruction. This also gives deliverable headings their precedence for
   // free, since a deliverable span is never a context span.
   const contextOnly = new Set([...inContext].filter((candidate) => !outsideContext.has(candidate)));
-  return { paths: found, deliverable, contextOnly, shadowed: shadowedCandidates(found) };
+  return {
+    paths: found,
+    deliverable,
+    contextOnly,
+    shadowed: shadowedCandidates(found),
+    // A pattern the issue declares under `## 対象ファイル` and ALSO cites under
+    // `## 根拠` is not a drop: the declaration already won above.
+    droppedPatterns: droppedPatterns.filter((candidate) => !seen.has(candidate)),
+  };
 }
 
 // The other half of Issue #49. Anchoring stops the extraction INVENTING a
@@ -1213,6 +1307,12 @@ function extractUnrecognizedPaths(text, candidates) {
     const candidate = match[1].trim();
     if (extracted.has(candidate) || seen.has(candidate)) continue;
     if (!isSafeRepoPath(candidate)) continue;
+    // A scope PATTERN that did not reach `paths` was refused by the
+    // deliverable-heading rule, not by FILE_EXT (Issue #219). `.json` is a
+    // recognised extension; saying otherwise would send the author to fix a
+    // spelling that is already correct. Its own report is
+    // `scope_pattern_dropped`.
+    if (SCOPE_PATTERN_RE.test(candidate)) continue;
     seen.add(candidate);
     out.push(candidate);
   }
@@ -1251,6 +1351,26 @@ function extractionWarnings(analyses) {
             'is the record of it. If the issue only needs to RUN the harness, delete the path from the deliverable ' +
             'heading and cite it in prose or under a context heading (`根拠` / `参考`) instead, then re-plan; the ' +
             'worker still reads it, it just cannot write to it.',
+        ),
+      });
+    }
+    // One warning per issue, not one per pattern: an issue whose prose is full
+    // of `skills/**`-style citations would otherwise bury everything beside it.
+    // The tally is part of the finding, the first few patterns say WHICH, and
+    // the fix is one sentence long because there is only one (Issue #219).
+    if (analysis._droppedPatterns.length > 0) {
+      const dropped = analysis._droppedPatterns;
+      const samples = dropped.slice(0, 3).map((pattern) => `\`${pattern}\``).join(', ');
+      const more = dropped.length > 3 ? `, …and ${dropped.length - 3} more` : '';
+      out.push({
+        code: 'scope_pattern_dropped',
+        detail: redact(
+          `#${analysis.number} writes ${dropped.length} scope pattern(s) outside every deliverable heading: ` +
+            `${samples}${more}. A glob or a directory is permission over files nobody has enumerated, so the ` +
+            'planner honours it only where the issue declares it as a product (`## 対象ファイル` / `## 成果物` / ' +
+            '`## Deliverables`, DELIVERABLE_HEADING_RE); cited under `## 根拠` or written in passing prose it is ' +
+            'read as a reference and stays out of `suspected_files`, hence out of the contract\'s `scope.allow`. ' +
+            'If the worker must WRITE these files, move the pattern under a deliverable heading and re-plan.',
         ),
       });
     }
@@ -1295,6 +1415,13 @@ function contractScopeDrops(paths) {
     if (pattern.includes('\\')) { dropped.push({ pattern, reason: 'backslash' }); continue; }
     if (pattern.split('/').includes('..')) { dropped.push({ pattern, reason: 'parent_escape' }); continue; }
     if (pattern.includes('\u0000')) { dropped.push({ pattern, reason: 'nul_byte' }); continue; }
+    // #219. A pattern whose every segment is `*` or `**` compiles, upstream, to
+    // a regex that matches every path — so a contract carrying it has no scope
+    // gate at all. It is the one shape the extraction can now produce that
+    // MUST not reach `scope.allow`, and it is dropped rather than narrowed:
+    // guessing what the author meant by `**` would be the derivation the ADR's
+    // invariant 1 forbids.
+    if (isOverBroadScope(pattern)) { dropped.push({ pattern, reason: 'over_broad' }); continue; }
     if (seen.has(pattern)) continue;
     seen.add(pattern);
     kept.push(pattern);
@@ -1331,9 +1458,49 @@ function contractScopeWarnings(analyses) {
           `${analysis.suspected_files.length} path(s) in this issue's suspected_files (${tally}): ${samples}${more}. ` +
           `\`scope.allow\` is a send-time snapshot, so a worker told to edit one of them is failed by the scope gate ` +
           'with no way to widen it. `over_bound` means the issue declares more paths than the contract accepts ' +
-          `(${MAX_SCOPE_PATTERNS} is CommandMate's bound, which no flag here raises) — split the issue; every other ` +
-          `reason is the shape of one path — write it as a plain repository-relative path of at most ` +
+          `(${MAX_SCOPE_PATTERNS} is CommandMate's bound, which no flag here raises) — split the issue; ` +
+          '`over_broad` means the pattern grants the whole repository (`**`, `*`, `.`), which is a contract with no ' +
+          'scope gate — name the directory or the file set it actually means; every other ' +
+          `reason is the shape of one path — write it as a repository-relative path or glob of at most ` +
           `${MAX_SCOPE_PATTERN_LENGTH} characters. Under --unattended the dispatch runner refuses the whole plan on this`,
+      ),
+    });
+  }
+  return out;
+}
+
+// The patterns an issue's declared scope actually carries (Issue #219).
+//
+// ADR §2 invariant 2 — "everything added is visible" — was written for paths the
+// planner DERIVES, and `scope_defaults` discharges it there. A glob discharges
+// nothing: `data/geo/**` is four words that grant an unbounded set, and the plan
+// cannot list what it covers without opening a working tree (invariant 3 forbids
+// that, and §12 of the ADR records why). So what is reported is the DECLARATION
+// — every entry of `scope.allow` that is a pattern rather than a path, named
+// verbatim — and a reviewer weighs the pattern instead of the expansion.
+//
+// A notice, not a blocking warning (§5.6): the issue said this on purpose, under
+// a deliverable heading, and refusing to plan on it would refuse the very
+// declaration this feature exists to accept. `over_broad` is the one shape that
+// stops a pattern, and it stops it in `contract_scope_dropped` above.
+function scopePatternWarnings(analyses) {
+  const out = [];
+  for (const analysis of analyses) {
+    const patterns = analysis.suspected_files.filter(
+      (path) => typeof path === 'string' && SCOPE_PATTERN_RE.test(path),
+    );
+    if (patterns.length === 0) continue;
+    const samples = patterns.slice(0, 5).map((pattern) => `\`${pattern}\``).join(', ');
+    const more = patterns.length > 5 ? `, …and ${patterns.length - 5} more` : '';
+    out.push({
+      code: 'scope_pattern_declared',
+      detail: redact(
+        `#${analysis.number} declares ${patterns.length} of its ${analysis.suspected_files.length} scope ` +
+          `entr${analysis.suspected_files.length === 1 ? 'y' : 'ies'} as a pattern rather than a path: ` +
+          `${samples}${more}. The contract carries them verbatim and CommandMate's scope gate adjudicates ` +
+          'them (`**` crosses directories, `*` and `?` do not, `{a,b}` alternates, `[` and `]` are literal, ' +
+          'and a directory covers everything beneath it). Nothing here expands them, so what a reviewer ' +
+          'weighs is the pattern: read each one as the permission it is.',
       ),
     });
   }
@@ -2577,6 +2744,8 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
     _topics: topicTokens(`${issue.title} ${body}`),
     _rawBody: body,
     _unrecognizedPaths: extractUnrecognizedPaths(text, extraction.paths),
+    // Scope patterns the body wrote outside every deliverable heading (#219).
+    _droppedPatterns: extraction.droppedPatterns,
     // Harness paths a deliverable heading claimed, hence granted (Issue #177).
     // The denied ones need no private field: they are in `reference_files`.
     _harnessPathsInScope: harness.declared,
@@ -2700,8 +2869,16 @@ function explicitReason(issueNumber, ref) {
 // than a boolean because it is EVIDENCE (Issue #182): an inferred edge that a
 // shared file grounds says which file in its `reason`.
 function sharedFiles(a, b) {
-  const right = new Set(b.suspected_files);
-  return a.suspected_files.filter((path) => right.has(path));
+  // Not a set intersection any more (Issue #219). `suspected_files` becomes
+  // `scope.allow` verbatim and the entries there are PATTERNS as often as they
+  // are paths, so comparing them as literal strings answered "no overlap" for
+  // `data/geo/**` beside `data/geo/landmarks/13101.json` — two issues writing
+  // the same files, placed in one wave. The relation is the same one
+  // CommandMate's scope gate uses; where it cannot decide, it says they overlap
+  // (a false positive costs one wave of parallelism, a false negative costs the
+  // integration — #175).
+  return a.suspected_files.filter((path) =>
+    b.suspected_files.some((other) => scopeEntriesOverlap(path, other)));
 }
 
 function hasFileOverlap(a, b) {
@@ -3253,8 +3430,11 @@ function completionChecks(plan, dependencyErrors, ranOverwriteGuard) {
     const inWave = wave.map((n) => plan.issues.find((i) => i.number === n));
     for (let i = 0; i < inWave.length; i += 1) {
       for (let j = i + 1; j < inWave.length; j += 1) {
-        const left = new Set(inWave[i].suspected_files);
-        if (inWave[j].suspected_files.some((p) => left.has(p))) return false;
+        const left = inWave[i].suspected_files;
+        // The same relation sharedFiles uses, for the same reason: a check that
+        // compared literal strings would pass a wave the planner built with the
+        // pattern-aware rule and call it conflict-free (Issue #219).
+        if (inWave[j].suspected_files.some((p) => left.some((q) => scopeEntriesOverlap(p, q)))) return false;
       }
     }
     return true;
@@ -3338,7 +3518,7 @@ function completionChecks(plan, dependencyErrors, ranOverwriteGuard) {
 // `harness_path_in_scope` is unchanged in every other respect: it still fires, it
 // still names the path, it still sits in `plan.warnings` and in the recovery
 // table. Only the colour moved.
-const NOTICE_WARNING_CODES = new Set(['harness_path_in_scope', 'profile_repository_override']);
+const NOTICE_WARNING_CODES = new Set(['harness_path_in_scope', 'profile_repository_override', 'scope_pattern_declared', 'scope_pattern_dropped']);
 
 // `severity` is written on NOTICE entries only. `blocking` stays implicit, which
 // buys two things at once:
@@ -3585,6 +3765,7 @@ function run(argv) {
     ...profileWarnings,
     ...extractionWarnings(analyses),
     ...contractScopeWarnings(analyses),
+    ...scopePatternWarnings(analyses),
     ...openQuestionWarnings(analyses),
     ...dependencyWarnings,
   ];

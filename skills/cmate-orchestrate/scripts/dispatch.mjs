@@ -77,6 +77,7 @@ import {
   redactionsList,
   resolveLauncher,
   safeWorktreeTarget,
+  isOverBroadScope,
 } from './lib.mjs';
 
 const DISPATCH_SCHEMA_VERSION = 1;
@@ -2642,6 +2643,7 @@ const SCOPE_DROP_HINT = {
   parent_escape: 'the pattern has a ".." segment, which escapes the repository',
   nul_byte: 'the pattern contains a NUL byte',
   over_bound: `the contract accepts at most ${MAX_SCOPE_PATTERNS} patterns and this issue declared more`,
+  over_broad: 'the pattern matches every path in the repository (`**`, `*`, `.`), so a contract carrying it has no scope gate at all',
 };
 
 // A dropped pattern as it can safely be printed. Control characters (the NUL
@@ -2702,6 +2704,11 @@ function contractScopeReview(issue) {
     if (pattern.includes('\\')) { drop(pattern, 'backslash'); continue; }
     if (pattern.split('/').includes('..')) { drop(pattern, 'parent_escape'); continue; }
     if (pattern.includes('\u0000')) { drop(pattern, 'nul_byte'); continue; }
+    // #219: the planner's contractScopeDrops refuses the same shape at plan
+    // review, where the fix is an edit to the issue body. Here is where it stops
+    // reaching a worker: `allow: ["**"]` is a contract whose scope gate can
+    // never fail, which is a gate that is not there.
+    if (isOverBroadScope(pattern)) { drop(pattern, 'over_broad'); continue; }
     if (seen.has(pattern)) continue;
     seen.add(pattern);
     allow.push(pattern);

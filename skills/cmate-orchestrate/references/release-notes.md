@@ -449,6 +449,50 @@ segment として安全な名前、`flakyIsPass: true` は `retryOnFail: 1` を�
 
 ---
 
+### #219 — 契約は glob を受け取れたのに、Issue 本文からそれを書く方法が無かった
+
+「`scope.allow` は完全一致の path 一覧である」は**誤り**である。契約も scope ゲートも
+CommandMate #1546 以来 glob 対応済みで（`src/lib/verification/scope-gate.ts` の
+`globToRegExp`、設計正本は同 repository の `docs/design/task-contract.md` 第2.2節）、
+この repository 側でも dispatch の `contractScopeReview` は `*` を拒まずに契約へ書き、
+`skills/cmate-task-contract/SKILL.md` 第4.2節は「ディレクトリ粒度の glob で宣言する」ことを
+**既に推奨していた**。
+
+実際の制約は **planner の抽出**だった。`CANDIDATE_WITH_EXT` の文字クラス `[A-Za-z0-9_.-]` は
+`* ? { } ,` を含まないので、`## 対象ファイル` に素で書いた `data/geo/landmarks/*.json` も
+ディレクトリ `data/geo/landmarks/` も**警告も出さずに落ちて**いた。一方 `CANDIDATE_BACKTICK`
+の `[^`\s]+` は backtick の中なら何でも通すので `` `data/geo/**/*.json` `` だけが
+`scope.allow` まで届いていた —— テストも文書も無い**偶発挙動**である。
+実測（Kewton/BorderFreeKidsMap #243）では、区ごとの生成物 46 file を手で列挙する羽目になった。
+その 46 行に情報は無い。言いたいことは「`data/geo/{landmarks,stations}/` 配下を再生成する」
+だけである。
+
+→ 抽出に4つ目の source（`CANDIDATE_PATTERN`）を足し、**成果物見出しの配下でだけ** glob と
+ディレクトリを候補にした。見出しの外のものは落とし、落としたことを `scope_pattern_dropped`
+（notice）で報告する。「明示の宣言が言及に優る」は #177 がハーネスに引いた線と同じであり、
+glob が「誰も列挙していない file 集合に対する権限」である以上、言及として受け取ることは
+できない。宣言された pattern は `scope_pattern_declared`（notice）が**列挙**する ——
+plan は展開しない（ADR 不変条件3）ので、可視にできるのは宣言そのものだからである。
+
+**副作用の方が重い欠陥だった。** wave の衝突判定（`sharedFiles`）は `suspected_files` の
+**完全一致集合の交差**だったので、`data/geo/**` を書く Issue と
+`data/geo/landmarks/13101.json` を書く Issue は「重なっていない」と判定され、
+**同じ file を2人の worker が同じ wave で書けて**いた。判定を上流と同じ関係
+（`lib.mjs` の `scopeEntriesOverlap`）に置き換え、決められない組は「重なる」と答えるようにした
+（偽陽性は wave 1本分の並列度で済むが、偽陰性は統合で壊れる —— #175 の教訓）。
+この置き換えは pattern を持たない plan の判定を1つも変えない。
+
+**1つだけ拒む形を足した**: 全 segment が `*` / `**` の pattern と `.`（`over_broad`）。
+`allow: ["**"]` は決して失敗しない scope ゲート、つまりゲートが無いのと同じである。
+狭めるのではなく落とす —— `**` が何を指すつもりだったかを推測すれば、それこそ ADR 不変条件1が
+禁じている導出になる。
+
+抽出定数は `cmate-issue-authoring` の `validate-plan.mjs` に byte 同一でミラーされているので
+両方を同時に更新した（`mirror-conformance.mjs` が constant の byte 一致と corpus の挙動一致の
+両方で守っている）。
+
+---
+
 ## dispatch（`scripts/dispatch.mjs`）
 
 ### CommandMate #1447 — 公式経路は public `commandmate` である（ADR）
@@ -1611,6 +1655,23 @@ SIGKILL する経路も無い（SIGTERM なら git は自分の lock を消す�
 lock 無しの run は両方 null で、fixture `m22` の golden はこの block だけを増やして byte 比較を
 続ける）と、`integration_verify` の内側の `tree_removed` である。`stop_reason` にも
 `preflight[].code` にも値を1つも足していない。
+
+---
+
+### #219 — PR 本文の scope 対比が、上流のゲートより狭い解釈をしていた
+
+`scopeMatches` は `*` と `**` だけを解釈し、それ以外は literal だった。上流の scope ゲート
+（`globToRegExp`、CommandMate #1546）は同じ入力に対して**ディレクトリ前置**（`src/lib` は
+配下すべてを指す。人がディレクトリを書く綴りである）・`?`・`{a,b}` も honour するので、
+PR 本文の対比表は in-scope の変更を「宣言外」として数えていた。レビュアが読むのは
+実在しない違反であり、しかも上流のゲートは同じ変更を通す。
+
+→ `lib.mjs` に上流の部分集合を移植し、merge と planner の両方がその1つの関数を使うようにした
+（1つの関係に対する実装が package 内に2つあれば、その2つは黙って食い違う）。
+`[` と `]` が literal であることも含めて写してある —— Next.js の `src/app/[...path]/` を
+文字クラスとして読むと、その path を名指した pattern が何にも一致しなくなる。
+裁定の**置き場所**は変えていない: `requireScopeClean` を下すのは上流であって、この runner は
+その根拠を人間が読める形にするだけである。
 
 ---
 

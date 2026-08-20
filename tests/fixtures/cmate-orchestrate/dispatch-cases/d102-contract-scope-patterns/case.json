@@ -1,0 +1,54 @@
+{
+  "description": "Issue #219（受入条件5）: 宣言された glob / ディレクトリが実行契約の `scope.allow` に **byte 一致で**載ることを golden で固定する。dispatch の `contractScopeReview` は 0.31.0 の時点で既に `*` を拒まず契約へそのまま書いていた —— が、それを測る case も文書も無く、planner 側が glob を1つも作れなかったので**通ったことが一度も無い経路**だった。ここで golden にすることで、通し方が偶発ではなく規約になる。`## Files you may change` は plan の順（宣言順のあと L1 の伴走）、`scope.allow` は sort 済みという既存の規約もそのまま効いており、pattern はどちらでも特別扱いされない。`data/geo/stations/` は**末尾スラッシュを保ったまま**運ばれる（上流の `globToRegExp` が最初に落とすので意味は変わらず、契約は Issue が書いた綴りの写しである）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-scope-patterns.json",
+    "orchestrate_args": [
+      "520",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "sent": [
+      520
+    ],
+    "worker_states": {
+      "520": "completed"
+    },
+    "verification_outcomes": {
+      "520": "pass"
+    },
+    "contract_issues": [
+      520
+    ],
+    "contract_contains": {
+      "520": [
+        "    - \"data/geo/**/*.json\"\n",
+        "    - \"data/geo/stations/\"\n",
+        "  - data/geo/**/*.json\n",
+        "  - data/geo/stations/\n"
+      ]
+    },
+    "absent_limitation_codes": [
+      "contract_unsupported",
+      "contract_disabled"
+    ]
+  }
+}

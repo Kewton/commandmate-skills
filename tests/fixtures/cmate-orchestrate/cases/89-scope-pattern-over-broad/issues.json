@@ -1,0 +1,12 @@
+{
+  "issues": [
+    {
+      "number": 502,
+      "title": "chore: lint を全体に通す",
+      "body": "リポジトリ全体を対象に lint を通す。\n\n## 対象ファイル\n- `**`\n- `src/lint.ts`\n\n## 受入条件\n- [ ] `npm run lint` が exit 0\n",
+      "labels": [
+        "chore"
+      ]
+    }
+  ]
+}
