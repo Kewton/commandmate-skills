@@ -1,0 +1,149 @@
+{
+  "description": "`gh pr view --json mergedAt,mergeCommit` cannot be answered for one of the two merged PRs. That issue is not_observable WITH THE REASON and nothing is collected for it; the other issue is still observed in full. The window start is never guessed.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ],
+    "profile_json": "node-fake-observations.json"
+  },
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": {
+      "repo_access": true
+    },
+    "git": {
+      "base_resolvable": true
+    },
+    "prs": {
+      "200": {
+        "view_state": "OPEN",
+        "checks": [
+          {
+            "name": "build",
+            "state": "SUCCESS"
+          }
+        ],
+        "merge": "ok"
+      },
+      "201": {
+        "view_state": "OPEN",
+        "checks": [
+          {
+            "name": "build",
+            "state": "SUCCESS"
+          }
+        ],
+        "merge": "ok"
+      }
+    }
+  },
+  "observe_args": [
+    "--runs",
+    "5"
+  ],
+  "observe_scenario": {
+    "observe": {
+      "merged": {
+        "200": {
+          "mergedAt": "2026-08-19T10:00:00Z",
+          "mergeCommit": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+        }
+      },
+      "runs": {
+        "ci.yml": [
+          {
+            "databaseId": 1006,
+            "url": "https://github.com/Kewton/CommandMate/actions/runs/1006",
+            "status": "completed",
+            "conclusion": "success",
+            "createdAt": "2026-08-19T10:50:00Z",
+            "startedAt": "2026-08-19T10:50:00Z",
+            "updatedAt": "2026-08-19T10:56:20Z"
+          },
+          {
+            "databaseId": 1005,
+            "url": "https://github.com/Kewton/CommandMate/actions/runs/1005",
+            "status": "completed",
+            "conclusion": "cancelled",
+            "createdAt": "2026-08-19T10:40:00Z",
+            "startedAt": "2026-08-19T10:40:00Z",
+            "updatedAt": "2026-08-19T10:41:00Z"
+          },
+          {
+            "databaseId": 1004,
+            "url": "https://github.com/Kewton/CommandMate/actions/runs/1004",
+            "status": "completed",
+            "conclusion": "success",
+            "createdAt": "2026-08-19T10:30:00Z",
+            "startedAt": "2026-08-19T10:30:00Z",
+            "updatedAt": "2026-08-19T10:36:25Z"
+          },
+          {
+            "databaseId": 1003,
+            "url": "https://github.com/Kewton/CommandMate/actions/runs/1003",
+            "status": "completed",
+            "conclusion": "success",
+            "createdAt": "2026-08-19T10:20:00Z",
+            "startedAt": "2026-08-19T10:20:00Z",
+            "updatedAt": "2026-08-19T10:27:20Z"
+          },
+          {
+            "databaseId": 1002,
+            "url": "https://github.com/Kewton/CommandMate/actions/runs/1002",
+            "status": "completed",
+            "conclusion": "success",
+            "createdAt": "2026-08-19T10:10:00Z",
+            "startedAt": "2026-08-19T10:10:00Z",
+            "updatedAt": "2026-08-19T10:17:26Z"
+          },
+          {
+            "databaseId": 1000,
+            "url": "https://github.com/Kewton/CommandMate/actions/runs/1000",
+            "status": "completed",
+            "conclusion": "success",
+            "createdAt": "2026-08-19T09:50:00Z",
+            "startedAt": "2026-08-19T09:50:00Z",
+            "updatedAt": "2026-08-19T09:57:00Z"
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "issues": {
+      "200": {
+        "observable": true,
+        "merged_at": "2026-08-19T10:00:00Z"
+      },
+      "201": {
+        "observable": false,
+        "merged_at": null,
+        "observation_count": 0
+      }
+    },
+    "observations": {
+      "200": {
+        "ci-wallclock": {
+          "collected": 5,
+          "counted": 4,
+          "median": 412.5
+        }
+      }
+    },
+    "limitation_codes": [
+      "not_observable"
+    ],
+    "summary_contains": [
+      "not_observable"
+    ],
+    "completion_satisfied": true
+  }
+}

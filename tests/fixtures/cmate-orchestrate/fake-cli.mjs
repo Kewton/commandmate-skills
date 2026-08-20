@@ -145,6 +145,27 @@ const sub = argv[0] ?? '';
 // Present in a worktree => that worktree's baseline passes.
 const VERIFY_MARKER = 'cmate-verify-ok';
 
+// The measuring script a `kind: command` observation runs (Issue #221). The name
+// is two whitespace-free tokens away from being runnable (`node measure.mjs`),
+// which matters: a profile command is split on whitespace and spawned WITHOUT a
+// shell, so a fixture command needing quotes could not be declared at all.
+const OBSERVE_MEASURE_SCRIPT = 'measure.mjs';
+
+// Returns the next declared value on each invocation, counting in a file beside
+// itself, and prints a prose line before it. Node stdlib only, like everything
+// else here.
+function measureScript(values) {
+  return [
+    "import { existsSync, readFileSync, writeFileSync } from 'node:fs';",
+    `const values = ${JSON.stringify(values)};`,
+    "const counter = new URL('./.observe-counter', import.meta.url);",
+    'const seen = existsSync(counter) ? Number(readFileSync(counter, \'utf8\')) : 0;',
+    'writeFileSync(counter, String(seen + 1));',
+    'process.stdout.write(`measuring the merged tree…\\n${values[Math.min(seen, values.length - 1)]}\\n`);',
+    '',
+  ].join('\n');
+}
+
 // commandmate subcommands this fake emulates. Only these are contract-checked.
 const COMMANDMATE_SUBS = new Set(['ls', 'send', 'wait', 'capture', 'respond', 'verify', 'sync']);
 
@@ -1090,12 +1111,24 @@ function main() {
     // cases are then the same world with one file's presence flipped.
     if (action === 'add' && argv.includes('--detach')) {
       const integration = spec.integration ?? {};
+      const observe = spec.observe ?? {};
       if (integration.worktree_add === 'fail') fail('fatal: could not create work tree: destination already exists');
+      if (observe.worktree_add === 'fail') fail('fatal: could not create work tree: destination already exists');
       const dir = argv[argv.length - 2];
       const absDir = resolve(process.cwd(), dir ?? '.');
       try {
         mkdirSync(absDir, { recursive: true });
         if (integration.verify === 'pass') writeFileSync(join(absDir, VERIFY_MARKER), 'ok');
+        // The `kind: command` deliverable (Issue #221). observe.mjs checks the
+        // MERGE COMMIT out and runs the profile's command in it N times, so a
+        // constant answer would not prove it ran more than once. This drops a
+        // measuring script that returns the next declared value each time it is
+        // invoked, which is what makes a median over N samples a real median —
+        // and it prints a line of prose BEFORE the number, so the "last line that
+        // is entirely a number" rule is exercised rather than assumed.
+        if (Array.isArray(observe.command_values)) {
+          writeFileSync(join(absDir, OBSERVE_MEASURE_SCRIPT), measureScript(observe.command_values));
+        }
       } catch {
         // best effort; a missing directory surfaces as a baseline failure, which
         // is a red integration verification rather than a silent pass
@@ -1304,6 +1337,22 @@ function main() {
   // second one for a known issue (no network, no auth, no `gh`).
   if (sub === 'issue') {
     const gh = spec.gh ?? {};
+    // `gh issue comment <n> --repo <r> --body-file <path>` — the ONE write
+    // observe.mjs has (Issue #221), and the first path in this package that writes
+    // to GitHub at all. The body file is read back and echoed into the log line's
+    // args so a case can assert WHAT was posted; a comment the runner made without
+    // --approve would show up here as an invocation, which is how the approval
+    // gate is measured rather than assumed.
+    if (String(argv[1] ?? '') === 'comment') {
+      const observe = spec.observe ?? {};
+      if (observe.comment === 'fail') fail('gh: could not create comment (HTTP 403)');
+      const bodyFile = optionValue('--body-file');
+      if (bodyFile !== null && !existsSync(resolve(process.cwd(), bodyFile))) {
+        fail(`gh: --body-file ${bodyFile} does not exist`, 1);
+      }
+      process.stdout.write(`https://github.com/${optionValue('--repo') ?? 'Kewton/CommandMate'}/issues/${argv[2] ?? '0'}#issuecomment-1\n`);
+      process.exit(0);
+    }
     if (String(argv[1] ?? '') !== 'view') fail(`fake-cli: unsupported gh issue subcommand "${argv[1] ?? ''}"`);
     if (gh.issue_view === 'fail') fail('gh: could not read the issue (HTTP 403)');
     const number = String(argv[2] ?? '');
@@ -1312,6 +1361,44 @@ function main() {
       fail(`gh: no issue ${number} in this scenario (the case's issue fixture is what the fake serves)`);
     }
     emit({ body: String(known[number] ?? '') });
+  }
+
+  // --- gh Actions history (observe.mjs, Issue #221) ------------------------
+  //
+  // `gh run list --workflow <w> --branch <b> --limit <n> --json …`. The rows are
+  // served NEWEST FIRST, as the real CLI does, so a runner that reported them in
+  // the order it received them would be reporting the N runs BEFORE the window
+  // instead of the N after it — and the fixture would see it, because the first
+  // runs after a merge are the outliers the whole feature is about.
+  //
+  // The window filter (created after `mergedAt`) is deliberately NOT applied here.
+  // It is the runner's rule and belongs to the runner; a fake that pre-filtered
+  // would be answering the question under test.
+  if (sub === 'run') {
+    const observe = spec.observe ?? {};
+    if (String(argv[1] ?? '') !== 'list') fail(`fake-cli: unsupported gh run subcommand "${argv[1] ?? ''}"`);
+    if (observe.run_list === 'fail') fail('gh: could not read run history (HTTP 403)');
+    const workflow = String(optionValue('--workflow') ?? '');
+    const rows = (observe.runs ?? {})[workflow];
+    if (rows === undefined) fail(`gh: no workflow named ${workflow} in this scenario`);
+    const limit = Number(optionValue('--limit') ?? rows.length);
+    process.stdout.write(`${JSON.stringify(rows.slice(0, Number.isFinite(limit) ? limit : rows.length))}\n`);
+    process.exit(0);
+  }
+  // `gh api repos/{owner}/{repo}/actions/runs/{id}/jobs` — the jobs+steps view.
+  // Measured case 2: `setup-node` alone varied by 28 seconds between runs, so a
+  // criterion about the e2e time cannot be read off the run's wall clock. The
+  // per-step timestamps here are what make the two answers differ in the fixture.
+  if (sub === 'api') {
+    const observe = spec.observe ?? {};
+    const path = String(argv[1] ?? '');
+    if (observe.jobs_api === 'fail') fail('gh: HTTP 403 (jobs)');
+    const runId = /\/actions\/runs\/(\d+)\/jobs$/.exec(path)?.[1] ?? null;
+    if (runId === null) fail(`fake-cli: unsupported gh api path "${path}"`);
+    const jobs = (observe.jobs ?? {})[runId];
+    if (jobs === undefined) fail(`gh: no jobs recorded for run ${runId} in this scenario`);
+    process.stdout.write(`${JSON.stringify({ jobs })}\n`);
+    process.exit(0);
   }
 
   // --- gh pull-request lifecycle (merge.mjs) -------------------------------
@@ -1326,6 +1413,27 @@ function main() {
       process.exit(0);
     }
     if (action === 'view') {
+      // `gh pr view <number> --repo <r> --json mergedAt,mergeCommit` — observe.mjs's
+      // first call (Issue #221). It is keyed by PR NUMBER, not by branch, because
+      // the merge report gives it a number and nothing else; `mergedAt` and the
+      // merge commit are not in merge-report.v1 at all, which is exactly why the
+      // runner has to ask GitHub for them. Three worlds are modelled and they are
+      // NOT the same: a call that cannot be answered (`"fail"`), an answer with a
+      // null `mergedAt` (a PR that is not merged), and a real answer. The runner
+      // must record the first two as `not_observable` with distinct reasons rather
+      // than inventing a window start.
+      const viewFields = String(optionValue('--json') ?? '').split(',');
+      if (viewFields.includes('mergedAt')) {
+        const observe = spec.observe ?? {};
+        const merged = (observe.merged ?? {})[String(argv[2] ?? '')];
+        if (merged === undefined || merged === 'fail') {
+          fail(`gh: could not read pull request ${argv[2] ?? ''} (HTTP 404)`);
+        }
+        emit({
+          mergedAt: merged.mergedAt ?? null,
+          mergeCommit: merged.mergeCommit ? { oid: merged.mergeCommit } : null,
+        });
+      }
       const branch = argv[2];
       const issue = issueFromBranch(branch);
       const pr = prSpec(spec, issue);

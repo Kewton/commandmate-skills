@@ -733,3 +733,81 @@ merge は profile ファイルを開かず `plan.profile.integration_baseline` �
 
 `plan.profile.integration_baseline` を持つ plan を**手で用意する**経路は塞がらない（plan は artifact である）。
 merge 側は plan を読む側として、配列でない値・欠けた値を「実行できるものが無い」＝ fail-closed 側に倒す。
+
+## 12. `observations` — merge 後に base branch で測るもの（任意）
+
+[#221](https://github.com/Kewton/commandmate-skills/issues/221)。読む側の契約は
+[observe-contract.md](./observe-contract.md) が正本で、ここは **profile field としての形**である。
+
+### 12.1 何を解く field か
+
+受入条件には **worktree の中では測れないもの**がある。「merge 後の CI 3 run の wall-clock 中央値が
+着手前より 1 分以上短い」「CI 5 run の e2e 時間が 30% 以上短い」。`baseline` は worker の健康診断、
+`integration_baseline` は合流後 1 回の検証であり、**どちらも「N 回測って並べる」段ではない。**
+測る対象は repository ごとに違う（workflow 名・job 名・step 名・計測 command）ので、
+**出どころは profile だけ**である。
+
+### 12.2 形
+
+```json
+"observations": [
+  { "id": "ci-wallclock", "kind": "gh_run",      "workflow": "ci.yml", "unit": "s" },
+  { "id": "e2e-step",     "kind": "gh_job_step", "workflow": "ci.yml", "job": "e2e", "step": "Run e2e", "unit": "s" },
+  { "id": "bundle-size",  "kind": "command",     "command": "bash scripts/measure-bundle.sh", "unit": "bytes" }
+]
+```
+
+| key | 必須 | 説明 |
+|---|---|---|
+| `id` | 常に | 観測の名前。`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`。**文書をまたぐ lookup key** である（report と `--inspect` の突き合わせ）ので、JSON key として往復できる形に限る |
+| `kind` | 常に | `gh_run` / `gh_job_step` / `command` |
+| `workflow` | `gh_run` / `gh_job_step` | workflow file 名 |
+| `job` / `step` | `gh_job_step` | job 名と step 名 |
+| `command` | `command` | merge commit の使い捨て checkout で回す command。空白分割・shell 無し（`baseline` と同じ規則） |
+| `unit` | 常に | 単位。**既定を置かない** —— runner は換算しないので、`446` と `446000` を見分ける唯一の情報である |
+
+### 12.3 拒否される宣言（すべて `load_error` / exit 6）
+
+第9.3節と同じ規律である。**黙って飛ばさない。**
+
+| 宣言 | 理由 |
+|---|---|
+| 配列でない | 宣言は測定の**並び**である |
+| entry が object でない | 同上 |
+| 未知の `kind` | 飛ばした run は「揃った観測集合」を名乗りながら、著者が頼んだ測定を欠く |
+| `kind` の必須 key 不足 | 何を測るのか決まらない |
+| `unit` 不足・空 | 第12.2節 |
+| entry の未知 field | closed である（例: `threshold` を書いても runner は判定しない） |
+| `id` の重複 | 「`ci-wallclock` の値」が2つになる。id はそれを消すために在る |
+| `id` が token でない | 文書をまたぐ lookup key だから |
+
+正規化は **`scripts/lib.mjs` の `normalizeObservations`** に在る。**planner と `observe.mjs` の両方が
+読むから**である（`observe.mjs --profile <path>` は profile file を直接読む）。2つ持てば
+「宣言が何を意味するか」について2つの意見を持つことになり、その食い違いは黙って進む。
+
+### 12.4 起案（`profile-init.mjs`）は `observations` を出さない
+
+第10.5節・第11.5節と同じ理由である。**tree の中に「この repository の受入条件が何を測るか」は
+書いていない。** workflow file から workflow 名は読めても、「どの step の秒数が受入条件なのか」は
+Issue の側の話であり、起案 runner が沈黙で決めてよいものではない。**key ごと出さない。**
+
+### 12.5 planner 側と run_id
+
+`orchestrate.mjs` の `PROFILE_FIELDS` が本 field を持ち、`publicProfile()` が
+**必須7 field の後ろ、`integration_baseline` の次**に echo する。規則は第11.6節の3点と同じで、
+順序だけが増える（新しい任意 field は常に末尾）。
+
+**planner は読むだけで使わない。** plan 内容は 1 byte も変わらず、変わるのは `plan.profile` の echo と、
+その結果としての run_id だけである（解決済み profile 全体が hash 対象。第11.4節と同じ）。
+
+**`[]` は `[]` のまま echo する。** 「この repository に merge 後の観測は無い」という宣言であり、
+`observe.mjs` は `observations_undeclared` で**名指して拒否**する —— 観測を1件もしなかった run を
+観測した run と同じ形にしないためである。
+
+### 12.6 後から足したときの逃げ道
+
+profile に本 field を足すと run_id は変わる。**しかし merge 済みの wave は re-plan できない。**
+そのために `observe.mjs --profile <path>` がある（read-only・merge 後なので plan の純関数性に触れない）。
+既定はあくまで `plan.profile.observations` で、逃げ道を使った run は report が
+`observations_source: "profile_file"` と limitation `observations_from_profile_file` で名乗る
+（[observe-contract.md](./observe-contract.md) 第4.2節）。

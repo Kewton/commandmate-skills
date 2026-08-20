@@ -414,6 +414,27 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   acceptance_gate_already_satisfied: '宣言した受入ゲートが**着手前の base で既に通っている**。直しても直さなくても緑になるので、ゲートとして働かない。何が変われば赤から緑になるのかを書き直して re-plan する。',
   acceptance_gate_nondeterministic: '宣言した受入ゲートが**実行ごとに結果を変える**。出力に時刻・乱数・並び順が混ざっていないかを見る。着手後も安定して通らないので、そのままでは完了を判定できない。',
   acceptance_gate_not_evaluable: 'notice。宣言した受入ゲートを**測れなかった**（id が verify.yaml に無い / built-in / timeout / ブロックが読めない / --repo-root が base でない）。**「通った」でも「落ちた」でもない。** 理由は report の `reason` にある。',
+  // ---- observe（#221）-------------------------------------------------------
+  //
+  // Here for the reason the inspect codes above are here, with one addition:
+  // observe writes to `--out`, which is not necessarily inside a run directory,
+  // and its phase model is not plan/dispatch/merge/uat — so `status.mjs` does not
+  // put its artifact in the run view at all (observe-contract.md §11). That makes
+  // the hint table the ONLY place an operator can look a code up, which is
+  // exactly why every one of them is here rather than only the blocking ones.
+  //
+  // None of them is a verdict about the work. `observe.mjs` collects and does not
+  // adjudicate, so each hint says what to do about the COLLECTION.
+  approval_required: '`--comment` は GitHub への書き込みなので `--approve` が要る。**既定は書かない。** 観測だけしたいなら `--comment` を外して同じコマンドを回す（`--out` は消費していない）。書いてよいなら両方を付ける（書くのはコメントだけで、Issue 本文は触らない）。',
+  observations_undeclared: 'profile が観測を1件も宣言していない（key が無いか `[]`）。`observations` を profile に書く（profile-contract.md 第12節）。**plan は merge 済みなので re-plan できない** —— 後から足したなら `--profile <path>` で profile file を直接読ませる（report に `observations_from_profile_file` が残る）。',
+  nothing_merged: 'その merge report は1件も merge していない（preview か、対象が無かったか、最初の merge の前に止まったか）。base branch が動いていないので merge 後の状態が無い。**実際に merge した run の report を渡す。**',
+  not_observable: 'その Issue の `mergedAt` が読めず、観測の窓を開けられなかった（**推測しない**: 始まりを捏造した窓は、その merge が起こしていない run をその merge に帰属させる）。`gh pr view <pr> --json mergedAt,mergeCommit` を手で叩いて認証と PR 番号を確かめ、直ってから同じコマンドを回す。他の Issue の観測は出ている。',
+  observation_incomplete: '`--runs` に足りない件数しか集まっていない。**足りないまま出している**（数字は report に在る）。run が溜まってから取り直すか、`--max-wait` を渡して待つ。**3 run と 8 run で結論が逆になった実測がある**ので、件数を確かめずに中央値だけを読まないこと。',
+  observation_unavailable: 'その観測を1件も集められなかった（`gh run list` / jobs API / checkout が答えなかった）。detail に理由が在る。**「観測できなかった」を「変化が無かった」と読み替えない。**',
+  observations_from_profile_file: 'notice。宣言を plan ではなく `--profile` の profile file から読んだ run である（merge 済みの wave は re-plan できないための逃げ道）。plan と file は違いうるので、**どの宣言を測ったのかは report の `observations_declared` を読む。**',
+  baseline_unavailable: 'notice。`--inspect` の文書に同 id の数値が無かったので着手前の値が `null` である。**artifact についての事実であって欠陥ではない。** 差分が要るなら着手前の値を持つ文書を渡して取り直す（観測そのものは揃っている）。',
+  comment_not_written: 'notice。観測の要約を Issue にコメントできなかった。**観測は失われていない**（`--out` 配下に report と summary が在る）。detail の理由（認証・権限）を潰して同じコマンドを回すか、`observe-summary.md` を手で貼る。',
+  observe_tree_left: 'notice。`kind: command` の使い捨て checkout を削除できなかった。`--out` 配下に残っているので `git worktree remove --force <dir>` で消す。**観測の数字は変わらない。**',
 
   // ---- shared --------------------------------------------------------------
   no_eligible_issues: 'dispatch report に completed かつ verification pass の Issue が無い。まず dispatch を通す。',

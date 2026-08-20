@@ -26,6 +26,7 @@ const UAT_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'ua
 const STATUS_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'status.mjs');
 const PROFILE_INIT_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'profile-init.mjs');
 const INSPECT_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'inspect.mjs');
+const OBSERVE_RUNNER = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'scripts', 'observe.mjs');
 const SCHEMA_DIR = join(REPO_ROOT, 'skills', 'cmate-orchestrate', 'schemas');
 const CASES_DIR = join(HERE, 'cases');
 const DISPATCH_CASES_DIR = join(HERE, 'dispatch-cases');
@@ -35,6 +36,7 @@ const UAT_CASES_DIR = join(HERE, 'uat-cases');
 const STATUS_CASES_DIR = join(HERE, 'status-cases');
 const PROFILE_INIT_CASES_DIR = join(HERE, 'profile-init-cases');
 const INSPECT_CASES_DIR = join(HERE, 'inspect-cases');
+const OBSERVE_CASES_DIR = join(HERE, 'observe-cases');
 const PROFILES_DIR = join(HERE, 'profiles');
 const FAKE_CLI = join(HERE, 'fake-cli.mjs');
 // The dispatch/merge/uat runners execute the profile baseline INSIDE each
@@ -57,6 +59,7 @@ const resultSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'orchestrate-resul
 const dispatchSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'dispatch-report.v1.json'), 'utf8'));
 const mergeSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'merge-report.v1.json'), 'utf8'));
 const uatSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'uat-report.v1.json'), 'utf8'));
+const observeSchema = JSON.parse(readFileSync(join(SCHEMA_DIR, 'observe-report.v1.json'), 'utf8'));
 // The semantic gate's input contract, owned by cmate-acceptance-test. The UAT
 // runner consumes it and never writes it, so the fixtures are validated against
 // the producing Skill's schema rather than against a local copy.
@@ -6089,6 +6092,602 @@ function evaluateGatesDoesNotReachPlanTest() {
 }
 
 // =============================================================================
+// observe cases (Issue #221)
+// =============================================================================
+//
+// Some acceptance criteria are about the base branch AFTER a merge — "3 CI runs
+// are a minute faster than before", "the e2e step is 30% shorter over 5 runs" —
+// and nothing in this package went there, so a human measured them by hand and
+// the measurement went wrong three ways (Kewton/CommandMate#1835): a median over
+// the first 3 runs said "missed" where 8 runs said "met" and the report had to be
+// retracted; a run's wall clock carried a `setup-node` that varied by 28s on its
+// own; and the defect that mattered appeared on the fifth run of five.
+//
+// `observe.mjs` is the runner that collects instead. What is asserted here is
+// what makes it worth having rather than merely present:
+//
+//   the series       every sample is a row of its own, the aggregate is computed
+//                    from the counted ones ONLY, and the excluded ones are
+//                    counted by name — in the report AND in the summary
+//   the resolution   `gh_job_step` returns the named step's seconds, and the
+//                    assertion is that they are NOT the run's wall clock
+//   the shortfall    fewer samples than --runs is `partial` with the numbers
+//                    that WERE collected, never a quiet round number
+//   the window       `mergedAt` comes from `gh pr view` (it is not in the merge
+//                    report at all), a run created before it is outside the
+//                    window, and an unreadable one is `not_observable` with the
+//                    reason rather than a guessed start
+//   the silence      no `pass` / `fail` vocabulary survives anywhere in the
+//                    output except a transcribed GitHub `conclusion`
+//   the gate         `--comment` without `--approve` makes ZERO calls of any
+//                    kind, and with it posts a comment and edits nothing
+
+function runObserve(args, env, cwd) {
+  try {
+    const stdout = execFileSync('node', [OBSERVE_RUNNER, ...args], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env, cwd,
+    });
+    return { exit: 0, stdout };
+  } catch (error) {
+    return { exit: error.status ?? 1, stdout: error.stdout ? error.stdout.toString() : '' };
+  }
+}
+
+// A GitHub `conclusion` is the one vocabulary in an observe report that is not
+// the runner's own: `failure` is GitHub's word about GitHub's run, and refusing
+// to transcribe it would be worse than carrying it. So the "no acceptance
+// vocabulary" check is run over the report with every transcribed conclusion
+// masked STRUCTURALLY — by key in the JSON, and by the summary table's own
+// `conclusion` column — rather than by blanking the word everywhere, which would
+// also hide a real violation.
+function maskConclusionValues(node) {
+  if (Array.isArray(node)) return node.map(maskConclusionValues);
+  if (node !== null && typeof node === 'object') {
+    return Object.fromEntries(Object.entries(node).map(
+      ([key, value]) => [key, key === 'conclusion' ? '<transcribed>' : maskConclusionValues(value)],
+    ));
+  }
+  return node;
+}
+
+// The summary's conclusion column, blanked only while the table being read
+// declares one. A row outside such a table keeps every cell, so a runner that
+// wrote a verdict into its prose is still caught.
+function maskSummaryConclusionColumn(markdown) {
+  let inTable = false;
+  return markdown.split('\n').map((line) => {
+    if (!line.startsWith('|')) { inTable = false; return line; }
+    const cells = line.split('|');
+    const last = (cells[cells.length - 2] ?? '').trim();
+    if (last === 'conclusion') { inTable = true; return line; }
+    if (!inTable) return line;
+    cells[cells.length - 2] = ' <transcribed> ';
+    return cells.join('|');
+  }).join('\n');
+}
+
+// Every conclusion string the report actually transcribed. Read out of the
+// PARSED document rather than from a word list here: what may legitimately appear
+// in the summary's exclusion tally is exactly what GitHub returned, so a runner
+// that wrote `pass: 1` into that line would still be caught (`pass` is not a
+// value in the data), while `failure: 1` — a real conclusion, counted by name —
+// is not.
+function transcribedConclusions(node, out = new Set()) {
+  if (Array.isArray(node)) {
+    for (const item of node) transcribedConclusions(item, out);
+    return out;
+  }
+  if (node !== null && typeof node === 'object') {
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'conclusion' && typeof value === 'string') out.add(value);
+      else transcribedConclusions(value, out);
+    }
+  }
+  return out;
+}
+
+function assertNoAcceptanceVocabulary(report, label) {
+  const conclusions = transcribedConclusions(report);
+  const masked = maskConclusionValues(report);
+  if (typeof masked.summary_markdown === 'string') {
+    masked.summary_markdown = maskSummaryConclusionColumn(masked.summary_markdown);
+    // The exclusion tally names each bucket and its count (`cancelled: 1`), which
+    // is the one place outside the table where a transcribed conclusion is prose.
+    for (const conclusion of conclusions) {
+      masked.summary_markdown = masked.summary_markdown.split(`${conclusion}: `).join('<transcribed>: ');
+    }
+  }
+  const text = JSON.stringify(masked, null, 2);
+  const hits = text.match(/[A-Za-z]*(?:pass|fail)[A-Za-z]*/gi) ?? [];
+  check(
+    hits.length === 0,
+    `${label}: the observe report carries acceptance vocabulary outside a transcribed conclusion: `
+      + `${JSON.stringify([...new Set(hits)].slice(0, 6))}`,
+  );
+}
+
+function findObservation(report, issueNumber, id) {
+  const issue = (report.issues ?? []).find((entry) => entry.issue === Number(issueNumber));
+  if (issue === undefined) return null;
+  return issue.observations.find((entry) => entry.id === id) ?? null;
+}
+
+// The merge world every observe case starts from: both issues of the two-wave
+// fixture merge, so the merge report hands the observer two merged targets with
+// PR numbers. Cases override it only when they need a different merged set.
+const OBSERVE_MERGE_SCENARIO = {
+  cli_available: true,
+  git: { branch: 'feature/integration', dirty: false },
+  gh: { repo_access: true },
+  prs: {
+    200: { view_state: 'OPEN', checks: [{ name: 'build', state: 'SUCCESS' }], merge: 'ok' },
+    201: { view_state: 'OPEN', checks: [{ name: 'build', state: 'SUCCESS' }], merge: 'ok' },
+  },
+};
+
+// plan -> dispatch -> merge -> observe, for real at every step. The handoff this
+// chain proves is the point of running it rather than hand-writing a merge
+// report: the planner has to have ECHOED `profile.observations` into plan.json
+// for the observer to find them, and the merge report has to carry the PR numbers
+// the observer asks GitHub about.
+function observeWorld(spec) {
+  const runsDir = mkdtempSync(join(tmpdir(), 'cmate-observe-plan-'));
+  const planPath = generatePlan(spec, runsDir);
+  if (!existsSync(planPath)) return { planPath: null };
+
+  const work = mkdtempSync(join(tmpdir(), 'cmate-observe-'));
+  const dispatchPath = generateDispatchReport(planPath, spec.dispatch_scenario ?? DEFAULT_DISPATCH_SCENARIO, work);
+  if (!existsSync(dispatchPath)) return { planPath, dispatchPath: null };
+
+  const mergeOut = join(work, 'merge');
+  const mergeLog = join(work, 'merge-gh.log');
+  const mergeScenario = writeScenario(
+    work, 'observe-merge-scenario.json',
+    withDiffDefaults(spec.merge_scenario ?? OBSERVE_MERGE_SCENARIO, readPlan(planPath)),
+  );
+  const merge = runMerge(
+    planPath, dispatchPath, mergeOut, '--merge-prs', ['--approve'],
+    { ...baseEnv(), CMATE_FAKE_SCENARIO: mergeScenario, CMATE_FAKE_LOG: mergeLog },
+    join(work, 'integration'),
+  );
+  return { planPath, dispatchPath, work, mergePath: join(mergeOut, 'merge-report.json'), mergeExit: merge.exit };
+}
+
+function runObserveCase(caseId) {
+  const caseDir = join(OBSERVE_CASES_DIR, caseId);
+  const spec = JSON.parse(readFileSync(join(caseDir, 'case.json'), 'utf8'));
+  log(`  ${caseId}: ${spec.description}`);
+
+  const world = observeWorld(spec);
+  if (!check(world.planPath !== null, 'plan.json was not generated')) return;
+  if (!check(world.dispatchPath !== null, 'dispatch-report.json was not generated')) return;
+  if (!check(existsSync(world.mergePath), `merge-report.json was not generated (merge exited ${world.mergeExit})`)) return;
+
+  const outDir = join(world.work, 'observe'); // must not pre-exist; observe creates it
+  const logPath = join(world.work, 'observe-gh.log');
+  const scenarioPath = writeScenario(world.work, 'observe-scenario.json', spec.observe_scenario ?? {});
+  const args = [
+    '--plan', world.planPath,
+    '--merge', world.mergePath,
+    '--out', outDir,
+    '--gh', FAKE_CLI, '--git', FAKE_CLI,
+    ...(spec.observe_args ?? []),
+  ];
+  if (spec.inspect_document !== undefined) {
+    const inspectPath = join(world.work, 'inspect-artifact.json');
+    writeFileSync(inspectPath, `${JSON.stringify(spec.inspect_document, null, 2)}\n`);
+    args.push('--inspect', inspectPath);
+  }
+  const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath };
+  const { exit, stdout } = runObserve(args, env, join(world.work, 'integration'));
+
+  let report;
+  try {
+    report = JSON.parse(stdout);
+  } catch {
+    check(false, `observe stdout is not valid JSON (exit ${exit}): ${stdout.slice(0, 300)}`);
+    return;
+  }
+
+  const expect = spec.expect ?? {};
+  check(exit === expect.exit, `exit ${exit} !== expected ${expect.exit}`);
+  const schemaErrors = validateAgainst(observeSchema, report, 'observe');
+  check(schemaErrors.length === 0, `observe schema: ${schemaErrors.slice(0, 3).join('; ')}`);
+  check(report.status === expect.status, `status "${report.status}" !== "${expect.status}"`);
+
+  // Asserted on EVERY case, whatever it is about: `status` is completeness of
+  // collection, and the moment an acceptance word appears anywhere in this
+  // document it starts being read as a verdict.
+  assertNoAcceptanceVocabulary(report, caseId);
+
+  if (expect.observations_source !== undefined) {
+    check(report.observations_source === expect.observations_source,
+      `observations_source "${report.observations_source}" !== "${expect.observations_source}"`);
+  }
+  if (expect.issues_null) {
+    check(report.issues === null, 'a refused run must carry issues: null, not an empty list');
+  }
+  if (expect.completion_satisfied !== undefined) {
+    check(report.completion_check.satisfied === expect.completion_satisfied,
+      `completion_check.satisfied ${report.completion_check.satisfied} !== ${expect.completion_satisfied}`);
+  }
+  for (const code of expect.error_codes ?? []) {
+    check((report.errors ?? []).some((entry) => entry.code === code),
+      `error "${code}" not in ${JSON.stringify((report.errors ?? []).map((e) => e.code))}`);
+  }
+
+  for (const [number, wanted] of Object.entries(expect.issues ?? {})) {
+    const issue = (report.issues ?? []).find((entry) => entry.issue === Number(number));
+    if (!check(issue !== undefined, `#${number} has no record in the observe report`)) continue;
+    for (const [field, value] of Object.entries(wanted)) {
+      if (field === 'observation_count') {
+        check(issue.observations.length === value,
+          `#${number} carries ${issue.observations.length} observation(s), expected ${value}`);
+        continue;
+      }
+      check(deepEqual(issue[field], value),
+        `#${number}.${field} ${JSON.stringify(issue[field])} !== ${JSON.stringify(value)}`);
+    }
+  }
+
+  for (const [number, byId] of Object.entries(expect.observations ?? {})) {
+    for (const [id, wanted] of Object.entries(byId)) {
+      const entry = findObservation(report, number, id);
+      if (!check(entry !== null, `#${number} has no observation "${id}"`)) continue;
+      for (const [field, value] of Object.entries(wanted)) {
+        if (field === 'run_ids') {
+          check(deepEqual(entry.samples.map((sample) => sample.run_id), value),
+            `#${number}/${id} run ids ${JSON.stringify(entry.samples.map((s) => s.run_id))} !== ${JSON.stringify(value)}`);
+          continue;
+        }
+        if (field === 'values') {
+          check(deepEqual(entry.samples.map((sample) => sample.value), value),
+            `#${number}/${id} values ${JSON.stringify(entry.samples.map((s) => s.value))} !== ${JSON.stringify(value)}`);
+          continue;
+        }
+        check(deepEqual(entry[field], value),
+          `#${number}/${id}.${field} ${JSON.stringify(entry[field])} !== ${JSON.stringify(value)}`);
+      }
+
+      // Independent of what the case declares, on every observation there is.
+      // These are the three properties the whole runner exists to hold, so they
+      // are not left to the cases to remember:
+      //
+      //   the aggregate is the COUNTED samples' aggregate, re-derived here from
+      //   the samples rather than compared against the runner's own arithmetic;
+      //   every sample that did not count is accounted for in `excluded`; and a
+      //   sample carries a value exactly when it counted.
+      const counted = entry.samples.filter((sample) => sample.counted).map((sample) => sample.value);
+      const sorted = [...counted].sort((a, b) => a - b);
+      const middle = Math.floor(sorted.length / 2);
+      const expectedMedian = sorted.length === 0
+        ? null
+        : Math.round((sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2) * 1000) / 1000;
+      check(deepEqual(entry.median, expectedMedian),
+        `#${number}/${id} median ${entry.median} is not the median of the counted samples (${JSON.stringify(sorted)})`);
+      check(entry.counted === counted.length, `#${number}/${id} counted ${entry.counted} !== ${counted.length}`);
+      check(entry.collected === entry.samples.length, `#${number}/${id} collected ${entry.collected} !== ${entry.samples.length}`);
+      check(
+        entry.excluded.reduce((sum, item) => sum + item.count, 0) === entry.collected - entry.counted,
+        `#${number}/${id} dropped ${entry.collected - entry.counted} sample(s) but accounted for `
+          + `${entry.excluded.reduce((sum, item) => sum + item.count, 0)}: ${JSON.stringify(entry.excluded)}`,
+      );
+      check(entry.samples.every((sample) => (sample.value === null) !== sample.counted),
+        `#${number}/${id} has a sample whose value and counted flag disagree: ${JSON.stringify(entry.samples)}`);
+      // Every sample is a ROW. This is the assertion the retracted report of
+      // CommandMate#1835 would have failed: a summary that showed only the
+      // median would satisfy every numeric expectation above and still be the
+      // document that caused the mistake.
+      const rows = report.summary_markdown.split('\n').filter((line) => /^\| \d+ \| /.test(line));
+      check(rows.length >= entry.samples.length,
+        `the summary lists ${rows.length} sample row(s) for ${entry.samples.length} sample(s) — `
+          + 'a median without its series is what this runner exists to stop');
+      for (const sample of entry.samples) {
+        if (sample.run_id === null) continue;
+        check(report.summary_markdown.includes(String(sample.run_id)),
+          `run ${sample.run_id} is in the report but not in the summary table`);
+      }
+    }
+  }
+
+  // The step is not the run (measured case 2). Asserted as an inequality on the
+  // SAME runs, so a `gh_job_step` implemented by reading the run's wall clock
+  // would be caught even if the numbers looked plausible.
+  if (expect.step_differs_from_run) {
+    const { issue, step, run } = expect.step_differs_from_run;
+    const stepEntry = findObservation(report, issue, step);
+    const runEntry = findObservation(report, issue, run);
+    if (check(stepEntry !== null && runEntry !== null, 'the step/run pair is not both present')) {
+      for (const [index, sample] of stepEntry.samples.entries()) {
+        const twin = runEntry.samples[index];
+        check(sample.run_id === twin.run_id, `sample ${index} is not the same run on both observations`);
+        check(sample.value !== twin.value,
+          `the step value ${sample.value} equals its run's wall clock — the step is being read off the run`);
+      }
+    }
+  }
+
+  for (const runId of expect.absent_run_ids ?? []) {
+    check(!JSON.stringify(report.issues).includes(String(runId)),
+      `run ${runId} was created before the merge and must be outside the window, yet it was collected`);
+  }
+  for (const needle of expect.summary_contains ?? []) {
+    check(report.summary_markdown.includes(needle), `the summary does not mention "${needle}"`);
+  }
+  for (const needle of expect.summary_absent ?? []) {
+    check(!report.summary_markdown.includes(needle), `the summary should not mention "${needle}"`);
+  }
+  const limitationCodes = (report.limitations ?? []).map((entry) => entry.code);
+  for (const code of expect.limitation_codes ?? []) {
+    check(limitationCodes.includes(code), `limitation "${code}" not in ${JSON.stringify(limitationCodes)}`);
+  }
+  for (const code of expect.absent_limitation_codes ?? []) {
+    check(!limitationCodes.includes(code), `limitation "${code}" should not have been recorded`);
+  }
+
+  // ---- what reached GitHub ------------------------------------------------
+  //
+  // Measured from the fake's invocation log, never from the report's own claim
+  // about itself: a runner that posted a comment and forgot to record it would
+  // look identical in the report and different here.
+  const cliLog = readCliLog(logPath);
+  const commentCalls = cliLog.filter((entry) => entry.sub === 'issue' && entry.args[0] === 'comment');
+  check(commentCalls.length === (expect.comment_calls ?? 0),
+    `gh issue comment ran ${commentCalls.length} time(s) !== ${expect.comment_calls ?? 0}`);
+  if (expect.total_cli_calls !== undefined) {
+    check(cliLog.length === expect.total_cli_calls,
+      `the runner made ${cliLog.length} CLI call(s), expected ${expect.total_cli_calls}: `
+        + `${JSON.stringify(cliLog.map((entry) => entry.sub))}`);
+  }
+  if (expect.commented_issues) {
+    check(deepEqual(commentCalls.map((entry) => Number(entry.args[1])), expect.commented_issues),
+      `commented on ${JSON.stringify(commentCalls.map((e) => e.args[1]))} !== ${JSON.stringify(expect.commented_issues)}`);
+  }
+  if (expect.no_edit_calls) {
+    // The line SKILL.md section 1 draws and this runner does not move: automatic
+    // issue-body editing is out of scope. `--comment` is a comment.
+    const edits = cliLog.filter((entry) => (entry.sub === 'issue' || entry.sub === 'pr') && entry.args[0] === 'edit');
+    check(edits.length === 0, `the runner edited an issue or PR body ${edits.length} time(s)`);
+  }
+  if (expect.comment_body_is_summary) {
+    for (const call of commentCalls) {
+      const bodyIndex = call.args.indexOf('--body-file');
+      if (!check(bodyIndex !== -1, 'gh issue comment was called without --body-file')) continue;
+      const body = readFileSync(call.args[bodyIndex + 1], 'utf8');
+      check(body === `${report.summary_markdown}\n`,
+        'the bytes posted to GitHub are not the bytes of summary_markdown');
+    }
+  }
+
+  // ---- the throwaway checkout (kind: command) -----------------------------
+  for (const [number, sha] of Object.entries(expect.checkout_of ?? {})) {
+    const adds = cliLog.filter((entry) => entry.sub === 'worktree' && entry.args[0] === 'add' && entry.args.includes('--detach'));
+    check(adds.some((entry) => entry.args[entry.args.length - 1] === sha),
+      `#${number}: no detached checkout of the merge commit ${sha.slice(0, 7)} — the state measured is not the merged state`);
+  }
+  if (expect.no_tree_left) {
+    const left = readdirSync(outDir).filter((name) => name.startsWith('observe-tree'));
+    check(left.length === 0, `the throwaway checkout(s) ${JSON.stringify(left)} were left behind`);
+  }
+
+  // The artifacts, and the property that makes them worth writing: the file on
+  // disk and the bytes on stdout are the same report.
+  if (report.status !== 'refused') {
+    const written = join(outDir, 'observe-report.json');
+    if (check(existsSync(written), 'observe-report.json was not written')) {
+      check(readFileSync(written, 'utf8') === stdout, 'the report on disk differs from the report on stdout');
+    }
+    check(readFileSync(join(outDir, 'observe-summary.md'), 'utf8') === `${report.summary_markdown}\n`,
+      'observe-summary.md differs from summary_markdown');
+  }
+}
+
+// The planner side of `observations` (Issue #221). The field reaches the observer
+// through plan.json and nowhere else on the default path, so what has to hold is
+// that the planner ACCEPTS a well-formed declaration, ECHOES it canonically, puts
+// it in the run id, and REFUSES the malformed shapes rather than dropping them.
+function observeProfileTest() {
+  log('  observations reach the plan, the run id, and nothing else');
+  const dir = mkdtempSync(join(tmpdir(), 'cmate-observe-profile-'));
+  const issuesPath = join(dir, 'issues.json');
+  writeFileSync(issuesPath, JSON.stringify(RUN_ID_ISSUE));
+
+  const declaration = [
+    { id: 'ci-wallclock', kind: 'gh_run', workflow: 'ci.yml', unit: 's' },
+    { id: 'e2e-step', kind: 'gh_job_step', workflow: 'ci.yml', job: 'e2e', step: 'Run e2e', unit: 's' },
+    { id: 'bundle-size', kind: 'command', command: 'bash scripts/measure-bundle.sh', unit: 'bytes' },
+  ];
+  const without = planWithProfile(writeProfileVariant(dir, 'no-observations.json', {}), issuesPath);
+  const with_ = planWithProfile(writeProfileVariant(dir, 'observations.json', { observations: declaration }), issuesPath);
+  if (check(without.exit === 0 && with_.exit === 0,
+    `both profiles should plan successfully, exited ${without.exit}/${with_.exit}`)) {
+    // In the hash, by construction: the run id covers the WHOLE resolved profile
+    // (#157), so a field added to the contract is covered without anybody
+    // remembering to add it. This is the assertion that says so for this one.
+    check(without.result.run_id !== with_.result.run_id,
+      `declaring observations did not fork the run id (${without.result.run_id})`);
+    check(with_.result.plan.profile.observations !== undefined,
+      'the plan does not echo profile.observations, so the observer cannot find the declaration');
+    check(deepEqual(with_.result.plan.profile.observations, declaration),
+      `the echoed declaration is not canonical: ${JSON.stringify(with_.result.plan.profile.observations)}`);
+    check(without.result.plan.profile.observations === undefined,
+      'a profile that declares nothing must not gain an observations key (absent stays absent)');
+    check(validateAgainst(planSchema, with_.result.plan, 'plan').length === 0,
+      `a plan carrying observations does not conform to execution-plan.v2: `
+        + `${validateAgainst(planSchema, with_.result.plan, 'plan').slice(0, 3).join('; ')}`);
+    // Key order inside an entry is not a difference, for the reason
+    // dispatch_defaults carries: the loader REBUILDS each entry, so an author who
+    // moved two lines in their profile does not fork the run id.
+    const shuffled = declaration.map((entry) => Object.fromEntries(Object.entries(entry).reverse()));
+    const asShuffled = planWithProfile(writeProfileVariant(dir, 'observations-reordered.json', { observations: shuffled }), issuesPath);
+    check(asShuffled.exit === 0 && asShuffled.result.run_id === with_.result.run_id,
+      `re-ordering the keys inside an observation forked the run id (${asShuffled.result?.run_id})`);
+  }
+
+  // The refusals. Every one is a `load_error` at exit 6, which is the discipline
+  // profile-contract.md section 9.3 states: a declaration the loader cannot read
+  // is refused, never skipped — a skipped observation is a report that claims a
+  // complete set while missing the measurement the author asked for.
+  const refusals = [
+    { label: 'an unknown kind', observations: [{ id: 'x', kind: 'gh_check', workflow: 'ci.yml', unit: 's' }] },
+    { label: 'a missing kind key', observations: [{ id: 'x', kind: 'gh_job_step', workflow: 'ci.yml', job: 'e2e', unit: 's' }] },
+    { label: 'a missing unit', observations: [{ id: 'x', kind: 'gh_run', workflow: 'ci.yml' }] },
+    { label: 'an unknown entry field', observations: [{ id: 'x', kind: 'gh_run', workflow: 'ci.yml', unit: 's', threshold: 60 }] },
+    { label: 'a duplicate id', observations: [
+      { id: 'x', kind: 'gh_run', workflow: 'ci.yml', unit: 's' },
+      { id: 'x', kind: 'gh_run', workflow: 'release.yml', unit: 's' },
+    ] },
+    { label: 'an id that is not a token', observations: [{ id: 'ci wallclock', kind: 'gh_run', workflow: 'ci.yml', unit: 's' }] },
+    { label: 'a declaration that is not an array', observations: { 'ci-wallclock': 's' } },
+  ];
+  for (const [index, refusal] of refusals.entries()) {
+    const path = writeProfileVariant(dir, `refusal-${index}.json`, { observations: refusal.observations });
+    const { exit, result } = planWithProfile(path, issuesPath);
+    check(exit === 6, `${refusal.label} should be refused with exit 6, exited ${exit}`);
+    check((result?.errors ?? []).some((entry) => entry.code === 'load_error'),
+      `${refusal.label} should raise load_error, got ${JSON.stringify((result?.errors ?? []).map((e) => e.code))}`);
+  }
+}
+
+// The observer's own input handling. Each of these is a REFUSAL, and the shape
+// they share is the one that matters: nothing is observed, `issues` is null, and
+// no `gh` runs — "we could not look" and "we looked and found nothing" never come
+// back in the same envelope.
+function observeInputTest() {
+  log('  observe input handling');
+  const dir = mkdtempSync(join(tmpdir(), 'cmate-observe-input-'));
+  const logPath = join(dir, 'gh.log');
+
+  // Hand-written inputs, on purpose: the observer does not produce either
+  // document, and a plan whose profile declares nothing cannot be obtained by
+  // running the planner with a profile that does (patchDispatchReport exists for
+  // the same reason in the merge suite).
+  const writePlan = (name, profile) => {
+    const path = join(dir, name);
+    writeFileSync(path, `${JSON.stringify({
+      plan_schema_version: 2,
+      skill_id: 'cmate-orchestrate',
+      run_id: 'plan-observe-input',
+      profile: { id: 'p', repository: 'Kewton/CommandMate', base: 'origin/develop', ...profile },
+    }, null, 2)}\n`);
+    return path;
+  };
+  const writeMerge = (name, targets) => {
+    const path = join(dir, name);
+    writeFileSync(path, `${JSON.stringify({
+      merge_schema_version: 1,
+      skill_id: 'cmate-orchestrate',
+      phase: 'merge_prs',
+      targets,
+    }, null, 2)}\n`);
+    return path;
+  };
+
+  const declaration = [{ id: 'ci-wallclock', kind: 'gh_run', workflow: 'ci.yml', unit: 's' }];
+  const planWithObs = writePlan('plan-with.json', { observations: declaration });
+  const planWithout = writePlan('plan-without.json', {});
+  const mergedOne = writeMerge('merge-one.json', [{ issue: 200, pr_number: 200, merged: true }]);
+  const mergedNone = writeMerge('merge-none.json', [{ issue: 200, pr_number: 200, merged: false }]);
+  const profilePath = join(dir, 'profile.json');
+  writeFileSync(profilePath, `${JSON.stringify({ id: 'p', observations: declaration }, null, 2)}\n`);
+  const emptyProfile = join(dir, 'profile-empty.json');
+  writeFileSync(emptyProfile, `${JSON.stringify({ id: 'p', observations: [] }, null, 2)}\n`);
+
+  const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: join(dir, 'nothing.json'), CMATE_FAKE_LOG: logPath };
+  const observe = (args) => runObserve(
+    [...args, '--gh', FAKE_CLI, '--git', FAKE_CLI], env, dir,
+  );
+
+  const bad = [
+    {
+      label: '--runs is not defaulted',
+      args: ['--plan', planWithObs, '--merge', mergedOne, '--out', join(dir, 'o1')],
+      code: 'invalid_input', exit: 3,
+    },
+    {
+      label: 'a profile that declares no observation',
+      args: ['--plan', planWithout, '--merge', mergedOne, '--runs', '3', '--out', join(dir, 'o2')],
+      code: 'observations_undeclared', exit: 3,
+    },
+    {
+      label: 'a profile that declares an EMPTY observation list',
+      args: ['--plan', planWithout, '--profile', emptyProfile, '--merge', mergedOne, '--runs', '3', '--out', join(dir, 'o3')],
+      code: 'observations_undeclared', exit: 3,
+    },
+    {
+      label: 'a merge report that merged nothing',
+      args: ['--plan', planWithObs, '--merge', mergedNone, '--runs', '3', '--out', join(dir, 'o4')],
+      code: 'nothing_merged', exit: 3,
+    },
+    {
+      label: 'an unreadable plan',
+      args: ['--plan', join(dir, 'missing.json'), '--merge', mergedOne, '--runs', '3', '--out', join(dir, 'o5')],
+      code: 'load_error', exit: 6,
+    },
+    {
+      label: '--comment without --approve',
+      args: ['--plan', planWithObs, '--merge', mergedOne, '--runs', '3', '--comment', '--out', join(dir, 'o6')],
+      code: 'approval_required', exit: 2,
+    },
+  ];
+  for (const entry of bad) {
+    const { exit, stdout } = observe(entry.args);
+    check(exit === entry.exit, `${entry.label}: exit ${exit} !== ${entry.exit}`);
+    let report;
+    try {
+      report = JSON.parse(stdout);
+    } catch {
+      check(false, `${entry.label}: stdout is not JSON`);
+      continue;
+    }
+    check(report.status === 'refused', `${entry.label}: status "${report.status}" !== "refused"`);
+    check(report.issues === null, `${entry.label}: a refusal must carry issues: null`);
+    check(report.errors.some((error) => error.code === entry.code),
+      `${entry.label}: expected ${entry.code}, got ${JSON.stringify(report.errors.map((e) => e.code))}`);
+    check(validateAgainst(observeSchema, report, 'observe').length === 0,
+      `${entry.label}: the refusal envelope does not conform to observe-report.v1`);
+    assertNoAcceptanceVocabulary(report, entry.label);
+  }
+  // Nothing above reached a CLI at all: every refusal happens before the first
+  // `gh`, which is what makes "--comment without --approve wrote nothing" a fact
+  // about the code path rather than about the fake's mood.
+  check(readCliLog(logPath).length === 0,
+    `a refused invocation ran ${readCliLog(logPath).length} CLI call(s)`);
+
+  // `--out` refuses an existing directory, exactly as merge does: a second
+  // observation of the same run writes a second directory or nothing.
+  const taken = join(dir, 'taken');
+  mkdirSync(taken, { recursive: true });
+  const clobber = observe(['--plan', planWithObs, '--merge', mergedOne, '--runs', '3', '--out', taken]);
+  check(clobber.exit === 4, `an existing --out should exit 4, exited ${clobber.exit}`);
+  check(JSON.parse(clobber.stdout).errors.some((error) => error.code === 'out_exists'),
+    'an existing --out should raise out_exists');
+
+  // `--profile` is the documented escape for a plan frozen before the profile
+  // declared observations. It is never silent: the source is named in the report
+  // and a limitation says the plan and the file can differ.
+  const overrideOut = join(dir, 'override');
+  const overrideScenario = join(dir, 'override-scenario.json');
+  writeFileSync(overrideScenario, `${JSON.stringify({
+    observe: { merged: { 200: { mergedAt: '2026-08-19T10:00:00Z', mergeCommit: 'abc1234' } }, runs: { 'ci.yml': [] } },
+  }, null, 2)}\n`);
+  const override = runObserve(
+    ['--plan', planWithout, '--profile', profilePath, '--merge', mergedOne, '--runs', '3',
+      '--out', overrideOut, '--gh', FAKE_CLI, '--git', FAKE_CLI],
+    { ...baseEnv(), CMATE_FAKE_SCENARIO: overrideScenario }, dir,
+  );
+  const overrideReport = JSON.parse(override.stdout);
+  check(overrideReport.observations_source === 'profile_file',
+    `--profile should record observations_source profile_file, got "${overrideReport.observations_source}"`);
+  check(overrideReport.limitations.some((entry) => entry.code === 'observations_from_profile_file'),
+    'reading the declaration from a profile file must not be silent');
+  // …and it is still partial, because zero runs is zero samples. The escape
+  // buys a declaration, not an observation.
+  check(overrideReport.status === 'partial', `an empty run history should be partial, got "${overrideReport.status}"`);
+  assertNoAcceptanceVocabulary(overrideReport, '--profile override');
+}
+
+// =============================================================================
 // Self-test of the validator: it must reject a broken plan, not wave it through.
 // =============================================================================
 
@@ -6408,7 +7007,7 @@ function runIdCoversProfileTest() {
   // reading this is deciding whether their profile edit is the reason this id
   // already exists. `integration_baseline` (#195) is on the list for the sharpest
   // version of that question: they may have just changed what "green" means.
-  for (const field of ['baseline', 'branch_template', 'worktree_template', 'verified', 'scope_companions', 'dispatch_defaults', 'integration_baseline']) {
+  for (const field of ['baseline', 'branch_template', 'worktree_template', 'verified', 'scope_companions', 'dispatch_defaults', 'integration_baseline', 'observations']) {
     check(detail.includes(field), `run_exists detail should name the profile field ${field}: ${detail}`);
   }
 
@@ -7075,6 +7674,14 @@ function main() {
   evaluateGatesInputTest();
   evaluateGatesDoesNotReachPlanTest();
 
+  log('  -- observe cases --');
+  const observeIds = existsSync(OBSERVE_CASES_DIR)
+    ? readdirSync(OBSERVE_CASES_DIR).filter((name) => existsSync(join(OBSERVE_CASES_DIR, name, 'case.json'))).sort()
+    : [];
+  for (const caseId of observeIds) runObserveCase(caseId);
+  observeProfileTest();
+  observeInputTest();
+
   log('  -- contract parity --');
   parityTest();
 
@@ -7114,7 +7721,7 @@ function main() {
     log(`FAILED: ${failures} assertion(s) did not pass`);
     process.exit(1);
   }
-  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases + --check, ${inspectIds.length - gateIds.length} inspect cases + input/--ref/plan isolation, ${gateIds.length} evaluate-gates cases + input/plan isolation, run id vs profile, contract parity, launcher resolution, worktree-setup input, reverify input, auto-yes arming, unattended input + exclusivity + merge, unattended stage C (gates + merge-prs + uat)`);
+  log(`PASSED: ${caseIds.length} plan cases, ${dispatchIds.length} dispatch cases, ${resumeIds.length} resume/reverify cases, ${mergeIds.length} merge cases, ${uatIds.length} uat cases, ${statusIds.length} status cases, ${profileInitIds.length} profile-init cases + --check, ${inspectIds.length - gateIds.length} inspect cases + input/--ref/plan isolation, ${gateIds.length} evaluate-gates cases + input/plan isolation, ${observeIds.length} observe cases + profile/input, run id vs profile, contract parity, launcher resolution, worktree-setup input, reverify input, auto-yes arming, unattended input + exclusivity + merge, unattended stage C (gates + merge-prs + uat)`);
 }
 
 main();

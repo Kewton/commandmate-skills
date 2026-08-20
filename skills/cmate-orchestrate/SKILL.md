@@ -38,6 +38,7 @@ runner は決定的なので、この文書が述べるのは「いつ使うか�
 `scripts/lib.mjs` は共有ヘルパーで、単体では起動しない。`scripts/profile-init.mjs`（第3.5節）と
 `scripts/inspect.mjs`（第3.6節）は phase ではなく **read-only の準備 runner** で、**どちらも
 何も書かず裁定せず、所見は warning・exit は 0 である。**
+merge 後の観測 runner は `scripts/observe.mjs`（[契約](./references/observe-contract.md)）。
 
 ## 1. いつ使うか / 使わないか
 
@@ -519,8 +520,7 @@ Issue ごとに出す4欄と「次にやること」の作り方、`--json` の 
 4 runner とも、機械可読な envelope / report を **stdout** に、進捗 notice を **stderr** に出す。
 mutating runner は `<out>/` にも report と summary markdown を書く。準備 runner の
 profile-init も同じ規約で、status は `success` / `partial`（雛形か warning がある）/
-`failure`、exit は 0 / `invalid_input` 3 / `out_exists` 4 / `load_error` 6 である
-（`--emit profile` のときだけ stdout は draft JSON。失敗時は常に envelope が出る）。
+`failure`、exit は 0 / `invalid_input` 3 / `out_exists` 4 / `load_error` 6 である。
 envelope の `mode` が `draft` / `check` を名乗り、**`--check` も同じ規約**である。
 
 **まず run 全体を見るなら `status.mjs --run <run-dir>`**（第3.7節）。以下の status / code /

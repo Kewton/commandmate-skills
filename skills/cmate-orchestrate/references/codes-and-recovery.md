@@ -27,6 +27,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | 第5節 停止したとき、人間が何をするか（対処表） | 第4節 |
 | 第5節 無人 run を取り消す | 第5節 |
 | （run の語彙ではない）準備 runner の warning code（profile-init `--check` / inspect `--check-references`） | 第6節 |
+| （run の語彙ではない）merge 後の観測 runner の code（observe） | 第7節 |
 
 ---
 
@@ -528,3 +529,50 @@ run view に表示しない。** ただし `NEXT_ACTION_HINTS` には5件とも�
 
 `--evaluate-gates` も run directory を持たないので `status.mjs` は run view に出さないが、
 `NEXT_ACTION_HINTS` には3件とも入っている（第6.2節末尾と同じ理由）。
+
+## 7. merge 後の観測 runner（`observe.mjs`）の code（[#221](https://github.com/Kewton/commandmate-skills/issues/221)）
+
+`observe.mjs` は run を進めない。merge のあとに base branch の上で、profile が宣言した観測
+（`observations`）を N 回集めて残すだけの runner である。契約の正本は
+[observe-contract.md](./observe-contract.md)。
+
+**この節の code はどれも「観測が達成されたか」を言わない。** この runner は**裁定しない** ——
+`status` は**観測の完了度**（`success` = 全観測が `--runs` 件揃った / `partial` = 揃わなかった・
+観測不能があった / `refused` = 1件も観測していない）だけを表し、report のどこにも
+`pass` / `fail` の語は出ない（唯一の例外は GitHub の `conclusion` の逐語転記で、
+それは常に `conclusion` という名の key の下に在る）。
+
+### 7.1 拒否（**blocking**。1件も観測せず、`issues` は `null`）
+
+| code | severity | exit | 何が起きたか | 人間が何をするか |
+|---|---|---|---|---|
+| `approval_required` | **blocking** | 2 | `--comment` を `--approve` 無しで渡した。**この package で runner が GitHub に書く初の経路**なので、入力を読む前・最初の `gh` の前に拒否する | 観測だけなら `--comment` を外して同じコマンドを回す（`--out` は消費していない）。書いてよいなら両方を付ける。**書くのはコメントだけで、Issue 本文は触らない** |
+| `observations_undeclared` | **blocking** | 3 | profile が観測を1件も宣言していない（key が無い、または `[]`） | `observations` を profile に書く（[profile-contract.md](./profile-contract.md) 第12節）。merge 済みで re-plan できないなら `--profile <path>` で profile file を直接読ませる |
+| `nothing_merged` | **blocking** | 3 | 渡された merge report に `merged: true` の target が1件も無い | base branch が動いていないので merge 後の状態が無い。**実際に merge した run の report を渡す** |
+| `invalid_input` | **blocking** | 3 | 引数不正。`--runs` を渡していない場合を含む（**既定値は無い**） | 何件に基づく数字かは人間が決める。3 run と 8 run で結論が逆になった実測があるので、`--runs` は明示する |
+| `out_exists` | **blocking** | 4 | `--out` が既存 | 別の `--out` を渡す。既存の観測を上書きしない |
+| `load_error` | **blocking** | 6 | plan / merge report / profile / `--inspect` が読めない、または profile の `observations` 宣言が契約に適合しない | detail が拒否理由を名指している。profile 側の拒否一覧は [profile-contract.md](./profile-contract.md) 第12.3節 |
+
+### 7.2 limitation（**notice**。止めていないが、数字の読み方を変える）
+
+| code | severity | 何が起きたか | 人間が何をするか |
+|---|---|---|---|
+| `not_observable` | notice | その Issue の `mergedAt` が読めず、**観測の窓を開けられなかった**。`observable: false`・`observations: []` | `gh pr view <pr> --json mergedAt,mergeCommit` を手で叩いて認証と PR 番号を確かめる。**窓の始まりは推測しない** —— 捏造した始まりは、その merge が起こしていない run をその merge に帰属させる |
+| `observation_incomplete` | notice | `--runs` に足りない件数しか集まっていない。**集まった分は出ている** | run が溜まってから取り直すか `--max-wait` で待つ。**中央値だけを読まない**（実測: 3 run の中央値が「未達」、8 run の中央値が達成） |
+| `observation_unavailable` | notice | その観測を1件も集められなかった（`gh run list` / jobs API / checkout が答えなかった） | detail の理由を潰して取り直す。**「観測できなかった」を「変化が無かった」と読み替えない** |
+| `observations_from_profile_file` | notice | 宣言を plan ではなく `--profile` の profile file から読んだ | plan と file は違いうる。**何を測ったのかは report の `observations_declared` を読む**（[observe-contract.md](./observe-contract.md) 第4.2節） |
+| `baseline_unavailable` | notice | `--inspect` の文書に同 id の数値が無く、着手前の値が `null` である | **artifact についての事実であって欠陥ではない。** 差分が要るなら着手前の値を持つ文書を渡して取り直す（観測そのものは揃っている） |
+| `comment_not_written` | notice | 観測の要約を Issue にコメントできなかった | **観測は失われていない**（`--out` 配下に report と summary が在る）。認証・権限を潰して回し直すか、`observe-summary.md` を手で貼る |
+| `observe_tree_left` | notice | `kind: command` の使い捨て checkout を削除できなかった | `--out` 配下に残っている。`git worktree remove --force <dir>` で消す。**観測の数字は変わらない** |
+
+### 7.3 `status.mjs` はこの report を run view に表示しない
+
+observe の出力先は `--out` であって run directory とは限らず、status の phase モデルは
+plan → dispatch → merge / uat である。**この report は単独で読むものである**
+（[observe-contract.md](./observe-contract.md) 第11節）。
+
+ただし **`NEXT_ACTION_HINTS` には本 runner が新設した10 code がすべて入っている**
+（第7.1節の6件のうち `invalid_input` / `out_exists` / `load_error` は他 runner と共有の code で、
+本 Issue が新設したものではない）。表に無い code は `UNKNOWN_CODE_HINT` に落ちるので、
+「まだ誰も分類していない code」と「表示する場所がまだ無い code」が同じ形になってしまうためである
+（第6.2節末尾と同じ理由）。
