@@ -1,0 +1,46 @@
+{
+  "description": "#222 (c) — m24's world with the cleanup broken: the throwaway detached checkout is created and the baseline passes in it, but `git worktree remove --force` fails. The verdict does not move (removal is best effort and never decides green/red), so the run is still success / completed with outcome pass — and the report says the cleanup did not happen, in BOTH channels: `integration_verify.tree_removed: false` and the `integration_verify_tree_left` limitation, together. Before #222 only the limitation existed, so 'the checkout was removed' and 'this runner is too old to say' were the same report; the pair here is what fixes the true side (m24) as a measurement rather than as an absence. The caller worktree is untouched throughout — a failed cleanup of the runner's OWN checkout says nothing about the caller's index, and both readings stay null.",
+  "phase": "merge-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "merge_args": ["--approve", "--integration-verify"],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": { "repo_access": true },
+    "git": { "base_resolvable": true },
+    "prs": {
+      "200": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" },
+      "201": { "view_state": "OPEN", "checks": [{ "name": "build", "state": "SUCCESS" }], "merge": "ok" }
+    },
+    "integration": { "verify": "pass", "remove": "fail" }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [201, 200],
+    "targets_outcome": { "201": "merged", "200": "merged" },
+    "pr_merge_calls": 2,
+    "completion_passed": true,
+    "limitation_codes": ["integration_verify_tree_left"],
+    "absent_limitation_codes": ["caller_index_lock_pre_existing", "caller_index_lock_appeared", "integration_verify_not_run"],
+    "absent_blocking_codes": ["integration_verify_failed", "integration_verify_unavailable"],
+    "caller_worktree": { "index_lock_before": null, "index_lock_after": null },
+    "caller_index_lock_remains": false,
+    "integration_verify": {
+      "requested": true,
+      "ran": true,
+      "outcome": "pass",
+      "merged_issues": [201, 200],
+      "source": "baseline",
+      "tree_removed": false
+    },
+    "git_calls": { "fetch": 1, "worktree": 2 },
+    "summary_contains": ["畳めていない", "integration_verify_tree_left"],
+    "summary_absent": ["## 呼び出し元 worktree の index.lock"]
+  }
+}

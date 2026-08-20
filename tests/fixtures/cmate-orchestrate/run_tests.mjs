@@ -2310,6 +2310,39 @@ function assertIntegrationVerify(report, expected) {
     check(report.status !== 'success' || actual.merged_issues.length === 0,
       `integration_verify outcome "${actual.outcome}" over merged PR(s) but the run reported success`);
   }
+  // Issue #222, asserted on EVERY integration case rather than only the ones that
+  // declare it: the cleanup is recorded exactly when there was something to clean
+  // up. A `ran` verification with no `tree_removed` is the silent-success shape
+  // the field replaced (before it, only the FAILURE spoke), and a `tree_removed`
+  // on a run that never checked anything out would be a claim about a directory
+  // that never existed.
+  check(('tree_removed' in actual) === (actual.ran === true),
+    `integration_verify.tree_removed present=${'tree_removed' in actual} but ran=${actual.ran}`);
+}
+
+// One reading of the caller worktree's index.lock (Issue #222). `null` is
+// asserted as null; a reading is asserted field by field, so a case pins `path`
+// and `size` — the two values the recovery instruction is written against —
+// without pinning `mtime`, which moves with the run and is only checked for being
+// a parseable instant.
+function assertCallerWorktree(report, expected) {
+  const actual = report.caller_worktree;
+  if (!check(actual !== undefined, 'the report carries no caller_worktree field')) return;
+  for (const [key, value] of Object.entries(expected)) {
+    const reading = actual[key];
+    if (value === null) {
+      check(reading === null, `caller_worktree.${key} ${JSON.stringify(reading)} !== null`);
+      continue;
+    }
+    if (!check(reading !== null && typeof reading === 'object',
+      `caller_worktree.${key} is ${JSON.stringify(reading)}, expected a reading`)) continue;
+    for (const [field, expectedValue] of Object.entries(value)) {
+      check(deepEqual(reading[field], expectedValue),
+        `caller_worktree.${key}.${field} ${JSON.stringify(reading[field])} !== ${JSON.stringify(expectedValue)}`);
+    }
+    check(typeof reading.mtime === 'string' && !Number.isNaN(Date.parse(reading.mtime)),
+      `caller_worktree.${key}.mtime ${JSON.stringify(reading.mtime)} is not an ISO instant`);
+  }
 }
 
 function runMergeCase(caseId) {
@@ -2335,8 +2368,23 @@ function runMergeCase(caseId) {
   const scenarioPath = writeScenario(work, 'merge-scenario.json', withDiffDefaults(spec.merge_scenario ?? {}, readPlan(planPath)));
   const env = { ...baseEnv(), CMATE_FAKE_SCENARIO: scenarioPath, CMATE_FAKE_LOG: logPath };
 
+  // The caller worktree's index.lock (Issue #222). `caller_index_lock:
+  // "pre_existing"` plants a 0-byte lock — the exact shape the operator found —
+  // in the directory the merge runner is spawned in, BEFORE the run, so the
+  // opening probe sees it. The "appeared" half is planted by the fake at `git
+  // worktree remove` instead (`integration.caller_index_lock: "appear"`), which
+  // is inside the run. Nothing in this harness or in that fake ever deletes
+  // either one: the file still being there afterwards is the assertion that the
+  // runner did not unlink somebody else's lock.
+  const callerWorktree = join(work, 'integration');
+  const callerLockPath = join(callerWorktree, '.git', 'index.lock');
+  if (spec.caller_index_lock === 'pre_existing') {
+    mkdirSync(dirname(callerLockPath), { recursive: true });
+    writeFileSync(callerLockPath, '');
+  }
+
   const phaseFlag = spec.phase === 'merge-prs' ? '--merge-prs' : '--create-prs';
-  const { exit, stdout } = runMerge(planPath, dispatchPath, mergeOut, phaseFlag, spec.merge_args ?? [], env, join(work, 'integration'));
+  const { exit, stdout } = runMerge(planPath, dispatchPath, mergeOut, phaseFlag, spec.merge_args ?? [], env, callerWorktree);
 
   let report;
   try {
@@ -2417,6 +2465,17 @@ function runMergeCase(caseId) {
   if (expect.no_integration_verify) {
     check(report.integration_verify === undefined,
       'the report carries an integration_verify field although --integration-verify was not passed');
+  }
+  // The caller worktree's two readings (Issue #222), and the file-system fact
+  // that matters more than either of them: the lock is still there. That is
+  // asserted as a fact about the disk rather than as an absence of a code path,
+  // because an implementation that unlinked the lock would still emit exactly the
+  // same limitation.
+  if (expect.caller_worktree) assertCallerWorktree(report, expect.caller_worktree);
+  if (expect.caller_index_lock_remains !== undefined) {
+    const remains = existsSync(callerLockPath);
+    check(remains === expect.caller_index_lock_remains,
+      `caller index.lock still present=${remains} !== ${expect.caller_index_lock_remains} (the runner must never remove it)`);
   }
   for (const [sub, count] of Object.entries(expect.git_calls ?? {})) {
     const actual = countCalls(cliLog, sub);

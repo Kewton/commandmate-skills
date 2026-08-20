@@ -1508,6 +1508,61 @@ planner 側（`PROFILE_FIELDS` と `publicProfile()` の echo）を同梱した�
 pin。#175 と同じくこの Issue の宣言 scope の外）が**フラグを使っていない run の report まで読めなく
 なる**。判断は [merge-contract.md](./merge-contract.md) 第10節に #175 の先例と並べて書いた。
 
+### #222 — merge が成功したあとの `index.lock` が、「merge が壊れた」と読めた
+
+`merge.mjs --merge-prs --approve --integration-verify` が `status: success` /
+`integration_verify.outcome: pass` で終わったあと、**呼び出し元 worktree に 0 バイトの
+`index.lock` が残り、後続の `git pull --ff-only` が落ちる**ことが同日に 2 回あった
+（CommandMate #1836。利用リポジトリ Kewton/BorderFreeKidsMap での実測。発見時点でそれぞれ
+約 40 分・52 分経過、`pgrep -fl 'git '` は該当なし、stale lock を消せば復旧）。
+
+**危険なのは lock そのものではなく、それが「merge が壊れた」と読めることである。**
+merge も統合検証も終わっているので、ここで人間が巻き戻すと **正しく終わった run の上に
+二次被害を積む**。
+
+**真因はこの runner には無い。** フィードバック元は「統合検証の使い捨て checkout が
+呼び出し元の index を掴んでいる」と推定し、`git worktree add --detach` にすることを提案したが、
+**それは #175 の時点で既に実装である**（`merge.mjs` の `runIntegrationVerify`、および
+`INTEGRATION_TREE_DIRNAME` の上のブロック）。この file が呼ぶ git verb は `fetch` /
+`rev-parse` / `worktree add|remove` / `diff` / `push` だけで、`checkout` / `merge` / `reset` /
+`read-tree` / `stash` / `pull` / `update-index` は**1つも無い** —— 呼び出し元の index を書く経路が
+無い。`runCli` は `execFileSync` に `timeout` も `killSignal` も渡していないので、runner が git を
+SIGKILL する経路も無い（SIGTERM なら git は自分の lock を消す）。0 バイト・数十分放置・git
+プロセス無し、は「**何かの git が lock 保持中に SIGKILL / クラッシュした**」形であり、候補は
+呼び出し元 worktree で走る他プロセス（agent harness / IDE の git 連携 / git status のポーリング）
+だが、**コードだけでは特定できない**。
+
+→ **消すのではなく、検出して名乗る。** run の開始前（pre-flight の前。この invocation が git を
+1回も呼ぶ前）と report を書く直前に `git rev-parse --git-path index.lock` → `stat` し、
+`caller_worktree.index_lock_before` / `index_lock_after` に記録する。開始時に在れば
+`caller_index_lock_pre_existing`、無くて終了時に在れば `caller_index_lock_appeared`。
+**どちらも notice で、裁定を1つも変えない** —— この runner は呼び出し元の index を使わないので
+停止する理由が無いし、merge も統合検証も終わった run を failure に落とすのは、本件が消そうと
+している誤読そのものである。
+
+**runner は lock を消さない。** lock は「今この index を書いている」という git の宣言であり、
+他人が保持中の lock を消すと**それが守っていた index が壊れる**。復帰手順（先に
+`integration_verify.outcome` と `merged` を読む → size 0 / mtime が run 中 / `pgrep -fl 'git '`
+に該当なし、の3つが揃うときだけ人間が手で消す）は
+[codes-and-recovery.md](./codes-and-recovery.md) 第4節に置いた。「消さない」ことは fixture でも
+**ファイルシステムの事実として**測っている（`m33` / `m34` は run 後に lock が残っていることを
+確かめる。実装が unlink すれば、limitation が同じでも赤くなる）。
+
+`path` は**呼び出し cwd からの相対**で記録する（[merge-contract.md](./merge-contract.md) 第7節:
+絶対 path を report / artifact に残さない）。復帰は同じ cwd で走るので相対のまま使えて、
+利用者名が漏れない。
+
+**ついでに、後片付けの成功を報告するようにした**（`integration_verify.tree_removed`）。#175 では
+畳めなかった側（`integration_verify_tree_left`）しか記録が無く、**成功が無言**だったので、
+「畳んだ」と「言えるほど新しくない runner」が同じ report だった。`ran` が true のときだけ現れる
+（＝畳む対象が在ったときだけ）ので、不在は「checkout を作っていない」であって
+「測っていない」ではない。
+
+`merge_schema_version` は **1 のまま**。足したのは optional な `caller_worktree`（両 phase に出る。
+lock 無しの run は両方 null で、fixture `m22` の golden はこの block だけを増やして byte 比較を
+続ける）と、`integration_verify` の内側の `tree_removed` である。`stop_reason` にも
+`preflight[].code` にも値を1つも足していない。
+
 ---
 
 ## uat（`scripts/uat.mjs`）

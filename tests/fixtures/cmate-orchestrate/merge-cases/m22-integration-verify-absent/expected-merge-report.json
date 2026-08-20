@@ -88,6 +88,10 @@
       "note": "merged PR #200 via squash"
     }
   ],
+  "caller_worktree": {
+    "index_lock_before": null,
+    "index_lock_after": null
+  },
   "blocking_reasons": [],
   "limitations": [],
   "redactions": [],

@@ -98,6 +98,15 @@
 // red. That distinction matters: "could not measure the merged state" must never
 // be reported as "the merged state is green".
 //
+// The same block carries `caller_index_lock: "appear"` (Issue #222): at the
+// `worktree remove` call — the last git the merge runner makes — the fake drops a
+// 0-byte `.git/index.lock` in the CALLER's cwd and never removes it. That is the
+// shape of the measured event (a stale lock outliving a successful merge run in
+// the invocation's own worktree), and the surviving file is what proves the
+// runner named it instead of unlinking it. The lock's location is answered by
+// `git rev-parse --git-path index.lock`, which this fake serves as
+// `.git/index.lock`; `git.git_path: false` makes that probe fail instead.
+//
 // A PR number in this fake is always equal to its issue number, so that
 // `pr view` (keyed by branch) and `pr checks`/`pr merge` (keyed by number) can
 // look the same worker's behavior up by a single key.
@@ -961,6 +970,19 @@ function main() {
 
   // --- git drift probes ----------------------------------------------------
   if (sub === 'rev-parse') {
+    // `git rev-parse --git-path index.lock` — WHERE the caller worktree's
+    // index.lock would live (Issue #222). Real git answers with a cwd-relative
+    // path in a main worktree (`.git/index.lock`) and with an absolute path under
+    // `<main>/.git/worktrees/<name>/` in a linked one; the fixtures model the
+    // main-worktree shape, because that is the one a fixture can create, assert on
+    // and leave behind. `git.git_path: false` models a cwd that is not a
+    // repository, where the runner must record nothing rather than "no lock".
+    if (argv[1] === '--git-path') {
+      const git = spec.git ?? {};
+      if (git.git_path === false) fail('fatal: not a git repository (or any of the parent directories): .git');
+      process.stdout.write(`.git/${argv[2] ?? ''}\n`);
+      process.exit(0);
+    }
     if (argv.includes('--verify')) {
       const git = spec.git ?? {};
       if (git.base_resolvable === false) fail('fatal: needed a single revision');
@@ -1063,6 +1085,18 @@ function main() {
       // checkout the runner could not clean up, which it must say out loud rather
       // than leave for the next `git worktree add` to discover.
       const integration = spec.integration ?? {};
+      // Issue #222: a scenario can make an index.lock APPEAR in the CALLER's
+      // worktree while the run is in flight. The measured event was a 0-byte
+      // index.lock that outlived a successful merge run in the invocation's own
+      // worktree with no git process holding it, and the runner must name it
+      // without deleting it — so this drops the file at the last git call the
+      // merge runner makes and NOTHING here ever removes it again. The file left
+      // behind is itself the assertion that the runner did not unlink it.
+      if (integration.caller_index_lock === 'appear') {
+        const lockDir = join(process.cwd(), '.git');
+        mkdirSync(lockDir, { recursive: true });
+        writeFileSync(join(lockDir, 'index.lock'), '');
+      }
       if (integration.remove === 'fail') fail('fatal: validation failed, cannot remove working tree');
       const absDir = resolve(process.cwd(), argv[argv.length - 1] ?? '.');
       try {

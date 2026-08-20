@@ -86,6 +86,7 @@ merge runner は次を呼ぶ。各呼び出しは失敗で非0を返し、握り
 
 | phase | 呼び出し | 期待する出力 | 用途 |
 |---|---|---|---|
+| 両 phase | `git rev-parse --git-path index.lock`（cwd = 呼び出し元） | lock が置かれる path | 呼び出し元 worktree の `index.lock` 検査（5.5節）。**invocation あたり1回**、pre-flight より前に引く。失敗しても停止しない（記録が null になるだけ） |
 | preflight | `gh --version` | exit 0 | gh 到達性 |
 | preflight | `gh repo view <repo> --json nameWithOwner` | `{ "nameWithOwner": "…" }` | repo アクセス |
 | preflight | `git rev-parse --verify <base>` | exit 0 | base 解決 |
@@ -101,7 +102,7 @@ merge runner は次を呼ぶ。各呼び出しは失敗で非0を返し、握り
 | merge_prs（同上） | `git rev-parse --verify FETCH_HEAD` | 合流後の tip の SHA | 検証対象の同定（短縮 SHA を report に載せる） |
 | merge_prs（同上） | `git worktree add --detach <out>/integration-tree FETCH_HEAD` | exit 0 | 使い捨ての合流後 checkout |
 | merge_prs（同上） | profile の `baseline` の各 command（cwd = 上の checkout） | すべて exit 0 なら green | 統合検証そのもの。**runner は command を1つも持たない** |
-| merge_prs（同上） | `git worktree remove --force <out>/integration-tree` | exit 0 | 後始末（失敗しても裁定は変えず、`integration_verify_tree_left` に残す） |
+| merge_prs（同上） | `git worktree remove --force <out>/integration-tree` | exit 0 | 後始末（失敗しても裁定は変えず、`integration_verify_tree_left` に残す）。**成否は必ず `integration_verify.tree_removed` に記録する**（5.5節） |
 
 規則:
 
@@ -346,6 +347,81 @@ node scripts/merge.mjs --dispatch <out>/dispatch-report.json --merge-prs --appro
 - merge queue 方式（base 更新 → CI 再走 → merge の直列化）は**実装しない**。Issue 本文が
   「まずは合流後検証の1段で十分」と裁定している。合流後検証で赤を捕まえられない事象が
   実運用で繰り返し出たときに、その事例とともに再検討する。
+
+## 5.5 呼び出し元 worktree の `index.lock`（両 phase。既定 on。裁定を変えない）
+
+### なぜ要るか（実測）
+
+`--merge-prs --approve --integration-verify` が `status: success` /
+`integration_verify.outcome: pass` で終わったあと、**呼び出し元 worktree に 0 バイトの
+`index.lock` が残り、後続の `git pull --ff-only` が落ちる**ことが同日に 2 回あった
+（[#222](https://github.com/Kewton/commandmate-skills/issues/222) / CommandMate #1836。
+発見時点でそれぞれ約 40 分・52 分経過、`pgrep -fl 'git '` は該当なし、手で消せば復旧）。
+
+**危険なのは lock ではなく、それが「merge が壊れた」と読めることである。** merge も統合検証も
+終わっているので、ここで巻き戻すと**正しく終わった run の上に二次被害を積む**。
+
+**この runner に原因は無い。** 上の第5節の表が全件である —— 呼ぶ git verb は `fetch` /
+`rev-parse` / `worktree add|remove` / `diff` / `push` だけで、`checkout` / `merge` / `reset` /
+`read-tree` / `stash` / `pull` / `update-index` は**1つも無い**（呼び出し元の index を書く経路が
+無い）。統合検証は 5.4 節どおり `git worktree add --detach` の使い捨て checkout で行い、
+**呼び出し元の作業ツリーを触らない**。`runCli` は `timeout` も `killSignal` も渡さないので、
+runner が git を SIGKILL する経路も無い。したがってこの節が約束するのは修理ではなく**測定**である。
+
+### 何を、いつ測るか
+
+| いつ | 何を |
+|---|---|
+| run の開始時（**pre-flight より前**。この invocation が git を1回も呼ぶ前） | `git rev-parse --git-path index.lock` → `stat`。結果を `caller_worktree.index_lock_before` に記録する |
+| report を書く直前（success / failure / partial のいずれでも。summary を組み立てる前） | 同じ path を再度 `stat`。結果を `caller_worktree.index_lock_after` に記録する |
+
+path を git に**訊く**のは、linked worktree では `.git` が file であり、実体が
+`<main>/.git/worktrees/<name>/index.lock` に在るからである（実測の失敗メッセージが出した path が
+まさにそれ）。記録は**呼び出し cwd からの相対**にする —— 第7節（絶対 path を残さない）に従い、
+かつ復帰は同じ cwd で走るのでそのまま使える。git が答えられない（リポジトリでない等）ときは
+**両方 null**であり、それは「lock は無かった」ではなく「**何も測っていない**」である。
+
+### code と、裁定に対する位置
+
+| 何が起きたか | code | severity |
+|---|---|---|
+| 開始時から在った | `caller_index_lock_pre_existing` | **notice**（limitation。停止しない） |
+| 開始時に無く、終了時に在る | `caller_index_lock_appeared` | **notice**（limitation。停止しない） |
+
+**どちらも status / stop_reason / exit を1文字も動かさない。** 停止しない理由は 2 つある:
+この runner は呼び出し元の index を読み書きしないので**止める理由が無い**こと、そして
+merge と統合検証が終わった run を failure に落とすのは**本節が消そうとしている誤読そのもの**で
+あることである。`caller_index_lock_appeared` は「開始時に無く終了時に在る」という**観測**であって、
+**この runner が作ったという主張ではない**。
+
+**runner は lock を消さない。** lock は「今この index を書いている」という git の宣言であり、
+他人が保持中の lock を消すと**それが守っていた index が壊れる**。復帰手順（先に
+`integration_verify.outcome` と各 target の `merged` を読む → size 0 / mtime が run 中 /
+`pgrep -fl 'git '` に該当なし、が揃うときだけ人間が手で消す）は
+[codes-and-recovery.md](./codes-and-recovery.md) 第4節が正本である。
+
+### 後片付けの報告（`integration_verify.tree_removed`）
+
+同じ Issue で、使い捨て checkout の後片付けを**両方向**記録するようにした。#175 では
+畳めなかった側（`integration_verify_tree_left`）しか記録が無く**成功が無言**だったので、
+「畳んだ」と「言えるほど新しくない runner」が同じ report だった。`tree_removed` は
+`integration_verify.ran` が true のとき**だけ**現れる（＝畳む対象が在ったときだけ）ので、
+不在は「checkout を作っていない」であって「測っていない」ではない。`false` は必ず
+`integration_verify_tree_left` と併存する。
+
+### 変えていないもの
+
+- `merge_schema_version` は **1 のまま**。`stop_reason` にも target `outcome` にも
+  `preflight[].code` にも値を1つも足していない（第6節・第10節）。
+- 足したのは optional な `caller_worktree`（**両 phase**に出る。`--create-prs` も同じ cwd から
+  `git push` / `git diff` を回すので、片方だけ答えられる report は「もう片方は触らない」という
+  測っていない主張に読める）と、`integration_verify` の内側の `tree_removed` である。
+- **lock が無い run の意味は変わらない**: 両方 null であり、それは #222 以前のすべての run が
+  記録していたはずの値である（fixture `m22` の golden はこの block だけを増やして byte 比較を
+  続ける）。
+- **lock を消す経路は実装にも fixture にも1つも無い**。`m33` / `m34` は run のあとに lock file が
+  **残っていること**をファイルシステムの事実として確かめる —— limitation が同じでも、unlink する
+  実装なら赤くなる。
 
 ## 6. 停止と status / stop_reason / exit
 

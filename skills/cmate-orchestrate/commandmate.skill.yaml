@@ -155,8 +155,8 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: 9ad8b9e451948b6fd855afcc9c943086d445d3b23948358087deff45e084da8a
-    size: 73190
+    sha256: a048d55ce073892a91631be9f22edc1094d082489ca247b2f7bc4753c5be5b96
+    size: 76280
     kind: instruction
     executable: false
     script: false
@@ -167,8 +167,8 @@ files:
     executable: false
     script: false
   - path: references/merge-contract.md
-    sha256: 601b1b3247ace5faff08460e177edb5c6d754a457b0db9742dc3998f4c47dc7c
-    size: 42181
+    sha256: 67e06447a3b8a072a9a382ef38ead27f14880ee4a530f767f2bab418313b98d2
+    size: 48401
     kind: instruction
     executable: false
     script: false
@@ -191,8 +191,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: c0270100c655b4e14ea3d8152b62e2e1ee44a3a8035d2b20ee0083bf1d47c475
-    size: 189606
+    sha256: cf321a0d721f38b59e1a999226faaec8d2ed2a0f728fea708b9a60e989a7450b
+    size: 194340
     kind: instruction
     executable: false
     script: false
@@ -227,8 +227,8 @@ files:
     executable: false
     script: false
   - path: schemas/merge-report.v1.json
-    sha256: 711b9faa561c6efc02d95b34a0a7544b31f8e68947b45644a28c59898bcbfad5
-    size: 15050
+    sha256: a6f23ebaccd096503b385bfb4887853b5802224fc7710bba19774436e36519db
+    size: 19202
     kind: asset
     executable: false
     script: false
@@ -257,8 +257,8 @@ files:
     executable: false
     script: true
   - path: scripts/merge.mjs
-    sha256: 7c7b0d5062d1946aa8c44d40f2ddf83f2724137bcbc40e0b835ee6a26dae0384
-    size: 98275
+    sha256: 4660b1a1b54f1ec38103212584f0666560ee891d01d6c089ad90eae907f65122
+    size: 110189
     kind: script
     executable: true
     script: true
@@ -275,8 +275,8 @@ files:
     executable: true
     script: true
   - path: scripts/status.mjs
-    sha256: 97fb764eaf76eb97400f477eb3fe484874068b5539d458dc3363c84dce64b51a
-    size: 63172
+    sha256: 4c71e833da707729b677b7252efc2bea84f6007b3de695dbd8e58f6fcd6d6d1c
+    size: 64689
     kind: script
     executable: true
     script: true

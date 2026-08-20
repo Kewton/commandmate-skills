@@ -34,8 +34,8 @@
 
 import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { mkdirSync, existsSync, statSync, writeFileSync } from 'node:fs';
+import { join, dirname, isAbsolute, relative, resolve } from 'node:path';
 
 import {
   SKILL_ID,
@@ -1453,6 +1453,12 @@ function runIntegrationVerify(inputs, plan, outDir, report) {
   // behind is said out loud: a git worktree nobody knows about is a surprise the
   // next `git worktree add` reports instead of this run.
   const removed = runCli(inputs.git, ['worktree', 'remove', '--force', treeDir]);
+  // Recorded in BOTH directions (Issue #222). Until now only the failure spoke —
+  // `integration_verify_tree_left` — and a successful cleanup was silent, so
+  // "the checkout was removed" and "this runner is too old to say" were the same
+  // report. The key exists exactly when `ran` is true, i.e. exactly when there
+  // was a throwaway checkout to remove.
+  iv.tree_removed = removed.ok;
   if (!removed.ok) {
     report.limitations.push({
       code: INTEGRATION_TREE_LEFT_CODE,
@@ -1483,6 +1489,140 @@ function runIntegrationVerify(inputs, plan, outDir, report) {
     `${iv.detail}. The PR(s) for ${merged.map((n) => `#${n}`).join(', ')} are already merged and each one's own CI was green on a base that did not yet contain the others, `
       + 'so this is the semantic conflict their file sets could not show. Do not dispatch the next wave on this base',
   );
+}
+
+// =============================================================================
+// The caller's index.lock — named, never removed (Issue #222)
+// =============================================================================
+//
+// Measured twice in one day (CommandMate#1836, in Kewton/BorderFreeKidsMap): a
+// `--merge-prs --approve --integration-verify` run finished `status: success` /
+// `integration_verify.outcome: pass`, and the operator's next `git pull
+// --ff-only` in the INVOCATION's own worktree died on
+//
+//     error: Unable to create '.../.git/worktrees/<name>/index.lock': File exists.
+//
+// The dangerous part is not the stale lock — it is 0 bytes, it had been sitting
+// there for ~40 and ~52 minutes, `pgrep -fl 'git '` matched nothing, and deleting
+// it by hand recovered both times. The dangerous part is that it READS AS "the
+// merge broke". The merges had landed and the merged base had been verified
+// green, so an operator who rolls back at that point breaks the repository a
+// SECOND time, on top of a run that did everything right.
+//
+// The upstream report guessed that the integration verification's throwaway
+// checkout was holding the caller's index and proposed switching it to `git
+// worktree add --detach`. That is already what runs (see the block above
+// INTEGRATION_TREE_DIRNAME, and `runIntegrationVerify`), and the git verbs this
+// whole file invokes are `fetch` / `rev-parse` / `worktree add|remove` / `diff` /
+// `push`: no `checkout`, `merge`, `reset`, `read-tree`, `stash`, `pull` or
+// `update-index` anywhere, so no path here writes the caller's index. `runCli`
+// passes neither `timeout` nor `killSignal` to execFileSync, so it cannot SIGKILL
+// a git either — and a git that is merely SIGTERM'd removes its own lock. The
+// cause is therefore NOT in this runner, and the honest thing to add is not a fix
+// but a MEASUREMENT.
+//
+// So this probes, and names what it saw:
+//
+//   * in the invocation's own cwd, before anything else runs and again
+//     immediately before the report is written;
+//   * `caller_index_lock_pre_existing` when a lock was already there. It is a
+//     limitation and never a stop: this runner does not use the caller's index,
+//     so a lock somebody else holds is no reason to refuse to merge;
+//   * `caller_index_lock_appeared` when there was none at the start and there is
+//     one at the end. Also only a limitation, for the reason at the top: the
+//     merges landed and the verification ran, and turning that into a failure is
+//     exactly the misreading this block exists to prevent.
+//
+// **Nothing here deletes anything.** A lock file is how git says "an index is
+// being written right now"; removing another process's lock corrupts the index it
+// was protecting. The recovery — read `integration_verify.outcome` and `merged`
+// FIRST, then check `pgrep -fl 'git '`, then delete by hand only if the size is 0
+// and nothing is running — belongs to a human and is written down in
+// references/codes-and-recovery.md.
+const CALLER_INDEX_LOCK_PRE_EXISTING_CODE = 'caller_index_lock_pre_existing';
+const CALLER_INDEX_LOCK_APPEARED_CODE = 'caller_index_lock_appeared';
+
+// WHERE the caller's index.lock would be. Asked of git rather than assembled
+// here, because `.git` is a FILE in a linked worktree and the real lock lives in
+// `<main>/.git/worktrees/<name>/index.lock` — which is precisely the path the
+// measured failure printed. A git that cannot answer (not a repository, git
+// missing) yields null, and then both probes record null: "we could not look" is
+// never rendered as "there was no lock", it is rendered as nothing at all.
+function resolveCallerIndexLock(inputs) {
+  const probe = runCli(inputs.git, ['rev-parse', '--git-path', 'index.lock']);
+  if (!probe.ok) return null;
+  const printed = probe.stdout.split('\n')[0].trim();
+  if (printed === '') return null;
+  return resolve(process.cwd(), printed);
+}
+
+// One `stat`, rendered for the report; null means "not there", which is the
+// ordinary case. Which of the two codes it earns is decided by the caller — this
+// function knows nothing about before and after.
+//
+// The path is recorded RELATIVE to the invocation cwd, because contract section 7
+// says no absolute path reaches a report or an artifact. That costs the reader
+// nothing: the recovery is run from that same cwd, so `.git/index.lock` — or
+// `../<repo>/.git/worktrees/<name>/index.lock` for a linked worktree — is
+// directly usable, and it carries no user name. redact() still runs over the
+// result as a backstop, so a path that somehow cannot be relativised degrades to
+// `[REDACTED-PATH]` rather than leaking.
+function statCallerIndexLock(path) {
+  if (path === null) return null;
+  let stats;
+  try {
+    stats = statSync(path);
+  } catch {
+    return null;
+  }
+  const rel = relative(process.cwd(), path);
+  return {
+    path: redact(rel === '' || isAbsolute(rel) ? path : rel),
+    size: stats.size,
+    mtime: new Date(stats.mtimeMs).toISOString(),
+  };
+}
+
+// The opening probe. Returns the resolved path so the closing probe stats the
+// SAME file rather than asking git a second time: the answer cannot have changed,
+// and re-asking would make "appeared" depend on two separate resolutions.
+function probeCallerIndexLockBefore(inputs, report) {
+  const path = resolveCallerIndexLock(inputs);
+  const before = statCallerIndexLock(path);
+  report.caller_worktree.index_lock_before = before;
+  if (before !== null) {
+    report.limitations.push({
+      code: CALLER_INDEX_LOCK_PRE_EXISTING_CODE,
+      detail: `呼び出し元 worktree に \`${before.path}\`（${before.size} bytes, mtime ${before.mtime}）が`
+        + 'この run の**開始前から**在った。この runner は呼び出し元の index を読み書きしないので、'
+        + '**停止する理由が無い（処理は続行する）**。runner はこの lock を消さない —— '
+        + '他人が保持中の lock を消すと、それが守っていた index が壊れる。'
+        + '後続の `git pull` / `git status` がこの lock で落ちるなら、それは**この run より前から在ったもの**である',
+    });
+  }
+  return path;
+}
+
+// The closing probe, run immediately before the report is written so it covers
+// everything the invocation did — including the artifacts written after it.
+function probeCallerIndexLockAfter(report, probe) {
+  const before = report.caller_worktree.index_lock_before;
+  const after = statCallerIndexLock(probe.lockPath);
+  report.caller_worktree.index_lock_after = after;
+  // Only the transition none -> one is `appeared`. A lock that was already there
+  // is `pre_existing` and was reported at the start, and re-reporting it here
+  // would tell the operator that this run produced something it merely outlived.
+  if (after === null || before !== null) return;
+  report.limitations.push({
+    code: CALLER_INDEX_LOCK_APPEARED_CODE,
+    detail: `呼び出し元 worktree の \`${after.path}\`（${after.size} bytes, mtime ${after.mtime}）が`
+      + `この run の**実行中に出現した**（run 開始 ${probe.startedAt} / 終了 ${new Date().toISOString()}）。`
+      + '**この runner が作ったとは言っていない** —— merge runner が呼ぶ git は fetch / rev-parse / '
+      + 'worktree add|remove / diff / push だけで、呼び出し元の index を書く経路が無い（#222）。'
+      + '**merge と統合検証の裁定は変わらない。まず `integration_verify.outcome` と各 target の `merged` を読むこと。** '
+      + 'runner はこの lock を消さない。size 0 かつ mtime がこの run の期間内で、'
+      + "`pgrep -fl 'git '` に該当が無ければ stale なので、人間が手で消す",
+  });
 }
 
 // =============================================================================
@@ -1551,6 +1691,16 @@ function baseReport(inputs, plan, eligible, outDir) {
     eligible_issues: eligible.slice(),
     preflight: [],
     targets: [],
+    // The invocation's OWN worktree, measured before and after the run (Issue
+    // #222). Both null is the ordinary case and is what every run wrote before
+    // this field existed, so the field's presence — not its content — is the only
+    // difference in a report from a lock-free run.
+    //
+    // Present in BOTH phases. `--create-prs` runs `git push` and `git diff` from
+    // this same cwd, and a report that could answer "was the caller's index
+    // locked?" for one phase and not the other would be read as "the other phase
+    // does not touch it", which is a claim nothing here measured.
+    caller_worktree: { index_lock_before: null, index_lock_after: null },
     // Present ONLY when `--integration-verify` was passed (Issue #175). A report
     // written without the flag keeps the exact key set — and therefore the exact
     // bytes — it had before this field existed, which is what makes the opt-in
@@ -1661,7 +1811,31 @@ function renderSummary(report) {
     lines.push(`- 合流後の ${integration.base}${integration.base_sha === null ? '' : `（${integration.base_sha}）`}で ${source} を実行: ${verdict}。`);
     lines.push(`- 対象（この invocation が merge した PR の Issue）: ${integration.merged_issues.length === 0 ? 'なし' : integration.merged_issues.map((n) => `#${n}`).join(', ')}`);
     lines.push(`- 詳細: ${integration.detail}`);
+    // The cleanup, said in both directions (Issue #222). `tree_removed` exists
+    // exactly when a throwaway checkout was created, so its absence here is "no
+    // checkout was made", never "we did not look".
+    if (integration.tree_removed !== undefined) {
+      lines.push(integration.tree_removed
+        ? `- 後片付け: 使い捨ての detached checkout（\`${INTEGRATION_TREE_DIRNAME}\`）は削除済み。`
+        : `- 後片付け: 使い捨ての detached checkout（\`${INTEGRATION_TREE_DIRNAME}\`）を**畳めていない**（${INTEGRATION_TREE_LEFT_CODE}）。\`git worktree remove --force\` で消す。`);
+    }
     lines.push('- **wave barrier は「全 worker completed + verification pass」だけでは満たされない。** 合流後の統合ブランチが green であることまでが barrier である。');
+    lines.push('');
+  }
+  // The caller's index.lock (Issue #222). Printed ONLY when a lock was seen, so a
+  // report from the ordinary run reads exactly as it did before this probe
+  // existed. The section leads with the adjudication rather than with the lock:
+  // the measured failure mode is a human reading "index.lock" as "the merge
+  // broke" and rolling back a merge that had already landed and been verified.
+  const lockBefore = report.caller_worktree?.index_lock_before ?? null;
+  const lockAfter = report.caller_worktree?.index_lock_after ?? null;
+  if (lockBefore !== null || lockAfter !== null) {
+    const seen = lockBefore !== null ? lockBefore : lockAfter;
+    const when = lockBefore !== null ? 'run の開始前から在った' : 'run の実行中に出現した';
+    lines.push('## 呼び出し元 worktree の index.lock');
+    lines.push(`- \`${seen.path}\`（${seen.size} bytes, mtime ${seen.mtime}）が${when}。run 終了時点: ${lockAfter === null ? '**消えている**' : '**残っている**'}。`);
+    lines.push('- **これは merge の失敗ではない。** 裁定は上の「対象と結論」と `merged` / `integration_verify.outcome` が正である。**merge 済みのものを、この lock を理由に巻き戻さない。**');
+    lines.push("- **runner はこの lock を消さない**（他人が保持中の lock を消すと index が壊れる）。`pgrep -fl 'git '` に該当が無く size 0 なら stale なので、人間が手で消す。");
     lines.push('');
   }
   lines.push('## 未解決と next action');
@@ -1735,12 +1909,20 @@ function runMerge(inputs, plan, dispatch, outDir) {
   // that stopped in the preflight still says what it had declared.
   if (inputs.unattended) report.limitations.push(unattendedModeLimitation(inputs.phase));
 
+  // Issue #222, and BEFORE the preflight: the question the closing probe answers
+  // is "did this appear WHILE the run was going", so the opening reading has to be
+  // older than every git this invocation runs — the preflight's `git rev-parse
+  // --verify <base>` included. Every early return below carries the probe into
+  // finalize(), so a run that stopped in the preflight still reports both sides.
+  const probe = { lockPath: null, startedAt: new Date().toISOString() };
+  probe.lockPath = probeCallerIndexLockBefore(inputs, report);
+
   // Read-only preflight before any mutation.
   report.preflight = preflight(inputs, plan);
   const blocked = report.preflight.find((c) => c.blocking && !c.ok);
   if (blocked) {
     halt(report, 'failure', 'preflight_failed', `preflight_${blocked.code}`, blocked.detail);
-    finalize(report);
+    finalize(report, probe);
     return report;
   }
 
@@ -1753,7 +1935,7 @@ function runMerge(inputs, plan, dispatch, outDir) {
         detail: '--integration-verify was requested but nothing was eligible to merge, so the integration branch was not verified. This is "not measured", not "green"',
       });
     }
-    finalize(report);
+    finalize(report, probe);
     return report;
   }
 
@@ -1768,7 +1950,7 @@ function runMerge(inputs, plan, dispatch, outDir) {
       // `blocking_reasons` — the shape section 15.2 used for
       // `wall_clock_budget_exhausted` and section 16 for the stage-B promotion.
       for (const reason of reasons) halt(report, 'failure', 'preflight_failed', reason.code, reason.detail);
-      finalize(report);
+      finalize(report, probe);
       return report;
     }
   }
@@ -1802,7 +1984,7 @@ function runMerge(inputs, plan, dispatch, outDir) {
         + 'and re-run, or drop --integration-verify to accept the pre-#175 behaviour';
     report.integration_verify.detail = detail;
     halt(report, 'failure', 'preflight_failed', INTEGRATION_VERIFY_UNAVAILABLE_CODE, detail);
-    finalize(report);
+    finalize(report, probe);
     return report;
   }
 
@@ -1817,11 +1999,15 @@ function runMerge(inputs, plan, dispatch, outDir) {
   // the loop, once per invocation, never per PR.
   if (inputs.integrationVerify) runIntegrationVerify(inputs, plan, outDir, report);
 
-  finalize(report);
+  finalize(report, probe);
   return report;
 }
 
-function finalize(report) {
+function finalize(report, probe) {
+  // Issue #222, and as late as the runner can make it: the closing reading of the
+  // caller's index.lock is taken before the summary is rendered, so the summary
+  // can say what was found, and after everything the phase does.
+  probeCallerIndexLockAfter(report, probe);
   report.completion_check = buildCompletionCheck(report, report.phase);
   if (!report.completion_check.passed && report.status === 'success') {
     report.status = 'partial';

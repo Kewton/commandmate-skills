@@ -288,6 +288,18 @@ CI が green でないときに `gh pr merge` が呼ばれていないことま�
 **#175 実装前の runner**（`git show HEAD:skills/cmate-orchestrate/scripts/merge.mjs`）が書いたもので
 ある —— opt-in が opt-in であること（既定の出力を1 byte も変えていないこと）の機械的な証明である。
 
+**呼び出し元 worktree の `index.lock`（#222）**: merge runner は run の開始時（pre-flight より前）と
+report を書く直前に `git rev-parse --git-path index.lock` → `stat` し、`caller_worktree` に2つの
+読みを載せる。fake の `rev-parse --git-path` は `.git/index.lock` を返す（本物の git が main
+worktree で返す形。linked worktree では絶対 path になるが、fixture が作れて残せるのは前者である）。
+case の `caller_index_lock: "pre_existing"` は **harness が run の前に** 0 バイトの lock を
+呼び出し cwd へ置き、`merge_scenario.integration.caller_index_lock: "appear"` は **fake が
+`git worktree remove` の時に**（＝ run の最中に）置く。**どちらも誰も消さない** ——
+`caller_index_lock_remains` が run 後に lock が**残っていること**をファイルシステムの事実として
+確かめるので、limitation の綴りが合っていても unlink する実装は赤くなる。
+`git.git_path: false` は「そもそもリポジトリでない cwd」を模し、そのときは両方 null になる
+（＝「lock は無かった」ではなく「何も測っていない」）。
+
 case.json は `plan_patch` で**生成された plan を merge に渡す前に書き換えられる**
 （`dispatch_report_patch` と同じ理由: plan はこの runner の**入力**であり、`baseline` を埋め忘れた
 profile のような状態は、harness 自身の dispatch 段が baseline を必要とするため planner だけでは
@@ -317,7 +329,7 @@ profile のような状態は、harness 自身の dispatch 段が baseline を�
 | `m21-pr-body-nonascii-path` | 非ASCII を含む path で、対比が git の**表記**でなく path そのもので行われるか（#174）。fake の `git diff` は本物と同じく出力を munge する（`core.quotePath` 既定 true で非ASCII を8進エスケープ、`"` は設定に関係なくクォート）ので、`-z` を使わない runner は同じ file を2行に割り `Out-of-scope changes: 1` を立てる。宣言 scope が日本語ファイル名の #300 は 0 件・表1行、宣言外の変更を持つ #301 は 1 件を**読める形で**名指し（空振り防止）。#301 の宣言外 path が `"` を含むので、最小修正 `-c core.quotePath=false` へ後退しても赤になる |
 | `m22-integration-verify-absent` | **#175 (a)。** `--integration-verify` 無しの run が **#175 実装前と byte 一致**するか（`expected-merge-report.json` と byte 比較。`out_dir` だけ `<out>` に置換）。`integration_verify` field を持たず、`git fetch` も `git worktree` も**1回も呼ばない**こと。m24 の双子で、違うのは `merge_args` だけである |
 | `m23-integration-verify-red` | **#175 (b)。** PR 個別 CI が両方 green で2件とも merge できたのに、**合流後の baseline が赤**。`integration_verify.outcome: fail` と blocking `integration_verify_failed` を載せ、`partial`（exit 7 / `stop_reason: merge_failed`）にして **success に丸めない**か。次 wave を止める信号がこの3つである。m24 との違いは合流後 checkout に成果物が在るかだけ |
-| `m24-integration-verify-green` | **#175 (c)。** 合流後が green なら従来どおり `success` / `completed` で、`integration_verify.outcome: pass`。使い捨て checkout を**作って畳む**（fetch 1回・worktree 2回）ので、緑の検証は何も残さない |
+| `m24-integration-verify-green` | **#175 (c)。** 合流後が green なら従来どおり `success` / `completed` で、`integration_verify.outcome: pass`。使い捨て checkout を**作って畳む**（fetch 1回・worktree 2回）ので、緑の検証は何も残さない。#222 でここに `tree_removed: true` が加わった —— 「畳んだ」を **`integration_verify_tree_left` が無いこと**で表すのをやめ、report が自分で言うようにした（`m35` が false 側） |
 | `m25-integration-verify-no-baseline` | profile が `baseline` を宣言していない plan に `--integration-verify` を渡したとき、**1件も merge せずに拒否**するか（`failure` / exit 1 / `preflight_failed` / `integration_verify_unavailable`）。skip にすると「opt-in した検証が走らないまま merge phase 完了」になり、#175 が消しに来た事象そのものになる |
 | `m26-integration-verify-create-prs-refused` | `--create-prs` との併用を `invalid_input`（exit 3）で拒否し、**受理して無視しない**か。push も PR 作成も 0 回 |
 | `m27-integration-verify-preview-not-run` | preview（`--approve` 無し）では merge が無いので合流後も無く、`outcome: not_run` + limitation `integration_verify_not_run` になるか。**fetch も checkout もしない**こと。「測っていない」を pass に丸めない |
@@ -325,6 +337,9 @@ profile のような状態は、harness 自身の dispatch 段が baseline を�
 | `m29-integration-baseline-declared-green` | **m28 の逆向きの変異。** ここでは**フォールバックが赤・宣言が緑**なので、`pass` は `integration_baseline` を読んだ実装にしか出せない（`baseline` は worker の worktree にだけ在る marker を読み、使い捨て checkout には無い）。緑の report にも `source` が載ることの測定でもある —— **静かな2つ目の baseline が隠れるのは赤ではなく緑の report である** |
 | `m30-integration-baseline-declared-empty` | **#195 の固定事項2。** `"integration_baseline": []` は「統合検証の定義は無い」という**宣言**であり、`baseline` へは落とさない。profile の `baseline` は**実行可能で緑**なので、空かどうかでフォールバックを決める実装は2件 merge して緑を報告する。ここでは merge 前に拒否（exit 1 / `preflight_failed` / `integration_verify_unavailable`、fetch 0回）し、next action は m25 の「`baseline` を宣言しろ」**ではない**こと（`summary_absent` が固定する。意図した宣言を取り消せという案内になるため） |
 | `m32-pr-body-flaky-gate` | **PR 本文は転記であって再判定ではない（[#224](https://github.com/Kewton/commandmate-skills/issues/224)）。** `verdict: flaky` の gate が Verification 表にそのまま載り、その語の意味が表の隣で説明される —— `| unit | flaky | 1 |` だけでは pass の一種か fail の一種か判断できず、判断しようとすると `flakyIsPass`（本文にも report にも無い宣言）を両方向に取り違える。注記は「どう数えたか」を言わず `Verdict` 行を指す。`flaky` を持たない Issue の本文にはこの注記が出ない（使っていない repository の本文は 1 バイトも変わらない） |
+| `m33-caller-index-lock-pre-existing` | **#222 (a)。** m24 の world に、run の**開始前から** 0 バイトの `.git/index.lock` が呼び出し元に在る。この runner は呼び出し元の index を読み書きしないので**止める理由が無く**、status / stop_reason / target は m24 と同じまま `caller_index_lock_pre_existing` を積むか。`caller_index_lock_appeared` は**出てはならない**（2つを混同する実装はここで赤くなる）。run 後も lock が**残っている**ことを確かめる |
+| `m34-caller-index-lock-appeared` | **#222 (b)。** 開始時は clean で、run の**最中に** lock が出現する（fake が `git worktree remove` の時に置く）。`caller_index_lock_appeared` は limitation であって**停止ではない** —— merge も統合検証も終わった run を failure に落とすのが、この Issue が消しに来た誤読そのものだからである。`index_lock_before` は null、`index_lock_after` に size / mtime が載り、**file は残っている**。`caller_index_lock_pre_existing` は出てはならない（区別は**開始時の読み**だけが持っている） |
+| `m35-integration-tree-remove-fails` | **#222 (c)。** 使い捨て checkout は作れて baseline も緑だが、`git worktree remove --force` が失敗する。後片付けは best effort なので**裁定は動かず** `success` / `pass` のまま、`integration_verify.tree_removed: false` と limitation `integration_verify_tree_left` が**併存**するか。#222 以前は失敗側しか記録が無く、成功が無言だった（＝「畳んだ」と「言えるほど新しくない runner」が同じ report だった）ので、m24 の true 側を測定として固定するにはこの false 側が要る。呼び出し元は無傷（両方 null） |
 | `m31-integration-baseline-plan-not-array` | **plan を読む側の fail-closed。** planner は配列でない `integration_baseline` を拒否する（plan case 76）が、**手で書いた plan** はこの runner に届く（#180 / profile-contract 第10.6節）。素の文字列は「強制変換すれば動く」形で `baseline` は緑なので、丸める実装も「配列でない＝未宣言」と読む実装も 2件 merge して緑を報告する。merge 前に拒否し、`source` は `integration_baseline` のまま（宣言は読めている。実行できる command が無いだけである） |
 
 ## uat case 一覧

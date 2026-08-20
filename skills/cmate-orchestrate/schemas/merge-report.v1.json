@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/schemas/merge-report.v1.json",
   "title": "cmate-orchestrate merge report v1",
-  "description": "Report printed to stdout and written to merge-report.json by the cmate-orchestrate merge runner (scripts/merge.mjs). Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records one mutating phase — either PR creation (create_prs) or guarded merge (merge_prs) — over the verification-passed issues of an already-executed plan. A single invocation enables exactly one phase. Nothing is created or merged without explicit approval, and no PR is merged unless its CI passed; a create failure, a red or pending CI, or a merge conflict stops the phase and is reported as partial, never rounded up to success. Every property is required EXCEPT integration_verify, which exists only in a run that opted into --integration-verify (Issue #175) — a report written without that flag carries the same key set, and the same bytes, as it did before the field existed.",
+  "description": "Report printed to stdout and written to merge-report.json by the cmate-orchestrate merge runner (scripts/merge.mjs). Closed schema: an unknown field is a contract violation, not something a reader may ignore. It records one mutating phase — either PR creation (create_prs) or guarded merge (merge_prs) — over the verification-passed issues of an already-executed plan. A single invocation enables exactly one phase. Nothing is created or merged without explicit approval, and no PR is merged unless its CI passed; a create failure, a red or pending CI, or a merge conflict stops the phase and is reported as partial, never rounded up to success. Every property is required EXCEPT integration_verify and caller_worktree. integration_verify exists only in a run that opted into --integration-verify (Issue #175) — a report written without that flag carries the same key set, and the same bytes, as it did before the field existed. caller_worktree (Issue #222) is written by every run of either phase and is optional only so that the runner_error envelope — which stops before the probe can run — still conforms.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -109,6 +109,10 @@
     "integration_verify": {
       "$ref": "#/$defs/integration_verify",
       "description": "Present only when --integration-verify was passed (merge_prs only, Issue #175). The wave barrier's second half: after every merge this invocation performed, the profile's post-merge verification set is run on the MERGED state of the base branch — fetched from origin and checked out into a throwaway detached worktree, so the invocation's own working tree is never touched. The set is plan.profile.integration_baseline ?? plan.profile.baseline, resolved on the KEY'S PRESENCE (Issue #195), and `source` records which one ran. Absent means the run did not verify the merged state; it never means the merged state is green."
+    },
+    "caller_worktree": {
+      "$ref": "#/$defs/caller_worktree",
+      "description": "The INVOCATION's own worktree, measured before the run starts and again immediately before the report is written (Issue #222). It exists because a merge run that finished success with a green integration verification was followed by a stale 0-byte index.lock in the caller's worktree, and the operator read that as 'the merge broke' \u2014 the merges had landed, so rolling back there would have broken the repository a second time. This runner neither writes nor removes the caller's index: it has no checkout/merge/reset/read-tree/stash/pull/update-index anywhere, and it never deletes a lock, because removing a lock another process holds corrupts the index it was protecting. Both members null is the ordinary case and is what every pre-#222 run would have recorded."
     },
     "blocking_reasons": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
     "limitations": { "type": "array", "items": { "$ref": "#/$defs/entry" } },
@@ -229,7 +233,50 @@
           "oneOf": [{ "type": "null" }, { "type": "integer" }],
           "description": "That command's exit status, or null when it could not be captured."
         },
+        "tree_removed": {
+          "type": "boolean",
+          "description": "Whether the throwaway detached checkout was removed again (Issue #222). Present exactly when `ran` is true \u2014 that is, exactly when there was a checkout to remove \u2014 and absent otherwise, so its absence means 'no checkout was created', never 'this run did not look'. False is always accompanied by the integration_verify_tree_left limitation; before this field only that failure spoke, and a successful cleanup was indistinguishable from a runner too old to say.",
+          "$comment": "Optional: a run that never reached the checkout has nothing to report here."
+        },
         "detail": { "type": "string", "minLength": 1 }
+      }
+    },
+    "caller_worktree": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index_lock_before", "index_lock_after"],
+      "description": "Two readings of the caller worktree's index.lock, taken by `git rev-parse --git-path index.lock` (asked of git, not assembled: in a linked worktree the lock lives under <main>/.git/worktrees/<name>/) plus a stat. Null means the file was not there \u2014 or, when git could not answer at all, that nothing was measured; the report never renders 'we could not look' as 'there was no lock'. before non-null raises the limitation caller_index_lock_pre_existing and does NOT stop the run; null before and non-null after raises caller_index_lock_appeared. Both are notices: they change no verdict, and the merge and the integration verification are read first.",
+      "properties": {
+        "index_lock_before": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/index_lock" }],
+          "description": "The reading taken before the pre-flight, i.e. before this invocation ran any git at all."
+        },
+        "index_lock_after": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/index_lock" }],
+          "description": "The reading taken immediately before the report is written. A non-null value here is NOT a claim that this runner created the file \u2014 nothing in the runner writes the caller's index \u2014 and it is never removed."
+        }
+      }
+    },
+    "index_lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size", "mtime"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The lock's path RELATIVE to the invocation cwd (contract section 7: no absolute path reaches a report). The recovery is run from that same cwd, so it is directly usable and carries no user name."
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Size in bytes. 0 is the shape of the measured failure: a lock whose writer died before it wrote anything into it."
+        },
+        "mtime": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The lock's mtime as an ISO 8601 instant. Compared against the run's start to tell a lock that predates the run from one that appeared during it."
+        }
       }
     },
     "target": {

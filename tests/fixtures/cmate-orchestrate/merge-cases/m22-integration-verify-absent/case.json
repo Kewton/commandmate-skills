@@ -1,5 +1,5 @@
 {
-  "description": "#175 (a) — the non-regression twin of m24: the SAME world, run WITHOUT --integration-verify. The report must be byte-identical to the one the pre-#175 runner wrote (expected-merge-report.json was generated from `git show HEAD:skills/cmate-orchestrate/scripts/merge.mjs` before the flag existed), must carry no integration_verify field, and must make no fetch and no worktree call at all.",
+  "description": "#175 (a) — the non-regression twin of m24: the SAME world, run WITHOUT --integration-verify. The report must be byte-identical to the one the pre-#175 runner wrote (expected-merge-report.json was generated from `git show HEAD:skills/cmate-orchestrate/scripts/merge.mjs` before the flag existed), must carry no integration_verify field, and must make no fetch and no worktree call at all. #222: this is also the LOCK-FREE case — the caller worktree carries no index.lock, so both readings are null and the golden gained the `caller_worktree` block and nothing else.",
   "phase": "merge-prs",
   "plan": {
     "issues_fixture": "cases/02-explicit-dependency/issues.json",
@@ -29,6 +29,8 @@
     "no_integration_verify": true,
     "absent_limitation_codes": ["integration_verify_not_run", "integration_verify_tree_left"],
     "git_calls": { "fetch": 0, "worktree": 0 },
+    "caller_worktree": { "index_lock_before": null, "index_lock_after": null },
+    "caller_index_lock_remains": false,
     "golden_report": "expected-merge-report.json"
   }
 }
