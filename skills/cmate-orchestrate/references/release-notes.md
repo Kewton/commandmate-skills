@@ -2086,6 +2086,61 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 
 ## パッケージ
 
+### 0.32.0 — 一本道の前と後ろに、測るだけの段が付いた（#217 / #218 / #219 / #220 / #221 / #222 / #223 / #224）
+
+**この版が足したのは plan → dispatch → merge → uat の「外側」である。** 0.31.0 までの runner は、
+Issue 本文が主張する事実も、受入条件そのものが着手前に落ちるかも、merge 後にしか測れない条件も、
+**一度も測らないまま通していた**。0.32.0 は前後に段を足した —— どちらも**裁定しない**。
+各件の経緯は本文の runner 別の節（inspect / observe / dispatch / merge / planner）に在る。
+
+**着手前**（`scripts/inspect.mjs`）
+
+- `--check-references`（#217）—— Issue 本文の `path:line` と行数の主張を base の tree に
+  突き合わせる。planner が対象リポジトリを開かないという不変条件（profile-contract 第9.1節）は
+  変えていない。**その不変条件が残す穴を、別の段で塞いだ**のがこの mode である。
+- `--evaluate-gates`（#218）—— 宣言済みの受入ゲートを base で `--repeat`（既定 2）回先行実行し、
+  `already_satisfied` / `failing_at_base` / `nondeterministic` / `not_evaluable` に 4 分類する。
+  **4 つ目が本体である**: 「測れなかった」を「通った」にも「落ちた」にも丸めない。`not_evaluable` は
+  notice なので status を動かさない（#199 の severity 規約と同じ）。exit は常に 0 で、
+  **plan.json には 1 バイトも書かない。**
+
+**merge 後**（`scripts/observe.mjs`。新 runner）
+
+- #221 —— profile が `observations` に宣言した測定を merged base で N 回集め、**見た値を全部**
+  report に書く。**裁定しない** —— verdict field も閾値も無く、`status` は「宣言された回数を
+  採り切れたか」だけを述べる。worktree の中では原理的に測れない受入条件（「merge 後の CI 3 run の
+  wall-clock 中央値」）に、測り方の正本を与えるための段である。`observe-report.v1.json` を新設した。
+
+**残る 4 件は「読めているのに使えない」「読めているのに名指しできない」の系統である。**
+
+- **#219** —— planner が glob（`*` / `**` / `?` / `{a,b}`）と末尾スラッシュのディレクトリを
+  **成果物見出しの配下でだけ**抽出するようになり、scope の重なり判定を上流の scope ゲート
+  （`src/lib/verification/scope-gate.ts` の `globToRegExp`）から移植した述語に揃えた。契約も上流も
+  CommandMate #1546 以来 glob を受け取れたのに、**Issue 本文からそれを書く方法だけが無かった** ——
+  backtick の中だけが偶然通る、テストも文書も無い経路が唯一の抜け道だった。merge の PR 本文が出す
+  scope 対比も同じ述語になり、`sharedFiles` と `waves_conflict_free` も揃えた。
+- **#220** —— `--max-turns` 到達（exit 21 の連続）を `worker_turn_evidence` として
+  `worker_upstream_unavailable` / `worker_produced_nothing` / `worker_output_unreadable` の 3 つに
+  分ける。**同じ exit code に、次の一手が正反対の 3 状態が畳まれていた**（待つ / Issue を割る /
+  手で確かめる）。
+- **#222** —— merge run の前後で呼び出し元 worktree の `index.lock` を検査し、limitations と
+  report に記録する。**削除はしない。** 危険なのは lock そのものではなく、成功した run の直後に
+  それが「merge が壊れた」と読めることである。真因はこの runner には無い（`git worktree add
+  --detach` は #175 で既に実装である）ので、runner が言えるのは**観測した事実だけ**である。
+- **#223 / #224** —— 上流 CommandMate #1771（gate 単位の `mutex` と worktree ごとの env 注入）と
+  #1772（FLAKY を一級の outcome にする）を、**GATE 行を読む側**として同じ意味で受け取る。語彙を
+  `lib.mjs` に集約し（`GATE_LINE_RE` / `parseGateLine` / `isFlakyVerdict`）、`flaky` は第 3 の
+  verdict として**転記する** —— pass にも fail にも丸めない。planner は `mutex` / `retryOnFail` /
+  `flakyIsPass` を宣言した ```acceptance-gates ブロックを受理し、dispatch は**宣言されたときだけ**
+  契約に書く。同じ移植の実行側は `cmate-verify` 0.5.0 / `cmate-verify-advisor` 0.3.0 である。
+
+**破壊的変更は無い。** `plan_schema_version`（2）/ `dispatch_schema_version`（1）/
+`merge_schema_version`（1）はすべて据え置きで、増えたのは additive な field と enum 値
+（dispatch report の verdict に `flaky`、execution-plan v2 の gate 定義に 3 field、
+`worker_turn_evidence`）だけである —— dispatch-contract.md 第7節が additive と分類する範囲に
+収まっている。**宣言を持たない Issue の plan は byte 不変**で、新しい段はどれも既存の経路を
+呼び出さない限り走らない。
+
 ### 0.31.0 — Issue が定義した受入ゲートを、`.commandmate/verify.yaml` を 1 バイトも書かずに運ぶ（#125）
 
 **「読めているのに強制できない」記法が、1つだけ残っていた**（#125 / PR #215）。```acceptance-gates
