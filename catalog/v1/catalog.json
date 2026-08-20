@@ -177,7 +177,7 @@
         "schema",
         "dry-run"
       ],
-      "latest": "0.8.0",
+      "latest": "0.9.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -501,6 +501,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.8.0/cmate-issue-authoring-0.8.0.tar.gz",
             "sha256": "b74e7e6fb4a49a56c7e78548d2ac18b6813f91dbac3b8e60483c2d74814e5d34",
             "size": 56410,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.9.0",
+          "changelog": "cmate-issue-authoring 0.9.0 — 対象ファイルに glob を書けるようにし、閾値は散文でなくゲートで書く手引きを足した\n\ncmate-orchestrate 0.32.0 と対になる版である。planner の抽出定数はこの package の\nvalidate-plan.mjs にバイト同一でミラーされ、mirror-conformance.mjs が pin しているため、\n上流が抽出を変えるときは同じ commit で両方を動かす必要がある。\n\n- #219: CANDIDATE_PATTERN の 3 定数を byte 同一で追随した。成果物見出しの配下でだけ\n  glob（* / ** / ? / {a,b}）と末尾スラッシュのディレクトリを候補にする。実測では\n  区ごとの生成物 46 file を「## 対象ファイル」に手で列挙させられており、その 46 行に\n  情報は無かった（言いたいことは「data/geo/{landmarks,stations}/ 配下の全 file」だけ）\n- #218: 受入条件の閾値を散文で書かせない手引きを acceptance-gates.md 第 8 節に足した。\n  「wc -l が 860 以下」のような散文からはコマンドを導出しない（引用は指示ではない）。\n  gates: に test $(wc -l < path) -le 860 と書けば、dispatch 前に base で先行実行され、\n  着手前から通っている条件・非決定な条件がその場で名指しされる。あわせて mirror の\n  checkoutGateIds の読み先を lib.mjs へ追随させた",
+          "published_at": "2026-08-20T15:07:07Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-authoring-v0.9.0",
+            "commit": "172db2d15f982119b8337b1bdb7d87049f4797fd"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-authoring-0.9.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.9.0/cmate-issue-authoring-0.9.0.tar.gz",
+            "sha256": "a67ca3d6bda9adf3dbf789f733742592e5933e21ff167aed819bab765ad3483e",
+            "size": 61062,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
