@@ -226,3 +226,4 @@ RESULT proposals=0 applicable=0 withheld=0 applied=0
 - [`references/change-classification.md`](references/change-classification.md) — 非対称ルールの正本（分類表、`requireCommit` と parser parity、適用の 3 条件、三重の門、層 2 提案 JSON）
 - [`references/layer2-review.md`](references/layer2-review.md) — 層 2 の手順の正本（すり抜け検出、flake 疑い、coverage 対応付け、提案の書き方）
 - [`references/operations.md`](references/operations.md) — 起動モードと定点、`--worktree-prefix`、cron / launchd 例、触るもの・触らないもの
+- [`references/release-notes.md`](references/release-notes.md) — なぜその挙動なのか（経緯の記録。契約の正本ではない）

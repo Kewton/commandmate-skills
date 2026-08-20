@@ -325,3 +325,9 @@ CommandMate の組み込み `env-clean` ゲート（#1740）を有効にする�
 `runner-suites` job）。install 先には存在しないので、利用者がこれを実行する手順は無い。
 カバレッジ・変異注入の結果・本体実装との conformance の正本は
 [`tests/fixtures/cmate-verify/README.md`](https://github.com/Kewton/commandmate-skills/blob/main/tests/fixtures/cmate-verify/README.md)。
+
+## 変更履歴
+
+なぜ今の挙動なのかは
+[`references/release-notes.md`](./references/release-notes.md)（経緯の記録）。
+**契約の正本はこの file である** —— 食い違ったら SKILL.md が正しい。

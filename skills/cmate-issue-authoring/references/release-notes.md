@@ -19,7 +19,7 @@ install 先で走らせるよう案内している箇所は無い。
 
 ## Changelog
 
-### 未リリース — 対象ファイル節に glob / ディレクトリを書けるようにした（planner Issue #219）
+### 0.9.0 — 対象ファイル節に glob / ディレクトリを書け、閾値は散文でなくゲートで書く（planner Issue #219 / #218）
 
 - **planner の抽出に4つ目の source（`CANDIDATE_PATTERN`）が入ったので、mirror も同時に更新した。**
   冒頭の同期規約どおり、`PATTERN_SEGMENT` / `CANDIDATE_PATTERN` / `SCOPE_PATTERN_RE` の3定数は
@@ -36,6 +36,19 @@ install 先で走らせるよう案内している箇所は無い。
   （`**` は 0 段も跨ぐ・`/` を含まない glob は拾わない・repository 全体を意味する pattern は拒まれる）。
 - **この package の rule は1つも変わっていない。** `planner_ready` が見るのは
   「`suspected_files` が空でないか」であり、pattern はその判定に新しい形の答えを増やしただけである。
+- **受入条件の閾値を、散文ではなくゲートで書く手引きを足した**（planner Issue #218）。
+  `inspect.mjs --evaluate-gates` は宣言済みゲートを base で先行実行して「着手前から通っている」
+  条件を名指すが、**見るのはブロックが宣言した gate だけ**である —— 散文に書いた閾値は誰も
+  先行評価しない。[acceptance-gates.md](./acceptance-gates.md) 第 8 節（新設）に、
+  現在値を測ってから閾値を書くことと、機械に測らせたい閾値は `gates:` に
+  `test $(wc -l < path) -le 860` の形で書くことを置いた。第 4 節の
+  「`gates:` を出さない」も**理由を書き直した** —— 消費側が未実装だからではなく、
+  **この package が renderer で出せない記法を本文に書かない**という起案側の判断である
+  （消費側は 0.31.0 / planner Issue #125 以降これを受理する）。
+- **mirror の `checkoutGateIds` も planner と同じ file を読み続けている。** planner 側で
+  verify.yaml の reader が `dispatch.mjs` から `lib.mjs` へ移った（#218）のに追随し、
+  `gates[]`（command と timeoutSec）を読めるようにした。mirror はこの field を一度も
+  使わないが、落とすと**両者が同じ file を読んでいることを conformance テストが測れなくなる**。
 
 ### 0.8.0 — 未決の問いを起案本文に埋める（Issue #209）
 
