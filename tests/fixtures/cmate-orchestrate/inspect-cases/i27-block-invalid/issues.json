@@ -1,0 +1,8 @@
+[
+  {
+    "number": 236,
+    "title": "ブロックが壊れている Issue",
+    "labels": [],
+    "body": "ゲートを宣言したつもりの Issue\n\n## 背景\n実測で機能しなかった受入条件の再現である。\n\n## 受入条件\n- [ ] `web/src/lib/repository.ts` が 860 行以下になる\n\n```acceptance-gates\nversion: 1\ngates:\n  - id: issue-236-broken\n    timeoutSec: 60\n```\n"
+  }
+]

@@ -55,6 +55,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..', '..', '..');
 const PLANNER = resolve(REPO_ROOT, 'skills/cmate-orchestrate/scripts/orchestrate.mjs');
 const DISPATCH = resolve(REPO_ROOT, 'skills/cmate-orchestrate/scripts/dispatch.mjs');
+// The verify.yaml reader stood in dispatch.mjs until Issue #218, when a second
+// consumer appeared (`inspect.mjs --evaluate-gates`, which runs the COMMAND
+// behind a `require:` id at the base) and it moved here unchanged. dispatch
+// still resolves ids with it; this test follows the definition rather than the
+// caller, because the definition is what the mirror is a copy of.
+const LIB = resolve(REPO_ROOT, 'skills/cmate-orchestrate/scripts/lib.mjs');
 const MIRROR = resolve(REPO_ROOT, 'skills/cmate-issue-authoring/scripts/validate-plan.mjs');
 const NOTATION = resolve(REPO_ROOT, 'skills/cmate-orchestrate/references/acceptance-gates-notation.md');
 const PRODUCERS = [
@@ -83,8 +89,10 @@ const SHARED_CONSTANTS = [
     'MAX_ACCEPTANCE_GATE_IDS',
   ] },
   { file: DISPATCH, label: 'dispatch', names: [
-    'VERIFY_CONFIG_RELATIVE',
     'CONTRACT_BUILT_IN_GATE_IDS',
+  ] },
+  { file: LIB, label: 'lib', names: [
+    'VERIFY_CONFIG_RELATIVE',
   ] },
 ];
 
@@ -107,9 +115,9 @@ const BLOCK_RENAMES = [
   [/\bplanner([A-Z])([A-Za-z0-9_]*)/g, (match, head, tail) => head.toLowerCase() + tail],
 ];
 const VERIFY_RENAMES = [
-  [/\bcheckoutGateIds\b/g, 'readWorktreeGateIds'],
-  [/\bcheckoutPath\b/g, 'worktreePath'],
-  [/\bACCEPTANCE_GATE_ID_RE\b/g, 'GATE_ID_RE'],
+  [/\bcheckoutGateIds\b/g, 'readVerifyConfigGates'],
+  [/\bcheckoutPath\b/g, 'rootPath'],
+  [/\bACCEPTANCE_GATE_ID_RE\b/g, 'VERIFY_GATE_ID_RE'],
   [/does not exist in the checkout/g, 'does not exist in the worktree'],
 ];
 
@@ -123,10 +131,10 @@ const MIRRORED_FUNCTIONS = [
   { left: { file: PLANNER, label: 'planner', name: 'readAcceptanceGates' },
     right: { file: MIRROR, label: 'mirror', name: 'plannerReadAcceptanceGates' },
     renames: BLOCK_RENAMES },
-  { left: { file: DISPATCH, label: 'dispatch', name: 'readWorktreeGateIds' },
+  { left: { file: LIB, label: 'lib', name: 'readVerifyConfigGates' },
     right: { file: MIRROR, label: 'mirror', name: 'checkoutGateIds' },
     renames: VERIFY_RENAMES },
-  { left: { file: DISPATCH, label: 'dispatch', name: 'unquoteYaml' },
+  { left: { file: LIB, label: 'lib', name: 'unquoteYaml' },
     right: { file: MIRROR, label: 'mirror', name: 'unquoteYaml' },
     renames: VERIFY_RENAMES },
 ];
@@ -370,10 +378,10 @@ function source(path) {
 // error rather than a silent skip.
 function constantDeclaration(path, label, name) {
   const text = source(path);
-  const single = new RegExp(`^const ${name} = (.*);$`, 'm');
+  const single = new RegExp(`^(?:export )?const ${name} = (.*);$`, 'm');
   const match = single.exec(text);
   if (match) return match[1];
-  if (new RegExp(`^const ${name}\\b`, 'm').test(text)) {
+  if (new RegExp(`^(?:export )?const ${name}\\b`, 'm').test(text)) {
     throw new HarnessError(
       `${label}: ${name} is no longer a single-line \`const NAME = ...;\` declaration; ` +
         'teach this test how to read its new shape rather than dropping it',
@@ -397,8 +405,8 @@ function region(path, label, startRe, endRe) {
 // exactly `}` — which holds for every function compared here, all declared at
 // module scope with two-space indentation inside.
 function functionBlock(path, label, name) {
-  const found = region(path, label, new RegExp(`^function ${name}\\(`), /^\}$/);
-  return `${found.text}\n}`;
+  const found = region(path, label, new RegExp(`^(?:export )?function ${name}\\(`), /^\}$/);
+  return `${found.text.replace(/^export /, '')}\n}`;
 }
 
 // Code only: comment-only lines and blank lines are where the mirror is expected
@@ -555,7 +563,7 @@ async function main() {
   // ---- the modules ---------------------------------------------------------
   const plannerBlockRegion = region(PLANNER, 'planner', /^const ACCEPTANCE_GATES_INFO\b/, /^\/\/ Topic tokens power/);
   const mirrorBlockRegion = region(MIRROR, 'mirror', /^const ACCEPTANCE_GATES_INFO\b/, /^\/\/ ---- the block this package emits/);
-  const dispatchVerifyRegion = region(DISPATCH, 'dispatch', /^const VERIFY_CONFIG_RELATIVE\b/, /^\/\/ The `require:` list of one plan issue/);
+  const libVerifyRegion = region(LIB, 'lib', /^export const VERIFY_CONFIG_RELATIVE\b/, /^\/\/ ---- end of the verify\.yaml reader/);
   const mirrorVerifyRegion = region(MIRROR, 'mirror', /^const VERIFY_CONFIG_RELATIVE\b/, /^\/\/ Planner mirror$/);
 
   const plannerBlocks = await loadModule(
@@ -572,16 +580,19 @@ async function main() {
     'mirror',
     `lines ${mirrorBlockRegion.first}-${mirrorBlockRegion.last}`,
   );
-  const dispatchVerify = await loadModule(
+  // No id pattern is injected on this side: lib.mjs declares its own
+  // (`VERIFY_GATE_ID_RE`) inside the region, and injecting a second one would be
+  // a duplicate declaration. The mirror's is still injected because the mirror
+  // keeps that constant outside the mirrored region.
+  const libVerify = await loadModule(
     [
       VERIFY_EXPORT_PREAMBLE,
-      `const GATE_ID_RE = ${constantDeclaration(DISPATCH, 'dispatch', 'GATE_ID_RE')};`,
-      dispatchVerifyRegion.text,
-      'const readGateIds = readWorktreeGateIds;',
+      libVerifyRegion.text,
+      'const readGateIds = readVerifyConfigGates;',
       VERIFY_EXPORT,
     ].join('\n'),
-    'dispatch',
-    `lines ${dispatchVerifyRegion.first}-${dispatchVerifyRegion.last}`,
+    'lib',
+    `lines ${libVerifyRegion.first}-${libVerifyRegion.last}`,
   );
   const mirrorVerify = await loadModule(
     [
@@ -598,7 +609,7 @@ async function main() {
   process.stdout.write(
     `     block reader:   ${relative(REPO_ROOT, PLANNER)}:${plannerBlockRegion.first}-${plannerBlockRegion.last}` +
       ` vs ${relative(REPO_ROOT, MIRROR)}:${mirrorBlockRegion.first}-${mirrorBlockRegion.last}\n` +
-      `     verify.yaml:    ${relative(REPO_ROOT, DISPATCH)}:${dispatchVerifyRegion.first}-${dispatchVerifyRegion.last}` +
+      `     verify.yaml:    ${relative(REPO_ROOT, LIB)}:${libVerifyRegion.first}-${libVerifyRegion.last}` +
       ` vs ${relative(REPO_ROOT, MIRROR)}:${mirrorVerifyRegion.first}-${mirrorVerifyRegion.last}\n`,
   );
 
@@ -705,7 +716,7 @@ async function main() {
     let left;
     let right;
     try {
-      left = dispatchVerify.gateIds(root);
+      left = libVerify.gateIds(root);
       right = mirrorVerify.gateIds(root);
     } catch (error) {
       fail(`verify.yaml: ${item.name}`, `the reader threw: ${error.message}`);
@@ -714,7 +725,7 @@ async function main() {
     // The one documented difference is the word for the tree being read, which is
     // the rename this harness normalises everywhere else too.
     const normalise = (value) => JSON.stringify(value, null, 2).replace(/in the (worktree|checkout)/g, 'in the tree');
-    same(`verify.yaml: ${item.name}`, normalise(left), normalise(right), 'dispatch', 'mirror');
+    same(`verify.yaml: ${item.name}`, normalise(left), normalise(right), 'lib', 'mirror');
   }
 
   // ---- layer 4a: what the producer emits IS the 正本's shape ----------------

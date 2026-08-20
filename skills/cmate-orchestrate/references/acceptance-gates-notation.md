@@ -135,6 +135,40 @@ verify.yaml のゲートは定義上「exit 0 が pass」であり、ランナ�
 `.commandmate/verify.yaml` 冒頭の言い方を借りれば「A test nobody runs is not a gate」であり、
 その裏返しとして**何を測っているか誰も知らないゲートは、緑の証拠能力を持たない**。
 
+### 5.1 base 先行評価の対象は宣言済み gate のみ（[#218](https://github.com/Kewton/commandmate-skills/issues/218)）
+
+`inspect.mjs --evaluate-gates` は、**このブロックが宣言した gate だけ**を dispatch の前に
+base で実行し、`already_satisfied` / `failing_at_base` / `nondeterministic` / `not_evaluable` に
+分類する（[codes-and-recovery.md](./codes-and-recovery.md) 第6.3節、
+[runner-operations.md](./runner-operations.md) 第16節）。**第5節の裁定はこれで一切変わらない** ——
+散文・箇条書き・表からコマンドは導出しない。`plan.issues[].test_expectations` も読まない。
+
+理由は第5節の4点そのままである。とくに (1) と (4) は、**実行を伴う**この runner では
+一段強く効く: 散文から導出したコマンドを base で走らせるのは、誰も承認していないコマンドを
+他人のリポジトリで実行することである。
+
+したがって**「着手前に落ちること」を機械に確かめさせたい条件は、`gates:` に書く。**
+gate は exit 0 だけを pass とするので（第4節）、閾値は `test` で表す。
+
+````markdown
+```acceptance-gates
+version: 1
+gates:
+  - id: issue-231-line-ceiling
+    command: "test $(wc -l < web/src/lib/repository.ts) -le 860"
+    timeoutSec: 60
+```
+````
+
+散文に「`wc -l` が 860 以下」と書いてあるだけの条件は、この runner の対象にならない
+（実測 [CommandMate#1832](https://github.com/Kewton/CommandMate/issues/1832): 到達不能な閾値が
+dispatch まで誰にも止められず、993 行で着地した）。**ゲートとして測ってほしいなら、
+ブロックに書くのが唯一の道である。**
+
+生産側の手引きは
+[cmate-issue-authoring の acceptance-gates.md](../../cmate-issue-authoring/references/acceptance-gates.md)
+第8節にミラーしてある。
+
 ---
 
 ## 6. `gates:`（新規コマンドゲート）— 契約が定義を運ぶ

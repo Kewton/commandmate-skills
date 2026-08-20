@@ -104,8 +104,8 @@ files:
     executable: false
     script: false
   - path: references/acceptance-gates.md
-    sha256: 897004ad2aa05a46b639ac80e20f3878a47b4d4a7dfd2c785311268db0bd765a
-    size: 7831
+    sha256: 4dd5b2d228a324e50521ffaddcf47302f6ed72d67f01eafe7abb6e88cacdee29
+    size: 10320
     kind: instruction
     executable: false
     script: false
@@ -164,8 +164,8 @@ files:
     executable: false
     script: false
   - path: scripts/validate-plan.mjs
-    sha256: e795ecfac3965499ed9ec9c506832618bf4040a1fe28b071faff3a441b6d4d57
-    size: 75906
+    sha256: cd7ec9671c6bd950fe9df3a0058b2c36e56a61b687cb63b93f2143b3aa6e585d
+    size: 77223
     kind: script
     executable: false
     script: true

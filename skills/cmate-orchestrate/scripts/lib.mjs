@@ -55,6 +55,7 @@
 // reading `^const NAME = ...` out of orchestrate.mjs.
 
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 export const SKILL_ID = 'cmate-orchestrate';
 
@@ -1024,3 +1025,155 @@ export function isOverBroadScope(pattern) {
   if (trimmed === '' || trimmed === '.') return true;
   return trimmed.split('/').every((segment) => segment === '*' || segment === '**');
 }
+
+// =============================================================================
+// .commandmate/verify.yaml — the gate table both judges read
+// =============================================================================
+//
+// Hoisted out of dispatch.mjs for the reason the scope_companions block above was
+// (Issue #218): a SECOND reader appeared. dispatch resolves the ids an issue's
+// `require:` names against the worktree; `inspect.mjs --evaluate-gates` has to
+// run the COMMAND behind each of those ids against the base before dispatch.
+// Two parsers of one YAML subset are two parsers that can disagree about what a
+// repository declared, and the disagreement would be silent — inspect reporting
+// `gate_id_unresolved` for an id dispatch resolves happily is exactly the
+// "we could not look" dressed up as "we looked" that both runners refuse.
+//
+// The subset is the one cmate-verify's verify-run.sh awk parser accepts —
+// 2-space indent, single-line scalars, comments on their own line, no tabs, no
+// anchors, no flow collections, no block scalars — so all three readers agree on
+// what the file says.
+//
+// FAIL-CLOSED: anything the subset cannot read returns an error rather than a
+// partial gate set. An unreadable config would otherwise make a required gate
+// look absent (dispatch refused for the wrong reason) or, worse, make the id set
+// look complete when it is not.
+//
+// Behaviour-preserving by construction: `ids` is pushed in the same places, in
+// the same order, and every refusal is the byte the previous reader wrote. What
+// is new is `gates[]`, which carries `command` and `timeoutSec` beside the id.
+// dispatch does not read it — it resolves names, it does not run them.
+export const VERIFY_CONFIG_RELATIVE = '.commandmate/verify.yaml';
+
+// CommandMate's GATE_ID_PATTERN, transcribed. Kept local rather than shared with
+// the acceptance-gates notation's copy for the reason this module's header
+// gives: only a byte-identical copy is hoisted, and these two are checked
+// against different documents.
+const VERIFY_GATE_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+export function readVerifyConfigGates(rootPath) {
+  const path = join(rootPath, VERIFY_CONFIG_RELATIVE);
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    return {
+      ok: false,
+      reason: error.code === 'ENOENT'
+        ? `${VERIFY_CONFIG_RELATIVE} does not exist in the worktree, so no gate id can be resolved`
+        : `${VERIFY_CONFIG_RELATIVE} could not be read (${error.code ?? 'error'})`,
+    };
+  }
+  const bad = (reason) => ({ ok: false, reason: `${VERIFY_CONFIG_RELATIVE}: ${reason}` });
+  const ids = [];
+  const gates = [];
+  let section = '';
+  let sawVersion = false;
+  let gateOpen = false;
+  // One `key: value` of the gate entry that is currently open. Unknown keys
+  // (`mutex`, `retryOnFail`, `flakyIsPass`, anything upstream adds later) are
+  // carried by neither reader: this one runs the command, and none of them
+  // changes what the command IS.
+  const field = (key, rawValue) => {
+    const entry = gates[gates.length - 1];
+    if (entry === undefined) return;
+    const value = unquoteYaml(rawValue);
+    if (key === 'id') entry.id = value;
+    else if (key === 'command') entry.command = value;
+    else if (key === 'timeoutSec') entry.timeoutSec = /^[0-9]+$/.test(value) ? Number(value) : null;
+  };
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/\r$/, '');
+    if (line.includes('\t')) return bad('tab characters are not allowed');
+    if (/^[ ]*$/.test(line)) continue;
+    if (/^[ ]*#/.test(line)) continue;
+    const indent = line.length - line.replace(/^ +/, '').length;
+    if (indent % 2 !== 0) return bad('indentation must be a multiple of 2 spaces');
+    const body = line.slice(indent);
+
+    if (indent === 0) {
+      gateOpen = false;
+      const colon = body.indexOf(':');
+      if (colon <= 0) return bad(`expected "key: value" at the top level, got "${body.slice(0, 40)}"`);
+      const key = body.slice(0, colon).trim();
+      const value = body.slice(colon + 1).trim();
+      if (key === 'version') {
+        sawVersion = true;
+        if (unquoteYaml(value) !== '1') return bad(`version must be 1 (got "${value}")`);
+        section = '';
+      } else if (key === 'gates') {
+        if (value !== '') return bad('gates: must be followed by an indented list');
+        section = 'gates';
+      } else if (key === 'options') {
+        if (value !== '') return bad('options: must be followed by indented keys');
+        section = 'options';
+      } else {
+        return bad(`unknown top-level key "${key}"`);
+      }
+      continue;
+    }
+    // An indented line with nothing open above it is a shape this reader does not
+    // understand, and the sibling awk parser rejects it too. Skipping it would be
+    // the one way a gate id could go unseen, which is the failure mode fail-closed
+    // exists to prevent.
+    if (section === '') return bad('indented line outside of gates: / options:');
+    if (section !== 'gates') continue; // options and their nested keys carry no id
+    if (indent === 2) {
+      if (!body.startsWith('- ')) return bad('gate list items must start with "- "');
+      gateOpen = true;
+      const first = body.slice(2).trim();
+      const colon = first.indexOf(':');
+      if (colon <= 0) return bad('expected "key: value" inside a gate');
+      const key = first.slice(0, colon).trim();
+      gates.push({ id: null, command: null, timeoutSec: null });
+      if (key === 'id') ids.push(unquoteYaml(first.slice(colon + 1).trim()));
+      field(key, first.slice(colon + 1).trim());
+      continue;
+    }
+    if (indent === 4) {
+      if (!gateOpen) return bad('gate field outside of a list item');
+      const colon = body.indexOf(':');
+      if (colon <= 0) return bad('expected "key: value" inside a gate');
+      const key = body.slice(0, colon).trim();
+      if (key === 'id') ids.push(unquoteYaml(body.slice(colon + 1).trim()));
+      field(key, body.slice(colon + 1).trim());
+      continue;
+    }
+    return bad(`unexpected indentation (${indent} spaces)`);
+  }
+  if (!sawVersion) return bad('missing top-level "version: 1"');
+  if (ids.length === 0) return bad('no gate is declared');
+  for (const id of ids) {
+    if (!VERIFY_GATE_ID_RE.test(id)) return bad(`declared gate id "${id}" does not match ${VERIFY_GATE_ID_RE.source}`);
+  }
+  return { ok: true, ids, gates };
+}
+
+// The single- or double-quoted scalar forms the subset allows. A value with no
+// quotes is returned unchanged.
+export function unquoteYaml(value) {
+  if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+// ---- end of the verify.yaml reader ------------------------------------------
+//
+// tests/fixtures/cmate-issue-authoring/acceptance-gates-conformance.mjs slices
+// the region ABOVE this line out of this file and runs it, function for function
+// and over a corpus, against cmate-issue-authoring's mirror of the same parser
+// (`validate-plan.mjs`'s `checkoutGateIds`). Anything added above this line has
+// to be added to that mirror in the SAME commit
+// (references/acceptance-gates-notation.md §10); anything added below it is
+// outside the comparison.

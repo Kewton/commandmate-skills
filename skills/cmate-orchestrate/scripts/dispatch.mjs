@@ -78,6 +78,8 @@ import {
   resolveLauncher,
   safeWorktreeTarget,
   isOverBroadScope,
+  readVerifyConfigGates,
+  VERIFY_CONFIG_RELATIVE,
 } from './lib.mjs';
 
 const DISPATCH_SCHEMA_VERSION = 1;
@@ -3397,11 +3399,6 @@ function contractRelativePath(issueNumber) {
 // an agent weakening its own judge must remain visible — so the one thing this
 // runner must never do to it is write (ADR §3.5.1).
 
-// The file both judges read: `commandmate verify` and cmate-verify's
-// verify-run.sh. That is the whole reason the ADR put issue-specific gates here
-// instead of in the contract (ADR §3.2).
-const VERIFY_CONFIG_RELATIVE = '.commandmate/verify.yaml';
-
 // The ids a contract's `verify.gates` may name WITHOUT them appearing in
 // verify.yaml. Transcribed from CommandMate's own contract-vs-config check,
 // which builds its known set as {work-evidence, scope} ∪ declared gate ids.
@@ -3409,107 +3406,12 @@ const VERIFY_CONFIG_RELATIVE = '.commandmate/verify.yaml';
 // `require: [env-clean]` is refused here exactly as `send --contract` would.
 const CONTRACT_BUILT_IN_GATE_IDS = ['work-evidence', 'scope'];
 
-// Gate ids declared in a worktree's `.commandmate/verify.yaml`.
-//
-// The YAML subset is the one cmate-verify's verify-run.sh awk parser accepts —
-// 2-space indent, single-line scalars, comments on their own line, no tabs, no
-// anchors, no flow collections, no block scalars — mirrored here so both readers
-// agree on what the file says. It is read-only and extracts ids only.
-//
-// FAIL-CLOSED: anything the subset cannot read returns an error rather than a
-// partial id set. An unreadable config would otherwise make a required gate look
-// absent (dispatch refused for the wrong reason) or, worse, make the id set look
-// complete when it is not. The file is read ONLY for issues that require a gate,
-// so a repository whose verify.yaml this cannot parse keeps its previous
-// behaviour everywhere else.
-function readWorktreeGateIds(worktreePath) {
-  const path = join(worktreePath, VERIFY_CONFIG_RELATIVE);
-  let text;
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch (error) {
-    return {
-      ok: false,
-      reason: error.code === 'ENOENT'
-        ? `${VERIFY_CONFIG_RELATIVE} does not exist in the worktree, so no gate id can be resolved`
-        : `${VERIFY_CONFIG_RELATIVE} could not be read (${error.code ?? 'error'})`,
-    };
-  }
-  const bad = (reason) => ({ ok: false, reason: `${VERIFY_CONFIG_RELATIVE}: ${reason}` });
-  const ids = [];
-  let section = '';
-  let sawVersion = false;
-  let gateOpen = false;
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/\r$/, '');
-    if (line.includes('\t')) return bad('tab characters are not allowed');
-    if (/^[ ]*$/.test(line)) continue;
-    if (/^[ ]*#/.test(line)) continue;
-    const indent = line.length - line.replace(/^ +/, '').length;
-    if (indent % 2 !== 0) return bad('indentation must be a multiple of 2 spaces');
-    const body = line.slice(indent);
-
-    if (indent === 0) {
-      gateOpen = false;
-      const colon = body.indexOf(':');
-      if (colon <= 0) return bad(`expected "key: value" at the top level, got "${body.slice(0, 40)}"`);
-      const key = body.slice(0, colon).trim();
-      const value = body.slice(colon + 1).trim();
-      if (key === 'version') {
-        sawVersion = true;
-        if (unquoteYaml(value) !== '1') return bad(`version must be 1 (got "${value}")`);
-        section = '';
-      } else if (key === 'gates') {
-        if (value !== '') return bad('gates: must be followed by an indented list');
-        section = 'gates';
-      } else if (key === 'options') {
-        if (value !== '') return bad('options: must be followed by indented keys');
-        section = 'options';
-      } else {
-        return bad(`unknown top-level key "${key}"`);
-      }
-      continue;
-    }
-    // An indented line with nothing open above it is a shape this reader does not
-    // understand, and the sibling awk parser rejects it too. Skipping it would be
-    // the one way a gate id could go unseen, which is the failure mode fail-closed
-    // exists to prevent.
-    if (section === '') return bad('indented line outside of gates: / options:');
-    if (section !== 'gates') continue; // options and their nested keys carry no id
-    if (indent === 2) {
-      if (!body.startsWith('- ')) return bad('gate list items must start with "- "');
-      gateOpen = true;
-      const first = body.slice(2).trim();
-      const colon = first.indexOf(':');
-      if (colon <= 0) return bad('expected "key: value" inside a gate');
-      if (first.slice(0, colon).trim() === 'id') ids.push(unquoteYaml(first.slice(colon + 1).trim()));
-      continue;
-    }
-    if (indent === 4) {
-      if (!gateOpen) return bad('gate field outside of a list item');
-      const colon = body.indexOf(':');
-      if (colon <= 0) return bad('expected "key: value" inside a gate');
-      if (body.slice(0, colon).trim() === 'id') ids.push(unquoteYaml(body.slice(colon + 1).trim()));
-      continue;
-    }
-    return bad(`unexpected indentation (${indent} spaces)`);
-  }
-  if (!sawVersion) return bad('missing top-level "version: 1"');
-  if (ids.length === 0) return bad('no gate is declared');
-  for (const id of ids) {
-    if (!GATE_ID_RE.test(id)) return bad(`declared gate id "${id}" does not match ${GATE_ID_RE.source}`);
-  }
-  return { ok: true, ids };
-}
-
-// The single- or double-quoted scalar forms the subset allows. A value with no
-// quotes is returned unchanged.
-function unquoteYaml(value) {
-  if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
-    return value.slice(1, -1);
-  }
-  return value;
-}
+// The worktree's gate table is read by lib.mjs's `readVerifyConfigGates` — the
+// same function `inspect.mjs --evaluate-gates` uses to find the COMMAND behind
+// an id it is about to run at the base (Issue #218). The reader stood here until
+// then and moved unchanged: same subset, same fail-closed refusals, the same ids
+// in the same order. Only the address changed, so that "what this repository
+// declares" has one reader instead of two that can drift apart.
 
 // The `require:` list of one plan issue, re-validated on the way in. The plan is
 // an INPUT — a hand-edited one must not be able to put a malformed id into a
@@ -6020,7 +5922,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
       // `.commandmate/verify.yaml` at all (a run that cannot start is a
       // completion criterion nothing can evaluate), and because the collision
       // check below is against exactly those ids.
-      const config = readWorktreeGateIds(res.worktreePath);
+      const config = readVerifyConfigGates(res.worktreePath);
       if (!config.ok) {
         worker.note = redact(`#${number} was not dispatched: ${config.reason}`);
         report.limitations.push({

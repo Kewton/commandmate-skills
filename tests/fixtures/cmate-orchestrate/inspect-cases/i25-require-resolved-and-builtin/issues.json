@@ -1,0 +1,8 @@
+[
+  {
+    "number": 234,
+    "title": "require の id を verify.yaml から解決して実行する",
+    "labels": [],
+    "body": "既存ゲートで判定する\n\n## 背景\n実測で機能しなかった受入条件の再現である。\n\n## 受入条件\n- [ ] `web/src/lib/repository.ts` が 860 行以下になる\n\n```acceptance-gates\nversion: 1\nrequire:\n  - unit\n  - lint\n  - work-evidence\n```\n"
+  }
+]

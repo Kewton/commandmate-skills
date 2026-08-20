@@ -1,0 +1,8 @@
+[
+  {
+    "number": 235,
+    "title": "散文の受入条件しか無い Issue",
+    "labels": [],
+    "body": "受入条件を散文でだけ書いた Issue である。\n\n## 受入条件\n- [ ] `wc -l` が 860 以下である\n- [ ] `grep -c handler src/api/handler.ts` が 3 である\n- [ ] `npm test` が通る\n"
+  }
+]

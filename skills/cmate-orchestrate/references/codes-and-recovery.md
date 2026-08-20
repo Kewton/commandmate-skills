@@ -487,3 +487,44 @@ report には出るが warning にはならない。後者で「移動した」�
 run view に表示しない。** ただし `NEXT_ACTION_HINTS` には5件とも入っている ——
 表に無い code は `UNKNOWN_CODE_HINT` に落ちるので、「まだ誰も分類していない code」と
 「表示する場所がまだ無い code」が同じ形になってしまうためである。
+
+### 6.3 inspect `--evaluate-gates` の code（[#218](https://github.com/Kewton/commandmate-skills/issues/218)）
+
+`inspect.mjs --evaluate-gates` は **Issue が宣言した受入ゲートを base で先行実行**する。
+`--check-references` と同じく run の語彙とは別で、**この節の code も1つも exit code を変えない。**
+
+| code | severity | 意味 | 人間が何をするか |
+|---|---|---|---|
+| `acceptance_gate_already_satisfied` | warning | 宣言した gate が **base で全回 exit 0** だった | **その条件はゲートとして働かない**（直しても直さなくても緑）。何が変われば赤から緑に変わるのかを書き直して re-plan する |
+| `acceptance_gate_nondeterministic` | warning | 実行ごとに判定（または exit code）が変わる | 出力に時刻・乱数・並び順が混ざっていないかを見る。着手後も安定して通らないので、そのままでは完了を判定できない |
+| `acceptance_gate_not_evaluable` | **notice** | **測れなかった**（`reason` 付き） | `reason` を読む。**「通った」にも「落ちた」にも丸めない。** notice のまま dispatch すると、その条件は誰にも判定されない |
+
+`acceptance_gate_not_evaluable` の `reason` は6つある。
+
+| reason | 意味 |
+|---|---|
+| `gate_id_unresolved` | `require:` の id が `.commandmate/verify.yaml` に無い（dispatch も同じ集合で解決するので、この Issue は `acceptance_gate_id_unknown` で send 前に止まる） |
+| `gate_id_builtin` | `work-evidence` / `scope` —— CommandMate が判定する built-in で、この tree に走らせるコマンドが無い。**解決できる id であることと測れる id であることは別である** |
+| `verify_config_unreadable` | `.commandmate/verify.yaml` が読めない（`readVerifyConfigGates` は fail-closed で、部分的な id 集合を返さない） |
+| `block_invalid` | ```acceptance-gates ブロックが読めない。planner も同じ理由で `acceptance_gate_block_invalid` を出す |
+| `repo_root_not_base` | `--base` が指す revision と `--repo-root` の HEAD が違う。**この場合コマンドは1つも実行しない** |
+| `timeout` | gate の `timeoutSec`（既定 600 秒）を超えた。**超過した回で repeat を打ち切る**ので `runs[]` は1件になる |
+
+**`failing_at_base` は code を持たない。** 着手前に落ちているのは受入条件が正しく書けている
+ということであり、報告すべき所見ではない —— `evaluation.gates[]` に記録は残る。
+
+`already_satisfied` / `nondeterministic` が1件でもあれば `status: partial`。`not_evaluable` だけなら
+`status: success`（notice は色を変えない。planner の `severity: notice`（[#199](https://github.com/Kewton/commandmate-skills/issues/199)）と同じ規約である）。
+**どちらも exit 0 である。**
+
+**読めない入力・汚れた tree は点検せずに拒否する。** `--repo-root` が clean でない / git checkout でない、
+`--repeat` が範囲外、mode を2つ渡した、は `invalid_input`（**exit 3**）で、**コマンドを1回も実行しない**。
+`--base` が解決しないのは `load_error`（exit 6）。envelope の `evaluation` は `null` になる。
+
+> Issue #218 本文は dirty tree を「`invalid_input` / exit 2」と書いているが、本 package では
+> exit 2 は `not_implemented` が取っており `invalid_input` は6 runner すべてで exit 3 である
+> （[#217](https://github.com/Kewton/commandmate-skills/issues/217) が同じ点を実測で確定させた）。
+> **実装済みの規約を正とした。**
+
+`--evaluate-gates` も run directory を持たないので `status.mjs` は run view に出さないが、
+`NEXT_ACTION_HINTS` には3件とも入っている（第6.2節末尾と同じ理由）。

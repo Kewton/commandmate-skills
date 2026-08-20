@@ -35,10 +35,9 @@ runner は決定的なので、この文書が述べるのは「いつ使うか�
 |---|---|---|---|
 | status | `scripts/status.mjs` | run directory の artifact を突き合わせ、phase × Issue のマトリクスを出す | **なし（read-only）** |
 
-`scripts/lib.mjs` は共有ヘルパーで、単体では起動しない。
-`scripts/profile-init.mjs`（profile の起案と点検。第3.5節）と `scripts/inspect.mjs`（Issue 本文の
-主張を tree に突き合わせる点検。第3.6節）は phase ではなく **read-only の準備 runner** で、
-**どちらも何も書かず裁定せず、所見は warning・exit は 0 である。**
+`scripts/lib.mjs` は共有ヘルパーで、単体では起動しない。`scripts/profile-init.mjs`（第3.5節）と
+`scripts/inspect.mjs`（第3.6節）は phase ではなく **read-only の準備 runner** で、**どちらも
+何も書かず裁定せず、所見は warning・exit は 0 である。**
 
 ## 1. いつ使うか / 使わないか
 
@@ -87,12 +86,6 @@ worktree path・baseline は **profile から解決**し、`develop`/`npm`/`carg
 | [cmate-acceptance-test](../cmate-acceptance-test/) | uat の**意味ゲート**を使うとき | orchestrate は動くが **UAT の裁定は機械ゲートだけ**になる。report の `limitations[]`（`acceptance_not_run`）に記録される |
 | [cmate-worktree-setup](../cmate-worktree-setup/) | dispatch の **`--prepare-worktrees`** を使うとき | **停止する**（`limitations` ではなく `blocking_reasons` の `worktree_setup_unavailable`）。1人も dispatch せず `--out` も作らない |
 | [cmate-worker-development](../cmate-worker-development/) | dispatch の **`--worker-method`** を使うとき | **停止する**（`limitations` ではなく `blocking_reasons` の `worker_method_unavailable`）。最初の Wave なら1人も dispatch せず `--out` も作らない |
-
-```bash
-commandmate skill install cmate-acceptance-test
-commandmate skill install cmate-worktree-setup
-commandmate skill install cmate-worker-development
-```
 
 3つとも**黙って劣化しない**という型は同じだが、**結果は違う**。意味ゲートは未導入でも機械ゲートで
 裁定できるので**続行して記録**し、worktree 準備と方法論は**停止**する。停止と続行を分けた理由、
@@ -451,40 +444,43 @@ plan に渡すには `--allow-unverified` が要る）。
 [profile-contract.md](./references/profile-contract.md) 第7節（起案）・第8節
 （`verified: true` の条件）・第9.7節（`--check`）。
 
-### 3.6 inspect（Issue 本文の主張を実物に突き合わせる。plan の前。read-only）
+### 3.6 inspect（plan の前に走る read-only の準備 runner。mode は2つ）
 
 ```
 inspect.mjs --check-references [--repo-root <path>] [--ref <rev>] <issue>...
-inspect.mjs --check-references [--repo-root <path>] --issue-json <path>
+inspect.mjs --evaluate-gates  [--repo-root <path>] [--repeat <n>] <issue>...
 ```
 
-**planner は対象リポジトリを開かない**（第9.1節）。この runner はそれを変えず、その不変条件が
-**残す穴**を塞ぐ —— 本文の主張（`path:line`・「N 行」）が古いことを dispatch まで誰も検知
-しなかった（実測 16 件中 11 件。CommandMate #1831）。
+**planner は対象リポジトリを開かない**（第9.1節）。その不変条件が**残す穴**を2つ塞ぐ ——
+本文の主張（`path:line`・「N 行」）が古いこと（実測 16 件中 11 件。CommandMate #1831）と、
+**受入条件が「着手前に落ちる」かを誰も確かめないこと**（実測 3 件。CommandMate #1832）。
 
 | flag | 既定 | 効果 |
 |---|---|---|
-| `--check-references` | — | **必須。** 突き合わせる mode（現状これ1つ） |
-| `--repo-root <path>` | cwd | 突き合わせ先の checkout |
-| `--ref <rev>` | — | working tree ではなくこの revision を読む（`git show`）。解決できなければ拒否 |
-| `--issues <n>` / 裸の番号 | — | 対象 Issue（反復可・カンマ可） |
-| `--issue-json <path>` | — | Issue fixture（第1.1節と同形。GitHub 不要）。`--issues` 省略時は全 Issue |
-| `--repo <owner/name>` | origin | fixture が無いとき Issue を読む先 |
-| `--out <path>` | — | 報告の書き出し先。**既存なら `out_exists`（exit 4）** |
+| `--check-references` | — | 本文の `path:line`・「N 行」を tree に突き合わせる mode |
+| `--evaluate-gates` | — | 宣言された受入ゲートを base で先行実行する mode。**どちらか必須・排他** |
+| `--repo-root <path>` | cwd | 突き合わせ先 / 実行先の checkout |
+| `--ref <rev>` | — | working tree でなくこの revision を読む（`--check-references` 専用） |
+| `--repeat <n>` | 2 | 各 gate の実行回数（`--evaluate-gates` 専用）。1 では非決定性を検出できない |
 
-押さえるべき点は4つ。**何も書かない**（plan.json には 1 byte も書かない）。
-**裁定しない**（所見は5つとも warning、`status` は `partial`、**exit は 0**）。
-**読めない入力は点検しない**（`load_error` 6 / `invalid_input` 3 で拒否し、envelope の
-`inspection` は `null`。「見て何も無かった」と「見られなかった」を同じ形にしない）。
-**候補抽出は planner と同じ関数**（`orchestrate.mjs` の `extractFileCandidates` を import する）。
+両 mode 共通: `--issues` / 裸の番号 / `--issue-json`（GitHub 不要）で対象を指定し、`--out` に
+報告を書く（既存なら `out_exists` / exit 4）。
 
-**見ないものが2つある。本文の意味的な矛盾**（「決定事項 対 受入条件」など）は対象外で、
-`cmate-issue-refinement` Step 4 の仕事である。**表記ゆれ**の検出も planner の
-`ambiguous_file_candidate` に任せ、そう判定された候補は**点検せず件数だけ名乗る**。
+**何も書かず**（plan.json には 1 byte も書かない）、**裁定せず**（所見は warning か notice、
+**exit は 0**）、**読めない入力は点検せず拒否する**（envelope の `inspection` / `evaluation` が
+`null` になる）。**読み口は planner と同じ関数**である。
 
-判定範囲・行数の数え方・warning にしない verdict は
-[runner-operations.md](./references/runner-operations.md) 第15節、code は
-[codes-and-recovery.md](./references/codes-and-recovery.md) 第6.2節が正本である。
+**`--evaluate-gates` は Issue が宣言したコマンドを実行する runner である**（`profile-init.mjs
+--check` の「subprocess を使わない」とは性質が違う）。実行前に `--repo-root` が clean で
+あることを確かめ、汚れていれば `invalid_input`（exit 3）で**1つも実行しない**（`--base <rev>`
+と HEAD が違うときも同じ）。**散文の受入条件からコマンドは導出しない**
+（acceptance-gates-notation.md 第5節・第5.1節。閾値は `gates:` に
+`test $(wc -l < path) -le 860` と書けば対象になる）。「測れなかった」は `not_evaluable` の
+**notice** であり、「通った」にも「落ちた」にも丸めない。
+
+判定範囲・出力・**見ないもの**（意味的な矛盾と表記ゆれ）は
+[runner-operations.md](./references/runner-operations.md) 第15節・第16節、code は
+[codes-and-recovery.md](./references/codes-and-recovery.md) 第6.2節・第6.3節が正本。
 
 ### 3.7 status（run の横断ビュー。read-only）
 

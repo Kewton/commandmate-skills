@@ -406,6 +406,15 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   reference_line_count_stale: '本文の「N 行」が実測と違う。受入条件が「着手前と同じ N」の形になっていないかを確かめる（なっていれば、直さない限り先行 Issue の追加を消すのが正解になる）。',
   reference_claim_inconsistent: '本文の中で主張が食い違っている（同一 path に2つの行数主張、または同一 path:line に2つの識別子）。どちらが意図かは runner には決められないので、実測を正として本文を1つに畳む。',
 
+  // ---- inspect --evaluate-gates（#218）--------------------------------------
+  //
+  // Same reason as the block above — no run view shows them, and the fallback
+  // would erase the difference between "unclassified" and "nowhere to show it".
+  // 正本は codes-and-recovery.md 第6.3節。
+  acceptance_gate_already_satisfied: '宣言した受入ゲートが**着手前の base で既に通っている**。直しても直さなくても緑になるので、ゲートとして働かない。何が変われば赤から緑になるのかを書き直して re-plan する。',
+  acceptance_gate_nondeterministic: '宣言した受入ゲートが**実行ごとに結果を変える**。出力に時刻・乱数・並び順が混ざっていないかを見る。着手後も安定して通らないので、そのままでは完了を判定できない。',
+  acceptance_gate_not_evaluable: 'notice。宣言した受入ゲートを**測れなかった**（id が verify.yaml に無い / built-in / timeout / ブロックが読めない / --repo-root が base でない）。**「通った」でも「落ちた」でもない。** 理由は report の `reason` にある。',
+
   // ---- shared --------------------------------------------------------------
   no_eligible_issues: 'dispatch report に completed かつ verification pass の Issue が無い。まず dispatch を通す。',
   completion_check_failed: 'completion check のどれかが passed でない。report の completion_check を読む。',

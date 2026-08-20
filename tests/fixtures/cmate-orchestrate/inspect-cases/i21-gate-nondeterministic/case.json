@@ -1,0 +1,28 @@
+{
+  "mode": "evaluate-gates",
+  "description": "a declared gate whose verdict changes between runs — one run could not see it",
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "acceptance_gate_nondeterministic"
+    ],
+    "notices": 0,
+    "gates": [
+      {
+        "gate_id": "issue-240-sha256-stable",
+        "source": "gates",
+        "outcome": "nondeterministic",
+        "reason": "verdict_flipped",
+        "exit_codes": [
+          0,
+          1
+        ],
+        "timeout_sec": 60
+      }
+    ],
+    "calls": {
+      "issue-240-sha256-stable": 2
+    }
+  }
+}

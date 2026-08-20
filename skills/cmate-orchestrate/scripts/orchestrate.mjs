@@ -3893,12 +3893,20 @@ function main() {
 // reports which citations were DROPPED before becoming candidates (a `..` escape,
 // an absolute path, a URL host), and the only honest way to name those is to run
 // the same three patterns and subtract what the extraction kept.
+//
+// `readIssueAcceptanceGates` is exported on the same principle, for the mode that
+// EVALUATES those gates at the base (Issue #218): the set of gates a run is
+// allowed to execute must be exactly the set the plan would carry — same subset,
+// same 32-id bound, same refusal of a block that does not parse. A second parser
+// there would be a runner executing commands the plan never declared, which is
+// the fail-closed rule of acceptance-gates-notation.md §5 broken from the inside.
 export {
   extractFileCandidates,
   classifyFileCandidates,
   loadIssuesFromFixture,
   fetchIssueWithGh,
   isSafeRepoPath,
+  readIssueAcceptanceGates,
   FILE_EXT,
   PATH_START,
   CANDIDATE_BACKTICK,
