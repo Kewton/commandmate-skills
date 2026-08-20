@@ -1891,6 +1891,98 @@ exit code は #217 と同じ理由で本文の提案（exit 2）ではなく pac
 
 ---
 
+## observe（`scripts/observe.mjs`）
+
+### #221 — 「merge 後の CI を N 回測る」段が無く、人間が手で測って測り方を間違えていた
+
+受入条件には **worktree の中では測れないもの**がある。「merge 後の CI 3 run の wall-clock 中央値が
+着手前より 1 分以上短い」「CI 5 run の e2e 時間が 30% 以上短く flaky 件数が +1 以内」。
+`uat.mjs` は **worktree 内**で profile baseline を回す受入判定であり（`uat.mjs:22-24`）、
+`merge.mjs --integration-verify` は merge 後 base 上で検証集合を **1 回**回す段である（#175 / #195）。
+GitHub Actions の run 時間を N 回集める段は**どちらでもない**。結果、人間が手で測った。
+
+実測（CommandMate #1835 / Kewton/BorderFreeKidsMap）で、測り方の誤りが3つ出た。
+
+1. **最初の 2 本が外れ値だった。** merge 直後 3 run の中央値 446 秒を見て「未達」と報告し、
+   run が溜まってから 8 run で測り直したら中央値 385.0 秒（−63.5 秒）で達成していた。
+   **誤報告を撤回した。**
+2. **run 全体に `setup-node` のばらつきが乗る**（38〜66 秒）。e2e 並列化の受入条件を run の
+   wall-clock で読むと、条件が言っていないものを測ることになる。**step 単位で採る**には
+   job step API が要る。
+3. **5 run 目で初めて出た不良。** 1〜4 run 目は緑で、5 run 目で serve が 3 回死んで 28 分ハングした。
+   **4 run では出ない。**
+
+→ merge の後に、**profile が宣言した観測を N 回集めて report に残す read-only runner** を足した。
+
+**裁定しない。** これが本 runner の中心にある固定事項である。実測3件目のとおり、**数字が揃っても
+結論は割れる** —— 時間は線を超えていたが、5 run 目のハングを見て差し戻したのが正解だった。
+だから report に verdict field は無く、`status` は**観測の完了度**（`success` = 全観測が `--runs` 件
+揃った / `partial` = 揃わなかった・観測不能があった / `refused` = 1件も観測していない）だけを表す。
+**`pass` / `fail` の語は出力に出さない** —— 唯一の例外が GitHub の `conclusion` の逐語転記で、
+それは常に `conclusion` という名の key の下に在る（fixture の語彙検査はその位置だけを
+**構造的に**除外して grep するので、runner が自分の散文に verdict を書けば赤くなる）。
+
+**全 run を並べる。** `samples[]` は除外されたものも含めて1件ずつ在り、`summary_markdown` は
+それを1行ずつの表に出す。実測1は**中央値をその系列なしで読んだ**ことで起きた。`--runs` に
+**既定値を置かなかった**のも同じ理由である —— 3 と 8 で結論が逆になったのだから、何件に基づく
+数字かは人間が決めて report に残すべき値である。
+
+**除外は黙って落とさない。** `cancelled` / `in_progress` / 非 green の run は集計に入れないが
+（終わっていない run・放棄された run はそれを測っていない）、`excluded[]` に
+`{conclusion, count}` として必ず出る。`collected - counted` と `excluded` の合計は常に一致する。
+
+**`mergedAt` / merge commit は `merge-report.json` に無い**（`pr_number` と `merged: bool` だけ）ので、
+`gh pr view <n> --json mergedAt,mergeCommit` で取って**この report に記録する**。取れなければ
+その Issue は `not_observable`（理由付き）で、**窓の始まりを推測しない** —— 捏造した始まりは、
+その merge が起こしていない run をその merge に帰属させる。
+
+**`uat.mjs` に混ぜていない**（Issue の固定事項）。uat は worktree、observe は merge 後 base である。
+混ぜると「network に触る run と触らない run」が同じ phase になり、`status` が2つの意味を持つ。
+
+**GitHub に書く初の経路**である。それまでの `gh` は `pr view` / `pr checks` / `pr merge` /
+`issue view` だけで、SKILL.md 第1節は「Issue 本文の自動編集」をスコープ外としている。
+**この runner はその線を動かさない** —— `--comment` は `--approve` 必須で、拒否は**入力を読む前・
+最初の `gh` の前**に起き、書くのは `gh issue comment` だけである。投稿する byte は
+`summary_markdown` と 1 byte も違わない（そのため summary はコメントの前に確定し、後に作り直さない)。
+
+**実装で決めたことが3つある。**
+
+**宣言の出どころは `plan` を既定にし、`--profile` を併設した。** Issue は「どちらを既定にするかは
+実装者が決め、理由を書く」としていた。plan を既定にしたのは、dispatch が
+`plan.profile.dispatch_defaults` を読み（#196）merge が `plan.profile.integration_baseline` を
+読む（#195）のと同じ handoff だからである —— **走るものは承認された plan が凍結したもの**であり、
+on-disk の profile を黙って優先すると同じ `run_id` の 2 回の observe が違うものを測れてしまう。
+`--profile` を併設したのは、**merge 済みの wave は re-plan できない**からである（profile に
+`observations` を足すと run_id が変わり、観測したい run はもう起きている）。使った run は
+`observations_source: "profile_file"` と limitation で名乗るので、黙って別のものを測ることはない。
+
+**正規化は `lib.mjs` に置いた。** planner と observe の両方が読む語彙だからである
+（lib.mjs 冒頭の維持規則そのもの）。2つ持てば「宣言が何を意味するか」について2つの意見を持つことに
+なり、その食い違いは黙って進む —— planner が拒否する profile を observe が受ける、またはその逆。
+
+**refusal envelope の `status` は `failure` ではなく `refused` にした。** この document の status
+語彙は collection について1つだけであり、「何も集めていない、理由はこれ」を、work についての
+裁定と読める語を借りずに言う必要がある。`issues: null` が「見て何も無かった」と「見られなかった」を
+分ける（`inspect.mjs` の `inspection: null` と同じ規律）。
+
+**`status.mjs` の run view には載せていない**（Issue が「載せないなら contract に書く」とした側）。
+observe の出力先は `--out` であって run directory とは限らず、status の phase モデルは
+plan → dispatch → merge / uat である。ただし `NEXT_ACTION_HINTS` には新設10 code をすべて入れた ——
+表に無い code は `UNKNOWN_CODE_HINT` に落ち、「まだ分類していない code」と「表示する場所が無い code」が
+同じ形になるためである。
+
+**SKILL.md への追記は 1 行に留め、差し引きで byte を減らした。** `scripts/validate.py:68` の
+`SKILL_MD_MAX_SIZE` は 60,000 byte で、着手時点の SKILL.md は 59,894 byte（**残り 106 byte**）だった。
+第3節に本 runner の節を足すと 1.5KB 程度になり、他の記述を削って場所を作ることになる ——
+同 wave の別 PR も SKILL.md に触るので、**削って作った場所はそのまま rebase の衝突面になる。**
+契約の正本は `references/observe-contract.md` なので、SKILL.md に置いたのは
+**準備 runner の段落への一方向参照 1 行だけ**である。その 103 byte は、同じ場所で2つ削って作った ——
+profile-init の `--emit` の挙動を述べた括弧書き（`profile-contract.md` 第2節の表と一対一の重複）と、
+第3.6節の `（第9.1節）`（SKILL.md に第9節は無い。指しているのは `profile-contract.md` 第9.1節で、
+同じ段落の下でリンク済みである）。結果 59,882 byte で、**着手前より 12 byte 小さい。**
+
+---
+
 ## 設計（ADR のみ。実装は後続）
 
 ### #103 — 「ワーカーが Issue を受け取ってから何をするか」を持つ Skill が無かった

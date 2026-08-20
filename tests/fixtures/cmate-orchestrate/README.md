@@ -52,6 +52,16 @@ inspect-cases/<id>/case.json    warning code 列・references[]/line_claims[] �
 inspect-cases/gate-fake.mjs     `--evaluate-gates` の case で gate の代わりに走る fake。呼び出しを
                                 $CMATE_GATE_FAKE_LOG（**checkout の外**）に記録し、spec で
                                 pass / fail / flip（1回目だけ緑）/ codes / hang を出し分ける
+observe-cases/<id>/case.json     plan/dispatch/merge を実際に通してから observe を回す case。
+                                `observe_scenario` は fake gh へ注入する world（`observe.merged` が
+                                `gh pr view --json mergedAt,mergeCommit` の答え、`observe.runs` が
+                                `gh run list` の行を **新しい順**で、`observe.jobs` が jobs API、
+                                `observe.command_values` が `kind: command` の checkout に置く
+                                measuring script の戻り値列）。集計・除外・中央値は harness が
+                                **sample から独立に再計算して**照合するので、case が「runner 自身と
+                                一致しているだけ」で緑になることはない。`pass` / `fail` の語が
+                                出力に無いことも全 case で見る（転記された `conclusion` だけを
+                                **構造的に**除外して grep する）
 fake-cli.mjs                    commandmate/git/gh を模した stub（failure injection）。`workers.<n>.capture_extra`
                                 は `capture --json` の payload に混ぜる field（`realtimeSnippet` /
                                 `lineCount` / `structuredEvents` / `cliToolId` / `upstreamFault`。#220）。

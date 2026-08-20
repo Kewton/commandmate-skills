@@ -1177,3 +1177,120 @@ export function unquoteYaml(value) {
 // to be added to that mirror in the SAME commit
 // (references/acceptance-gates-notation.md §10); anything added below it is
 // outside the comparison.
+
+// observations — what to measure on the base branch AFTER the merge (Issue #221)
+// =============================================================================
+//
+// The optional profile field `observations` declares measurements that cannot be
+// taken inside a worktree: "the CI wall clock of the merged base", "the seconds
+// the e2e STEP takes", "the bundle size of the merged tree". `uat.mjs` cannot
+// answer any of them — it runs the profile baseline in the issue's own worktree,
+// before the merge (uat-contract.md) — so the declaration is read by a separate
+// post-merge runner (`observe.mjs`, references/observe-contract.md).
+//
+// It lives in lib.mjs rather than in the planner for the reason this module is
+// maintained by: TWO runners read the vocabulary. The planner validates it and
+// freezes it into `plan.profile`, and `observe.mjs --profile <path>` reads a
+// profile file directly for the case the plan predates the declaration. A second
+// copy of these rules is a second opinion about what a declaration MEANS, and the
+// disagreement would be silent — a profile the planner refuses being accepted by
+// the observer, or the reverse.
+//
+// WHAT IS DELIBERATELY NOT HERE: how a kind is COLLECTED. That is observe.mjs's
+// alone. This file decides only whether a declaration is well formed, which is
+// the half the planner has to decide without ever running `gh`.
+export const OBSERVATION_KINDS = new Map([
+  // kind          keys that MUST be present, in the order they are echoed
+  ['gh_run', ['workflow']],
+  ['gh_job_step', ['workflow', 'job', 'step']],
+  ['command', ['command']],
+]);
+
+// Same shape as a run id (makeRunId) and for the same reason: the value is used
+// as a lookup key across documents — the observation's own report, and the
+// `--inspect` artifact a "before" value is matched out of — so it has to survive
+// a round trip through a filename and a JSON key without being quoted.
+const OBSERVATION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+function observationError(detail) {
+  return new SkillError('load_error', detail, 6);
+}
+
+// ABSENT stays absent (`undefined` in, `null` out), exactly as `scope_companions`
+// / `dispatch_defaults` / `integration_baseline` do: a profile written before this
+// field existed must produce the plan bytes it always produced.
+//
+// A declared `[]` is NOT normalized away either. It states "this repository has
+// nothing to observe after a merge", and observe.mjs refuses on it by name rather
+// than reporting a run in which zero observations were collected — the same
+// distinction `integration_baseline: []` carries.
+//
+// Every entry is REBUILT field by field in one fixed key order. The plan's bytes
+// are the run id's input (canonicalInputSignature), so a hand-written profile
+// whose keys are in another order must not fork the run id.
+export function normalizeObservations(raw) {
+  if (raw === undefined) return null;
+  if (!Array.isArray(raw)) {
+    throw observationError(
+      `profile.observations must be an array of declarations, got ${JSON.stringify(raw)}. `
+        + 'Omit the key entirely to declare nothing; declare `[]` to state that this repository has no '
+        + 'post-merge observation (which observe.mjs then refuses by name rather than reporting an empty run)',
+    );
+  }
+  const out = [];
+  const seen = new Set();
+  for (const [index, entry] of raw.entries()) {
+    const at = `profile.observations[${index}]`;
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw observationError(`${at} must be an object, got ${JSON.stringify(entry)}`);
+    }
+    const id = entry.id;
+    if (typeof id !== 'string' || !OBSERVATION_ID_RE.test(id)) {
+      throw observationError(
+        `${at}.id must be a short token matching ${OBSERVATION_ID_RE.source}, got ${JSON.stringify(id)}`,
+      );
+    }
+    if (seen.has(id)) {
+      // Two declarations under one id would make "the value of `ci-wallclock`"
+      // ambiguous in the report AND in the `--inspect` lookup, which is exactly
+      // the confusion an id exists to remove.
+      throw observationError(`${at}.id "${id}" is declared twice; an observation id names one measurement`);
+    }
+    seen.add(id);
+    const kind = entry.kind;
+    if (typeof kind !== 'string' || !OBSERVATION_KINDS.has(kind)) {
+      throw observationError(
+        `${at}.kind ${JSON.stringify(kind)} is not one of ${[...OBSERVATION_KINDS.keys()].join(' / ')}. `
+          + 'An unknown kind is refused rather than skipped: a run that silently dropped it would report '
+          + 'a complete observation set that is missing the measurement the author asked for',
+      );
+    }
+    const required = OBSERVATION_KINDS.get(kind);
+    const normalized = { id, kind };
+    for (const key of required) {
+      const value = entry[key];
+      if (typeof value !== 'string' || value.trim() === '') {
+        throw observationError(`${at}.${key} is required for kind "${kind}" and must be a non-empty string`);
+      }
+      normalized[key] = value;
+    }
+    const unit = entry.unit;
+    if (typeof unit !== 'string' || unit.trim() === '') {
+      // The unit is required, not defaulted. A number whose unit the reader has
+      // to infer is how "446" and "446000" end up in the same table — and this
+      // runner never converts, so the unit is the only thing that says which.
+      throw observationError(`${at}.unit is required and must be a non-empty string (e.g. "s", "bytes")`);
+    }
+    normalized.unit = unit;
+    const allowed = new Set(['id', 'kind', 'unit', ...required]);
+    for (const key of Object.keys(entry)) {
+      if (!allowed.has(key)) {
+        throw observationError(
+          `${at} has an unknown field "${key}" for kind "${kind}" (accepted: ${[...allowed].join(', ')})`,
+        );
+      }
+    }
+    out.push(normalized);
+  }
+  return out;
+}

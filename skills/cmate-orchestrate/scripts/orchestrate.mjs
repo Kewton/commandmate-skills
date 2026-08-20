@@ -38,6 +38,7 @@ import {
   companionsForPath,
   scopeEntriesOverlap,
   isOverBroadScope,
+  normalizeObservations,
 } from './lib.mjs';
 
 const PLAN_SCHEMA_VERSION = 2;
@@ -110,6 +111,7 @@ const PROFILE_FIELDS = [
   'scope_companions',
   'dispatch_defaults',
   'integration_baseline',
+  'observations',
 ];
 
 // =============================================================================
@@ -467,6 +469,15 @@ function normalizeProfile(raw) {
   // `null` is not a synonym for either and is refused (normalizeIntegrationBaseline).
   const integrationBaseline = normalizeIntegrationBaseline(raw.integration_baseline);
   if (integrationBaseline !== null) profile.integration_baseline = integrationBaseline;
+  // ABSENT-stays-absent a fourth time (Issue #221). The planner does not USE this
+  // field — it validates it and freezes it into `plan.profile` so `observe.mjs`
+  // can read the declaration out of the approved plan, the same handoff
+  // `dispatch_defaults` (#196) and `integration_baseline` (#195) use. The rules
+  // themselves live in lib.mjs because observe.mjs reads them too, under
+  // `--profile <path>`, and two copies would be two opinions about what a
+  // declaration means (references/profile-contract.md §12).
+  const observations = normalizeObservations(raw.observations);
+  if (observations !== null) profile.observations = observations;
   return profile;
 }
 
@@ -3358,6 +3369,11 @@ function publicProfile(profile) {
   if (profile.scope_companions !== undefined) out.scope_companions = profile.scope_companions;
   if (profile.dispatch_defaults !== undefined) out.dispatch_defaults = profile.dispatch_defaults;
   if (profile.integration_baseline !== undefined) out.integration_baseline = profile.integration_baseline;
+  // `observations` is here for the same reason with a third reader: observe.mjs
+  // reads `plan.profile.observations` after the merge (Issue #221,
+  // profile-contract.md §12). Appended LAST, so a profile that does not declare
+  // it produces the plan bytes it produced before the field existed.
+  if (profile.observations !== undefined) out.observations = profile.observations;
   return out;
 }
 
@@ -3804,7 +3820,7 @@ function run(argv) {
       `run directory ${runDir} already exists; refusing to overwrite. ` +
         'The default run id hashes the planner inputs — the issue set INCLUDING each title/body/labels, the ' +
         'resolved profile (every field, so editing baseline/branch_template/worktree_template/verified/' +
-        'scope_companions/dispatch_defaults/integration_baseline derives a new id), and the CLI options — so an ' +
+        'scope_companions/dispatch_defaults/integration_baseline/observations derives a new id), and the CLI options — so an ' +
         'earlier run hashed to this ' +
         'same id. ' +
         'Read the plan.json already in that directory to see whether it is the plan you meant to produce. ' +

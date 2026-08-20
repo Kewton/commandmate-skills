@@ -1,0 +1,195 @@
+{
+  "description": "5 runs after the merge, one of them cancelled: the median is computed from the other 4, the cancelled one is counted by name in the report AND in the summary, and every one of the 5 is listed as its own row. A run created BEFORE the merge is outside the window and is not collected.",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ],
+    "profile_json": "node-fake-observations.json"
+  },
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": {
+      "repo_access": true
+    },
+    "git": {
+      "base_resolvable": true
+    },
+    "prs": {
+      "200": {
+        "view_state": "OPEN",
+        "checks": [
+          {
+            "name": "build",
+            "state": "SUCCESS"
+          }
+        ],
+        "merge": "ok"
+      },
+      "201": {
+        "view_state": "OPEN",
+        "checks": [
+          {
+            "name": "build",
+            "state": "SUCCESS"
+          }
+        ],
+        "merge": "ok"
+      }
+    }
+  },
+  "observe_args": [
+    "--runs",
+    "5"
+  ],
+  "observe_scenario": {
+    "observe": {
+      "merged": {
+        "200": {
+          "mergedAt": "2026-08-19T10:00:00Z",
+          "mergeCommit": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+        },
+        "201": {
+          "mergedAt": "2026-08-19T10:00:00Z",
+          "mergeCommit": "b1c2d3e4f5061728394a5b6c7d8e9f0123456789"
+        }
+      },
+      "runs": {
+        "ci.yml": [
+          {
+            "databaseId": 1006,
+            "url": "https://github.com/Kewton/CommandMate/actions/runs/1006",
+            "status": "completed",
+            "conclusion": "success",
+            "createdAt": "2026-08-19T10:50:00Z",
+            "startedAt": "2026-08-19T10:50:00Z",
+            "updatedAt": "2026-08-19T10:56:20Z"
+          },
+          {
+            "databaseId": 1005,
+            "url": "https://github.com/Kewton/CommandMate/actions/runs/1005",
+            "status": "completed",
+            "conclusion": "cancelled",
+            "createdAt": "2026-08-19T10:40:00Z",
+            "startedAt": "2026-08-19T10:40:00Z",
+            "updatedAt": "2026-08-19T10:41:00Z"
+          },
+          {
+            "databaseId": 1004,
+            "url": "https://github.com/Kewton/CommandMate/actions/runs/1004",
+            "status": "completed",
+            "conclusion": "success",
+            "createdAt": "2026-08-19T10:30:00Z",
+            "startedAt": "2026-08-19T10:30:00Z",
+            "updatedAt": "2026-08-19T10:36:25Z"
+          },
+          {
+            "databaseId": 1003,
+            "url": "https://github.com/Kewton/CommandMate/actions/runs/1003",
+            "status": "completed",
+            "conclusion": "success",
+            "createdAt": "2026-08-19T10:20:00Z",
+            "startedAt": "2026-08-19T10:20:00Z",
+            "updatedAt": "2026-08-19T10:27:20Z"
+          },
+          {
+            "databaseId": 1002,
+            "url": "https://github.com/Kewton/CommandMate/actions/runs/1002",
+            "status": "completed",
+            "conclusion": "success",
+            "createdAt": "2026-08-19T10:10:00Z",
+            "startedAt": "2026-08-19T10:10:00Z",
+            "updatedAt": "2026-08-19T10:17:26Z"
+          },
+          {
+            "databaseId": 1000,
+            "url": "https://github.com/Kewton/CommandMate/actions/runs/1000",
+            "status": "completed",
+            "conclusion": "success",
+            "createdAt": "2026-08-19T09:50:00Z",
+            "startedAt": "2026-08-19T09:50:00Z",
+            "updatedAt": "2026-08-19T09:57:00Z"
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "observations_source": "plan",
+    "issues": {
+      "200": {
+        "observable": true,
+        "merged_at": "2026-08-19T10:00:00Z",
+        "merge_commit": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        "pr_number": 200
+      },
+      "201": {
+        "observable": true,
+        "merged_at": "2026-08-19T10:00:00Z",
+        "merge_commit": "b1c2d3e4f5061728394a5b6c7d8e9f0123456789",
+        "pr_number": 201
+      }
+    },
+    "observations": {
+      "200": {
+        "ci-wallclock": {
+          "collected": 5,
+          "counted": 4,
+          "complete": true,
+          "median": 412.5,
+          "mean": 412.75,
+          "excluded": [
+            {
+              "conclusion": "cancelled",
+              "count": 1
+            }
+          ],
+          "run_ids": [
+            1002,
+            1003,
+            1004,
+            1005,
+            1006
+          ],
+          "values": [
+            446,
+            440,
+            385,
+            null,
+            380
+          ],
+          "baseline": null,
+          "baseline_source": null
+        }
+      }
+    },
+    "absent_run_ids": [
+      1000
+    ],
+    "summary_contains": [
+      "cancelled: 1",
+      "1002",
+      "1003",
+      "1004",
+      "1005",
+      "1006",
+      "412.5"
+    ],
+    "summary_absent": [
+      "1000"
+    ],
+    "completion_satisfied": true,
+    "absent_limitation_codes": [
+      "observation_incomplete",
+      "not_observable",
+      "baseline_unavailable"
+    ]
+  }
+}

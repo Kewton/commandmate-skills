@@ -237,6 +237,104 @@
     }
   },
   "$defs": {
+    "observation": {
+      "description": "One post-merge measurement, as the profile declared it and the planner froze it (Issue #221). The kind decides which extra keys are required, and each shape is CLOSED: an unknown kind or a missing key is a profile load_error (exit 6), never a declaration the runner quietly skips \u2014 a run that dropped one would report a complete observation set that is missing the measurement the author asked for. `unit` is required and never converted: the runner records the number the source gave it, and the unit is the only thing that says what it means.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "workflow",
+            "unit"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/observation_id"
+            },
+            "kind": {
+              "const": "gh_run"
+            },
+            "workflow": {
+              "type": "string",
+              "minLength": 1
+            },
+            "unit": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "workflow",
+            "job",
+            "step",
+            "unit"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/observation_id"
+            },
+            "kind": {
+              "const": "gh_job_step"
+            },
+            "workflow": {
+              "type": "string",
+              "minLength": 1
+            },
+            "job": {
+              "type": "string",
+              "minLength": 1
+            },
+            "step": {
+              "type": "string",
+              "minLength": 1
+            },
+            "unit": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "command",
+            "unit"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/observation_id"
+            },
+            "kind": {
+              "const": "command"
+            },
+            "command": {
+              "type": "string",
+              "minLength": 1
+            },
+            "unit": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "observation_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+      "description": "Names one measurement. Used as a lookup key across documents \u2014 in the observe report and in the --inspect artifact a \"before\" value is matched out of \u2014 so it has to survive a round trip through a JSON key without being quoted."
+    },
     "companion_rule": {
       "type": "object",
       "additionalProperties": false,
@@ -417,6 +515,13 @@
           "items": {
             "type": "string",
             "minLength": 1
+          }
+        },
+        "observations": {
+          "description": "Optional post-merge measurements for the observe runner (Issue #221). Each entry declares ONE thing to measure on the base branch AFTER a merge \u2014 a workflow's wall clock (gh_run), one job step's seconds (gh_job_step), or a number a command prints in a throwaway checkout of the merge commit (command). The planner does not USE it: it validates it (scripts/lib.mjs normalizeObservations) and echoes it here so observe.mjs reads the declaration out of the approved plan, the same handoff dispatch_defaults (#196) and integration_baseline (#195) use. Echoed only when the profile declared it, and last among the optional fields, so a plan built without it is byte-identical to the plans produced before it existed. A declared [] states that the repository has no post-merge observation, which observe.mjs refuses by name (observations_undeclared) rather than reporting an empty collection as one that was made.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/observation"
           }
         }
       }
