@@ -40,7 +40,21 @@ concurrency:
 jobs:
   build:
     name: build reproducibly and verify
-    runs-on: ubuntu-latest
+    # [self-hosted] Runs on this repository's ephemeral self-hosted runners
+    # (labels: self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull
+    # request opened from a fork, which falls back to `ubuntu-latest`.
+    #
+    # WHY THE FALLBACK. This repository is public, so a fork PR is code written
+    # by someone else. The runners are ephemeral — each job gets a fresh one and
+    # nothing survives it — but the job still executes on hardware we own and
+    # from our network position. Keeping fork PRs on GitHub-hosted runners means
+    # an outside contribution still gets the full CI verdict without ever
+    # running on our machines.
+    #
+    # The expression reads: anything that is not a pull request (push, tag,
+    # workflow_dispatch) and any pull request whose head repository IS this
+    # repository -> self-hosted; everything else -> ubuntu-latest.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -53,6 +67,16 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
       commit: ${{ steps.resolve.outputs.commit }}
     steps:
+      # [self-hosted] Toolchain preflight. On a GitHub-hosted image python3 is
+      # guaranteed; on a self-hosted runner it is whatever the image provides.
+      # Fail here, by name, rather than three steps later inside a script.
+      - name: Preflight the toolchain
+        run: |
+          for tool in python3 tar gzip sha256sum; do
+            command -v "$tool" >/dev/null || { echo "::error::missing required tool: $tool"; exit 1; }
+          done
+          python3 --version
+
       - name: Check out the tagged commit
         uses: actions/checkout@v4
         with:
@@ -144,7 +168,21 @@ jobs:
     name: publish artifact then Catalog
     needs: build
     if: github.event_name == 'push'
-    runs-on: ubuntu-latest
+    # [self-hosted] Runs on this repository's ephemeral self-hosted runners
+    # (labels: self-hosted, Linux, ARM64, ubuntu-24.04), EXCEPT for a pull
+    # request opened from a fork, which falls back to `ubuntu-latest`.
+    #
+    # WHY THE FALLBACK. This repository is public, so a fork PR is code written
+    # by someone else. The runners are ephemeral — each job gets a fresh one and
+    # nothing survives it — but the job still executes on hardware we own and
+    # from our network position. Keeping fork PRs on GitHub-hosted runners means
+    # an outside contribution still gets the full CI verdict without ever
+    # running on our machines.
+    #
+    # The expression reads: anything that is not a pull request (push, tag,
+    # workflow_dispatch) and any pull request whose head repository IS this
+    # repository -> self-hosted; everything else -> ubuntu-latest.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 15
     # Gate the only job that can change anything. Configure `release` in
     # Settings > Environments with required reviewers; see
@@ -169,6 +207,21 @@ jobs:
       # ones. The artifact itself was already built and verified from the tagged
       # commit in the build job, so nothing about the payload depends on this
       # checkout.
+      # [self-hosted] Toolchain preflight, deliberately the FIRST step of the
+      # only job that can change the world. `gh` ships with GitHub-hosted images
+      # but not necessarily with a self-hosted one, and a `gh` that goes missing
+      # halfway through would strand the release between "asset uploaded" and
+      # "Catalog appended" — the exact intermediate state the publish order in
+      # docs/design/release-pipeline.md exists to avoid. Nothing has been written
+      # yet at this point, so failing here is free.
+      - name: Preflight the toolchain
+        run: |
+          for tool in gh python3 git; do
+            command -v "$tool" >/dev/null || { echo "::error::missing required tool: $tool"; exit 1; }
+          done
+          gh --version
+          python3 --version
+
       - name: Check out the default branch
         uses: actions/checkout@v4
         with:
