@@ -2861,7 +2861,7 @@
         "node",
         "ci"
       ],
-      "latest": "0.2.0",
+      "latest": "0.3.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -3009,6 +3009,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-advisor-v0.2.0/cmate-verify-advisor-0.2.0.tar.gz",
             "sha256": "c7f848593251440de0eac56bacf86ad01b481b298697f49ee4b7b60348d3e8e5",
             "size": 37720,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-31 on Claude Code 2.1.220 with CommandMate 0.16.0 for 9 packages under docs/agent-support-matrix.md 3.2. This package was added 2026-08-02 and was NOT separately measured; install layout is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-31 on Codex CLI 0.145.0 (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured. The analyser needs only node, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured. The analyser needs only node, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.17.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.3.0",
+          "changelog": "cmate-verify-advisor 0.3.0 — 上流と同じ verify.yaml を読めるようにし、flake を推定と実測の 2 段にした\n\ncmate-verify 0.5.0 と同じキー集合（gates: mutex / retryOnFail / flakyIsPass、\noptions: requireEnvClean）を同じ値域で受理する。読めない verify.yaml に対して助言は\n0 件になるので、parity が崩れている間この skill は静かに無力だった。\nキー集合の一致は tests/fixtures/cmate-verify-advisor/parser-parity.sh が pin する。\n\n- mutex / retryOnFail / flakyIsPass は「層 1 が書ける変更ではない」として内部ガードで\n  書き込みを禁じた。層 1 は timeout の調整だけを提案する層であり、排他や再実行の宣言は\n  リポジトリの運用判断である\n- [mutex] … waited= を duration 系列から外したまま集計し、待ちが観測されたゲートには\n  timeout の短縮を提案しない。mutex 付きゲートの timeoutSec はロック待ちの予算でもあり、\n  短縮は混雑を「裁定に到達しないゲート」に変える\n- 層 2 の flake を 2 段にした。flake-observed は [flaky] アンカー（または verify --json の\n  gates[].flaky）による実測で分母を持ち、従来の flake-candidate は run をまたいだ\n  fail→pass の推定である。実測が在るゲートについては推定を出さない",
+          "published_at": "2026-08-20T15:02:28Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-advisor-v0.3.0",
+            "commit": "65f58f22264fb76924057e6989eddebd0fa8a56a"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-advisor-0.3.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-advisor-v0.3.0/cmate-verify-advisor-0.3.0.tar.gz",
+            "sha256": "c34f10938f8210f8ccb3341815f045bc68f2a950267af58450b06de87238c0f5",
+            "size": 45360,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
