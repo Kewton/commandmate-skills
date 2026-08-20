@@ -2523,7 +2523,7 @@
         "timeout",
         "work-evidence"
       ],
-      "latest": "0.4.2",
+      "latest": "0.5.0",
       "versions": [
         {
           "version": "0.1.1",
@@ -2759,6 +2759,50 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.4.2/cmate-verify-0.4.2.tar.gz",
             "sha256": "4738bfdb4a889015f61a854a409f6e54b80ca9a35bdcf7c7a8b82a36fea3296b",
             "size": 15781,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.5.0",
+          "changelog": "cmate-verify 0.5.0 — verify.yaml v1 に mutex / worktree env / FLAKY を足し、run 途中で作業 directory を失う欠陥を塞いだ\n\n上流 CommandMate の #1771（gate 単位の mutex と worktree ごとの env 注入）/ #1772（FLAKY を\n一級の outcome にする）/ #1740（options.requireEnvClean）と同じ受理集合を持つ。片方だけが\n知るキーは正当な verify.yaml への exit 2 になるため、キーの受理だけでなく意味も実装した。\n\n- mutex: ~/.commandmate/locks/<name>.lock を mkdir で取り、待った時間は waited= として\n  duration と別 field に出す（待ちを実行時間に混ぜると timeout 調整と advisor の入力が歪む）。\n  空かないまま gate の timeoutSec に達したら TIMEOUT でも FAIL でもなく\n  SKIP reason=mutex-wait —— 裁定に到達していないことを名乗る\n- retryOnFail: 値域は 0 か 1 のみ。再実行は同一 tree で 1 回だけ、対象は FAIL（非ゼロ終了）\n  のみで TIMEOUT と mutex-SKIP は対象外。2 回目が裁定に到達しなければ 1 回目の FAIL が立つ\n- flakyIsPass: gate 単位。既定は FLAKY を fail 扱いで、ゲートは 1 bit も弱くならない。\n  FLAKY の綴りは flakyIsPass の値で変わらない（変わるのは RESULT と exit code）\n- CM_WORKTREE_INDEX / CM_WORKTREE_ID は上書きしない。gate 側が既定値を持つ\n- requireEnvClean: 受理して報告するが判定しない（ベースラインが無いので SKIP reason=no-baseline）\n\nあわせて #228 を修正した。ARM64 の self-hosted runner で suite が確率的にどこかのケースで\n赤くなり、署名は常に「gate のログ先 directory が無い」だった。原因は bash が fork した子で\nsignal handler は reset するが EXIT trap の文字列は残すことで、watchdog を後始末する\nkill -TERM が fork 直後の subshell に届くと、その子が親から受け継いだ rm -rf \"$WORKDIR\" を\n実行していた。引き金（kill -s KILL。SIGKILL は catch できない）と結果（trap に BASH_SUBSHELL\nガード）の両方を塞ぎ、workdir-lifetime fixture で回帰を固定した。",
+          "published_at": "2026-08-20T14:59:40Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-v0.5.0",
+            "commit": "00c23fb9adfc217a60502ac76f21830aaf1c61f2"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-0.5.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.5.0/cmate-verify-0.5.0.tar.gz",
+            "sha256": "10e071638a0d6301efc3eec1ec6d748092a33f3510937ca55027e5b9332c786c",
+            "size": 29455,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
