@@ -246,6 +246,24 @@ Enter は tmux ペインへ直接送るので **CommandMate サーバの承認�
   `commits=` / `uncommitted=` の 0 は「測れなかった」であって「作業ゼロ」ではない。
   `ERROR` = その worker については**何も測れていない**（両カウンタが答えの代わりに 0）、
   `WARN` = 片方のカウンタだけが劣化し、もう片方は実測値。
+- **「もう出した」の記録はファイルであり、置き場を PID で決めることはしない**
+  （CommandMate #2119）。`monitor.sh` はカウンタを `$(...)` の subshell で呼ぶのでシェル変数では
+  次のポーリングまで残らず、マーカーは `$MONITOR_HOOKS_STATE_DIR/warned-<wid>.<cause>` という
+  ファイルである。置き場は 3 通り:
+
+  | 状況 | 置き場 | 掃除 |
+  |---|---|---|
+  | `MONITOR_HOOKS_STATE_DIR` を指定 | その値 | 呼び出し側の責任（`hooks-git.sh` は消さない） |
+  | `monitor.sh` から source | `monitor.sh` の `STATE_DIR` に相乗り | `monitor.sh` の EXIT trap が一緒に消す |
+  | どちらも無い（standalone） | `mktemp -d "${TMPDIR:-/tmp}/cm-monitor-hooks-XXXXXXXX"` | 自分で作った時だけ EXIT trap で消す（既に EXIT trap があるときは張らない） |
+
+  standalone は 0.7.0 まで `${TMPDIR:-/tmp}/cm-monitor-hooks-$$` だった。PID は再利用され
+  （macOS は約 10 万で周回）、`monitor.sh` を経由しない source は誰も掃除しないので、再利用 PID を
+  引いた run が**自分が書いていないマーカー**を見つけて本物の `WARN` / `ERROR` を黙って捨てていた
+  （実測 2026-08-27: `$TMPDIR` に 4129 ディレクトリ / 4214 マーカーが堆積し、キーはすべて次の run が
+  出そうとするものだった）。`mktemp -d` は既存の名前を返さないのでこの誤抑止は起きない。EXIT trap を
+  条件付きにしているのは、bash の EXIT trap が 1 本しかなく、source されたファイルが無条件に張ると
+  オペレータ自身の後始末を黙って潰すためである。
 
 #### worktree-id の突合順（CommandMate #1728）
 
