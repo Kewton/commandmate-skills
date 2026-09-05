@@ -171,8 +171,8 @@ files:
     executable: true
     script: true
   - path: scripts/monitor.sh
-    sha256: 57025a2d18762c6fa131cc010f5b57b835214397fc175d0090c0576521af657c
-    size: 33204
+    sha256: 2285f534ba6760e45f0bc32e378be3b0fd7cc38ad53c2272c417e7c76eea5cdd
+    size: 34506
     kind: script
     executable: true
     script: true

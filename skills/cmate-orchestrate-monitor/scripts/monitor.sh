@@ -386,6 +386,12 @@ done_count=0
 # `set -u`.
 run_ended=1
 
+# Issue #1950: only the signal that actually stopped the run gets to explain
+# itself. A second one arriving while the first is still mid-report must not
+# take the story over — the latch that enforces that lives in
+# `report_fatal_signal` below.
+fatal_signal_seen=""
+
 report_exit() {
   re__rc=$?
   if [ "$run_ended" = "0" ]; then
@@ -396,7 +402,24 @@ report_exit() {
 
 # Fatal by default: report, then exit 128+n so a supervising shell still sees the
 # conventional status. `cleanup` runs from the EXIT trap that follows.
+#
+# The latch on `fatal_signal_seen` is load-bearing, not housekeeping (Issue
+# #1950). The usual way this loop dies is `spawnSync(..., { timeout })`, and node
+# delivers SIGTERM and closes the child's stdio in the same breath. The `echo`
+# below then writes into a pipe nobody is reading, collects a SIGPIPE for it,
+# and — without the latch — re-enters here as PIPE and exits 141 where the
+# caller was owed 143. A timeout that surfaces as `status: 141` with empty
+# stderr reads like an argument about exit codes and is nothing of the sort;
+# working that out cost Issue #1950 the better part of a day.
+#
+# SIGPIPE stays reportable. A lone one — `monitor.sh | head`, the case the PIPE
+# trap was added for — is the FIRST signal, so it finds the latch open, prints,
+# and exits 141 exactly as before. Only a signal that lands on a shutdown
+# already in progress is dropped, and the one already in progress is the one
+# that explains what happened.
 report_fatal_signal() {
+  if [ -n "$fatal_signal_seen" ]; then return; fi
+  fatal_signal_seen=$1
   echo "monitor: ERROR caught SIG$1 (signal $2) on poll round $poll_round — monitoring stops here" >&2
   exit $((128 + $2))
 }
