@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-worktree-cleanup
 name: cmate-worktree-cleanup
-version: 0.1.5
+version: 0.1.6
 summary: merge 済み・不要な git worktree を、削除可能性と証跡を dry-run で提示したうえで、clean かつ merge 証跡が十分な対象だけ guarded な方式で安全に削除する。dirty・unmerged・検証不能は削除しない。
 description: >-
   対象 issue または eligible な worktree を検査し、削除可能性と proof を dry-run で
@@ -61,8 +61,11 @@ compatibility:
       support: unknown
       evidence: Not verified for this version. Readable as a procedure, discovery and reload unverified.
     - agent: opencode
-      support: unknown
-      evidence: Not verified for this version. Readable as a procedure, discovery and reload unverified.
+      support: native
+      evidence: 'Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode''s own slash palette.'
+    - agent: command-code
+      support: native
+      evidence: 'Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer''s .agents/skills copy suffices. No restart needed.'
 requirements:
   commands:
     - name: git
