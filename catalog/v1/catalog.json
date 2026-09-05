@@ -2052,7 +2052,7 @@
         "guard",
         "bash"
       ],
-      "latest": "0.7.0",
+      "latest": "0.7.1",
       "versions": [
         {
           "version": "0.1.0",
@@ -2268,6 +2268,55 @@
                 "agent": "opencode",
                 "evidence": "Not measured for this version. Readable as a procedure; discovery unverified.",
                 "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.15.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.7.1",
+          "changelog": "cmate-orchestrate-monitor 0.7.1 — 最初に来た致命シグナルだけが報告されるようにし、SIGTERM が 141 に化けるのを止める\n\n上流 CommandMate #1950 の修正を counterpart へ移植した（Issue #236 / PR #239）。\n\nspawnSync({ timeout }) が SIGTERM 送出と stdio クローズを同じ手順で行うため、\nSIGTERM ハンドラが閉じた stderr へ書いて SIGPIPE を受け、再入して 143 が 141 に\n上書きされていた。141 を「上流でパイプが切れた」と読むと原因を取り違える。\nfatal_signal_seen ラッチで first-signal-wins にし、単独 SIGPIPE\n（monitor.sh | head）は従来どおり 141 で報告される挙動を保った。\n\nあわせて compatibility.agents に opencode / command-code の discovery 実測を\n記載した（Issue #238 / PR #240）。",
+          "published_at": "2026-09-05T09:52:52Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-monitor-v0.7.1",
+            "commit": "93232177106e22d3b484c053d83a3e30a3c249cc"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-monitor-0.7.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-monitor-v0.7.1/cmate-orchestrate-monitor-0.7.1.tar.gz",
+            "sha256": "1e1f8692d17df8cbe8e466bd7adb49178e8c8b29aa60d1033104fe8029db5693",
+            "size": 71005,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0. An installed skill was discovered from .claude/skills and matched in the slash palette; the installer writes .agents/skills and .claude/skills byte-identically.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0. It reads SKILL.md from .agents/skills (model self-report of the absolute path, not a mechanical trace). This version does not expose skills as slash commands; invoke by name or run the scripts.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; discovery unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
               }
             ],
             "commandmate": ">=0.15.0 <1.0.0"
