@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-worktree-setup
 name: cmate-worktree-setup
-version: 0.1.5
+version: 0.1.6
 summary: 対象repositoryを検証し既存branch/directory/worktreeを暗黙上書きせず、profile規約に沿った専用worktreeをresolved base SHAから作成し、proportional baseline結果を証跡付きで返す。
 description: >-
   1つ以上のIssueについて、対象リポジトリを検証し、衝突しない専用 worktree を作成し、
@@ -63,8 +63,11 @@ compatibility:
       support: unknown
       evidence: Discovery path not verified for this version
     - agent: opencode
-      support: unknown
-      evidence: Discovery path not verified for this version
+      support: native
+      evidence: 'Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode''s own slash palette.'
+    - agent: command-code
+      support: native
+      evidence: 'Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer''s .agents/skills copy suffices. No restart needed.'
 requirements:
   commands:
     - name: commandmate
