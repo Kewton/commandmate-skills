@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-orchestrate-monitor
 name: cmate-orchestrate-monitor
-version: 0.7.0
+version: 0.7.1
 summary: commandmate wait が見ない停滞（プロンプト待ち・rate limit・リトライ枯渇死）を capture の 1 フレームから検知して回収し、介入と判定の全件を機械可読なログに残す監視レシピ。契約付き dispatch の一次監督は cmate-orchestrate の wait ループで、本 Skill はその回収と可観測性のサイドカーである。
 description: >-
   tmux セッション上で走る worker（coding CLI）を監督するための、実運用で検証済みの監視レシピである。
@@ -168,8 +168,8 @@ files:
     executable: true
     script: true
   - path: scripts/monitor.sh
-    sha256: 57025a2d18762c6fa131cc010f5b57b835214397fc175d0090c0576521af657c
-    size: 33204
+    sha256: 2285f534ba6760e45f0bc32e378be3b0fd7cc38ad53c2272c417e7c76eea5cdd
+    size: 34506
     kind: script
     executable: true
     script: true
