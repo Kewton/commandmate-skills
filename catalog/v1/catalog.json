@@ -1029,7 +1029,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.32.0",
+      "latest": "0.32.1",
       "versions": [
         {
           "version": "0.4.0",
@@ -2169,6 +2169,55 @@
                 "agent": "opencode",
                 "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
                 "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.32.1",
+          "changelog": "cmate-orchestrate 0.32.1 — opencode / Command Code の discovery 実測（2026-09-04）を compatibility.agents へ反映（Issue #238 / PR #240）。\n\nopencode 1.18.22（再確認 1.18.27）と Command Code 1.47.0 の実測により、両ツールを\nsupport: native として宣言した。CommandMate 側の CLI_TOOL_IDS mirror にも command-code を追加済み。\nコード・SKILL.md の変更は無く、manifest の compatibility.agents と version のみの更新。",
+          "published_at": "2026-09-06T01:14:20Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.32.1",
+            "commit": "ac7fc1989801ad383a928a8a2688433fe1464e1f"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.32.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.32.1/cmate-orchestrate-0.32.1.tar.gz",
+            "sha256": "1ff3869aca895bfcfa32aa6178abd570916b9cc5ca8c0ad01caa7ef26b39aeac",
+            "size": 802089,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
               }
             ],
             "commandmate": ">=0.11.0 <1.0.0"
