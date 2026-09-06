@@ -3292,7 +3292,7 @@
         "node",
         "ci"
       ],
-      "latest": "0.3.0",
+      "latest": "0.3.1",
       "versions": [
         {
           "version": "0.1.0",
@@ -3508,6 +3508,55 @@
                 "agent": "opencode",
                 "evidence": "Not measured. The analyser needs only node, so the procedure is usable by hand; discovery is unverified.",
                 "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.17.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.3.1",
+          "changelog": "cmate-verify-advisor 0.3.1 — opencode / Command Code の discovery 実測（2026-09-04）を compatibility.agents へ反映（Issue #238 / PR #240）。\n\nopencode 1.18.22（再確認 1.18.27）と Command Code 1.47.0 の実測により、両ツールを\nsupport: native として宣言した。CommandMate 側の CLI_TOOL_IDS mirror にも command-code を追加済み。\nコード・SKILL.md の変更は無く、manifest の compatibility.agents と version のみの更新。",
+          "published_at": "2026-09-06T01:22:37Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-advisor-v0.3.1",
+            "commit": "ac7fc1989801ad383a928a8a2688433fe1464e1f"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-advisor-0.3.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-advisor-v0.3.1/cmate-verify-advisor-0.3.1.tar.gz",
+            "sha256": "a75eb1e18b60a760fde0e5518c585854ac81021eec029aae2326d84df866126b",
+            "size": 45610,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-31 on Claude Code 2.1.220 with CommandMate 0.16.0 for 9 packages under docs/agent-support-matrix.md 3.2. This package was added 2026-08-02 and was NOT separately measured; install layout is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-31 on Codex CLI 0.145.0 (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured. The analyser needs only node, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
               }
             ],
             "commandmate": ">=0.17.0 <1.0.0"
