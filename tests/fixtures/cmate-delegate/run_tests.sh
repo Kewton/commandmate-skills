@@ -3,7 +3,7 @@
 #
 #   bash tests/fixtures/cmate-delegate/run_tests.sh
 #
-# Four things are proved here, in this order:
+# Five things are proved here, in this order:
 #
 #  1. **The request template still asks for everything a request needs.** The
 #     five fields SKILL.md refuses to send without are present in the ja block,
@@ -23,6 +23,12 @@
 #     reaches `respond`, `auto-yes`, `interrupt` or `--auto-yes` -- proved both
 #     by a `commandmate` stub that records every call and fails loudly on an
 #     unexpected subcommand, and by grepping the shipped scripts.
+#  5. **SKILL.md section 8 still teaches the relay, and does not declare it
+#     absent.** The section that covers `--reply-to` / `--async` has to carry
+#     the ledger commands and the four refusals, and must not say the CLI does
+#     not exist yet. That sentence is what issue #243 removed: it read as "this
+#     whole section is unusable", so an agent skipped the section entirely
+#     while the commands were shipping in CommandMate#2377.
 #
 # Requires bash and the standard POSIX tools. No network and no CommandMate
 # server: `commandmate` on PATH is a stub that only writes a log.
@@ -387,6 +393,118 @@ if [ -z "$static_hits" ]; then
   pass 'the shipped scripts contain no respond / interrupt / auto-yes invocation'
 else
   fail 'the shipped scripts contain no respond / interrupt / auto-yes invocation' "$static_hits"
+fi
+
+# ---------------------------------------------------------------------------
+# 5. SKILL.md section 8 teaches the relay ledger, not its absence
+# ---------------------------------------------------------------------------
+printf '\n== 5. section 8 teaches the relay ledger, not its absence ==\n'
+
+SKILL_MD="$SKILL_DIR/SKILL.md"
+
+# The literals section 8 has to keep. Each one is a thing an agent cannot work
+# out from the rest of the file: the two ledger commands, the two asynchronous
+# forms, the limits the server refuses on, and the header a delivered reply
+# arrives under.
+SECTION8_REQUIRED='commandmate relays
+relays cancel <relay-id>
+--reply-to
+--async
+--allow-relay-chain
+3 hops
+24h
+exit 2
+[from '
+
+# check_section8 <file> -- exit 0 when the section carries every literal above
+# and does not declare the CLI absent. Names what is wrong on stderr.
+check_section8() {
+  local file="$1" lit oldifs missing=0
+  oldifs="$IFS"
+  IFS='
+'
+  for lit in $SECTION8_REQUIRED; do
+    IFS="$oldifs"
+    if ! grep -qF -- "$lit" "$file"; then
+      printf 'section 8 no longer mentions: %s\n' "$lit" >&2
+      missing=$((missing + 1))
+    fi
+    IFS='
+'
+  done
+  IFS="$oldifs"
+  # 「まだ存在しない」 -- the assertion #243 removed. A sentence that dates a
+  # shipped CLI as unbuilt kills the section it closes.
+  if grep -qF -- 'まだ存在しない' "$file"; then
+    printf 'section 8 declares the CLI absent again\n' >&2
+    missing=$((missing + 1))
+  fi
+  [ "$missing" -eq 0 ]
+}
+
+# The extraction has to be anchored at both ends: a renamed heading 9 would let
+# section 8 swallow the rest of the file, and every check below would pass on
+# text that is not section 8 at all.
+SECTION8="$WORK/section8.md"
+awk '/^## 8\./ { inside = 1 } /^## 9\./ { inside = 0 } inside { print }' \
+  "$SKILL_MD" > "$SECTION8"
+
+if [ "$(grep -c '^## 8\.' "$SKILL_MD")" -eq 1 ] \
+  && [ "$(grep -c '^## 9\.' "$SKILL_MD")" -eq 1 ] \
+  && [ -s "$SECTION8" ]; then
+  pass 'section 8 is bounded by exactly one "## 8." and one "## 9." heading'
+else
+  fail 'section 8 is bounded by exactly one "## 8." and one "## 9." heading' \
+    'the extraction is empty or the headings moved; every check below would be vacuous'
+fi
+
+if out=$(check_section8 "$SECTION8" 2>&1); then
+  pass 'section 8 carries the relay commands, the refusals and no "not built yet"'
+else
+  fail 'section 8 carries the relay commands, the refusals and no "not built yet"' "$out"
+fi
+
+# The checker is held to the same standard as check-brief: every literal it
+# claims to require is deleted from a copy, and that deletion has to be what it
+# reports.
+expect_section8_rejected() { # expect_section8_rejected <name> <literal>
+  local name="$1" literal="$2" copy out
+  mutations=$((mutations + 1))
+  copy="$WORK/section8-mutated.md"
+  LITERAL="$literal" awk '
+    BEGIN { needle = ENVIRON["LITERAL"] }
+    index($0, needle) == 0 { print }
+  ' "$SECTION8" > "$copy"
+  if cmp -s "$SECTION8" "$copy"; then
+    fail "$name" "the mutation removed nothing: literal not found in section 8 ($literal)"
+    return
+  fi
+  if out=$(check_section8 "$copy" 2>&1); then
+    fail "$name" "check_section8 accepted a section 8 with '$literal' removed"
+  else
+    pass "$name"
+  fi
+}
+
+expect_section8_rejected 'the relays listing removed is rejected'   'commandmate relays'
+expect_section8_rejected 'relays cancel removed is rejected'        'relays cancel <relay-id>'
+expect_section8_rejected '--reply-to removed is rejected'           '--reply-to'
+expect_section8_rejected '--async removed is rejected'              '--async'
+expect_section8_rejected 'the chain override removed is rejected'   '--allow-relay-chain'
+expect_section8_rejected 'the hop limit removed is rejected'        '3 hops'
+expect_section8_rejected 'the 24h deadline removed is rejected'     '24h'
+expect_section8_rejected 'the refusal exit code removed is rejected' 'exit 2'
+expect_section8_rejected 'the [from header removed is rejected'     '[from '
+
+# And the sentence #243 deleted must not be able to come back unnoticed.
+mutations=$((mutations + 1))
+copy="$WORK/section8-stale.md"
+cp "$SECTION8" "$copy"
+printf 'この節の CLI は**まだ存在しない**。\n' >> "$copy"
+if check_section8 "$copy" >/dev/null 2>&1; then
+  fail 'a re-added "まだ存在しない" is rejected' 'check_section8 accepted the stale assertion'
+else
+  pass 'a re-added "まだ存在しない" is rejected'
 fi
 
 # ---------------------------------------------------------------------------
