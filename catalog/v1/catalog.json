@@ -205,6 +205,95 @@
       ]
     },
     {
+      "id": "cmate-delegate",
+      "name": "cmate-delegate",
+      "summary": "隣のセッションへ一言頼んで返答を回収する手順。宛先解決・依頼文の定型・待機と exit code の分岐・返答の要約を1本にする。プロンプトは人へ返し、自分では respond せず、相手の auto-yes も触らない。",
+      "provider": {
+        "name": "CommandMate",
+        "url": "https://github.com/Kewton/CommandMate"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/Kewton/commandmate-skills",
+      "keywords": [
+        "delegation",
+        "multi-session",
+        "instance",
+        "roster",
+        "alias",
+        "handoff",
+        "relay",
+        "exit-code",
+        "prompt",
+        "human-in-the-loop",
+        "auto-yes",
+        "summary",
+        "commandmate-cli",
+        "bash"
+      ],
+      "latest": "0.1.1",
+      "versions": [
+        {
+          "version": "0.1.1",
+          "changelog": "cmate-delegate 0.1.1 — 初回リリース。セッション間の委任手順を Skill 化（#241 / PR #242）: 宛先解決（instances / alias）、依頼文の定型、wait の exit code 分岐（0/10/124）、プロンプトは人へ報告して止まる、相手の Auto-Yes は触らない、ask.sh は wait の exit code を透過する。第8節に relay 台帳の運用を収録（#243 / PR #244）: send --reply-to / ask --async の 2 形、commandmate relays / relays cancel、待つか待たないかの選択基準、拒否条件（連鎖は既定拒否・hops 上限 3・同一ペア 1 件・24h 期限）。CLI の有無は版で分岐させず send --help のプローブで確かめる。",
+          "published_at": "2026-09-07T09:37:40Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-delegate-v0.1.1",
+            "commit": "82483cb6d15eb1cc2abf03048157c91dd038774a"
+          },
+          "artifact": {
+            "asset_name": "cmate-delegate-0.1.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-delegate-v0.1.1/cmate-delegate-0.1.1.tar.gz",
+            "sha256": "3c2cd59b91e845d5cdfe9fcab097fa5d370b298aecae497ee8458d6017788e05",
+            "size": 21470,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0, re-checked 2026-07-31 as a two-way control - an installed skill is found under .claude/skills and matches in the slash palette. Package-independent; this package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 and re-checked 2026-08-02 with a mechanical trace (the /skills picker lists it). That version exposes no slash command, so invoke by name. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured, for this package or any other. The wrapper needs only bash and the commandmate CLI, so the procedure is usable by hand; discovery and reload are unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "copilot",
+                "evidence": "Not measured, for this package or any other. No discovery, invocation or reload behaviour has been observed, so no support level is claimed.",
+                "support": "unknown"
+              },
+              {
+                "agent": "antigravity",
+                "evidence": "Not measured, for this package or any other. No discovery, invocation or reload behaviour has been observed, so no support level is claimed.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        }
+      ]
+    },
+    {
       "id": "cmate-issue-authoring",
       "name": "cmate-issue-authoring",
       "summary": "Feature 記述から実装可能な Issue 群を起案する。read-only の分割計画を schema 準拠 artifact で出し、明示承認の下でだけ依存順に GitHub へ一括登録する 2 phase 手順。",
