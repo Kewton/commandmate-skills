@@ -158,3 +158,17 @@ jobs:
       # nothing ever ran it. Wired here and in .commandmate/verify.yaml (#69).
       - name: Run the cmate-verify-advisor suite
         run: bash tests/fixtures/cmate-verify-advisor/run_tests.sh
+
+      # Third time for the same defect class (#241, after #57/#69 and #70):
+      # cmate-delegate shipped its regression suite in the same commit as the
+      # package and named it nowhere, so nothing ran the assertions that hold
+      # ask.sh's exit-code pass-through — the one property that keeps a timed-out
+      # delegation from being reported as a finished one. Wired here and in
+      # .commandmate/verify.yaml.
+      #
+      # It needs no Node: it drives a `commandmate` stub on PATH and touches no
+      # network. It sits in this job anyway, with the other fixture suites,
+      # rather than in `validate` — that job's stated property is stdlib-only
+      # Python, and a bash suite would end it.
+      - name: Run the cmate-delegate suite
+        run: bash tests/fixtures/cmate-delegate/run_tests.sh
