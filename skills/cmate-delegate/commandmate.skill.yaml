@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-delegate
 name: cmate-delegate
-version: 0.1.0
+version: 0.1.1
 summary: 隣のセッションへ一言頼んで返答を回収する手順。宛先解決・依頼文の定型・待機と exit code の分岐・返答の要約を1本にする。プロンプトは人へ返し、自分では respond せず、相手の auto-yes も触らない。
 description: |-
   セッション A が別のセッション B へ作業を頼み、返答を受け取って報告するまでの手順である。「Codex 2 にこの diff をレビューしてもらって」のような一言の委任が対象で、契約付き dispatch・PR・merge は扱わない（それは cmate-orchestrate の領分）。
@@ -19,7 +19,7 @@ capabilities:
   - 相手の auto-yes を読むだけで変更せず、--auto-yes も auto-yes --enable も実行しない
   - 返答を結論・変更されたファイル・相手が残した懸念・未解決の質問の4つに分けて要約する
   - 画面末尾から読んだのか履歴から読んだのかを報告に明記し、DONE: 行が無ければ途中である可能性を書く
-  - reply-to で返答が自動配送される運用（CommandMate#2377）で、relay 由来のメッセージへ再び reply-to で返さない
+  - reply-to で返答が自動配送される運用（CommandMate#2377）を relays で確認し、要らなくなった relay を cancel し、relay 由来のメッセージへ再び reply-to で返さない
 expected_outcomes:
   - 委任のたびに人がハーネス（送り方・待ち方・prompt の扱い）を書き直さなくてよくなる
   - 相手のコンテキストが共有されていないまま送られた依頼文で、見当違いの答えが返ることが減る
@@ -29,6 +29,8 @@ expected_outcomes:
   - wait の exit 0 が「タスク完了」として報告されない
   - 相手が残した懸念と未解決の質問が、要約の過程で消えない
   - 契約付き dispatch が要る作業に、この軽い手順が流用されない
+  - 実装済みの CLI を「まだ存在しない」と読んで、待たない委任（reply-to / async）の経路が使われないまま終わらない
+  - relay の拒否（連鎖・hops 超過・同一ペアの重複）が返す exit 2 が、引数の誤りと取り違えられない
 provider:
   name: CommandMate
   url: https://github.com/Kewton/CommandMate
@@ -41,6 +43,7 @@ keywords:
   - roster
   - alias
   - handoff
+  - relay
   - exit-code
   - prompt
   - human-in-the-loop
@@ -92,14 +95,14 @@ risk_rationale: >-
   commandmate CLI が local の API を叩くだけなので host は固定しない。
 files:
   - path: SKILL.md
-    sha256: 10c9b9797ac5b975978cb2380f91fa1b96a9721268959a11c7c6a5a1ae6e8631
-    size: 17065
+    sha256: 6ec7e73ee5db492a7f48fc064f33040651fd6dd3c07d652194c0cf0c0f133f60
+    size: 22322
     kind: skill_md
     executable: false
     script: false
   - path: references/agent-compatibility.md
-    sha256: b10fd5346efbb53610053b203a27c5a1e7150cee350c06649a1f6f2d2529d75a
-    size: 8544
+    sha256: a1e1b48e3d58efc54190ff5fd1170bdd4a054b9de549c4e07c09acbf0dad587b
+    size: 8864
     kind: instruction
     executable: false
     script: false

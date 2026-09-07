@@ -81,12 +81,14 @@ manifest の `compatibility.agents` には **実測した Agent と CLI version 
 | 1 コマンド委任 | `commandmate ask --help` が exit 0 か | `send`→`wait`→`capture` の 3 コマンド経路（v0.1 の既定）へ落ちる |
 | 自己判定の第1経路 | `commandmate whoami --json` が exit 0 か | SKILL.md 第1節の経路 2〜4 へ落ちる |
 | 返答の自動配送 | `commandmate send --help` に `--reply-to` が載るか | 待って回収する（SKILL.md 第4節） |
+| relay 台帳の読み書き | `commandmate relays --help` が exit 0 か | 張った relay の状態確認も取り下げもできない。`--reply-to` を使わず、第4節で待って回収する |
 
-**`ask` / `whoami` / `peers` / `--reply-to` を下限に入れない。** それらは
+**`ask` / `whoami` / `peers` / `--reply-to` / `relays` を下限に入れない。** それらは
 [CommandMate#2376](https://github.com/Kewton/CommandMate/issues/2376) /
-[#2377](https://github.com/Kewton/CommandMate/issues/2377) のもので、
-**0.31.3 の時点でどれも存在しない**（`commandmate --help` の Commands 一覧で実測）。
-無い前提の経路がこの package の既定であり、`ask` は在れば使う**上乗せ**である。
+[#2377](https://github.com/Kewton/CommandMate/issues/2377) で入ったもので、
+**0.31.3 には 1 つも無かった**（`commandmate --help` の Commands 一覧で実測）。
+下限を上げれば、その版でこの Skill が使えなくなるだけである。
+無い前提の経路がこの package の既定であり、`ask` も `--reply-to` も在れば使う**上乗せ**である。
 
 「現時点の公開版は…」という形の断定を SKILL.md に書かないのは、
 **書いた当日に嘘になる**からである。判るのは実行時であって、宣言時ではない。
