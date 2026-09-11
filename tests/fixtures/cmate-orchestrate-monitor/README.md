@@ -259,6 +259,26 @@ delivered / undelivered の 2 本を同じ fixture・同じ hooks で並べ、
 **「監視が死んだ」を検知するテストは、監視が死んでも緑になりうる。** だから SIGURG のケースは
 「SIGURG では死なず、**後続の SIGTERM で死ぬ**」ことを exit code で固定してある。
 
+`CommandMate#2119` 分（2026-08-27 実測、それぞれ **suite exit 1**。ベースラインは 310/310 green）。
+変異は構造を保つもの（値の入替・条件の反転）だけを使い、毎回 md5 でバイト一致復元を確認している。
+
+| 変異 | 落ちるテスト |
+|---|---|
+| `mktemp -d` を `${TMPDIR:-/tmp}/cm-monitor-hooks-$$` へ戻す（0.7.0 の置き場） | 3 件（堆積下の報告・置き場が PID 由来でないこと・**他人の store を消してしまう**） |
+| `MONITOR_HOOKS_STATE_DIR_OWNED=1` を空へ | 2 件（exit 時の掃除・`$TMPDIR` に何も残らないこと） |
+| EXIT trap のガードを `-z "$(trap -p EXIT)"` から `-n` へ反転 | 3 件（掃除 2 件 ＋ **operator の EXIT trap が潰される**） |
+| `STATE_DIR` 分岐の条件を `-n` から `-z` へ反転 | 6 件（`monitor.sh` 相乗り 3 件 ＋ standalone 3 件） |
+| `hooks-git.sh` を CommandMate#2119 以前へ全戻し | 4 件（堆積下の報告・置き場・掃除 2 件） |
+
+**「他人の store を消してしまう」が 1 番目の変異で赤くなるのが、この節の要点である。**
+`mktemp` を戻しただけで所有フラグを残すと、hook は自分が作っていないディレクトリを EXIT で
+`rm -rf` する。それは `mh_report_once` に既出の行を再出力させ、once-per-worker を**逆側から**
+壊す。「置き場を直す」と「掃除を足す」は独立に壊せるので、独立に固定してある。
+
+**`monitor.sh` 配下が不変であることは、別のテストが担保している**: `STATE_DIR` を渡した source は
+`mktemp` も trap もせず、実 `monitor.sh` の 4 ポール run は警告 1 行で終わり `$TMPDIR` に何も
+残さない。standalone 側の assertion ではこれを満たせない。
+
 **「一律保留」の変異が赤くなることが、この節でいちばん重要である**: 型で切る実装は
 一見安全側に見えて、実機の権限プロンプトを 1 件も承認しなくなる。
 `live-prompt-multiple-choice.json` は生採取なので、この主張は fixture の作り方に依存しない。

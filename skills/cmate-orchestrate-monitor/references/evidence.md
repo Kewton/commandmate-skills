@@ -266,6 +266,66 @@ git リポジトリを実際に作る fixture（メイン worktree・detached HE
 `feature/x` / id `myrepo-feature-x` は**旧規則そのもの**で組まれており、ブランチ突合だけでも
 全件緑になる。テストが緑であることは、テストが穴を見ていることを意味しない。
 
+## 1g. once-per-worker マーカーの置き場（0.8.0 で修正、CommandMate #2119）
+
+`hooks-git.sh` の `WARN` / `ERROR` は `<worktree-id>.<cause>` ごとに 1 回だけ出る。その
+「もう出した」の記録は**ファイル**（`$MONITOR_HOOKS_STATE_DIR/warned-<key>`）である ——
+`monitor.sh` がカウンタを `$(...)` の subshell で呼ぶ以上シェル変数では次のポーリングまで
+残らないので、ファイルであること自体は正しい。**壊れていたのは置き場の同一性**である。
+
+0.7.0 まで、`MONITOR_HOOKS_STATE_DIR` も `STATE_DIR` も無い経路（＝ `monitor.sh` を介さず
+`. hooks-git.sh` した operator）は `${TMPDIR:-/tmp}/cm-monitor-hooks-$$` を使っていた。
+
+1. **`$$` は再利用される。** macOS の PID 空間は約 10 万で周回する。
+2. **誰も掃除しない。** `monitor.sh` 経由なら自分の `STATE_DIR` を EXIT trap で消すが、
+   素の source にはオーナーがいない。
+3. **キーは次の run が出そうとするキーそのもの。** `<worktree-id>.<cause>` は id ごとに固定である。
+
+CommandMate 側の開発機で実測（2026-08-27）: `$TMPDIR` に `cm-monitor-hooks-*` が
+**4129 ディレクトリ / マーカー 4214 個**堆積していた。再利用 PID を引いた run は
+**自分が書いていない** `warned-…` を見つけ、`mh_report_once()` が黙って `return 0` する。
+第1d節と第1f節が「絶対に消えない診断」にしたはずの 1 行が、他人の残骸で消える。
+
+### 対照実験（PID 衝突を確率でなく決定的に作る）
+
+PID は選べないので、**spawn した shell 自身に自分の `$$` でマーカーを書かせてから** hooks を
+source する。`$$` はその 1 行後に旧フォールバックが計算する値そのものなので、これは再利用 PID の
+シミュレーションではなく**再現**である。同一サンドボックス・同一コマンド（`mh_resolve nope-nope`）:
+
+| `hooks-git.sh` | `$TMPDIR` | stderr | 実行後の `$TMPDIR` |
+|---|---|---|---|
+| 0.7.0 | 自 PID のマーカーあり | **空（＝欠陥）** | 残る |
+| 0.7.0 | 空 | `ERROR` 1 行 | `cm-monitor-hooks-<pid>` が**残る**（堆積の生産） |
+| 0.8.0 | 自 PID のマーカーあり | `ERROR` 1 行 | 他人のディレクトリだけ残る（触らない） |
+| 0.8.0 | 空 | `ERROR` 1 行 | **何も残らない** |
+
+### 0.8.0 の置き場
+
+| 状況 | 置き場 | 掃除 |
+|---|---|---|
+| `MONITOR_HOOKS_STATE_DIR` を指定 | その値 | しない（呼び出し側の所有物） |
+| `monitor.sh` から source（`STATE_DIR` あり） | 相乗り（**従来どおり**） | `monitor.sh` の EXIT trap |
+| どちらも無い | `mktemp -d "${TMPDIR:-/tmp}/cm-monitor-hooks-XXXXXXXX"` | 自分で作った時だけ EXIT trap |
+
+`mktemp -d` は既存の名前を返さないので、**誤抑止は構造的に起きえない**。`mktemp` が答えられない
+ときだけ旧来の `-$$` へ落ちる（マーカーを諦めて毎ポール警告する方が悪い）。EXIT trap は
+`trap -p EXIT` が空のときだけ張る: bash の EXIT trap は 1 本しかなく、source されたファイルが
+無条件に張ると operator 自身の後始末を黙って潰す。空ディレクトリ 1 つと引き換えにはしない。
+
+**`monitor.sh` 配下は挙動不変である。** `STATE_DIR` があり、`trap cleanup EXIT` も hooks を
+source する前に張られているので、所有判定と trap 判定の両方が「自分のものではない」と答える。
+
+**この節も実運用実績ではない。** 固定しているのは fixture（`run_tests.sh` の
+`where the once-per-worker markers live when nobody says`、16 ケース）で、4 変異でそれぞれ
+赤くなることを確認している（内訳は `tests/fixtures/cmate-orchestrate-monitor/README.md`）。
+**堆積によって実運用の診断が消えた場面を回収した実績は未計測である**（欠陥は
+CommandMate 側のテストが 3 回連続でバイト一致の失敗を再現したことで特定された）。
+
+既存 fixture がこの穴を構造的に検知できなかった理由も記録しておく: この suite は
+`next_hooks_state` で**ケースごとに** `MONITOR_HOOKS_STATE_DIR` を渡すので、フォールバック分岐を
+1 ケースも踏んでいなかった。テストが緑であることは、テストが穴を見ていることを意味しない
+（第1f節と同じ結論に、逆側 —— 隔離しすぎ —— から到達している）。
+
 ## 2. 測定の限界（この Skill について）
 
 - **修正後の介入経路は fixture / shim テストのみ**。実 worker のペインへ Enter / `a` /

@@ -1289,6 +1289,139 @@ check "…with nothing on stderr claiming the counters were unmeasurable" "" "$L
 LOOP_ID=w1
 
 echo
+echo "== where the once-per-worker markers live when nobody says (CommandMate #2119) =="
+# Every case above hands hooks-git.sh a MONITOR_HOOKS_STATE_DIR, so none of them
+# exercises the branch an operator actually takes: `. hooks-git.sh` with neither
+# that variable nor monitor.sh's STATE_DIR set. That branch used to resolve to
+# `$TMPDIR/cm-monitor-hooks-$$`, and two properties of it lost real diagnostics —
+# pids recycle (macOS wraps at ~100k) and nothing ever removed the directories, so
+# a run could open a store full of `warned-<key>` files it had never written and
+# mh_report_once() would return silently. The keys are `<worktree-id>.<cause>`,
+# i.e. exactly what the next run wants to print.
+#
+# The collision is built from the INSIDE rather than waited for: the shell writes
+# the marker for its own `$$` before sourcing, and `$$` there is the same value
+# the old fallback computed one command later. That is a recycled pid reproduced,
+# not simulated, and it is deterministic.
+MARKER_TMP="$WORK/marker-store"
+MISSING_ID=nope-nope
+NO_CHECKOUT="monitor hooks ERROR: [$MISSING_ID] no checkout resolved"
+POISON_OWN_PID='mkdir -p "$TMPDIR/cm-monitor-hooks-$$" && : > "$TMPDIR/cm-monitor-hooks-$$/warned-nope-nope.no-checkout";'
+
+# hooks_standalone <tmpdir> <prelude> <snippet>
+#
+# Sources the hook with $TMPDIR pointed at a directory of this suite's own and
+# BOTH state-dir inputs removed. The unsets are the point: an inherited value
+# would take the branch these cases are not about, and every one of them would
+# pass without the fallback ever running. Result in HS_STDOUT / HS_STDERR.
+HS_STDOUT=""
+HS_STDERR=""
+hooks_standalone() {
+  hs_tmp=$1
+  hs_prelude=$2
+  hs_snippet=$3
+  mkdir -p "$hs_tmp"
+  hs_err="$WORK/hooks-standalone.err"
+  HS_STDOUT=$(
+    unset MONITOR_HOOKS_STATE_DIR STATE_DIR
+    TMPDIR="$hs_tmp" MONITOR_HOOKS_REPO="$GIT_REPO" MONITOR_HOOKS_BASE=main \
+      MONITOR_WORKTREE_ROOT= bash -c "$hs_prelude . \"$HOOKS_GIT\"; $hs_snippet" 2>"$hs_err"
+  )
+  HS_STDERR=$(cat "$hs_err")
+}
+
+hooks_standalone "$MARKER_TMP/poison" "$POISON_OWN_PID" \
+  "mh_resolve $MISSING_ID >/dev/null; printf '%s\n%s\n' \"\$MONITOR_HOOKS_STATE_DIR\" \"\$TMPDIR/cm-monitor-hooks-\$\$\""
+check_contains "a stale pid-keyed store in \$TMPDIR no longer swallows the report" \
+  "$NO_CHECKOUT" "$HS_STDERR"
+# ...and it printed because the store MOVED, not because the marker check got
+# weaker: the two paths the snippet reports must differ.
+chosen=$(printf '%s\n' "$HS_STDOUT" | sed -n '1p')
+pidpath=$(printf '%s\n' "$HS_STDOUT" | sed -n '2p')
+if [ -n "$chosen" ] && [ "$chosen" != "$pidpath" ]; then
+  passed=$((passed + 1)); printf 'ok   the store is not the pid-keyed path\n'
+else
+  failed=$((failed + 1))
+  printf 'FAIL the store is not the pid-keyed path\n     chosen: %s\n     pid:    %s\n' "$chosen" "$pidpath"
+fi
+# The tempting cheap fix — clear the pid-keyed directory at source time — is
+# wrong the same way the defect is: it may belong to a live process, and removing
+# its markers makes IT reprint a line, breaking once-per-worker from the far side.
+check "another run's store is left alone, markers and all" "present" \
+  "$([ -f "$pidpath/warned-${MISSING_ID}.no-checkout" ] && echo present || echo absent)"
+
+hooks_standalone "$MARKER_TMP/once" "" \
+  "mh_resolve $MISSING_ID >/dev/null; mh_resolve $MISSING_ID >/dev/null; mh_resolve $MISSING_ID >/dev/null"
+# `mktemp -d` runs ONCE, at source time. A store minted per call would make every
+# poll of a 20s supervision loop reprint the same line, which is the per-poll
+# noise CommandMate #1614 removed.
+# `grep -F`: the report contains `[nope-nope]`, which a basic regular expression
+# reads as a bracket expression matching ONE character — `grep -c` without -F
+# counts 0 and the case would fail for a reason that is not the hook's.
+check "three calls in one run still report the cause once" 1 \
+  "$(printf '%s\n' "$HS_STDERR" | grep -cF "$NO_CHECKOUT")"
+
+hooks_standalone "$MARKER_TMP/quiet" "" \
+  "printf '%s %s' \"\$(count_commits $WID)\" \"\$(count_uncommitted $WID)\""
+check "a healthy standalone run counts without saying anything" "1 1" "$HS_STDOUT"
+check "…and puts nothing on stderr" "" "$HS_STDERR"
+
+hooks_standalone "$MARKER_TMP/cleanup" "" \
+  "mh_resolve $MISSING_ID >/dev/null; printf '%s' \"\$MONITOR_HOOKS_STATE_DIR\""
+# Computed outside the `check` call: bash 3.2's `$( )` parser counts the `)` that
+# closes a case pattern and dies on `case ... in pat) ...` inside a command
+# substitution (measured: `syntax error near unexpected token 'newline'`).
+store_where=$HS_STDOUT
+case "$HS_STDOUT" in
+  "$MARKER_TMP/cleanup"/cm-monitor-hooks-*) store_where=inside ;;
+esac
+check "the private store is minted inside the run's \$TMPDIR" "inside" "$store_where"
+# The leak the pid-keyed name could not fix on its own: before this, every
+# standalone source left a directory behind for ever.
+check "…and taken back out when the shell exits" "absent" \
+  "$([ -d "$HS_STDOUT" ] && echo present || echo absent)"
+check "…leaving \$TMPDIR as it found it" "" "$(ls "$MARKER_TMP/cleanup")"
+
+# bash keeps ONE EXIT trap, not a chain, so a sourced file that installs one
+# unconditionally disarms the operator's own cleanup. Losing their trap to save an
+# empty directory is the worse trade, so ours is armed only when there is none.
+hooks_standalone "$MARKER_TMP/optrap" "trap 'echo OPERATOR-CLEANUP-RAN >&2' EXIT;" \
+  "mh_resolve $MISSING_ID >/dev/null"
+check_contains "an EXIT trap the sourcing shell already had is not replaced" \
+  "OPERATOR-CLEANUP-RAN" "$HS_STDERR"
+check_contains "…and the report is printed either way" "$NO_CHECKOUT" "$HS_STDERR"
+
+# Under monitor.sh nothing changes: it owns STATE_DIR and installs `trap cleanup
+# EXIT` before it sources any hooks file, so both guards answer "not yours".
+RIDE_STATE="$WORK/ride-along-state"
+mkdir -p "$RIDE_STATE" "$MARKER_TMP/ride"
+ride=$(
+  unset MONITOR_HOOKS_STATE_DIR
+  TMPDIR="$MARKER_TMP/ride" STATE_DIR="$RIDE_STATE" MONITOR_HOOKS_REPO="$GIT_REPO" \
+    MONITOR_HOOKS_BASE=main MONITOR_WORKTREE_ROOT= bash -c \
+    ". \"$HOOKS_GIT\"; mh_resolve $MISSING_ID >/dev/null; printf '%s|%s|%s' \"\$MONITOR_HOOKS_STATE_DIR\" \"\$MONITOR_HOOKS_STATE_DIR_OWNED\" \"\$(trap -p EXIT)\"" 2>/dev/null
+)
+check "STATE_DIR is adopted verbatim, unowned, and adds no EXIT trap" "$RIDE_STATE||" "$ride"
+check "…the marker landed in STATE_DIR, where monitor.sh will remove it" "present" \
+  "$([ -f "$RIDE_STATE/warned-${MISSING_ID}.no-checkout" ] && echo present || echo absent)"
+check "…and nothing was minted in \$TMPDIR" "" "$(ls "$MARKER_TMP/ride")"
+
+# End to end on the real loop, with no MONITOR_HOOKS_STATE_DIR anywhere: one
+# warning for four polls is the once-per-worker rule, and an empty $TMPDIR
+# afterwards is monitor.sh's own EXIT trap taking the markers with its STATE_DIR.
+TMPDIR_BEFORE=${TMPDIR:-}
+mkdir -p "$MARKER_TMP/loop"
+LOOP_ID=$MISSING_ID
+TMPDIR="$MARKER_TMP/loop" MONITOR_HOOKS_REPO="$GIT_REPO" MONITOR_HOOKS_BASE=main \
+  run_loop hooks-git-statedir-e2e 4 live-idle.json --hooks "$HOOKS_GIT"
+LOOP_ID=w1
+if [ -n "$TMPDIR_BEFORE" ]; then export TMPDIR="$TMPDIR_BEFORE"; else unset TMPDIR; fi
+check "four polls under monitor.sh, one warning" 1 \
+  "$(printf '%s\n' "$LOOP_STDERR" | grep -cF "$NO_CHECKOUT")"
+check "…and no marker store survives the run" 0 \
+  "$(ls "$MARKER_TMP/loop" | grep -c 'cm-monitor-hooks-' || true)"
+
+echo
 echo "== monitor.sh liveness: heartbeat, signals, exit report (CommandMate #1728) =="
 # Silence had two meanings and no way to tell them apart: a monitor watching
 # healthy workers prints nothing, and a monitor that has died prints nothing. A
