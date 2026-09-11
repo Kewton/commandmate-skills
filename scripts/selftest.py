@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -33,6 +34,7 @@ from cmate_skills.package import _read_octal as read_octal
 from cmate_skills.repo import build_and_verify, check_package
 from cmate_skills.safe_yaml import SkillYamlError, parse_skill_yaml
 from cmate_skills.schema import validate_catalog, validate_manifest
+import validate
 
 REPO_ROOT = _bootstrap.REPO_ROOT
 FIXTURE = REPO_ROOT / "tests" / "fixtures" / "skills" / "pipeline-selftest"
@@ -257,6 +259,41 @@ class ManifestReconciliation(unittest.TestCase):
             lambda target: target.write_text("see http://example.com/doc\n", encoding="utf-8"),
         )
         self.assertIn("SKILLS_LINK_INSECURE", codes)
+
+
+class SkillMdSlashArguments(unittest.TestCase):
+    """`SKILL.md` must hold nothing Claude Code rewrites with the slash arguments (#250)."""
+
+    @staticmethod
+    def _findings(body: str) -> list:
+        entry = types.SimpleNamespace(path="SKILL.md", data=body.encode("utf-8"))
+        out: list = []
+        validate.check_skill_md_placeholders(types.SimpleNamespace(payload=[entry]), out)
+        return out
+
+    def test_a_positional_argument_is_refused(self) -> None:
+        codes = [f.code for f in self._findings('commandmate ask "$1" --instance "$2" x\n')]
+        self.assertIn(validate.SKILL_MD_SLASH_ARG, codes)
+
+    def test_the_arguments_placeholder_is_refused(self) -> None:
+        self.assertTrue(self._findings("pass $ARGUMENTS through\n"))
+
+    def test_an_indexed_arguments_placeholder_is_refused(self) -> None:
+        self.assertTrue(self._findings("first: $ARGUMENTS[0]\n"))
+
+    def test_forms_claude_leaves_alone_pass(self) -> None:
+        body = 'WT=a; echo "$WT" "${WT}" "${1}" "$?" "$(date +%Y)" "$*" "$@" "$#" "$RUN/x"\n'
+        self.assertEqual([], self._findings(body))
+
+    def test_the_finding_names_the_line(self) -> None:
+        findings = self._findings("# Title\n\nrun it with \"$3\"\n")
+        self.assertEqual(len(findings), 1)
+        self.assertIn("line 3", str(findings[0]))
+
+    def test_the_fixture_package_passes(self) -> None:
+        out: list = []
+        validate.check_skill_md_placeholders(_load_fixture_check(), out)
+        self.assertEqual([], out)
 
 
 class SafeYaml(unittest.TestCase):
