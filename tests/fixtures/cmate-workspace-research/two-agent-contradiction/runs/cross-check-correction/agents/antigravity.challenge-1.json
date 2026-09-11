@@ -1,0 +1,7 @@
+{
+  "worktreeId": "node-app",
+  "instanceId": "antigravity",
+  "cliToolId": "antigravity",
+  "source": "history",
+  "reply": "1. \"pkg-x 3.x の native binding は Node-API なので major 更新で壊れない\": REJECTED\n   - https://pkg-x.example.com/docs/support-matrix — pkg-x Support Matrix（2026-06-30 更新）, as-of 2026-09-11 の注記: 3.x の prebuilt binary は Node の ABI ごとに build されており、Node-API ではない\n2. \"open() is now async\" がどの open() か: UNVERIFIED\n   - https://pkg-x.example.com/changelog#4.0.0 — pkg-x Changelog 4.0.0（2026-05-12）, as-of 2026-09-11 の該当行は「open() is now async」だけで、pkg-x/native の open() かトップレベルの open() かが書かれていない\n   - 同じ節に native binding の記述が続くので、native の open() も async になったと読む\nShared assumption（CI が Node 24 で緑なら安全）: undecided — test の中身は見ていない\n\nDONE: 3.x の binary は ABI 依存で Node-API ではない（前提は棄却）。4.x の open() の影響は未確認"
+}

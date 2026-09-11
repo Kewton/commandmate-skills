@@ -1,0 +1,1 @@
+{"worktreeId":"node-app","cliToolId":"antigravity","type":"multiple_choice","question":"Allow Antigravity to run this command? npm ls pkg-x --all","options":[{"number":1,"label":"Allow once","isDefault":true},{"number":2,"label":"Allow for this conversation"},{"number":3,"label":"Deny"}],"status":"pending","approvalTarget":"npm ls pkg-x --all"}
