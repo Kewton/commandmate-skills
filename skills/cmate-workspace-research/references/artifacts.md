@@ -23,6 +23,7 @@ challenge の雛形は [cross-check.md](./cross-check.md) にある。
 ├── challenges/<key>.challenge-<n>.md  cross check で確かめてほしい claim。その子だけが読む
 ├── integrity/<worktree-id>.before.txt git status --porcelain（調査の前）
 ├── integrity/<worktree-id>.after.txt  git status --porcelain（調査の後）
+├── integrity/<worktree-id>.touched.txt before より後に更新された run-dir 外の file（ignored / visible。SKILL.md 第7節）
 ├── cross-check.md                     第5節
 ├── evidence.md                        第6節
 └── final.md                           第7節
@@ -107,7 +108,7 @@ exit 10 — prompt JSON（1 行。`wait --on-prompt agent` と同じ形）。返
     }
   ],
   "coverage": { "web": "full", "workspace": "full", "reduced_by": [] },
-  "workspace_integrity": { "worktrees": ["node-app"], "changed": false }
+  "workspace_integrity": { "worktrees": ["node-app"], "changed": false, "ignored_touched": [] }
 }
 ```
 
@@ -130,6 +131,7 @@ exit 10 — prompt JSON（1 行。`wait --on-prompt agent` と同じ形）。返
 | `agents[].reason` | `completed` 以外のときの理由。exit code と、人へ何を返したか |
 | `coverage.reduced_by` | 完了しなかった子の `key` |
 | `workspace_integrity.changed` | before と after が 1 つの worktree でも違えば `true` |
+| `workspace_integrity.ignored_touched` | `touched.txt` の `ignored` 行を `<worktree-id>:<path>` で並べたもの。無ければ `[]` |
 
 `agents[].status` は、その子の**調査の `ask`**（`<key>`）の exit code で決まる。調査まで届かなかった子は、
 最後に届いた warm-up / probe の exit code で決まる。challenge が返らなかったことは status を変えず、
@@ -303,7 +305,7 @@ Finding ごとに `## R-001` から。規則は [evidence-rules.md](./evidence-r
 - AS_OF: <YYYY-MM-DD>
 - Depth: standard（requested: <depth_requested>）
 - Coverage: <full | Research coverage reduced: <key> did not complete (<status>). | Web research unavailable. Result is based on Workspace evidence only. | Workspace research unavailable. Result is based on external evidence only.>
-- Workspace integrity: <unchanged | changed> — git status --porcelain の before / after（run-dir を除外）
+- Workspace integrity: <unchanged | changed> — git status --porcelain の before / after（run-dir を除外）。ignore 対象の更新: <N> 件
 - Run: .commandmate/workspace-research/<run-id>/
 ```
 <!-- END FINAL TEMPLATE -->
@@ -323,5 +325,7 @@ Finding ごとに `## R-001` から。規則は [evidence-rules.md](./evidence-r
   （[cross-check.md](./cross-check.md) 第8節）。
 - `Workspace integrity: changed` のときは、`Risks / Counterevidence` に「workspace が変更された」と
   before / after の差分を書く。止めはしないが、隠さない。
+- `ignore 対象の更新` が 1 件以上なら、`Risks / Counterevidence` に path を 1 件ずつ書く（子の tool が
+  ignore 対象へ書いた。`git status` の比較には映らない。SKILL.md 第7節）。
 - 完了しなかった子が 1 つでもあれば、`Coverage:` に `Research coverage reduced:` で始まる文を書き、
   その子の `key` と status を入れる（§37.1）。

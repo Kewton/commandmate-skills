@@ -64,6 +64,7 @@ pkg-x の support matrix は 3.x の対象を Node 18 / 20 / 22 としている�
 
 - antigravity は調査中に権限ダイアログ（`npm ls pkg-x --all`）で止まった（exit 10、Auto-Yes は ON だった）。prompt の本文と選択肢は人へ写し、親は respond も auto-yes も打っていない。External-first の調査が欠けているので、Web 側の網羅は command-code が確かめた範囲に限られる。
 - 子が 1 つしか完了していないので、Cross Check は自己反証だけである。
+- ignore 対象への書き込み: `.commandcode/taste/taste.md`（Command Code の taste 機能。`git status` の前後比較には映らない。親は止めていない）。
 
 # Unknowns
 
@@ -97,5 +98,5 @@ pkg-x の support matrix は 3.x の対象を Node 18 / 20 / 22 としている�
 - AS_OF: 2026-09-12
 - Depth: standard（requested: standard）
 - Coverage: Research coverage reduced: antigravity did not complete (prompt_stopped).
-- Workspace integrity: unchanged — git status --porcelain の before / after が一致（run-dir を除外）
+- Workspace integrity: unchanged — git status --porcelain の before / after が一致（run-dir を除外）。ignore 対象の更新: 1 件
 - Run: .commandmate/workspace-research/node24-migration-20260912-001/

@@ -78,6 +78,7 @@
     "worktrees": [
       "node-app"
     ],
-    "changed": false
+    "changed": false,
+    "ignored_touched": []
   }
 }

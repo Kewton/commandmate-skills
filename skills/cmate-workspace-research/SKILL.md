@@ -334,7 +334,8 @@ wait   # shell の wait。全員の .exit が揃うまで返らない
     `source = file` と記録する。例外でない子の `pane` は、**先頭が欠けている疑い**を coverage に書く。
   - `reply` が空、または `source` が `history` / `pane` 以外 — 返答を読めなかった。`status = failed`。
   - `DONE:` 行が無ければ、返答が途中である可能性を coverage に書く。見つかったふりをしない。
-  - 1 行目の `WEB:` を `run.json` に写す。probe の報告と違えば両方を残す。
+  - 報告の最初の見出しより前にある、最初の `WEB:` 行を `run.json` に写す。1 行目とは限らない（command-code の
+    history 返答は、報告の前にターン内の独り言を含む。第11節）。probe の報告と違えば両方を残す。
 - **10** — prompt で止まった。第10.2節。
 - **それ以外** — 第10.1節の表。
 
@@ -392,6 +393,24 @@ cross check で残った claim のうち、**結論を左右し、外から確�
 コマンドで取り、before と比べる。**差分があっても止めはしない**が、final の Risks に
 「workspace が変更された」と差分ごと記録する。
 
+`git status` の比較は gitignore 対象を見ない。子の tool 自身が ignore 対象へ書くことがある
+（Command Code の taste 機能は run の最中に `.commandcode/taste/` を書く。第11節）ので、
+`before.txt` を取った時刻より後に更新された run-dir 外の file も洗い出す。
+
+```bash
+WT_PATH=<worktree-path> WTID=<worktree-id>
+find "$WT_PATH" -type f -newer "$RUN/integrity/$WTID.before.txt" \
+    -not -path '*/.git/*' -not -path '*/.commandmate/workspace-research/*' | sort |
+while read -r F; do
+  REL="${F#"$WT_PATH"/}"
+  if git -C "$WT_PATH" check-ignore -q -- "$REL"; then printf 'ignored\t%s\n' "$REL"; else printf 'visible\t%s\n' "$REL"; fi
+done > "$RUN/integrity/$WTID.touched.txt"
+```
+
+- `ignored` の行は `run.json` の `workspace_integrity.ignored_touched` に `<worktree-id>:<path>` で写し、
+  final の Research Metadata に `ignore 対象の更新: <N> 件` と書き、Risks に path を 1 件ずつ書く。止めはしない。
+- `visible` の行は `git status` の差分にも出ている。そちらは上の「workspace が変更された」で扱う。
+
 ## 8. EVIDENCE MERGE
 
 Finding を `$RUN/evidence.md` に `R-001` から統合する（雛形は
@@ -425,7 +444,8 @@ Finding を `$RUN/evidence.md` に `R-001` から統合する（雛形は
 - 未解決の矛盾は統合しない。`UNRESOLVED CONTRADICTION` として残す（§37.4）。
 - 1 子でも完了しなかったら、Research Metadata に
   `Research coverage reduced: <key> did not complete (<status>).` と書く（§37.1）。
-- Research Metadata に workspace の前後比較の結果（`Workspace integrity: unchanged | changed`）を書く。
+- Research Metadata に workspace の前後比較の結果（`Workspace integrity: unchanged | changed`）と、
+  ignore 対象の更新の件数（`ignore 対象の更新: <N> 件`）を書く。1 件以上なら Risks に path を 1 件ずつ書く（第7節）。
 
 `run.json` の `status` を COMPLETED / PARTIAL / FAILED に確定して閉じる（第10.3節）。
 
@@ -511,9 +531,9 @@ manifest の `compatibility.agents` は**親として**この Skill を読める
 
 | cliTool | 返答の回収（`ask --json` の `source`） | Web（第4節） | read-only コマンドの権限ダイアログ（第2.3節） | 冷間起動 |
 |---|---|---|---|---|
-| `claude` | `history`（本文全文。実測） | 未計測 | `permissions.allow` が無いと出る（実測） | 長い送信文が途中から届いた（#2464） |
+| `claude` | `history`（本文全文。実測） | available（2026-09-11 実測） | `permissions.allow` が無いと出る（実測） | 長い送信文が途中から届いた（#2464） |
 | `codex` | `history`（実測） | **sandbox が既定で遮断する**（実測） | sandbox で prefix ごとに出る（実測） | — |
-| `command-code` | `history`（実測） | 未計測 | 未計測 | `prompt not ready`（15 秒）で `ask` が失敗しうる（実測）→ warm-up |
+| `command-code` | `history`（実測。報告の前にターン内の独り言が入り、`WEB:` は 1 行目とは限らない） | available（2026-09-11 実測） | 出る（2026-09-11 実測: `node --version` など） | `prompt not ready`（15 秒）で `ask` が失敗しうる（実測）→ warm-up |
 | `antigravity` | `history`（実測） | 未計測 | 出る。初回にも出る（実測） | → warm-up |
 | `opencode` | `history`（CLI に転写リーダーが在る。本 Skill では未計測） | 未計測 | 未計測 | — |
 | `gemini` / `copilot` / `vibe-local` | **`pane`**（転写リーダーが無い。末尾 80 行）→ 第5.1節の書き出し例外 | 未計測 | 未計測 | — |
@@ -522,6 +542,9 @@ manifest の `compatibility.agents` は**親として**この Skill を読める
 回収は、5,050 字の本文と `DONE:` 行が欠けずに返ることを claude / codex / command-code /
 antigravity で確かめた。「未計測」は動かないという意味ではない。**Web の可否は毎回 probe で
 確かめる**ので、この表は preflight の説明と role の既定を決めるためにだけ使う。
+
+「2026-09-11 実測」は #245 の AC-20 と UAT の実機 run による。**Command Code は taste 機能で run の最中に
+`.commandcode/taste/` を書く**（ignore 対象なので `git status` の前後比較に映らない。第7節の `touched.txt` で拾う）。
 
 ## 参照
 

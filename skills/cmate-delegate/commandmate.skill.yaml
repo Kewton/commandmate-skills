@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-delegate
 name: cmate-delegate
-version: 0.1.1
+version: 0.1.2
 summary: 隣のセッションへ一言頼んで返答を回収する手順。宛先解決・依頼文の定型・待機と exit code の分岐・返答の要約を1本にする。プロンプトは人へ返し、自分では respond せず、相手の auto-yes も触らない。
 description: |-
   セッション A が別のセッション B へ作業を頼み、返答を受け取って報告するまでの手順である。「Codex 2 にこの diff をレビューしてもらって」のような一言の委任が対象で、契約付き dispatch・PR・merge は扱わない（それは cmate-orchestrate の領分）。
@@ -95,8 +95,8 @@ risk_rationale: >-
   commandmate CLI が local の API を叩くだけなので host は固定しない。
 files:
   - path: SKILL.md
-    sha256: 6ec7e73ee5db492a7f48fc064f33040651fd6dd3c07d652194c0cf0c0f133f60
-    size: 22322
+    sha256: 493dca4ca07e742f7a05964b58438ba4cc7b81876f557e56d667ec5760d77ee0
+    size: 22366
     kind: skill_md
     executable: false
     script: false

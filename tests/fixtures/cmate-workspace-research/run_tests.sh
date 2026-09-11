@@ -63,6 +63,8 @@ B: no Web anywhere lowers coverage	Workspace evidence only
 C: the run-dir lives under .commandmate	.commandmate/workspace-research/<run-id>/
 C: children write nothing	workspace に 1 byte も書かない
 C: before/after git status is kept	workspace が変更された
+C: ignored-path writes are listed	ignore 対象の更新
+B: the WEB line is read before the report	最初の `WEB:` 行
 C: pane-only tools get the one write exception	agents/<key>.md
 D: the contract lives in the role file	調査契約を送信文に入れない
 E: N background asks	) &

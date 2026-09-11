@@ -1,0 +1,1 @@
+ignored	.commandcode/taste/taste.md

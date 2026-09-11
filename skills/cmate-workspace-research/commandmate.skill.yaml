@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-workspace-research
 name: cmate-workspace-research
-version: 0.1.1
+version: 0.1.2
 summary: 指定した複数の Agent セッションに Web と Workspace を独立に調査させ、重要な Finding を相互反証し、結論を左右する claim を追加検証して、Evidence 付きの final.md 1 本に統合する技術調査の手順。
 description: |-
   ユーザーが agents と request だけを指定すると、親セッションが指定の Agent（子）に同じ調査を独立に委ね、Web と Workspace の Evidence を突き合わせて「このリポジトリにとって何を意味するか」までを 1 本の final.md にまとめる。migration / upgrade / incident / architecture / security / OSS の技術調査が対象で、コードの変更・PR・実行契約は扱わない。
@@ -91,20 +91,20 @@ declared_risk: moderate
 risk_rationale: >-
   script も実行 bit 付きの file も含まず、install 時に実行されるものも無い。手順が spawn するのは
   commandmate（whoami / instances / ls / ask、ask の無い版では send / wait / capture）と git（status /
-  check-ignore / rev-parse）と tmux display-message だけで、respond / auto-yes / interrupt は使わない。
+  check-ignore / rev-parse）と find（run-dir の外で更新された file の列挙。read-only）と tmux display-message だけで、respond / auto-yes / interrupt は使わない。
   子のコンポーザーへ文章を入力する。file を書くのは run-dir（.commandmate/workspace-research/<run-id>/）の
   中だけで、workspace の他の場所は変えない。読む環境変数は CM_WORKTREE_ID / CM_INSTANCE_ID で、
   credential は読まない。親は network に接続せず、Web の調査は子の CLI が行う。
 files:
   - path: SKILL.md
-    sha256: 68356c195847185113d79bdadaf6f8aa27cccd14b53e60c64af0fc58e1cb70db
-    size: 35051
+    sha256: 55caeadaa39a9630cd9f38680fc729c16650c4535f334c2440956e6df0305187
+    size: 36971
     kind: skill_md
     executable: false
     script: false
   - path: references/artifacts.md
-    sha256: 52e10e8c748747ceb8dd9ab29e663c0340ab87ed9a2a675517c74d15e8272da6
-    size: 13234
+    sha256: 0094cc51bb1465303db877cf7be2ead2052df5a19233e057d48dbe59396149de
+    size: 13797
     kind: instruction
     executable: false
     script: false
