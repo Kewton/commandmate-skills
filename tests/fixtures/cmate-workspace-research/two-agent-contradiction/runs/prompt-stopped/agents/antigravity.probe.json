@@ -1,0 +1,7 @@
+{
+  "worktreeId": "node-app",
+  "instanceId": "antigravity",
+  "cliToolId": "antigravity",
+  "source": "history",
+  "reply": "WEB: available — https://pkg-x.example.com/docs/support-matrix を fetch できた\nWORKSPACE: readable — /work/node-app/.commandmate/workspace-research/node24-migration-20260912-001/brief.md を読めた\nDONE: probe"
+}

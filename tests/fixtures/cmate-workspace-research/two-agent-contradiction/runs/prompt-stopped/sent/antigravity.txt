@@ -1,0 +1,20 @@
+【依頼】workspace 調査（cmate-workspace-research、run node24-migration-20260912-001）の独立調査をお願いします。
+
+■ 目的
+このリポジトリを Node.js 24 へ移行してよいかを判断したい
+
+■ 対象
+- workspace: node-app（path: /work/node-app）
+- 最初に次の 2 つを読み、それに従ってください: /work/node-app/.commandmate/workspace-research/node24-migration-20260912-001/brief.md と /work/node-app/.commandmate/workspace-research/node24-migration-20260912-001/roles/antigravity.md
+
+■ 出力の形
+- 1 行目: 最初に公式 doc を 1 件 fetch し、`WEB: available — <URL>` か `WEB: unavailable — <理由>` を報告してから調査に入る
+- 本文: roles/antigravity.md の「Report」の 8 見出しで、このチャットに返す
+
+■ 触ってはいけないもの
+- run-dir を含め、workspace に 1 byte も書かない（ファイルの作成・編集、git の状態を変える操作、依存の更新をしない）
+- run-dir の agents/ と、他の Agent の roles/ は読まない
+- push / PR / deploy / 外部への書き込みをしない
+
+■ 締め方
+最後に `DONE:` で始まる 1 行で結論を要約してください。判断できない場合は `DONE: 判断不能 — <理由>` と書いてください。

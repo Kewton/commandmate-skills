@@ -1,0 +1,18 @@
+{
+  "name": "node-app",
+  "version": "2.3.0",
+  "private": true,
+  "description": "Synthetic workspace for the cmate-workspace-research fixture. Not a real project.",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20 <23"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "pkg-x": "^3.4.2",
+    "pkg-y": "^1.8.0"
+  }
+}

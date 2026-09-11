@@ -172,3 +172,18 @@ jobs:
       # Python, and a bash suite would end it.
       - name: Run the cmate-delegate suite
         run: bash tests/fixtures/cmate-delegate/run_tests.sh
+
+      # cmate-workspace-research ships no script, so what this suite holds is
+      # the procedure and the run-dir it leaves behind: SKILL.md still carrying
+      # the rules Issue #245 settled (the parent never answers a child's prompt,
+      # never touches its auto-yes, never writes outside the run-dir), and a
+      # checker that holds the two fixture runs to the acceptance criteria, with
+      # one injected mutation per rule. Wired here and in
+      # .commandmate/verify.yaml in the same change that added the suite — the
+      # defect class of #57/#69, #70 and #241 is a suite named nowhere.
+      #
+      # bash and stdlib-only python3; no Node, no network. It sits in this job
+      # with the other fixture suites for the reason the delegate suite does:
+      # the `validate` job's stated property is stdlib-only Python.
+      - name: Run the cmate-workspace-research suite
+        run: bash tests/fixtures/cmate-workspace-research/run_tests.sh
