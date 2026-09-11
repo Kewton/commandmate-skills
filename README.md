@@ -15,7 +15,7 @@ Claude Code 2.1.220 は `.claude/skills` しか、Codex CLI 0.145.0 は `.agents
 - 親 Epic: [Kewton/CommandMate#1227](https://github.com/Kewton/CommandMate/issues/1227)
 - 本リポジトリの release pipeline: [Kewton/CommandMate#1238](https://github.com/Kewton/CommandMate/issues/1238)
 
-> **状態**: release pipeline と公式 Skill 11 件が揃っている。
+> **状態**: release pipeline と公式 Skill 14 件が揃っている。
 > どの Agent でどこまで確認済みかは
 > [docs/agent-support-matrix.md](./docs/agent-support-matrix.md) を参照。
 
@@ -133,6 +133,9 @@ export CM="npx commandmate@latest"
 | `cmate-orchestrate-monitor` | 並列 worker 監視の判定コア（bash script 同梱） | **high** |
 | `cmate-verify` | 検証ゲートの起案と実 exit code 判定（bash script 同梱） | **high** |
 | `cmate-verify-advisor` | 検証履歴から verify.yaml の改善案を出す（強化は適用可・弱体化は提案止まり。Node script 同梱） | moderate |
+| `cmate-worker-development` | Issue や実行契約を受け取ったワーカーの作業方法（読取・調査・計画・実装・検証・証拠の6段） | moderate |
+| `cmate-delegate` | 隣のセッションへ一言頼んで返答を回収する手順（bash ラッパ同梱） | moderate |
+| `cmate-workspace-research` | 複数の Agent に Web と Workspace を独立に調査させ、相互反証と追加検証を経て Evidence 付きの `final.md` 1 本にまとめる手順 | moderate |
 
 version と risk は `skills/<skill-id>/commandmate.skill.yaml` の `version` /
 `declared_risk` が正本である（Catalog は「入手可能なもの」を示す）。high risk の
@@ -140,9 +143,9 @@ package（**`cmate-worktree-cleanup` / `cmate-orchestrate` / `cmate-orchestrate-
 `cmate-verify` の 4 件**）は install に `--yes` と `--ack-risk <skill-id>@<version>` の
 完全一致が要る。
 
-**11 package すべてが Catalog に publish 済みである**
-（[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開）。
-どれも `commandmate skill install` で入るので、手で配置する必要はない。
+**上の表の 14 package すべてが Catalog に publish 済みである**
+（[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開したものと、
+その後に足したもの）。どれも `commandmate skill install` で入るので、手で配置する必要はない。
 
 install は `.agents/skills/<id>` と `.claude/skills/<id>` の**両方**へ byte-identical に書く。
 **この両置きは load-bearing である** — 2026-08-02 の実測では、`.claude/skills/<id>` だけを

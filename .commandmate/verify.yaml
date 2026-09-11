@@ -24,6 +24,21 @@
 # secret value had never run in CI. repository-analysis-fixtures closes it. A
 # test nobody runs is not a gate.
 #
+# Nor was that one. Issue #241 shipped cmate-delegate together with
+# tests/fixtures/cmate-delegate/run_tests.sh — 36 assertions and 14 injected
+# mutations, holding ask.sh's exit-code pass-through (a wrapper that returned 0
+# for a timed-out delegation is the defect it exists to prevent) and the five
+# required fields of the delegation brief — and named the suite in neither this
+# file nor validate.yml. The suite was green on the author's laptop and invisible
+# to every gate. delegate-fixtures closes it, in both places, the same way.
+#
+# workspace-research-fixtures (Issue #245) was wired in the same change that
+# shipped its suite, not after the fact. cmate-workspace-research has no script,
+# so tests/fixtures/cmate-workspace-research/run_tests.sh holds the procedure
+# instead: the confirmed-spec rules in SKILL.md, no runnable snippet reaching
+# respond / auto-yes / a relay, and check_run.py grading the two fixture
+# run-dirs with one injected mutation per rule.
+#
 # Timeouts are the measured wall clock on the development machine (warm cache)
 # with generous headroom for a cold CI runner:
 #   validate                       0.25s   (2026-08-01)
@@ -37,6 +52,8 @@
 #   issue-authoring-fixtures       2s      (2026-08-05)
 #   verify-advisor-fixtures        4s      (2026-08-20)
 #   repository-analysis-fixtures   0.3s    (2026-08-05)
+#   delegate-fixtures              4s      (2026-09-07)
+#   workspace-research-fixtures    2s      (2026-09-11)
 #
 # The runner reads a YAML subset: 2-space indent, single-line scalars, no inline
 # comments. Keep it that way — a file it cannot parse is exit 2, not a partial run.
@@ -71,6 +88,12 @@ gates:
     timeoutSec: 300
   - id: repository-analysis-fixtures
     command: "python3 tests/fixtures/cmate-repository-analysis/check_result.py --selftest"
+    timeoutSec: 300
+  - id: delegate-fixtures
+    command: "bash tests/fixtures/cmate-delegate/run_tests.sh"
+    timeoutSec: 300
+  - id: workspace-research-fixtures
+    command: "bash tests/fixtures/cmate-workspace-research/run_tests.sh"
     timeoutSec: 300
 options:
   baseRef: origin/main

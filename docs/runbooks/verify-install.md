@@ -214,6 +214,68 @@ Claude は `.claude/skills` を読み、`.agents/skills` は読まない。
 3. 発見の確認は、**tool を使わないよう指示したうえで** SKILL.md の絶対 path を答えさせる。
    これは **model の自己申告**であり機械的証跡ではない。記録にそう書くこと。
 
+### opencode
+
+**model 呼び出しなしで discovery だけを測れる。** 隔離 `HOME` を作り、
+`~/.config/opencode` と `~/.local/share/opencode` を差し替えてから server を立てる
+（本番の設定を読ませない。`--pure` も同じ目的である）。
+
+```bash
+export HOME=<isolated home>            # ~/.config/opencode と ~/.local/share/opencode ごと差し替わる
+opencode serve --pure --port <p> &     # プローブ専用ポート
+curl -s "http://127.0.0.1:<p>/skill" | python3 -m json.tool
+```
+
+1. 応答に install した skill が並び、各件が**絶対 path** を持つことを確認する。
+   これが機械的証跡である（model には一度も聞いていない）。
+2. `.agents/skills` / `.claude/skills` / `.opencode/skills` のどれから来たかを path で読む。
+   両 root へ同名で置いた package は **1 件に畳まれ**、`.agents/skills` 側が出る。
+3. 呼出まで測るなら composer へ `/<skill-id>` を送信し、SKILL.md 本文が読まれたことを
+   本文側に仕込んだ合図（`PROBE_OK_<name>` のような文字列）で確認する。
+   **opencode 自身の slash palette には Skill は出ない**（`/skills` picker が `/<name>` を
+   挿入する形である）。出ないこと自体は配置先の問題ではない。
+4. **install 後は再起動する。** 起動時スキャンなので、稼働中の server は後から足した
+   Skill を見ない。再起動せずに「出なかった」と記録しないこと。
+5. 出た／出ないと **opencode の exact version** を記録する。
+
+### Command Code（npm `command-code`、bin `cmd`）
+
+こちらも **model 呼び出しなし**で一覧が取れる。
+
+```bash
+cmd skills list -d      # model を呼ばない。どの root から来たかがバッジで付く（例: [.agents]）
+```
+
+1. 列挙に install した package が出ること、`[.agents]` バッジが付くことを確認する。
+2. 呼出は headless で測る。
+
+   ```bash
+   cmd -p "/<skill-id>" --output-format json --no-session --trust --skip-onboarding
+   ```
+
+   NDJSON に
+   `{"type":"event","event":{"type":"skill_loaded","name":"<skill-id>"}}`
+   が出れば、発見と起動の両方が機械的に取れている。`finalText` も併せて記録する。
+   予約語と衝突する名前は `/skill:<skill-id>` で呼ぶ。
+
+3. **陰性対照を必ず用意する。** `.claude/skills/<probe-id>/` に**だけ**置いた probe を作り、
+   同じ手順で呼ぶ。
+
+   ```bash
+   mkdir -p .claude/skills/probe-claude-root      # .agents/skills 側には置かない
+   # SKILL.md を書く（本文に PROBE_OK_probe-claude-root を仕込む）
+   cmd -p "/probe-claude-root" --output-format json --no-session --trust --skip-onboarding
+   # -> 「I don't see a skill named…」・skill_loaded は 0 件
+   ```
+
+   これが出て初めて「`.agents/skills` から見えている」と言える。
+   **Command Code は `.claude/skills` を読まない**ので、CommandMate の両 root install のうち
+   効いているのは `.agents/skills` 側だけである。陰性対照を取らずに
+   「両方に置いたら見えた」で `native` と書かないこと。
+4. **再起動は要らない。** TUI 稼働中に足した Skill は `/skills` を開き直せば出る。
+   Claude / Codex / opencode と違う点なので、記録にそう書く。
+5. 出た／出ないと **Command Code の exact version** を記録する。
+
 ### どちらの root を読んでいるかを確定させる（対照実験）
 
 「両 root へ置いたら両方から見えた」だけでは、どちらの root が効いているか分からない。
@@ -242,14 +304,15 @@ Claude は `.claude/skills` を読み、`.agents/skills` は読まない。
 |---|---|
 | 測定日 | 2026-07-31 |
 | CommandMate | 0.16.0（npm 公開版と同一か） |
-| Agent と version | Claude Code 2.1.220 / Codex CLI 0.145.0 |
+| Agent と version | Claude Code 2.1.220 / Codex CLI 0.145.0 / opencode 1.18.27 / Command Code 1.47.0 |
 | OS / Node | macOS 26.5.2 / v24.1.0 |
 | 対象 Skill と version | 測った package を全部（1 件で代表させたなら、そう書く） |
 | 配置経路 | catalog install / 手動両置き（3.1） |
 | 配置 | 両 root・`diff -r` 差分なし |
 | 発見 / slash 呼出 | Agent ごとに YES / NO |
 | 証跡の性質 | 機械的 / self-report |
-| 未計測 | Gemini / OpenCode / vibe-local |
+| Agent ごとの reload | 新 session / 再起動 / 不要 のどれか（opencode は再起動、Command Code は不要） |
+| 未計測 | Gemini / vibe-local / copilot / antigravity |
 
 **未計測の Agent は `unknown` のままにする。** 「たぶん動く」は記録ではない。
 **1 package で測った結果を全 package に敷衍したなら、敷衍だと書く。**
@@ -282,6 +345,8 @@ package 単位で測ったのか install 経路の共通性から言っている
 |---|---|
 | `.claude/skills` に無い | CommandMate が 0.15.0 未満。installer の問題であって package の問題ではない |
 | Codex の palette に出ない | 0.145.0 の仕様。配置先の問題ではない（対照実験で切り分け済み） |
+| opencode の palette に出ない | 仕様。`/skills` picker が `/<name>` を挿入する。送信すれば Skill は読まれる |
+| Command Code が skill を見つけない | `.claude/skills` にしか無い可能性。primary root（`.agents/skills`）を確認する |
 | install が digest 検査で失敗する | pin が機能している状態。別 artifact で retry せず、事象として報告する |
 | high-risk package が `--yes` だけで入る | 承認ゲートの不具合。install を止めて報告する |
 | `SKILL_SNAPSHOT_STORE_IO`（exit 1） | config dir が `/tmp` `/var` 配下。取得失敗ではない（0-1） |

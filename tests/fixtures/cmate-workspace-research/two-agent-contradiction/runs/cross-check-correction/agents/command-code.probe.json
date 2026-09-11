@@ -1,0 +1,7 @@
+{
+  "worktreeId": "node-app",
+  "instanceId": "command-code",
+  "cliToolId": "command-code",
+  "source": "history",
+  "reply": "WEB: available — https://nodejs-release.example.org/blog/release/v24.0.0 を fetch できた\nWORKSPACE: readable — /work/node-app/.commandmate/workspace-research/node24-migration-20260911-001/brief.md を読めた\nDONE: probe"
+}

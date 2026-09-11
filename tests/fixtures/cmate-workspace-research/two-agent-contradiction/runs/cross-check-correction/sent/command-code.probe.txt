@@ -1,0 +1,21 @@
+【依頼】調査の前の確認（cmate-workspace-research、run node24-migration-20260911-001）。まだ調査は始めないでください。
+
+■ 目的
+この後の調査で、あなたに Web と Workspace のどちらを任せられるかを決めたい
+
+■ 対象
+- /work/node-app/.commandmate/workspace-research/node24-migration-20260911-001/brief.md（run-dir で読むのはこれだけ）
+- Web: brief.md の主題に関係する公式 doc を 1 件
+
+■ 出力の形
+次の 3 行だけを返す:
+WEB: available — <fetch できた URL>（または WEB: unavailable — <理由>）
+WORKSPACE: readable — <読めた path>（または WORKSPACE: unreadable — <理由>）
+DONE: probe
+
+■ 触ってはいけないもの
+- workspace に 1 byte も書かない
+- brief.md 以外の run-dir を読まない
+
+■ 締め方
+3 行目の `DONE: probe` で締める

@@ -1517,6 +1517,11 @@ sig_start() {
 # deadline plus a PID-targeted SIGKILL is what turns that into a red.
 sig_finish() {
   if ! wait_for "$SIG_DIR/stderr" 'exiting on poll round' 100; then
+    # Report it as well as kill it (PR #239). A silent kill turns "the monitor
+    # never acted on the signal" into a puzzling status mismatch ten seconds
+    # later; named here, the reason is the first thing in the output.
+    failed=$((failed + 1))
+    printf 'FAIL the monitor in %s reported no exit within 10s — killed at the deadline\n     the status checked below is the kill, not the monitor\n' "$SIG_DIR"
     kill -s KILL "$SIG_PID" 2>/dev/null || true
   fi
   SIG_STATUS=0
@@ -1567,6 +1572,261 @@ if [ -n "$urg_round" ] && [ -n "$term_round" ] && [ "$term_round" -gt "$urg_roun
 else
   failed=$((failed + 1))
   printf 'FAIL the loop did not advance across the SIGURG (round %s -> %s)\n' "$urg_round" "$term_round"
+fi
+
+# --- the signal that stopped the run is the one that gets to speak (#1950) ----
+# Ported from CommandMate Issue #1950 / PR #1978, where the counterpart runner
+# grew a first-signal-wins latch in `report_fatal_signal`. The three cases below
+# are what that latch has to satisfy at once: a shutdown reports the kill that
+# caused it, a broken pipe on its own is still reportable, and neither claim is
+# made about a signal number the shell never delivered.
+
+# sig_pid_status <pid> <what> — reap, bounded, and leave the status in SIG_STATUS.
+# Unlike sig_finish this cannot wait on a stderr needle: some of the cases below
+# are precisely the ones where stderr is gone, so the deadline is a plain poll on
+# whether the process is still alive.
+#
+# The deadline reports rather than hides (PR #239). A case that hung here burned
+# a self-hosted runner's entire 15-minute job budget and was CANCELLED — neither
+# green nor red, which is the one outcome a shared runner must not produce. Ten
+# seconds is far longer than any case needs and far shorter than a job timeout,
+# so a monitor that will not end is a fast red with its own line saying why.
+sig_pid_status() {
+  sps__n=0
+  while [ "$sps__n" -lt 100 ]; do
+    kill -0 "$1" 2>/dev/null || break
+    sps__n=$((sps__n + 1))
+    sleep 0.1
+  done
+  if kill -0 "$1" 2>/dev/null; then
+    failed=$((failed + 1))
+    printf 'FAIL %s did not end within 10s — killed at the deadline\n     every status checked below it is the kill, not the monitor\n' "$2"
+    kill -s KILL "$1" 2>/dev/null
+  fi
+  SIG_STATUS=0
+  wait "$1" 2>/dev/null || SIG_STATUS=$?
+}
+
+# --- SIGPIPE has to be DELIVERABLE before any of it can be measured ----------
+# PR #239 died in the lone-SIGPIPE case below: it hung a self-hosted Linux runner
+# until the 15-minute job timeout cancelled the job, having passed in 70s on
+# macOS and in Docker. The cause is not in monitor.sh.
+#
+# A parent that ignores SIGPIPE hands SIG_IGN down to every descendant, and a
+# signal that was IGNORED ON ENTRY cannot be trapped — POSIX says so and bash
+# obeys, which is the same rule the SIGINT note further down already relies on.
+# `trap 'report_fatal_signal PIPE 13' PIPE` then installs nothing at all: the
+# write returns EPIPE, bash prints `echo: write error: Broken pipe`, and the poll
+# loop carries on for as long as anything lets it. Measured under such a parent:
+# the probe below answers 0 instead of 43, and the monitor logs one
+# `write error: Broken pipe` per round indefinitely. Plenty of supervisors do
+# this — the .NET-based Actions runner, any Python parent, anything that does not
+# reset dispositions across fork/exec.
+#
+# So the disposition is measured, and restored when it is wrong. python3 first,
+# because this repository's CI already requires it (`python3 scripts/validate.py`
+# is a gate); perl as the fallback. If neither can restore it the PIPE cases are
+# SKIPPED rather than hung, because on such a machine they would be measuring the
+# supervisor's signal mask instead of monitor.sh.
+
+# sigpipe_probe [prefix...] — echo 43 when a bash child started through the given
+# prefix can trap SIGPIPE, and anything else when it cannot.
+sigpipe_probe() {
+  sp__rc=0
+  "$@" bash -c 'sp__me=$$; ( sleep 0.2; kill -s PIPE "$sp__me" 2>/dev/null ) & trap "exit 43" PIPE; sleep 3; exit 0' \
+    >/dev/null 2>&1 || sp__rc=$?
+  echo "$sp__rc"
+}
+
+# Every SIGPIPE-dependent case starts the monitor through this wrapper, so "was
+# the disposition restored?" is answered once, here, instead of at each call
+# site. It `exec`s, so the pid the reapers hold is still the monitor's.
+PIPE_RUN="$WORK/sigpipe-run.sh"
+printf '#!/usr/bin/env bash\nexec "$@"\n' > "$PIPE_RUN"
+pipe_disposition=""
+if [ "$(sigpipe_probe)" = "43" ]; then
+  pipe_disposition="inherited"
+else
+  if command -v python3 >/dev/null 2>&1; then
+    cat > "$PIPE_RUN" <<'PIPEWRAP'
+#!/usr/bin/env bash
+exec python3 -c 'import os, signal, sys; signal.signal(signal.SIGPIPE, signal.SIG_DFL); os.execvp(sys.argv[1], sys.argv[1:])' "$@"
+PIPEWRAP
+    [ "$(sigpipe_probe bash "$PIPE_RUN")" = "43" ] && pipe_disposition="restored by python3"
+  fi
+  if [ -z "$pipe_disposition" ] && command -v perl >/dev/null 2>&1; then
+    cat > "$PIPE_RUN" <<'PIPEWRAP'
+#!/usr/bin/env bash
+exec perl -e '$SIG{PIPE} = "DEFAULT"; exec @ARGV or die "exec failed: $!\n"' "$@"
+PIPEWRAP
+    [ "$(sigpipe_probe bash "$PIPE_RUN")" = "43" ] && pipe_disposition="restored by perl"
+  fi
+  if [ -z "$pipe_disposition" ]; then
+    printf '#!/usr/bin/env bash\nexec "$@"\n' > "$PIPE_RUN"
+  fi
+fi
+if [ -n "$pipe_disposition" ]; then
+  printf '#    SIGPIPE is deliverable here (%s) — the PIPE cases are live\n' "$pipe_disposition"
+else
+  printf '#    SIGPIPE is SIG_IGN here and neither python3 nor perl is available to reset it\n'
+fi
+
+# The kill that a supervisor's timeout actually looks like: `spawnSync(..., {
+# timeout })` sends SIGTERM and closes the child's stdio in the SAME step, so the
+# SIGTERM handler writes its diagnostic into a stderr nobody is reading and takes
+# a SIGPIPE for it. The FIFO reproduces that here without node: the reader is
+# killed first, which leaves the write end with no reader, and the SIGTERM lands
+# on a monitor whose next word cannot be delivered.
+#
+# Without the latch the SIGPIPE re-enters the handler and wins, and the run
+# reports 141 — a timeout wearing the exit code of a broken pipe, with an empty
+# stderr to explain it. 143 is 128+15: the signal that was really sent.
+sig_dir="$WORK/sig-term-deadpipe"
+mkdir -p "$sig_dir"
+printf '#!/bin/sh\ncat "%s"\n' "$FIXTURES/live-idle.json" > "$sig_dir/fake-cm"
+printf '#!/bin/sh\nexit 0\n' > "$sig_dir/tmux"
+chmod +x "$sig_dir/fake-cm" "$sig_dir/tmux"
+mkfifo "$sig_dir/errpipe"
+cat "$sig_dir/errpipe" > "$sig_dir/stderr" &
+err_reader=$!
+# Forget the job before killing it: otherwise the shell reports the reader's
+# death ("Killed: 9 cat ...") into the suite's own output, which is a line an
+# operator reads as a fault and is not one — the kill is the fixture.
+disown "$err_reader" 2>/dev/null || true
+# A long interval keeps the monitor asleep between polls, so the only write that
+# can meet the dead pipe is the handler's own — the race the case is not about.
+PATH="$sig_dir:$PATH" CM="$sig_dir/fake-cm" \
+  bash "$PIPE_RUN" bash "$MONITOR" --interval 5 --idle-threshold 99 --heartbeat 0 --verbose w1 \
+  > "$sig_dir/stdout" 2> "$sig_dir/errpipe" &
+deadpipe_pid=$!
+# `--verbose` above is what puts `poll 1 ->` on stdout at all: the needle is the
+# documented "the traps are installed by now" marker (see sig_start), and without
+# the flag it never appears, so every run of this case used to pay the whole 10s
+# deadline before it could even begin.
+wait_for "$sig_dir/stdout" 'poll 1 ->' 100
+kill -s KILL "$err_reader" 2>/dev/null || true
+kill -s TERM "$deadpipe_pid"
+sig_pid_status "$deadpipe_pid" "the monitor whose SIGTERM report cannot be written"
+check "a SIGTERM whose report cannot be written still exits 143, not 141" 143 "$SIG_STATUS"
+
+# The positive control for the same latch: SIGTERM with a stderr that works is
+# unchanged, so 143 above is the latch doing its job rather than the diagnostic
+# having gone missing.
+sig_start term-alone
+kill -s TERM "$SIG_PID"
+sig_finish
+check "…and a SIGTERM with somewhere to write it exits 143 too" 143 "$SIG_STATUS"
+check_contains "…still naming the signal exactly once" \
+  "monitor: ERROR caught SIGTERM (signal 15) on poll round" "$SIG_STDERR"
+check "…exactly once, not once per signal that followed it" 1 \
+  "$(printf '%s\n' "$SIG_STDERR" | grep -c 'monitor: ERROR caught SIG')"
+
+# A SIGPIPE that arrives on its own is the FIRST signal, so the latch is open and
+# it reports and exits 141 exactly as before. This is the case a "swallow
+# SIGPIPE" fix would have broken, and the reason the latch is about ORDER rather
+# than about PIPE.
+#
+# It is measured twice, because the two halves fail for different reasons.
+if [ -n "$pipe_disposition" ]; then
+  # Half one: the signal is DELIVERED, not provoked. The original version of this
+  # case ran `monitor.sh | head -1` and then waited for the monitor to notice —
+  # which it can only do on its NEXT write, so the case was really an assertion
+  # about write timing, and a monitor that went quiet hung it forever (PR #239).
+  # An explicit `kill -s PIPE` is the same thing the SIGTERM/SIGHUP/SIGURG cases
+  # above already do, and it pins what this case is actually about: PIPE arriving
+  # first is reported, not dropped.
+  sig_dir="$WORK/sig-pipe-signalled"
+  mkdir -p "$sig_dir"
+  printf '#!/bin/sh\ncat "%s"\n' "$FIXTURES/live-idle.json" > "$sig_dir/fake-cm"
+  printf '#!/bin/sh\nexit 0\n' > "$sig_dir/tmux"
+  chmod +x "$sig_dir/fake-cm" "$sig_dir/tmux"
+  PATH="$sig_dir:$PATH" CM="$sig_dir/fake-cm" \
+    bash "$PIPE_RUN" bash "$MONITOR" --interval 1 --idle-threshold 99 --heartbeat 0 --verbose w1 \
+    > "$sig_dir/stdout" 2> "$sig_dir/stderr" &
+  signalled_pid=$!
+  wait_for "$sig_dir/stdout" 'poll 1 ->' 100
+  kill -s PIPE "$signalled_pid"
+  sig_pid_status "$signalled_pid" "the monitor sent a lone SIGPIPE"
+  check "a lone SIGPIPE is still fatal and still exits 128+13" 141 "$SIG_STATUS"
+  check_contains "…and is still named on the stderr that survived it" \
+    "monitor: ERROR caught SIGPIPE (signal 13) on poll round" "$(cat "$sig_dir/stderr")"
+
+  # Half two: the shape the PIPE trap was actually added for — `monitor.sh | head`
+  # — where the signal comes from a write to a reader that has gone. Kept because
+  # half one cannot show that a REAL broken pipe still reaches the handler, and
+  # rebuilt so it can only ever be slow, never eternal: the monitor is a
+  # background job with a pid, both ends are reaped by the bounded reaper, and
+  # `--heartbeat 1` guarantees a write every round so the EPIPE cannot be waited
+  # on forever. The FIFO replaces the shell pipeline only because a pipeline
+  # gives no pid to hold.
+  sig_dir="$WORK/sig-pipe-broken"
+  mkdir -p "$sig_dir"
+  printf '#!/bin/sh\ncat "%s"\n' "$FIXTURES/live-idle.json" > "$sig_dir/fake-cm"
+  printf '#!/bin/sh\nexit 0\n' > "$sig_dir/tmux"
+  chmod +x "$sig_dir/fake-cm" "$sig_dir/tmux"
+  mkfifo "$sig_dir/outpipe"
+  # Started before the reader on purpose: opening a FIFO for writing blocks until
+  # a reader arrives, so this order cannot deadlock on a reader that came and went.
+  PATH="$sig_dir:$PATH" CM="$sig_dir/fake-cm" \
+    bash "$PIPE_RUN" bash "$MONITOR" --interval 1 --idle-threshold 99 --heartbeat 1 --verbose w1 \
+    > "$sig_dir/outpipe" 2> "$sig_dir/stderr" &
+  broken_pid=$!
+  head -1 < "$sig_dir/outpipe" > "$sig_dir/stdout" &
+  head_pid=$!
+  sig_pid_status "$head_pid" "the reader of the lone-SIGPIPE pipeline"
+  sig_pid_status "$broken_pid" "the monitor writing into a reader that has gone"
+  check "…and a real broken pipe reaches the same handler" 141 "$SIG_STATUS"
+  check_contains "…reporting the pipe rather than dying mute" \
+    "monitor: ERROR caught SIGPIPE (signal 13) on poll round" "$(cat "$sig_dir/stderr")"
+else
+  printf 'SKIP the lone-SIGPIPE cases: SIGPIPE is SIG_IGN in this environment and cannot be reset,\n     so they would measure the supervisor rather than monitor.sh\n'
+fi
+
+# SIGINT, which the note on sig_start explains cannot be measured through a
+# background job: bash sets INT to SIG_IGN in an asynchronous child of a
+# non-interactive shell, and a signal ignored on entry cannot be trapped. The
+# driver below sidesteps that by never being a background job — it is run in the
+# FOREGROUND, arms a killer aimed at its own pid, and then `exec`s the monitor,
+# which keeps that pid and that (default) disposition.
+#
+# The probe first: if the suite ITSELF was started as a background job, INT is
+# ignored all the way down and this case would measure bash rather than the
+# monitor. Reporting that as a failure would be a lie, so it is reported as what
+# it is and the case is skipped.
+int_probe=0
+bash -c 'ip__me=$$; ( sleep 0.2; kill -s INT "$ip__me" 2>/dev/null ) & trap "exit 42" INT; sleep 3; exit 0' \
+  || int_probe=$?
+if [ "$int_probe" = "42" ]; then
+  sig_dir="$WORK/sig-int"
+  mkdir -p "$sig_dir"
+  printf '#!/bin/sh\ncat "%s"\n' "$FIXTURES/live-idle.json" > "$sig_dir/fake-cm"
+  printf '#!/bin/sh\nexit 0\n' > "$sig_dir/tmux"
+  chmod +x "$sig_dir/fake-cm" "$sig_dir/tmux"
+  # This case is the one that cannot be reaped from outside — it has to run in the
+  # foreground, so the suite is blocked while it does. Its deadline therefore
+  # travels inside the driver, armed BEFORE the exec so the exec cannot lose it:
+  # the INT goes at 2s and an unconditional KILL follows 6s later. A monitor that
+  # ignored the INT exits 137, which fails the check below in ~8s rather than
+  # polling until something outside the suite gives up (PR #239).
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'me=$$\n'
+    printf '( sleep 2; kill -s INT "$me" 2>/dev/null; sleep 6; kill -s KILL "$me" 2>/dev/null ) &\n'
+    printf 'exec bash "$1" --interval 1 --idle-threshold 99 --heartbeat 0 --verbose w1\n'
+  } > "$sig_dir/int-driver.sh"
+  int_status=0
+  PATH="$sig_dir:$PATH" CM="$sig_dir/fake-cm" \
+    bash "$sig_dir/int-driver.sh" "$MONITOR" > "$sig_dir/stdout" 2> "$sig_dir/stderr" \
+    || int_status=$?
+  int_stderr=$(cat "$sig_dir/stderr")
+  check "SIGINT exits 128+2, the status a supervising shell expects" 130 "$int_status"
+  check_contains "…naming the signal and the round it stopped on" \
+    "monitor: ERROR caught SIGINT (signal 2) on poll round" "$int_stderr"
+  check_contains "…and reporting who is left unwatched" \
+    "worker(s) complete (rc=130) — the rest are now UNMONITORED" "$int_stderr"
+else
+  printf 'SKIP SIGINT is ignored in this environment (probe rc=%s); the case would measure bash, not monitor.sh\n' \
+    "$int_probe"
 fi
 
 echo

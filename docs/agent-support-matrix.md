@@ -63,6 +63,9 @@ skills 未導入の新規 git リポジトリ・専用ポート・専用 DB の�
 | OpenCode | 未計測 | 未計測 | — |
 | vibe-local / copilot / antigravity | 未計測 | 未計測 | — |
 
+この表は 2026-07-26 時点の記録である。**OpenCode と Command Code は
+2026-09-04 に実測した**（第 3.4 節）ので、現在の宣言は第 4 節を見ること。
+
 evidence:
 <https://github.com/Kewton/CommandMate/issues/1513#issuecomment-5083878264>
 
@@ -219,31 +222,133 @@ slash command として露出しない点は変わらない（`/cmate-` はマ�
 （`compatibility.agents[].measured.discovery.evidenceKind = self_report`）。
 訂正には version bump と再 publish が要るため、ここでは記録に留める。
 
+### 3.4 opencode / Command Code（2026-09-04）
+
+第 3 節から第 3.3 節までは Claude Code と Codex CLI しか測っておらず、`opencode` は
+全 package で `unknown` のままだった。`command-code` に至っては、upstream の
+`CLI_TOOL_IDS`（[CommandMate#2250](https://github.com/Kewton/CommandMate/issues/2250)）に
+入っているのにこの repository の mirror が追いついておらず、宣言しようとすると
+`validate.py` が `INVALID_ENUM` で撥ねる状態だった。2026-09-04 に**両方の discovery 経路を
+機械的に測った**（mirror も同じ commit で追いつかせている）。
+
+一次記録: [CommandMate#2322](https://github.com/Kewton/CommandMate/issues/2322)（Command Code）、
+[CommandMate#2037](https://github.com/Kewton/CommandMate/issues/2037) と
+`docs/design/opencode-server-live-verification.md` 第 12.4–12.5 節（opencode 1.18.22）。
+
+| 項目 | 値 |
+|---|---|
+| opencode | **1.18.27**（discovery の再確認。invocation は 1.18.22 の #2037 実測） |
+| Command Code | **1.47.0**（npm `command-code`、bin `cmd`） |
+| 前提 | `skill install` が `.agents/skills/<id>/` と `.claude/skills/<id>/` の両方へ byte-identical に置く（第 2 節） |
+| 測定に使った Skill | probe（`/probe-agents-root` ほか）と実 package 3 件 |
+
+#### opencode 1.18.27
+
+隔離 `HOME` に `opencode serve --pure` を立て、`GET /skill` の応答を読む。
+**model 呼び出しを伴わない**ので、発見の証跡は絶対 path つきの機械的な列挙である。
+
+| root | 発見 |
+|---|---|
+| `<project>/.agents/skills/` | **YES**（絶対 path つき） |
+| `<project>/.claude/skills/` | **YES** |
+| `<project>/.opencode/skills/` | **YES** |
+| 実 package `cmate-repository-analysis`（両 root に配置） | **YES**。同名は 1 件に畳まれ、`location` は `.agents/skills` |
+
+invocation は 1.18.22 で測ってある（[#2037](https://github.com/Kewton/CommandMate/issues/2037)）:
+`/probe-agents-root` を送信すると SKILL.md 本文が読み込まれ、agent が
+`PROBE_OK_probe-agents-root` を返す。
+
+- **reload**: 起動時スキャンである。**install 後は再起動が要る。**
+- **opencode 自身の slash palette には Skill が出ない**（`/skills` picker が `/<name>` を挿入する）。
+
+#### Command Code 1.47.0
+
+`cmd skills list -d`（**model 呼び出しなし**）、TUI の `/skills` picker、
+headless `cmd -p "/<name>" --output-format json` の NDJSON を読む。
+
+| root | 発見 |
+|---|---|
+| `<project>/.agents/skills/`（**primary install root**） | **YES**（`[.agents]` バッジ付き） |
+| `<project>/.claude/skills/` | **NO — 読まない**（陰性対照は下記） |
+| `<project>/.commandcode/skills/` | **YES** |
+| `~/.agents/skills/` ・ `~/.commandcode/skills/` | bundle の走査対象（`dist/cli.mjs`） |
+| 実 package `cmate-repository-analysis` / `cmate-verify`（`allowed-tools` frontmatter あり） / `cmate-orchestrate`（SKILL.md 59,914 bytes） | **YES（3/3）**、skip なし |
+
+invocation: `/probe-agents-root` → NDJSON に
+`{"type":"event","event":{"type":"skill_loaded","name":"probe-agents-root"}}` が出て、
+`finalText` が `PROBE_OK_probe-agents-root` になる。`/<name>` は slash route で Skill に
+解決され（予約語と衝突する場合は `/skill:<name>`）、model 側からは `activate_skill` tool でも
+起動できる。
+
+- **reload**: **再起動不要**。TUI 稼働中に足した Skill が `/skills` の開き直しで出た。
+
+#### 陰性対照
+
+| 対照 | 結果 |
+|---|---|
+| `.claude/skills` に**だけ**置いた probe を Command Code から呼ぶ（`/probe-claude-root`） | 「I don't see a skill named…」・`skill_loaded` **0 件** |
+
+⇒ Command Code の `native` は **`.agents/skills` への配置**（installer の primary root）に
+だけ依存する。第 2 節の両 root install のうち `.claude/skills` 側は Command Code には
+効いておらず、**installer の `.agents/skills` 側だけで足りている**。
+第 3.2 / 3.3 節が Claude と Codex に対してやったのと同じ形の対照であり、
+「両方に置いたら両方から見えた」で止めていない。
+
+#### evidence の性質
+
+| Agent | 発見の証跡 | 呼出の証跡 |
+|---|---|---|
+| opencode 1.18.27 | **機械的**（`GET /skill` が返す絶対 path） | 1.18.22 で `/<name>` 送信 → 本文が読まれる（#2037） |
+| Command Code 1.47.0 | **機械的**（`cmd skills list -d` の列挙・`/skills` picker） | **機械的**（NDJSON の `skill_loaded` event） |
+
+どちらも model の自己申告ではない。**測ったのは discovery 経路だけである**（第 1 節）。
+cmate-* の各手順を opencode / Command Code で最後まで回した rubric 評価は含まない。
+
 ## 4. package 別の宣言
 
-| Skill | version | claude | codex | gemini | opencode | 実測日（package 単位） | 経路 |
-|---|---|---|---|---|---|---|---|
-| `cmate-acceptance-test` | 0.1.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
-| `cmate-issue-authoring` | 0.1.0 | native | native | unknown | unknown | **2026-08-02** | catalog install |
-| `cmate-issue-refinement` | 0.1.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
-| `cmate-orchestrate` | 0.9.0 | native | native | unknown | unknown | **2026-08-02（0.9.0 で実測）** | catalog install |
-| `cmate-orchestrate-monitor` | 0.4.0 | native | native | unknown | unknown | **2026-08-02（0.4.0 で実測）** | catalog install |
-| `cmate-repository-analysis` | 0.1.1 | native | native | unknown | unknown | 2026-07-31 | catalog install |
-| `cmate-task-contract` | 0.1.0 | native | native | unknown | unknown | **2026-08-02** | catalog install |
-| `cmate-verify` | 0.1.1 | native | native | unknown | unknown | **2026-08-02（0.1.1 で実測）** | catalog install |
-| `cmate-verify-advisor` | 0.1.0 | native | native | unknown | unknown | **2026-08-02** | catalog install |
-| `cmate-worktree-cleanup` | 0.1.2 | native | native | unknown | unknown | 2026-07-31 | catalog install |
-| `cmate-worktree-setup` | 0.1.2 | native | native | unknown | unknown | 2026-07-31 | catalog install |
+| Skill | 宣言 version | claude | codex | gemini | opencode | command-code | claude / codex 実測 | opencode / command-code 実測 |
+|---|---|---|---|---|---|---|---|---|
+| `cmate-acceptance-test` | 0.1.4 | native | native | unknown | native | native | 0.1.1・2026-07-31 | 2026-09-04（経路） |
+| `cmate-delegate` | 0.1.2 | native | native | unknown | native | native | 未（経路からの敷衍） | 2026-09-04（経路） |
+| `cmate-issue-authoring` | 0.9.1 | native | native | unknown | native | native | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
+| `cmate-issue-refinement` | 0.4.1 | native | native | unknown | native | native | 0.1.1・2026-07-31 | 2026-09-04（経路） |
+| `cmate-orchestrate` | 0.32.1 | native | native | unknown | native | native | 0.9.0・**2026-08-02** | **2026-09-04（Command Code は 0.32.0 を実 package で実測）** |
+| `cmate-orchestrate-monitor` | 0.7.1 | native | native | unknown | native | native | 0.4.0・**2026-08-02** | 2026-09-04（経路） |
+| `cmate-repository-analysis` | 0.2.1 | native | native | unknown | native | native | 0.1.1・2026-07-31 | **2026-09-04（両者とも 0.2.0 を実 package で実測）** |
+| `cmate-task-contract` | 0.2.3 | native | native | unknown | native | native | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
+| `cmate-verify` | 0.5.1 | native | native | unknown | native | native | 0.1.1・**2026-08-02** | **2026-09-04（Command Code は 0.5.0 を実 package で実測）** |
+| `cmate-verify-advisor` | 0.3.1 | native | native | unknown | native | native | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
+| `cmate-worker-development` | 0.2.1 | native | native | unknown | native | native | 未（経路からの敷衍） | 2026-09-04（経路） |
+| `cmate-workspace-research` | 0.1.2 | native | native | unknown | native | native | 0.1.1・**2026-09-11**（claude を親に実機 run。codex は未） | 2026-09-04（経路） |
+| `cmate-worktree-cleanup` | 0.1.6 | native | native | unknown | native | native | 0.1.2・2026-07-31 | 2026-09-04（経路） |
+| `cmate-worktree-setup` | 0.1.6 | native | native | unknown | native | native | 0.1.2・2026-07-31 | 2026-09-04（経路） |
+
+「宣言 version」は本 commit 時点で各 package の `commandmate.skill.yaml` が名乗っている
+version である。**evidence の文面を直すだけでも bump が要る**（公開済み version は immutable）
+ので、実測に使った version とは普通ずれる。ずれた分は右 2 列に書いてある。
 
 `claude` / `codex` 列は第 3.2 節（2026-07-31）と第 3.3 節（2026-08-02）で
 **package ごとに**測った結果である（それ以前は第 3 節の 1 package の測定を
 install 経路の共通性から全件に敷衍していた）。両節で重なる 4 件は新しい方で上書きしてある。
+`cmate-worker-development`・`cmate-delegate`・`cmate-workspace-research` は両節より後に足した package なので、
+claude / codex はまだ package 単位で測っていない（経路からの敷衍である）。ただし `cmate-workspace-research` 0.1.1 は、
+#245 の UAT（2026-09-11）で claude を親にした実機 run（slash で起動し COMPLETED）を通している。
+`cmate-delegate`（2026-09-07）と `cmate-workspace-research`（2026-09-11）は第 3.4 節より後に足したので、**opencode / command-code も同様に敷衍**である
+（第 3.4 節が測ったのは root ごとの discovery 経路であり、install 先は package に依存しない）。
 
-**11 package すべてが Catalog に publish 済みであり、全件が catalog install 経由で
-package 単位に測られている。** 第 3.2 節が残していた「手動両置き」「未 publish」
-「repo 側だけ先行」の 3 種類の但し書きは、第 3.3 節の実測ですべて解消した。
+`opencode` / `command-code` 列は第 3.4 節（2026-09-04）の測定である。
+**この 2 つは package 単位に全件を測ってはいない。** 測ったのは（a）root ごとの
+discovery 経路と（b）実 package（opencode は `cmate-repository-analysis`、
+Command Code はそれに `cmate-verify` と `cmate-orchestrate` を加えた 3 件）で、
+残りは「install 先が package に依存しない」（第 2 節）ことからの敷衍である。
+第 3 節が Claude / Codex に対して最初に採った立場と同じであり、
+package 単位の追試は第 3.2 節がそうしたように別に行う。
 
-`gemini` / `opencode` は依然としてどの package でも測っていない。
+`gemini` / `copilot` / `vibe-local` / `antigravity` は依然としてどの package でも測っていない。
+`cmate-delegate` と `cmate-workspace-research` は、そのうち `copilot` / `antigravity` を**省略せず `unknown` として
+明示的に宣言している**——省略と `unknown` は manifest の上では区別できるが、
+読み手にとっては「まだ考えていない」と「測っていないと判っている」の差だからである。
+`vibe-local` はどの package も宣言していない。
 
 ## 5. 既知の制約
 
@@ -263,7 +368,21 @@ package 単位に測られている。** 第 3.2 節が残していた「手動�
   `--ack-risk <skill-id>@<version>` の完全一致が必要。ゲートの拒否（exit 12）は
   2026-07-29 に publish 済み 3 件で、2026-07-31 に `cmate-worktree-cleanup` 0.1.2 で、
   2026-08-02 に **`cmate-verify` 0.1.1** で実測した（4 件すべて実測済み）。
-- **Gemini / OpenCode / vibe-local / copilot / antigravity は未計測。**
+- **Command Code 1.47.0 は `.claude/skills` を読まない。** 読むのは primary install root
+  （`.agents/skills`）と `.commandcode/skills`、および `~/.agents/skills` /
+  `~/.commandcode/skills` である。`.claude/skills` にだけ置いた probe は
+  「I don't see a skill named…」で終わり `skill_loaded` が 1 件も出ない（第 3.4 節の陰性対照）。
+  したがって `command-code: native` は installer の `.agents/skills` 側の配置にだけ依存する
+  —— `claude: native` が `.claude/skills` 側に依存しているのとちょうど対になっている。
+- **opencode 1.18.27 は自身の slash palette に Skill を出さない。**
+  `/skills` picker が `/<name>` を composer へ挿入する形であり、送信すれば Skill は読まれる
+  （invocation は 1.18.22 で実測。第 3.4 節）。Codex 0.145.0 と同じく「palette に出ない」は
+  配置先の問題ではない。
+- **reload の要否は Agent ごとに違う。** opencode は起動時スキャンなので
+  **install 後に再起動が要る**。Command Code は **再起動不要**で、TUI 稼働中に足した Skill が
+  `/skills` の開き直しで出る。Claude / Codex は新しい session の開始が要る（下記）。
+- **Gemini / vibe-local / copilot / antigravity は未計測。**
+  opencode と Command Code は第 3.4 節（2026-09-04）で実測したので、ここから外した。
 - **CommandMate の config dir（`$HOME/.commandmate`）を `/tmp` や `/var` 配下に置くと
   install できない。** snapshot store が system directory を拒否するため、
   `SKILL_SNAPSHOT_STORE_IO`・exit 1 で失敗する（macOS の `mktemp -d` は `/var/folders/…`）。

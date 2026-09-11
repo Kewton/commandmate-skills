@@ -156,6 +156,9 @@ SKILL_FILE_KINDS: tuple[str, ...] = ("skill_md", "instruction", "script", "asset
 
 # Mirrors `CLI_TOOL_IDS` in `src/lib/cli-tools/types.ts`: `compatibility.agents[].agent`
 # is rejected upstream when it is not a known CLI tool.
+# `command-code` is upstream's since Kewton/CommandMate#2250; while this tuple
+# lagged it, a manifest declaring the agent CommandMate accepts was rejected here
+# with INVALID_ENUM -- mirror drift that only this repository could see.
 CLI_TOOL_IDS: tuple[str, ...] = (
     "claude",
     "codex",
@@ -164,6 +167,7 @@ CLI_TOOL_IDS: tuple[str, ...] = (
     "opencode",
     "copilot",
     "antigravity",
+    "command-code",
 )
 
 # =============================================================================

@@ -1,0 +1,18 @@
+【依頼】cross check（cmate-workspace-research、run node24-migration-20260912-001、challenge 1）をお願いします。
+
+■ 目的
+「pkg-x 3.x が blocker」という結論を覆す evidence が無いかを、自己反証で確かめたい
+
+■ 対象
+- /work/node-app/.commandmate/workspace-research/node24-migration-20260912-001/challenges/command-code.challenge-1.md を読み、そこに挙げた claim を確かめてください
+
+■ 出力の形
+- challenge ファイルの「Reply」の形で、このチャットに返す
+
+■ 触ってはいけないもの
+- run-dir を含め、workspace に 1 byte も書かない
+- run-dir の agents/ と、他の Agent の roles/ は読まない
+- push / PR / deploy / 外部への書き込みをしない
+
+■ 締め方
+最後に `DONE:` で始まる 1 行で要約してください。

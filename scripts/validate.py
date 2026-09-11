@@ -17,10 +17,12 @@ What it proves, in the order it proves it:
 6. a `SKILL_VERSION` constant shipped in `scripts/lib.mjs` agrees with the
    manifest version;
 7. `SKILL.md` is small enough for CommandMate's slash-command palette to load;
-8. the artifact the package builds into is accepted by the strict reader;
-9. building it twice produces byte-identical output.
+8. `SKILL.md` holds no `$<digit>` / `$ARGUMENTS`, which Claude Code rewrites with the
+   slash-command arguments before the model reads the body;
+9. the artifact the package builds into is accepted by the strict reader;
+10. building it twice produces byte-identical output.
 
-Exit status is 0 only when every package passes all nine.
+Exit status is 0 only when every package passes all ten.
 """
 
 from __future__ import annotations
@@ -49,6 +51,7 @@ CATALOG_UNREADABLE = "SKILLS_CATALOG_UNREADABLE"
 GOVERNANCE_MISSING = "SKILLS_GOVERNANCE_MISSING"
 VERSION_CONSTANT_MISMATCH = "SKILLS_VERSION_CONSTANT_MISMATCH"
 SKILL_MD_TOO_LARGE = "SKILLS_SKILL_MD_TOO_LARGE"
+SKILL_MD_SLASH_ARG = "SKILLS_SKILL_MD_SLASH_ARG_PLACEHOLDER"
 
 #: The one payload file a package may state its own version in a second time.
 SKILL_LIB_PATH = "scripts/lib.mjs"
@@ -92,6 +95,13 @@ REQUIRED_GOVERNANCE_FILES = (
     "CONTRIBUTING.md",
     ".github/CODEOWNERS",
 )
+
+
+#: What Claude Code rewrites in a `SKILL.md` body with the arguments of `/<skill> <args>`
+#: before the model reads it (measured on Claude Code 2.1.268, commandmate-skills #247):
+#: `$0`..`$N` (0-based, only while in range) and `$ARGUMENTS` / `$ARGUMENTS[N]`. `${1}`,
+#: `$*`, `$@`, `$#`, `$?`, named variables and `$(...)` pass through unchanged.
+SLASH_ARG_PLACEHOLDER = re.compile(r"\$(?:[0-9]|ARGUMENTS\b)")
 
 
 def _annotation_safe(text: str) -> str:
@@ -258,6 +268,43 @@ def validate_catalogs(catalog_root: Path) -> tuple[int, int]:
     return checked, failures
 
 
+def check_skill_md_placeholders(check, out: list[Finding]) -> None:
+    """Refuse a `SKILL.md` holding what Claude Code rewrites with the slash arguments.
+
+    `/<skill> <args>` hands the model the body only after replacing `$<digit>` and
+    `$ARGUMENTS` with the arguments, so a shell snippet written with `"$1"` reaches
+    the model with the first argument in its place. An index past the last argument
+    is left alone, so the damage depends on how many arguments the user typed, and
+    nothing else sees it: the package validates, builds and installs, and fixture
+    suites read the file as bytes. Only a live run found it (#247), so it is checked
+    here, where every package and both CI jobs pass through.
+
+    Reads `check.payload` like `check_skill_md_size`, for the same reason.
+    """
+    if check.payload is None:
+        return
+
+    entry = next((f for f in check.payload if f.path == SKILL_MD_FILENAME), None)
+    if entry is None:
+        return
+
+    text = entry.data.decode("utf-8", errors="replace")
+    hits = [(number, line.strip()) for number, line in enumerate(text.splitlines(), 1)
+            if SLASH_ARG_PLACEHOLDER.search(line)]
+    if hits:
+        shown = "; ".join(f"line {number}: {line[:80]}" for number, line in hits[:5])
+        out.append(
+            Finding(
+                SKILL_MD_SLASH_ARG,
+                SKILL_MD_FILENAME,
+                "SKILL.md holds a placeholder Claude Code rewrites with the slash-command "
+                f"arguments ($<digit> / $ARGUMENTS): {shown}. Write shell snippets with named "
+                "variables, or move them into scripts/.",
+                {"lines": [number for number, _ in hits]},
+            )
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -309,6 +356,7 @@ def main() -> int:
         findings = list(check.findings)
         check_version_constant(check, findings)
         check_skill_md_size(check, findings)
+        check_skill_md_placeholders(check, findings)
 
         artifact = None
         if check.manifest is not None and not findings:

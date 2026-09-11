@@ -1,0 +1,140 @@
+schema_version: 1
+id: cmate-workspace-research
+name: cmate-workspace-research
+version: 0.1.2
+summary: 指定した複数の Agent セッションに Web と Workspace を独立に調査させ、重要な Finding を相互反証し、結論を左右する claim を追加検証して、Evidence 付きの final.md 1 本に統合する技術調査の手順。
+description: |-
+  ユーザーが agents と request だけを指定すると、親セッションが指定の Agent（子）に同じ調査を独立に委ね、Web と Workspace の Evidence を突き合わせて「このリポジトリにとって何を意味するか」までを 1 本の final.md にまとめる。migration / upgrade / incident / architecture / security / OSS の技術調査が対象で、コードの変更・PR・実行契約は扱わない。
+  手順は preflight → FRAME → CAPABILITY PROBE → ROLE → INDEPENDENT → CROSS CHECK → TARGETED VERIFY → EVIDENCE MERGE → SYNTHESIZE である。preflight で自分を子から除外し、alias を instanceId へ解決し、子の cliTool / running / autoYes と read-only コマンドに要る権限の整え方を表にして、人に 1 回だけ選ばせる。running でない子には固定文の warm-up を送る。
+  Web に出られるかは Agent に依存するので、role は probe の報告（WEB: available | unavailable）の後に決める。子への送信文は cmate-delegate の 5 欄だけの短文で、調査契約は run-dir の roles/<key>.md に書いて読ませる。子は chat で返答し、workspace には 1 byte も書かない。親は commandmate ask --json --timeout 3600 を子の数だけ背景で走らせ、exit code で分岐する。
+  規律は 4 つある。Agent の一致は Evidence ではない。独立調査の間は他の子の結果を見せない。調査中に workspace を変えない（git status の前後比較を final に残す）。子の prompt に答えず（respond を打たない）、子の auto-yes を触らない（exit 10 はその子だけ止めて人へ写す）。
+  final.md の What Changed Through Cross Check は修正が無くても見出しを残して「修正なし」と書く。完了しなかった子は coverage の降格として、未解決の矛盾は UNRESOLVED CONTRADICTION として残す。
+capabilities:
+  - agents と request だけで起動し（slash でも名前付き欄でも）、request が読めなければ子に何も送らず ambiguous_request で止まる
+  - whoami / 環境変数 / tmux 逆引きで自分を特定し、自分を子に含めた指定や解決できない alias を開始前に拒否する
+  - 子の cliTool / running / autoYes と、read-only コマンドに要る権限の整え方を表にして、人に 1 回だけ「整えて続行 / コマンド無しで続行」を選ばせる
+  - 子の Web 到達を probe で確かめてから Workspace-first / External-first などの role を割り当て、Web が誰にも無ければ coverage を下げて続行する
+  - 5 欄だけの短い送信文と role ファイルで独立調査を委ね、commandmate ask --json を背景で N 本走らせて exit code で回収する（親が Codex なら直列）
+  - 結論を変えうる Finding と全員が置いている前提を選んで challenge を送り、Workspace の claim は親が自分で読み、Web の claim は Web の使える子に確かめさせる
+  - Finding を WEB / WORKSPACE / DERIVED と 5 つの state で統合し、同じ URL の重複を独立 evidence として数えない
+  - path:line / path::symbol と URL ＋ as-of の locator を持つ final.md を、What Changed Through Cross Check を必ず含めて書く
+  - 子が exit 10 / 124 / 21 で止まっても respond も auto-yes も打たず、その子だけ止めて残りの子で final を出し、run.json に理由を残す
+  - 調査の前後で git status --porcelain を比べ、workspace が変わっていれば final の Risks に記録する
+expected_outcomes:
+  - Web の一般論ではなく、自分の workspace の実際（依存の version・読み込み箇所・CI・Dockerfile）を踏まえた調査結果が 1 本の final.md で返る
+  - 複数の Agent を使ったことで初期分析の何が修正されたかが、What Changed Through Cross Check として毎回残る
+  - Agent 同士の一致や多数決が、結論の根拠として扱われない
+  - 全員が共有していた誤った前提が、一致したという理由で見逃されにくくなる
+  - 未検証の claim が、検証済みの事実と同じ強さで書かれない
+  - 子が権限ダイアログで止まっても、親が勝手に承認せず、残りの子で調査が続く
+  - 調査中に workspace が変更されたかどうかが、後から確かめられる
+  - Web に出られない子へ Web 役が割り当てられない
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - research
+  - workspace-research
+  - multi-agent
+  - cross-check
+  - evidence
+  - falsification
+  - web-research
+  - delegation
+  - migration
+  - upgrade
+  - incident
+  - architecture
+  - security
+  - read-only
+  - human-in-the-loop
+  - commandmate-cli
+compatibility:
+  commandmate: '>=0.31.3 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 and re-checked 2026-07-31 - an installed skill is found under .claude/skills and matches in the slash palette. Package-independent; this package was NOT separately measured.
+    - agent: codex
+      support: native
+      evidence: Discovery path measured 2026-07-26 on Codex CLI 0.145.0 and re-checked 2026-08-02 with a mechanical trace (the /skills picker lists it). No slash command is exposed, so invoke it by name with the agents and request fields. This package was NOT separately measured.
+    - agent: opencode
+      support: native
+      evidence: 'Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Restart after install. This package was NOT separately measured.'
+    - agent: command-code
+      support: native
+      evidence: 'Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read. This package was NOT separately measured.'
+    - agent: gemini
+      support: unknown
+      evidence: Not measured, for this package or any other. The procedure needs only a shell and the commandmate and git CLIs; discovery and reload are unverified.
+    - agent: copilot
+      support: unknown
+      evidence: Not measured, for this package or any other. No discovery, invocation or reload behaviour has been observed, so no support level is claimed.
+    - agent: antigravity
+      support: unknown
+      evidence: Not measured as the parent that loads this skill, for this package or any other. Its behaviour as a child session is recorded in SKILL.md section 11, which says nothing about discovery.
+requirements:
+  commands:
+    - name: commandmate
+      version_range: '>=0.31.3 <1.0.0'
+    - name: git
+      version_range: '>=2.30.0 <3.0.0'
+  network_hosts: []
+declared_permissions:
+  - process_execution
+  - filesystem_read
+  - filesystem_write
+  - environment_read
+declared_risk: moderate
+risk_rationale: >-
+  script も実行 bit 付きの file も含まず、install 時に実行されるものも無い。手順が spawn するのは
+  commandmate（whoami / instances / ls / ask、ask の無い版では send / wait / capture）と git（status /
+  check-ignore / rev-parse）と find（run-dir の外で更新された file の列挙。read-only）と tmux display-message だけで、respond / auto-yes / interrupt は使わない。
+  子のコンポーザーへ文章を入力する。file を書くのは run-dir（.commandmate/workspace-research/<run-id>/）の
+  中だけで、workspace の他の場所は変えない。読む環境変数は CM_WORKTREE_ID / CM_INSTANCE_ID で、
+  credential は読まない。親は network に接続せず、Web の調査は子の CLI が行う。
+files:
+  - path: SKILL.md
+    sha256: 55caeadaa39a9630cd9f38680fc729c16650c4535f334c2440956e6df0305187
+    size: 36971
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/artifacts.md
+    sha256: 0094cc51bb1465303db877cf7be2ead2052df5a19233e057d48dbe59396149de
+    size: 13797
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/cross-check.md
+    sha256: cf55c25a90a410d01dee2488b3fcf36bd39804ef2a20c13975459d3b6d0f47c8
+    size: 7441
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/delegate-contract.md
+    sha256: 1d05be4a7a23bad314293dcdb1f988807901ce0b602e7bef8d0347a450e073d4
+    size: 6507
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/evidence-rules.md
+    sha256: 3f8d49d415d6ec17a89023651d95c922b8e54524e32f09741af791f169324e05
+    size: 5710
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/research-brief.md
+    sha256: 13087a2f6bfb36823b4a577d731429fb5955f1ff2ed6548604afc04c1bd539db
+    size: 11344
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/roles.md
+    sha256: d44efe5e137c8a4cc01163bd18e7c4d5a88c619430c6c9baf7ae9742674b2492
+    size: 5177
+    kind: instruction
+    executable: false
+    script: false
