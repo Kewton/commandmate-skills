@@ -2256,3 +2256,8 @@ Cross Checkで修正された点
    この経路の返答は常に画面の末尾で、長い調査の返答は先頭が欠けるからである（`references/delegate-contract.md` 第3節）。
 10. **fixture の run は手で組んだ期待形であり、実機の capture ではない。** 実機 2 Agent の live run（AC-20）は
     この文書を書いた worktree では実施していない。
+11. **SKILL.md の本文に位置引数の記法を書かない（0.1.1、#247）。** Claude Code は Skill を slash で起動すると、
+    本文の `$0`〜`$9`（0 始まりの起動引数）と `$ARGUMENTS` を置き換えてからモデルに渡す（2.1.268 で実測。
+    範囲外の添字と名前付き変数は置き換わらない）。0.1.0 の第5.2節は背景 `ask` を関数の位置引数で書いていたため、
+    AC-20 の実機 run（2026-09-11）で宛先が `claude-2,command-code` に化けた。第5.2節を名前付き変数だけで
+    書き直し、`tests/fixtures/cmate-workspace-research/run_tests.sh` の第5節がこの記法の不在を検査する。

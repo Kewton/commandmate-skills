@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-workspace-research
 name: cmate-workspace-research
-version: 0.1.0
+version: 0.1.1
 summary: 指定した複数の Agent セッションに Web と Workspace を独立に調査させ、重要な Finding を相互反証し、結論を左右する claim を追加検証して、Evidence 付きの final.md 1 本に統合する技術調査の手順。
 description: |-
   ユーザーが agents と request だけを指定すると、親セッションが指定の Agent（子）に同じ調査を独立に委ね、Web と Workspace の Evidence を突き合わせて「このリポジトリにとって何を意味するか」までを 1 本の final.md にまとめる。migration / upgrade / incident / architecture / security / OSS の技術調査が対象で、コードの変更・PR・実行契約は扱わない。
@@ -97,8 +97,8 @@ risk_rationale: >-
   credential は読まない。親は network に接続せず、Web の調査は子の CLI が行う。
 files:
   - path: SKILL.md
-    sha256: 78f8722660fca870422d3a382a025843a8e2f76f5ca7ba0d26fde641c31847d8
-    size: 34010
+    sha256: 68356c195847185113d79bdadaf6f8aa27cccd14b53e60c64af0fc58e1cb70db
+    size: 35051
     kind: skill_md
     executable: false
     script: false

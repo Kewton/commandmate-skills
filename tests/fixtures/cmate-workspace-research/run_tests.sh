@@ -7,8 +7,9 @@
 # held mechanically is (a) that SKILL.md still carries the rules Issue #245
 # settled against measured CommandMate behaviour, (b) that no runnable snippet
 # in the package answers a child's prompt, touches its auto-yes or opens a
-# relay, and (c) that a run-dir produced by the procedure has the shape the
-# acceptance criteria describe. Four sections, in this order:
+# relay, (c) that a run-dir produced by the procedure has the shape the
+# acceptance criteria describe, and (d) that SKILL.md holds nothing Claude
+# rewrites with the slash arguments. Five sections, in this order:
 #
 #  1. **SKILL.md carries the confirmed spec.** One literal per rule (A-I of
 #     Issue #245 plus the section 37 failure handling). A SKILL.md that quietly
@@ -23,6 +24,10 @@
 #     package templates, both fixture runs under two-agent-contradiction/runs,
 #     one injected mutation per rule, and the exit 124 / 21 / 2 variants of the
 #     child that stopped (AC-16).
+#  5. **SKILL.md survives the slash arguments.** Claude Code rewrites a dollar
+#     sign followed by a digit, and $ARGUMENTS, in the SKILL.md body with the
+#     arguments of the slash invocation (Issue #247). The body must hold
+#     neither, and a planted one has to be found.
 #
 # Requires bash (3.2 is enough), python3 (standard library only) and the POSIX
 # tools. No network, no CommandMate server, no Agent session.
@@ -181,6 +186,42 @@ else
   printf '%s\n' "$out" | sed 's/^/  /'
   fail 'check_run.py --selftest' 'see the FAIL lines above'
 fi
+
+# ---------------------------------------------------------------------------
+# 5. SKILL.md survives the slash arguments
+# ---------------------------------------------------------------------------
+printf '\n== 5. SKILL.md holds nothing Claude rewrites with the slash arguments ==\n'
+
+# Claude Code hands the SKILL.md body to the model only after replacing a
+# dollar sign followed by a digit (0-based positional argument) and
+# $ARGUMENTS with the arguments of `/cmate-workspace-research <args>`
+# (measured on 2.1.268, Issue #247). 0.1.0 wrote the background ask as a shell
+# function, and its "$1" reached the parent as the agents list. An index past
+# the last argument is left alone, so the damage depends on how many arguments
+# the user typed: no fixture run can show it, only the file itself. Only
+# SKILL.md is scanned -- it is the body the slash invocation hands over.
+scan_substituted() {
+  awk '/\$[0-9]/ || /\$ARGUMENTS/ { printf "%s:%d: %s\n", FILENAME, FNR, $0 }' "$@"
+}
+
+hits=$(scan_substituted "$SKILL_MD")
+if [ -z "$hits" ]; then
+  pass 'SKILL.md has no positional-argument or ARGUMENTS placeholder'
+else
+  fail 'SKILL.md has no positional-argument or ARGUMENTS placeholder' "$hits"
+fi
+
+# The scan has to be able to see each form.
+planted="$WORK/SKILL.planted.md"
+for form in '"$1"' '$ARGUMENTS'; do
+  mutations=$((mutations + 1))
+  { cat "$SKILL_MD"; printf '\n```bash\ncommandmate ask %s --instance x y\n```\n' "$form"; } > "$planted"
+  if [ -n "$(scan_substituted "$planted")" ]; then
+    pass "a planted $form in a copy of SKILL.md is found"
+  else
+    fail "a planted $form in a copy of SKILL.md is found" 'scan_substituted returned nothing'
+  fi
+done
 
 # ---------------------------------------------------------------------------
 printf '\n%s passed, %s failed (%s mutations exercised here; check_run.py counts its own)\n' \

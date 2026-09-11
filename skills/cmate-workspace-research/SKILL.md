@@ -283,18 +283,30 @@ shell の `wait`（引数なし。`commandmate wait` ではない）で揃える
 
 ```bash
 RUN=".commandmate/workspace-research/<run-id>"
-ask_bg() {  # ask_bg <worktree-id> <instance-id> <name> <timeout>   name = <key> | <key>.probe | <key>.challenge-1 ...
-  printf '%s commandmate ask %s --instance %s @sent/%s.txt --timeout %s --json\n' \
-    "$(date +%Y-%m-%dT%H:%M:%S%z)" "$1" "$2" "$3" "$4" >> "$RUN/commands.log"
-  ( commandmate ask "$1" --instance "$2" "$(cat "$RUN/sent/$3.txt")" --timeout "$4" --json \
-      > "$RUN/agents/$3.json" 2> "$RUN/agents/$3.log"
-    echo $? > "$RUN/agents/$3.exit" ) &
-}
-ask_bg node-app command-code command-code 3600
-ask_bg node-app antigravity  antigravity  3600
+# 子 1 本につき 1 ブロック。WT / INST / NAME / TO だけを書き換えて、子の数だけ並べる
+# （NAME = <key> | <key>.probe | <key>.challenge-1 ...）
+WT=node-app INST=command-code NAME=command-code TO=3600
+printf '%s commandmate ask %s --instance %s @sent/%s.txt --timeout %s --json\n' \
+  "$(date +%Y-%m-%dT%H:%M:%S%z)" "$WT" "$INST" "$NAME" "$TO" >> "$RUN/commands.log"
+( commandmate ask "$WT" --instance "$INST" "$(cat "$RUN/sent/$NAME.txt")" --timeout "$TO" --json \
+    > "$RUN/agents/$NAME.json" 2> "$RUN/agents/$NAME.log"
+  echo $? > "$RUN/agents/$NAME.exit" ) &
+
+WT=node-app INST=antigravity NAME=antigravity TO=3600
+printf '%s commandmate ask %s --instance %s @sent/%s.txt --timeout %s --json\n' \
+  "$(date +%Y-%m-%dT%H:%M:%S%z)" "$WT" "$INST" "$NAME" "$TO" >> "$RUN/commands.log"
+( commandmate ask "$WT" --instance "$INST" "$(cat "$RUN/sent/$NAME.txt")" --timeout "$TO" --json \
+    > "$RUN/agents/$NAME.json" 2> "$RUN/agents/$NAME.log"
+  echo $? > "$RUN/agents/$NAME.exit" ) &
+
 wait   # shell の wait。全員の .exit が揃うまで返らない
 ```
 
+- **この雛形に位置引数を使わない。** Claude Code はこの Skill を slash で起動すると、本文中の
+  「`$` の直後に数字」の記法を 0 始まりの起動引数で、`$` ＋ `ARGUMENTS` を引数全体で置き換えてから
+  読む（2.1.268 で実測）。関数の位置引数で書いていた 0.1.0 の雛形は、宛先が `claude-2,command-code` に
+  化けた（#247）。名前付き変数だけで書いてあれば、置き換えを通っても意味は変わらない。子を足すときも
+  関数にまとめず、ブロックを並べる。
 - `--timeout` は **3600**。既定の 1800 では調査の 1 ターンが 124 になりやすく、124 のあとの
   再送は二重実行になる（warm-up と probe だけは 600）。
 - stdout（`--json`）は `agents/<name>.json`、stderr は `agents/<name>.log`、exit code は
