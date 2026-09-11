@@ -309,7 +309,7 @@ cmate-* の各手順を opencode / Command Code で最後まで回した rubric 
 | Skill | 宣言 version | claude | codex | gemini | opencode | command-code | claude / codex 実測 | opencode / command-code 実測 |
 |---|---|---|---|---|---|---|---|---|
 | `cmate-acceptance-test` | 0.1.4 | native | native | unknown | native | native | 0.1.1・2026-07-31 | 2026-09-04（経路） |
-| `cmate-delegate` | 0.1.0 | native | native | unknown | native | native | 未（経路からの敷衍） | 2026-09-04（経路） |
+| `cmate-delegate` | 0.1.2 | native | native | unknown | native | native | 未（経路からの敷衍） | 2026-09-04（経路） |
 | `cmate-issue-authoring` | 0.9.1 | native | native | unknown | native | native | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
 | `cmate-issue-refinement` | 0.4.1 | native | native | unknown | native | native | 0.1.1・2026-07-31 | 2026-09-04（経路） |
 | `cmate-orchestrate` | 0.32.1 | native | native | unknown | native | native | 0.9.0・**2026-08-02** | **2026-09-04（Command Code は 0.32.0 を実 package で実測）** |
@@ -319,6 +319,7 @@ cmate-* の各手順を opencode / Command Code で最後まで回した rubric 
 | `cmate-verify` | 0.5.1 | native | native | unknown | native | native | 0.1.1・**2026-08-02** | **2026-09-04（Command Code は 0.5.0 を実 package で実測）** |
 | `cmate-verify-advisor` | 0.3.1 | native | native | unknown | native | native | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
 | `cmate-worker-development` | 0.2.1 | native | native | unknown | native | native | 未（経路からの敷衍） | 2026-09-04（経路） |
+| `cmate-workspace-research` | 0.1.2 | native | native | unknown | native | native | 0.1.1・**2026-09-11**（claude を親に実機 run。codex は未） | 2026-09-04（経路） |
 | `cmate-worktree-cleanup` | 0.1.6 | native | native | unknown | native | native | 0.1.2・2026-07-31 | 2026-09-04（経路） |
 | `cmate-worktree-setup` | 0.1.6 | native | native | unknown | native | native | 0.1.2・2026-07-31 | 2026-09-04（経路） |
 
@@ -329,9 +330,10 @@ version である。**evidence の文面を直すだけでも bump が要る**�
 `claude` / `codex` 列は第 3.2 節（2026-07-31）と第 3.3 節（2026-08-02）で
 **package ごとに**測った結果である（それ以前は第 3 節の 1 package の測定を
 install 経路の共通性から全件に敷衍していた）。両節で重なる 4 件は新しい方で上書きしてある。
-`cmate-worker-development` と `cmate-delegate` は両節より後に足した package なので、
-claude / codex はまだ package 単位で測っていない（経路からの敷衍である）。
-`cmate-delegate` は 2026-09-07 に足したので、**opencode / command-code も同様に敷衍**である
+`cmate-worker-development`・`cmate-delegate`・`cmate-workspace-research` は両節より後に足した package なので、
+claude / codex はまだ package 単位で測っていない（経路からの敷衍である）。ただし `cmate-workspace-research` 0.1.1 は、
+#245 の UAT（2026-09-11）で claude を親にした実機 run（slash で起動し COMPLETED）を通している。
+`cmate-delegate`（2026-09-07）と `cmate-workspace-research`（2026-09-11）は第 3.4 節より後に足したので、**opencode / command-code も同様に敷衍**である
 （第 3.4 節が測ったのは root ごとの discovery 経路であり、install 先は package に依存しない）。
 
 `opencode` / `command-code` 列は第 3.4 節（2026-09-04）の測定である。
@@ -343,7 +345,7 @@ Command Code はそれに `cmate-verify` と `cmate-orchestrate` を加えた 3 
 package 単位の追試は第 3.2 節がそうしたように別に行う。
 
 `gemini` / `copilot` / `vibe-local` / `antigravity` は依然としてどの package でも測っていない。
-`cmate-delegate` 0.1.0 は、そのうち `copilot` / `antigravity` を**省略せず `unknown` として
+`cmate-delegate` と `cmate-workspace-research` は、そのうち `copilot` / `antigravity` を**省略せず `unknown` として
 明示的に宣言している**——省略と `unknown` は manifest の上では区別できるが、
 読み手にとっては「まだ考えていない」と「測っていないと判っている」の差だからである。
 `vibe-local` はどの package も宣言していない。
