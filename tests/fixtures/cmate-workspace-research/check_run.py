@@ -77,6 +77,7 @@ REPORT_HEADINGS = (
     "Conclusion", "Web Findings", "Workspace Findings", "Web ↔ Workspace Connections",
     "Assumptions", "Risks / Counterevidence", "Unknowns", "Recommended Next Checks",
 )
+REPORT_HEADING_LINES = frozenset("# " + h for h in REPORT_HEADINGS)
 CROSS_CHECK_HEADINGS = (
     "Important Agreements", "Important Contradictions", "Shared Assumptions",
     "Challenges Sent", "Verification Performed", "Corrections", "Remaining Disagreements",
@@ -543,8 +544,13 @@ def check_run(run_dir: Path, workspace: Path | None, rules: dict[str, re.Pattern
                 bad("REPLY-SHAPE", f"agents/{key}.json source {data['source']} but run.json says {agent['source']}")
             reply = data["reply"] if isinstance(data["reply"], str) else ""
             lines = [l for l in reply.splitlines() if l.strip()]
-            if not lines or not re.match(r"^WEB: (available|unavailable)\b", lines[0]):
-                bad("REPLY-SHAPE", f"{key}: the reply does not open with the WEB line")
+            # A history reply can carry the turn's narration before the report (Command Code
+            # does; Claude returns only the final message), so the WEB line only has to come
+            # before the report's first heading, not on line 1 (Issue #253).
+            web_at = next((i for i, l in enumerate(lines) if re.match(r"^WEB: (available|unavailable)\b", l)), None)
+            report_at = next((i for i, l in enumerate(lines) if l.strip() in REPORT_HEADING_LINES), len(lines))
+            if web_at is None or web_at > report_at:
+                bad("REPLY-SHAPE", f"{key}: the reply has no WEB line before the report")
             if not any(l.startswith("DONE:") for l in lines):
                 bad("REPLY-SHAPE", f"{key}: the reply has no DONE: line")
             body = read(agents_dir / f"{key}.md") if agent["source"] == "file" else reply
@@ -616,6 +622,8 @@ def check_run(run_dir: Path, workspace: Path | None, rules: dict[str, re.Pattern
     for line in log_lines:
         if FORBIDDEN_CMD.search(line):
             bad("CMD-FORBIDDEN", f"the parent answered for or re-armed a child: {line.strip()}")
+        if re.search(r"\bcommandmate\s+ask\s+(--help|-h)\b", line):
+            continue  # the ask-path probe references/delegate-contract.md prescribes; it sends nothing
         if re.search(r"\bcommandmate\s+ask\b", line):
             match = ASK_NAME.search(line)
             if not match:
@@ -721,7 +729,8 @@ def check_run(run_dir: Path, workspace: Path | None, rules: dict[str, re.Pattern
         if len(set(locators)) != len(locators):
             bad("EV-DUP", f"{title}: the same locator is counted twice")
         declared = fields.get("Independent sources", [""])[0]
-        if not declared.isdigit() or int(declared) != len(set(locators)):
+        count = re.match(r"\s*(\d+)(?!\d)", declared)  # a note may follow the number (Issue #253)
+        if not count or int(count.group(1)) != len(set(locators)):
             bad("EV-DUP", f"{title}: Independent sources {declared!r}, distinct locators {len(set(locators))}")
 
     # ---- final.md ----------------------------------------------------------
@@ -1015,8 +1024,10 @@ RUN_MUTATIONS: tuple[tuple[str, str, Callable[[Path], None], str], ...] = (
      lambda d: edit_reply(d / "agents" / "command-code.json", lambda s: s.replace("\n\nDONE:", "\n\nantigravity の結論とも一致する。\n\nDONE:")), "REPLY-INDEPENDENT"),
     ("reply: no DONE line", CC,
      lambda d: edit_reply(d / "agents" / "antigravity.json", lambda s: "\n".join(l for l in s.splitlines() if not l.startswith("DONE:"))), "REPLY-SHAPE"),
-    ("reply: the WEB line is not first", CC,
+    ("reply: the WEB line removed", CC,
      lambda d: edit_reply(d / "agents" / "command-code.json", lambda s: s.split("\n", 1)[1]), "REPLY-SHAPE"),
+    ("reply: the WEB line only after the report", CC,
+     lambda d: edit_reply(d / "agents" / "command-code.json", lambda s: "\n".join(s.split("\n")[1:] + [s.split("\n")[0]])), "REPLY-SHAPE"),
     ("reply: a report heading is missing", CC,
      lambda d: edit_reply(d / "agents" / "antigravity.json", lambda s: s.replace("# Web ↔ Workspace Connections\n", "")), "REPLY-HEADINGS"),
     ("reply: exit 10 without a prompt payload", PS,
@@ -1047,6 +1058,8 @@ RUN_MUTATIONS: tuple[tuple[str, str, Callable[[Path], None], str], ...] = (
      lambda d: replace_in(d / "commands.log", "@sent/antigravity.challenge-1.txt --timeout 3600 --json", "@sent/antigravity.challenge-1.txt --timeout 3600 --json --async"), "CMD-ASK"),
     ("commands.log: a reply with no ask that produced it", CC,
      lambda d: drop_lines(d / "commands.log", "@sent/antigravity.txt"), "CMD-TRACE"),
+    ("commands.log: an ask that sends an inline message", CC,
+     lambda d: append(d / "commands.log", "2026-09-11T10:30:00+0900 commandmate ask node-app --instance antigravity \"inline\" --timeout 3600 --json\n"), "CMD-TRACE"),
     ("brief: the Original Request reworded", CC,
      lambda d: replace_in(d / "brief.md", "このrepoをNode.js 24へ移行して問題ないか調査して", "Node.js 24 への移行手順を作って"), "BRIEF"),
     ("cross-check: a heading removed", CC,
@@ -1061,6 +1074,8 @@ RUN_MUTATIONS: tuple[tuple[str, str, Callable[[Path], None], str], ...] = (
      lambda d: replace_in(d / "evidence.md", f"  - {SUPPORT_LINE}\n", f"  - {SUPPORT_LINE}\n  - {SUPPORT_LINE}\n"), "EV-DUP"),
     ("evidence: Independent sources overstated", CC,
      lambda d: replace_in(d / "evidence.md", "- Independent sources: 4", "- Independent sources: 5"), "EV-DUP"),
+    ("evidence: Independent sources overstated behind a note", CC,
+     lambda d: replace_in(d / "evidence.md", "- Independent sources: 4", "- Independent sources: 5（同じ URL は 1 と数える）"), "EV-DUP"),
     ("final: the What Changed heading removed", CC,
      lambda d: drop_lines(d / "final.md", "# What Changed Through Cross Check"), "FINAL-HEADINGS"),
     ("final: What Changed left empty", PS,
@@ -1120,6 +1135,23 @@ class Tally:
     def fail(self, name: str, detail: str) -> None:
         self.failed += 1
         print(f"FAIL {name}\n     {detail}")
+
+
+ASK_HELP_LINE = "2026-09-11T09:59:00+0900 commandmate ask --help   # preflight: ask path check\n"
+
+# Shapes a real run produced in the #245 UAT (Issue #253). Each must pass as it is; the
+# mutations above keep the relaxed rules able to reject the real violation next to it.
+LIVE_SHAPES: tuple[tuple[str, str, Callable[[Path], None]], ...] = (
+    ("a history reply with the turn's narration before the WEB line (Command Code)", CC,
+     lambda d: edit_reply(d / "agents" / "command-code.json",
+                          lambda s: "I'll read the two required files first.\n\n> **Thinking**\n\n" + s)),
+    ("commands.log records the ask-path probe `commandmate ask --help`", CC,
+     lambda d: (d / "commands.log").write_text(ASK_HELP_LINE + (d / "commands.log").read_text(encoding="utf-8"),
+                                               encoding="utf-8")),
+    ("Independent sources carries a note after the number", CC,
+     lambda d: replace_in(d / "evidence.md", "- Independent sources: 4",
+                          "- Independent sources: 4（同じ URL を挙げた子が 2 つあっても 1 と数える）")),
+)
 
 
 def variant(tmp: Path, code: int, status: str, reason: str, log: str) -> Path:
@@ -1209,7 +1241,16 @@ def selftest() -> int:
         name = "exit 124 recorded as completed is rejected"
         tally.ok(name) if "RUN-EXIT" in fired else tally.fail(name, f"fired: {sorted(fired)}")
 
-    print("\n== 6. no rule is a rubber stamp ==")
+    print("\n== 6. shapes seen in the #245 UAT pass (Issue #253) ==")
+    with tempfile.TemporaryDirectory(prefix="cwr-live-") as tmp:
+        for index, (name, run_name, shape) in enumerate(LIVE_SHAPES):
+            run_dir = Path(tmp) / f"{index:02d}-{run_name}"
+            shutil.copytree(RUNS / run_name, run_dir)
+            shape(run_dir)
+            problems = check_run(run_dir, FIXTURE_WORKSPACE, rules)
+            tally.fail(name, "; ".join(f"{r}: {m}" for r, m in problems)) if problems else tally.ok(name)
+
+    print("\n== 7. no rule is a rubber stamp ==")
     missing = [r for r in RULES if r not in exercised]
     name = f"all {len(RULES)} run rules were seen to reject something"
     tally.fail(name, f"never exercised: {missing}") if missing else tally.ok(name)
