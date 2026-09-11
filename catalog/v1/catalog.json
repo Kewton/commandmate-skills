@@ -3868,6 +3868,97 @@
       ]
     },
     {
+      "id": "cmate-workspace-research",
+      "name": "cmate-workspace-research",
+      "summary": "指定した複数の Agent セッションに Web と Workspace を独立に調査させ、重要な Finding を相互反証し、結論を左右する claim を追加検証して、Evidence 付きの final.md 1 本に統合する技術調査の手順。",
+      "provider": {
+        "name": "CommandMate",
+        "url": "https://github.com/Kewton/CommandMate"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/Kewton/commandmate-skills",
+      "keywords": [
+        "research",
+        "workspace-research",
+        "multi-agent",
+        "cross-check",
+        "evidence",
+        "falsification",
+        "web-research",
+        "delegation",
+        "migration",
+        "upgrade",
+        "incident",
+        "architecture",
+        "security",
+        "read-only",
+        "human-in-the-loop",
+        "commandmate-cli"
+      ],
+      "latest": "0.1.1",
+      "versions": [
+        {
+          "version": "0.1.1",
+          "changelog": "cmate-workspace-research 0.1.1 — 初回リリース。指定した複数の Agent セッションに Web と Workspace を独立に調査させ、重要な Finding を相互反証し、結論を左右する claim を追加検証して Evidence 付きの final.md 1 本に統合する技術調査の手順を Skill 化（#245 / PR #246）: preflight（自己除外・alias 解決・子の権限表を 1 回だけ人へ・warm-up）、Web 能力の probe を受けてから role を割り当て、子は chat で返答し run-dir（.commandmate/workspace-research/<run-id>/）には親だけが書く、送信文は 5 欄の短文で調査契約は role ファイル、背景 ask ×N（--timeout 3600）、exit 10 の子はその子だけ止めて coverage を下げる（respond / auto-yes は打たない）、What Changed Through Cross Check は空でも残す、git status の前後比較。第5.2節の背景 ask 雛形を名前付き変数で書き直し、Claude の slash 引数置換（$0〜$N / $ARGUMENTS）で壊れないようにした（#247 / PR #248）。AC-20 実機確認済み（親 claude、子 claude ＋ command-code）。",
+          "published_at": "2026-09-11T14:07:48Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-workspace-research-v0.1.1",
+            "commit": "8a32689d7ab29d213129ca5d49b0068fe7dbf68e"
+          },
+          "artifact": {
+            "asset_name": "cmate-workspace-research-0.1.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-workspace-research-v0.1.1/cmate-workspace-research-0.1.1.tar.gz",
+            "sha256": "8440843cf3ecc9e84d37c3ca720caba21ee0859f04877fcf1d5007a8b33fd490",
+            "size": 33246,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 and re-checked 2026-07-31 - an installed skill is found under .claude/skills and matches in the slash palette. Package-independent; this package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 and re-checked 2026-08-02 with a mechanical trace (the /skills picker lists it). No slash command is exposed, so invoke it by name with the agents and request fields. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Restart after install. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured, for this package or any other. The procedure needs only a shell and the commandmate and git CLIs; discovery and reload are unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "copilot",
+                "evidence": "Not measured, for this package or any other. No discovery, invocation or reload behaviour has been observed, so no support level is claimed.",
+                "support": "unknown"
+              },
+              {
+                "agent": "antigravity",
+                "evidence": "Not measured as the parent that loads this skill, for this package or any other. Its behaviour as a child session is recorded in SKILL.md section 11, which says nothing about discovery.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.31.3 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        }
+      ]
+    },
+    {
       "id": "cmate-worktree-cleanup",
       "name": "cmate-worktree-cleanup",
       "summary": "merge 済み・不要な git worktree を、削除可能性と証跡を dry-run で提示したうえで、clean かつ merge 証跡が十分な対象だけ guarded な方式で安全に削除する。dirty・unmerged・検証不能は削除しない。",
