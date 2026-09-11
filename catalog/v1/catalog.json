@@ -2396,7 +2396,7 @@
         "guard",
         "bash"
       ],
-      "latest": "0.7.1",
+      "latest": "0.8.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -2632,6 +2632,55 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-monitor-v0.7.1/cmate-orchestrate-monitor-0.7.1.tar.gz",
             "sha256": "1e1f8692d17df8cbe8e466bd7adb49178e8c8b29aa60d1033104fe8029db5693",
             "size": 71005,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0. An installed skill was discovered from .claude/skills and matched in the slash palette; the installer writes .agents/skills and .claude/skills byte-identically.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0. It reads SKILL.md from .agents/skills (model self-report of the absolute path, not a mechanical trace). This version does not expose skills as slash commands; invoke by name or run the scripts.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; discovery unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.15.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.8.0",
+          "changelog": "cmate-orchestrate-monitor 0.8.0 — CommandMate #2119 の移植（#237）: monitor.sh を介さず hooks-git.sh を source した standalone 経路の warning marker 置き場を、$$（PID）ではなく mktemp -d で作るようにした。PID が再利用されると他人の古い marker を拾い、once-per-worker の WARN / ERROR が黙って消えていた（開発機で 4129 dir / 4214 marker が堆積）。自分で作った置き場だけを EXIT trap で片付け、operator が EXIT trap を張っていれば張らない。MONITOR_HOOKS_STATE_DIR 指定時と monitor.sh 配下の挙動は不変。fixture に 16 ケース（フォールバック分岐・他人の store を消さない・operator の trap を潰さない）。上流とのコード差分 0 行。",
+          "published_at": "2026-09-11T16:16:28Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-monitor-v0.8.0",
+            "commit": "6574b9ca4df71e708d28a92c4a74a6b2e3c258b3"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-monitor-0.8.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-monitor-v0.8.0/cmate-orchestrate-monitor-0.8.0.tar.gz",
+            "sha256": "af08a375389973ed951c786ec94edccb28cdf76292cc812b2b6d63a799359dc7",
+            "size": 74568,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
