@@ -135,7 +135,7 @@ export CM="npx commandmate@latest"
 | `cmate-verify-advisor` | 検証履歴から verify.yaml の改善案を出す（強化は適用可・弱体化は提案止まり。Node script 同梱） | moderate |
 | `cmate-worker-development` | Issue や実行契約を受け取ったワーカーの作業方法（読取・調査・計画・実装・検証・証拠の6段） | moderate |
 | `cmate-delegate` | 隣のセッションへ一言頼んで返答を回収する手順（bash ラッパ同梱） | moderate |
-| `cmate-workspace-research` | 複数の Agent に Web と Workspace を独立に調査させ、相互反証と追加検証を経て Evidence 付きの `final.md` 1 本にまとめる手順（未 publish） | moderate |
+| `cmate-workspace-research` | 複数の Agent に Web と Workspace を独立に調査させ、相互反証と追加検証を経て Evidence 付きの `final.md` 1 本にまとめる手順 | moderate |
 
 version と risk は `skills/<skill-id>/commandmate.skill.yaml` の `version` /
 `declared_risk` が正本である（Catalog は「入手可能なもの」を示す）。high risk の
@@ -143,15 +143,9 @@ package（**`cmate-worktree-cleanup` / `cmate-orchestrate` / `cmate-orchestrate-
 `cmate-verify` の 4 件**）は install に `--yes` と `--ack-risk <skill-id>@<version>` の
 完全一致が要る。
 
-**上の表のうち 13 package が Catalog に publish 済みである**
+**上の表の 14 package すべてが Catalog に publish 済みである**
 （[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開したものと、
 その後に足したもの）。どれも `commandmate skill install` で入るので、手で配置する必要はない。
-
-**`cmate-workspace-research` はまだ publish されていない。** release は maintainer が
-`git tag -a cmate-workspace-research-v<version>` を打って行うので、それまでは
-[docs/runbooks/verify-install.md](./docs/runbooks/verify-install.md) 第 3.1 節の手順で
-手動配置して試すことになる（receipt が付かないため `skill status` / `skill uninstall` の
-対象外になる）。
 
 install は `.agents/skills/<id>` と `.claude/skills/<id>` の**両方**へ byte-identical に書く。
 **この両置きは load-bearing である** — 2026-08-02 の実測では、`.claude/skills/<id>` だけを

@@ -666,6 +666,24 @@ def check_run(run_dir: Path, workspace: Path | None, rules: dict[str, re.Pattern
             changed = True
     if run["workspace_integrity"].get("changed") is not changed:
         bad("INTEGRITY", f"workspace_integrity.changed is {run['workspace_integrity'].get('changed')}, the files say {changed}")
+    # git status does not see ignored paths; touched.txt lists what changed after before.txt (Issue #249).
+    ignored_touched: list[str] = []
+    for wt in worktrees:
+        touched = run_dir / "integrity" / f"{wt}.touched.txt"
+        if not touched.is_file():
+            bad("INTEGRITY", f"integrity/{wt}.touched.txt missing")
+            continue
+        for line in read(touched).splitlines():
+            if not line.strip():
+                continue
+            kind, _, path = line.partition("\t")
+            if kind not in ("ignored", "visible") or not path:
+                bad("INTEGRITY", f"integrity/{wt}.touched.txt: {line!r} is not <ignored|visible><TAB><path>")
+            elif kind == "ignored":
+                ignored_touched.append(f"{wt}:{path}")
+    declared_ignored = run["workspace_integrity"].get("ignored_touched")
+    if not isinstance(declared_ignored, list) or sorted(declared_ignored) != sorted(ignored_touched):
+        bad("INTEGRITY", f"workspace_integrity.ignored_touched is {declared_ignored}, touched.txt says {ignored_touched}")
 
     if run["status"] == "FAILED":
         return found
@@ -823,6 +841,13 @@ def check_run(run_dir: Path, workspace: Path | None, rules: dict[str, re.Pattern
         bad("FINAL-INTEGRITY", f"final says {integrity.split()[0]!r} but before/after say {'changed' if changed else 'unchanged'}")
     if changed and "workspace が変更された" not in (section(final, "Risks / Counterevidence") or ""):
         bad("FINAL-INTEGRITY", "the workspace changed and Risks does not say so")
+    reported = re.search(r"ignore 対象の更新: *(\d+) *件", integrity)
+    if integrity and (not reported or int(reported.group(1)) != len(ignored_touched)):
+        bad("FINAL-INTEGRITY", f"Workspace integrity does not report {len(ignored_touched)} ignored-path write(s) as 'ignore 対象の更新: N 件'")
+    risks_text = section(final, "Risks / Counterevidence") or ""
+    for entry in ignored_touched:
+        if entry.split(":", 1)[1] not in risks_text:
+            bad("FINAL-INTEGRITY", f"the ignored-path write {entry} is not listed in Risks")
 
     for key in reduced:
         if "Research coverage reduced:" not in coverage_line or not mentions(coverage_line, key):
@@ -1102,6 +1127,14 @@ RUN_MUTATIONS: tuple[tuple[str, str, Callable[[Path], None], str], ...] = (
      lambda d: replace_in(d / "final.md", "UNRESOLVED CONTRADICTION", "未決着の点", count=0), "FINAL-UNRESOLVED"),
     ("integrity: the after snapshot is missing", CC,
      lambda d: (d / "integrity" / "node-app.after.txt").unlink(), "INTEGRITY"),
+    ("integrity: touched.txt is missing", CC,
+     lambda d: (d / "integrity" / "node-app.touched.txt").unlink(), "INTEGRITY"),
+    ("integrity: an ignored-path write not carried to run.json", CC,
+     lambda d: append(d / "integrity" / "node-app.touched.txt", "ignored\t.commandcode/taste/taste.md\n"), "INTEGRITY"),
+    ("final: an ignored-path write not listed in Risks", PS,
+     lambda d: drop_lines(d / "final.md", "- ignore 対象への書き込み:"), "FINAL-INTEGRITY"),
+    ("final: the ignored-path write count is wrong", PS,
+     lambda d: replace_in(d / "final.md", "ignore 対象の更新: 1 件", "ignore 対象の更新: 0 件"), "FINAL-INTEGRITY"),
 )
 
 # The package mutations: one literal dropped from a copy of a reference, and the
