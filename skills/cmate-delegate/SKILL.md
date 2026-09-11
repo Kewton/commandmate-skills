@@ -31,7 +31,7 @@ description: 隣のセッションへ一言頼んで返答を受け取る手順�
 
 解決順は次のとおり。**上で解決したらそこで止める。**
 
-1. `commandmate whoami --json` — `worktree_id` と `instance_id` を返す。
+1. `commandmate whoami --json` — `worktreeId` と `instanceId` を返す（camelCase。CommandMate 0.33.3 で実測）。
    **CommandMate#2376 が入った版にだけ在る。** 無い版では未知のコマンドとして失敗するので、
    その失敗を「自分は特定できない」ではなく「**この経路は無い**」と読み、2 へ落ちる。
 2. 環境変数 `CM_WORKTREE_ID` / `CM_INSTANCE_ID`。**両方揃っているときだけ**採用する。
