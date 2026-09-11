@@ -80,6 +80,9 @@
     "worktrees": [
       "node-app"
     ],
-    "changed": false
+    "changed": false,
+    "ignored_touched": [
+      "node-app:.commandcode/taste/taste.md"
+    ]
   }
 }

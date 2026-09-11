@@ -135,5 +135,5 @@ pkg-x の support matrix は 3.x の対象を Node 18 / 20 / 22 としている�
 - AS_OF: 2026-09-11
 - Depth: standard（requested: standard）
 - Coverage: full
-- Workspace integrity: unchanged — git status --porcelain の before / after が一致（run-dir を除外）
+- Workspace integrity: unchanged — git status --porcelain の before / after が一致（run-dir を除外）。ignore 対象の更新: 0 件
 - Run: .commandmate/workspace-research/node24-migration-20260911-001/

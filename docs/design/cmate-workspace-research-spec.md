@@ -2261,3 +2261,11 @@ Cross Checkで修正された点
     範囲外の添字と名前付き変数は置き換わらない）。0.1.0 の第5.2節は背景 `ask` を関数の位置引数で書いていたため、
     AC-20 の実機 run（2026-09-11）で宛先が `claude-2,command-code` に化けた。第5.2節を名前付き変数だけで
     書き直し、`tests/fixtures/cmate-workspace-research/run_tests.sh` の第5節がこの記法の不在を検査する。
+12. **ignore 対象への書き込みも洗い出す（0.1.2、#249）。** `git status` の前後比較は gitignore 対象を見ない。
+    #245 の AC-20 と UAT では、子の Command Code が taste 機能で `.commandcode/taste/` を run の最中に書き、比較には
+    映らなかった。第7節で `before.txt` の更新時刻より後に更新された run-dir 外の file を `find` で拾い、
+    `integrity/<worktree-id>.touched.txt` に `ignored` / `visible` で残す。`ignored` の path は `run.json` の
+    `workspace_integrity.ignored_touched`・final の Research Metadata（`ignore 対象の更新: N 件`）・Risks に書く。止めはしない。
+13. **`WEB:` 行は 1 行目に限らない（0.1.2、#254）。** `ask --json` の history 返答は tool によって形が違う。Claude は
+    最終メッセージだけ、Command Code はターン内の独り言も含む。第5.3節は「報告の最初の見出しより前にある最初の
+    `WEB:` 行」を読む。検査器の REPLY-SHAPE も同じ規則である（#253）。
