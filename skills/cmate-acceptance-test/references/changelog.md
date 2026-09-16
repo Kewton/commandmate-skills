@@ -4,6 +4,32 @@ Catalog の `changelog` はこの Skill の release tag の annotation から生
 その annotation の元になる記述をここに置く。install 前の利用者が読む前提で書く。
 **新しい version を上に置く。version を上げたらこの file も同じ commit で更新する。**
 
+## 0.2.0
+
+`acceptance-result.v1` の `skill.id` を、この Skill の名前に固定した `const` から
+**2 値の `enum`**（`cmate-acceptance-test` / `cmate-uat`）へ広げた（#259 / #260）。
+
+### 何が変わるか
+
+- **この Skill の手順・判定規則・決定表・outcome の定義は 1 つも変わっていない。**
+  変わったのは schema が「誰が書いた document を v1 と認めるか」だけである。
+- **`cmate-uat` が書いた document も v1 に適合するようになった。** 受入判定の *形* は
+  証跡の取り方に依存しない —— `cmate-acceptance-test` は渡された対象を検証し、
+  `cmate-uat` は実機環境を立ててから検証する、という違いは document の shape を変えない。
+  そこで schema を 2 つの producer で共有し、**schema 自体はこの package に 1 本だけ置く**
+  （複製すると必ず乖離する）。
+- **`enum` は閉じたままである。** `cmate-orchestrate` の uat runner はこの document を
+  意味ゲートとして読むので、**著者を特定できない判定は受け付けない**。
+  「v1 に見えるから通す」ようにはしていない。
+
+### 使う側への影響
+
+- この Skill が書く document は従来どおり `skill.id: cmate-acceptance-test` である。
+  **既存の document は 1 つも無効にならない**（`const` から `enum` への拡大なので、
+  以前適合していたものは今も適合する）。
+- 読む側で `skill.id` を `cmate-acceptance-test` と決め打ちで比較している consumer は、
+  `cmate-uat` の document を弾く。runner 側の対応は `cmate-orchestrate` 0.33.0（#259）。
+
 ## 0.1.3
 
 SKILL.md を「いつ使うか / どう呼ぶか / 出力をどう読むか / 止まったとき何をするか」の

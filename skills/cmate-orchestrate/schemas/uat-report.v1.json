@@ -302,7 +302,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["state", "verdict", "status", "issue_ref", "verdict_reason", "findings", "conditions", "note"],
-      "description": "Optional (0.8.0, #1616). What the semantic gate contributed for one issue, read from a cmate-acceptance-test acceptance-result.v1 document. The UAT runner never produces a verdict — it validates the document, confirms it targets this issue, and records what it said.",
+      "description": "Optional (0.8.0, #1616). What the semantic gate contributed for one issue, read from an acceptance-result.v1 document written by cmate-acceptance-test or cmate-uat (0.33.0, #259). The UAT runner never produces a verdict — it validates the document, confirms it targets this issue, and records what it said and who said it.",
       "properties": {
         "state": {
           "enum": ["not_configured", "missing", "invalid", "mismatched", "loaded"],
@@ -321,6 +321,21 @@
           "description": "The document's target.issue_ref, redacted. Recorded for a loaded or mismatched document so a wrong-target result can be diagnosed."
         },
         "verdict_reason": { "type": "string", "maxLength": 300 },
+        "producer": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "version"],
+              "properties": {
+                "id": { "enum": ["cmate-acceptance-test", "cmate-uat"] },
+                "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }
+              }
+            }
+          ],
+          "description": "OPTIONAL, and absent — not null — in a report written by a runner before 0.33.0, which is why it is not required: making it required would retroactively invalidate every v1 report already on disk, and the schema version is still 1. Present from 0.33.0 (#259): who produced the verdict. The id set is an allowlist, not a hint — a skill.id outside it makes the document invalid, so a producer recorded here is one the runner accepted. Null for every state but loaded: a missing document has no producer, and an invalid one has no producer the runner will vouch for (an unknown skill.id is exactly what failed to conform). Recorded rather than branched on — the composition rules never read it, because which producer judged an issue does not change how its verdict composes. The fix prompt names it in the acceptance heading, so a worker is never told a Skill produced a verdict it did not."
+        },
         "findings": {
           "type": "array",
           "maxItems": 8,

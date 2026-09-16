@@ -84,7 +84,7 @@ worktree path・baseline は **profile から解決**し、`develop`/`npm`/`carg
 
 | Skill | いつ要るか | 未導入だとどうなるか |
 |---|---|---|
-| [cmate-acceptance-test](../cmate-acceptance-test/) | uat の**意味ゲート**を使うとき | orchestrate は動くが **UAT の裁定は機械ゲートだけ**になる。report の `limitations[]`（`acceptance_not_run`）に記録される |
+| [cmate-acceptance-test](../cmate-acceptance-test/) / [cmate-uat](../cmate-uat/) | uat の**意味ゲート**を使うとき（実機環境が要るなら後者） | orchestrate は動くが **UAT の裁定は機械ゲートだけ**になる。report の `limitations[]`（`acceptance_not_run`）に記録される |
 | [cmate-worktree-setup](../cmate-worktree-setup/) | dispatch の **`--prepare-worktrees`** を使うとき | **停止する**（`limitations` ではなく `blocking_reasons` の `worktree_setup_unavailable`）。1人も dispatch せず `--out` も作らない |
 | [cmate-worker-development](../cmate-worker-development/) | dispatch の **`--worker-method`** を使うとき | **停止する**（`limitations` ではなく `blocking_reasons` の `worker_method_unavailable`）。最初の Wave なら1人も dispatch せず `--out` も作らない |
 

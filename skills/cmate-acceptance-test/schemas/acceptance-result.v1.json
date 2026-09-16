@@ -32,7 +32,10 @@
       "additionalProperties": false,
       "required": ["id", "version"],
       "properties": {
-        "id": { "const": "cmate-acceptance-test" },
+        "id": {
+          "enum": ["cmate-acceptance-test", "cmate-uat"],
+          "description": "Which Skill produced this document. Two do: cmate-acceptance-test judges a target it did not have to stand up, and cmate-uat stands the real environment up first and judges from the evidence it collected there (commandmate-skills#260). Both write THIS schema — the shape of an acceptance verdict does not depend on how the evidence was obtained — so the id is an enum rather than one Skill's name. It stays a closed enum on purpose: cmate-orchestrate's uat runner reads this document as its semantic gate, and a verdict whose author it cannot place is one it refuses (commandmate-skills#259)."
+        },
         "version": {
           "type": "string",
           "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",

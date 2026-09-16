@@ -71,44 +71,67 @@ eligible が空の場合は `no_eligible_issues`（limitation）を載せて no-
 | 層 | 判定するもの | 出力元 | 実行者 |
 |---|---|---|---|
 | 機械ゲート | profile `baseline` が worktree 内で全部 exit 0 か | runner 内の実測 | uat runner（決定的） |
-| 意味ゲート | Issue の**受入条件**が満たされているか | `acceptance-result.v1` document | **エージェント**（cmate-acceptance-test） |
+| 意味ゲート | Issue の**受入条件**が満たされているか | `acceptance-result.v1` document | **エージェント**（cmate-acceptance-test か cmate-uat） |
 
 **役割分担を崩さない。** 判定の生成はエージェント側の手順であり、uat runner の中で LLM を実行したり、
 受入条件を自動解釈したりは **しない**。runner がするのは、document を読み・検証し・照合し・合成する
 ことだけである。
 
-**`cmate-acceptance-test` は別途 install が要る。** `cmate-orchestrate` の install には含まれない。
+**意味ゲートの Skill は別途 install が要る。** `cmate-orchestrate` の install には含まれない。
+producer は 2 つあり、**どちらを入れるかは受入条件の性質で決まる**。
 
 ```bash
-commandmate skill install cmate-acceptance-test
+commandmate skill install cmate-acceptance-test   # 立てなくても検証できる対象
+commandmate skill install cmate-uat               # 実機環境を立てないと検証できない対象
 ```
 
-未導入なら `--acceptance-dir` を渡せないので、裁定は機械ゲートだけになる。その場合 runner は
-意味ゲートが参加していないことを `limitations[]` の `acceptance_not_run` に記録する
-（黙って劣化しない）。本書中の `../../cmate-acceptance-test/...` への相対リンクも未導入では
-解決しない。
+| producer | 何をするか | 選ぶ基準 |
+|---|---|---|
+| `cmate-acceptance-test` | 渡された対象を検証して判定する。環境は立てない | test command を叩けば確かめられる受入条件 |
+| `cmate-uat` | 環境を起動し・隔離を実測し・TC を回し・証跡を残してから判定する（#260） | サーバや DB を立てないと確かめられない受入条件 |
+
+どちらも同じ `acceptance-result.v1` を書き、**runner は同じ合成規則で裁定する**（第 4.2 節）。
+producer の違いは裁定を変えない。per-issue の `acceptance.producer` に記録するだけである。
+
+未導入ならどちらも `--acceptance-dir` に渡す document を作れないので、裁定は機械ゲートだけになる。
+その場合 runner は意味ゲートが参加していないことを `limitations[]` の `acceptance_not_run` に
+記録する（黙って劣化しない）。本書中の `../../cmate-acceptance-test/...` への相対リンクも
+未導入では解決しない。
 
 ### 4.1 意味ゲートの入力
 
 `--acceptance-dir <dir>` の `issue-<n>.json` を読む。document は
 [cmate-acceptance-test](../../cmate-acceptance-test/schemas/acceptance-result.v1.json) の
-`acceptance-result.v1` に適合していなければならない。runner は各 document について:
+`acceptance-result.v1` に適合していなければならない（**schema の正本はこの 1 本**で、
+producer が増えても増やさない）。runner は各 document について:
 
 1. JSON として parse できること。
-2. `result_schema_version` が 1、`skill.id` が `cmate-acceptance-test`、`skill.version` が semver。
+2. `result_schema_version` が 1、`skill.id` が **`cmate-acceptance-test` か `cmate-uat`**、
+   `skill.version` が semver。
 3. `verdict` が `go`/`conditional_go`/`no_go`、`status` が `success`/`partial`/`failure`、
    `verdict_reason` が非空、required field が揃っていること。
 4. `target.issue_ref` が **その Issue を指す**こと（Issue URL・`owner/repo#<n>`・裸の番号を解釈する）。
 
 を確認する。**未知の `verdict` を `go` と読まない。** 到達した状態を per-issue に記録する。
 
+**`skill.id` の 2 値は allowlist であって緩和ではない。** この 2 つ以外の id は従来どおり
+`invalid` である。「acceptance-result.v1 に見えるから通す」ことはしない —— 誰が書いたか分からない
+判定を意味ゲートとして通すのは、`target.issue_ref` を解決できない document を `mismatched` に
+落とすのと同じ理由で拒否する。
+
 | state | 意味 |
 |---|---|
 | `not_configured` | `--acceptance-dir` 未指定。意味ゲートは参加していない（#1616 以前の挙動） |
 | `missing` | directory はあるがその Issue の document が無い |
-| `invalid` | JSON でない、または `acceptance-result.v1` に適合しない |
+| `invalid` | JSON でない、または `acceptance-result.v1` に適合しない（**未知の `skill.id` もここ**） |
 | `mismatched` | 適合しているが `target.issue_ref` が別 Issue を指している |
 | `loaded` | 適合し対象も一致。`verdict` が合成に入る唯一の state |
+
+**producer は per-issue の `acceptance.producer` に `{id, version}` で記録する。**
+`loaded` だけが producer を名乗れる（`missing` には producer が無く、`invalid` は
+まさに id が適合しなかった側なので、runner が保証できる producer が無い）。
+fix prompt の受入判定見出しもこの値から組む —— 特定の Skill 名を固定で書くと、
+その Skill が出していない判定にその名前が乗る。
 
 ### 4.2 合成規則
 

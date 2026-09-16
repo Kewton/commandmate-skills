@@ -2856,6 +2856,24 @@ function runUatCase(caseId) {
       check(assessment.acceptance.verdict === verdict, `#${num} acceptance verdict ${JSON.stringify(assessment.acceptance.verdict)} !== ${JSON.stringify(verdict)}`);
     }
   }
+  // WHICH Skill produced the verdict (#259). Two producers write acceptance-result.v1
+  // — cmate-acceptance-test and cmate-uat — and the report has to say which one did,
+  // because "who judged this" is what tells a reader whether a real environment was
+  // ever stood up. A case may expect `null` for a state that has no producer to name.
+  for (const [num, producer] of Object.entries(expect.acceptance_producers ?? {})) {
+    const assessment = lastAssessmentOf(report, Number(num));
+    if (check(assessment !== undefined, `#${num} has no assessment`)) {
+      const actual = assessment.acceptance.producer === null ? null : assessment.acceptance.producer.id;
+      check(actual === producer, `#${num} acceptance producer ${JSON.stringify(actual)} !== ${JSON.stringify(producer)}`);
+    }
+  }
+  for (const [num, version] of Object.entries(expect.acceptance_producer_versions ?? {})) {
+    const assessment = lastAssessmentOf(report, Number(num));
+    if (check(assessment !== undefined, `#${num} has no assessment`)) {
+      const actual = assessment.acceptance.producer === null ? null : assessment.acceptance.producer.version;
+      check(actual === version, `#${num} acceptance producer version ${JSON.stringify(actual)} !== ${JSON.stringify(version)}`);
+    }
+  }
   for (const [num, source] of Object.entries(expect.verdict_sources ?? {})) {
     const assessment = lastAssessmentOf(report, Number(num));
     if (check(assessment !== undefined, `#${num} has no assessment`)) {
