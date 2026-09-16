@@ -1,0 +1,111 @@
+{
+  "result_schema_version": 1,
+  "skill": {
+    "id": "cmate-uat",
+    "version": "0.1.0"
+  },
+  "generated_at": "2026-09-16T12:00:00Z",
+  "status": "success",
+  "verdict": "go",
+  "verdict_reason": "#2601 の受入条件 2 件を実機で検証し、いずれも満たされていた。",
+  "target": {
+    "issue_ref": "Kewton/CommandMate#2601",
+    "issue_title": null,
+    "repository": "Kewton/CommandMate",
+    "branch": "develop",
+    "commit": "67b4cf89b0a1c2d3e4f5061728394a5b6c7d8e9f",
+    "dirty": false
+  },
+  "environment": {
+    "agent": "command-code",
+    "agent_version": "1.53.1",
+    "commandmate_version": "0.37.0",
+    "invocation": "non_interactive"
+  },
+  "criteria": [
+    {
+      "id": "AC-01",
+      "text": "API が警告フィールドを返す",
+      "classification": "automated",
+      "risk_tier": "safe",
+      "outcome": "pass",
+      "evidence_ids": [
+        "EV-01"
+      ],
+      "notes": "exit 0 と応答本文を実測した。"
+    },
+    {
+      "id": "AC-02",
+      "text": "lint / tsc / unit が exit 0",
+      "classification": "automated",
+      "risk_tier": "safe",
+      "outcome": "pass",
+      "evidence_ids": [
+        "EV-02"
+      ],
+      "notes": "3 本すべて exit 0。"
+    }
+  ],
+  "checks": [
+    {
+      "id": "CK-01",
+      "kind": "command",
+      "description": "TC-2601-01: API を叩いて warning を確認する",
+      "criterion_ids": [
+        "AC-01"
+      ],
+      "risk_tier": "safe",
+      "executed": true,
+      "skip_reason": null,
+      "evidence_ids": [
+        "EV-01"
+      ]
+    },
+    {
+      "id": "CK-02",
+      "kind": "command",
+      "description": "TC-2601-02: 品質ゲートを回す",
+      "criterion_ids": [
+        "AC-02"
+      ],
+      "risk_tier": "safe",
+      "executed": true,
+      "skip_reason": null,
+      "evidence_ids": [
+        "EV-02"
+      ]
+    }
+  ],
+  "confirmations": [],
+  "evidence": [
+    {
+      "id": "EV-01",
+      "type": "command",
+      "collected_at": "2026-09-16T11:59:00Z",
+      "summary": "一覧 API が warning を返した。",
+      "redacted": false,
+      "path": "./evidence/EV-01.txt",
+      "command": "curl -fsS 127.0.0.1:3011/api/logs",
+      "exit_code": 0,
+      "output_excerpt": null,
+      "truncated": false
+    },
+    {
+      "id": "EV-02",
+      "type": "command",
+      "collected_at": "2026-09-16T11:59:00Z",
+      "summary": "lint / tsc / unit がすべて exit 0。",
+      "redacted": false,
+      "path": "./evidence/EV-02.txt",
+      "command": "npm run lint && npx tsc --noEmit && npm run test:unit",
+      "exit_code": 0,
+      "output_excerpt": null,
+      "truncated": false
+    }
+  ],
+  "next_actions": [],
+  "blocking_reasons": [],
+  "limitations": [],
+  "evidence_dir": "./evidence/",
+  "summary_text": null
+}

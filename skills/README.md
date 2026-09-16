@@ -23,6 +23,7 @@ skills/<skill-id>/
 | `cmate-orchestrate-monitor` | high | 並列 worker 監視の判定コア（bash script 同梱） |
 | `cmate-repository-analysis` | low | リポジトリ構造・規約の分析手順 |
 | `cmate-task-contract` | moderate | Issue から実行契約 `.commandmate/tasks/<name>.yaml` を起案する手順 |
+| `cmate-uat` | moderate | 実機環境を立ててから受入条件を検証する手順（bash script 同梱） |
 | `cmate-verify` | high | 検証ゲートの起案と実 exit code 判定（bash script 同梱） |
 | `cmate-verify-advisor` | moderate | 検証履歴から verify.yaml の改善案を出す（強化は適用可・弱体化は提案止まり。Node script 同梱） |
 | `cmate-worker-development` | moderate | Issue や実行契約を受け取ったワーカーの作業方法（読取・調査・計画・実装・検証・証拠の6段） |
@@ -30,7 +31,7 @@ skills/<skill-id>/
 | `cmate-worktree-cleanup` | high | worktree の安全な後始末 |
 | `cmate-worktree-setup` | moderate | 専用 worktree の作成と baseline 取得 |
 
-**上の 14 package すべてが Catalog に publish 済み**であり、`commandmate skill install`
+**上の 15 package のうち 14 件が Catalog に publish 済み**（`cmate-uat` は未 publish）であり、`commandmate skill install`
 で入る（[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開したものと、その後に足したもの）。
 
 この表は目次であって正本ではない。**version は載せない**（package ごとに上がるので、ここに書くと必ずずれる）。

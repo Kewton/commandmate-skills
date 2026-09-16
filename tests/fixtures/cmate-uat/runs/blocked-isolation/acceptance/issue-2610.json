@@ -1,0 +1,93 @@
+{
+  "result_schema_version": 1,
+  "skill": {
+    "id": "cmate-uat",
+    "version": "0.1.0"
+  },
+  "generated_at": "2026-09-16T12:00:00Z",
+  "status": "failure",
+  "verdict": "no_go",
+  "verdict_reason": "isolation.checks が 1 件落ちたため、テストケースを 1 つも実行せずに停止した。受入の可否は判断できない。",
+  "target": {
+    "issue_ref": "Kewton/CommandMate#2610",
+    "issue_title": null,
+    "repository": "Kewton/CommandMate",
+    "branch": "develop",
+    "commit": "67b4cf89b0a1c2d3e4f5061728394a5b6c7d8e9f",
+    "dirty": false
+  },
+  "environment": {
+    "agent": "command-code",
+    "agent_version": "1.53.1",
+    "commandmate_version": "0.37.0",
+    "invocation": "non_interactive"
+  },
+  "criteria": [
+    {
+      "id": "AC-01",
+      "text": "警告つきの行が記録される",
+      "classification": "automated",
+      "risk_tier": "safe",
+      "outcome": "not_run",
+      "evidence_ids": [],
+      "notes": "隔離が確認できなかったため実行していない。"
+    },
+    {
+      "id": "AC-02",
+      "text": "一覧 API が warning を返す",
+      "classification": "automated",
+      "risk_tier": "safe",
+      "outcome": "not_run",
+      "evidence_ids": [],
+      "notes": "同上。"
+    }
+  ],
+  "checks": [
+    {
+      "id": "CK-01",
+      "kind": "command",
+      "description": "TC-2610-01",
+      "criterion_ids": [
+        "AC-01"
+      ],
+      "risk_tier": "safe",
+      "executed": false,
+      "skip_reason": "isolation.checks が落ちたため実行していない。",
+      "evidence_ids": []
+    },
+    {
+      "id": "CK-02",
+      "kind": "command",
+      "description": "TC-2610-02",
+      "criterion_ids": [
+        "AC-02"
+      ],
+      "risk_tier": "safe",
+      "executed": false,
+      "skip_reason": "同上。",
+      "evidence_ids": []
+    }
+  ],
+  "confirmations": [],
+  "evidence": [
+    {
+      "id": "EV-00",
+      "type": "command",
+      "collected_at": "2026-09-16T11:59:00Z",
+      "summary": "isolation.checks の 2 本目が exit 1。起動したプロセスが本番 DB を開いていた。",
+      "redacted": false,
+      "path": "./evidence/EV-00.txt",
+      "command": "! lsof -p <pid> -Fn | grep -q '/.commandmate/data/cm.db'",
+      "exit_code": 1,
+      "output_excerpt": null,
+      "truncated": false
+    }
+  ],
+  "next_actions": [],
+  "blocking_reasons": [
+    "isolation.checks の 2 本目が exit 1。起動したプロセスが本番 DB を開いていたため、テストを 1 つも実行せずに停止した。uat.yaml の env.up が CM_DB_PATH を渡していない。"
+  ],
+  "limitations": [],
+  "evidence_dir": "./evidence/",
+  "summary_text": null
+}

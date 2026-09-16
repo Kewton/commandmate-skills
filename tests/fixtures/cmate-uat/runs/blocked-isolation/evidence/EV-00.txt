@@ -1,0 +1,7 @@
+# isolation.checks の実測（run 20260916-2610）
+$ lsof -p 54999 -Fn | grep -q '<run_dir>/uat.db'
+exit=0
+$ ! lsof -p 54999 -Fn | grep -q '/.commandmate/data/cm.db'
+exit=1
+  -> 起動したプロセスが本番 DB を開いている。ここで停止した。
+（3 本目は未実行）

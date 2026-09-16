@@ -32,6 +32,18 @@
 # file nor validate.yml. The suite was green on the author's laptop and invisible
 # to every gate. delegate-fixtures closes it, in both places, the same way.
 #
+# uat-fixtures (Issue #260) is likewise wired in the same change that ships the
+# suite. cmate-uat carries one script, and the property it exists for cannot be
+# read off the source: a stop that signals a LISTENER but never a process merely
+# CONNECTED to the same port. The suite opens both sockets on loopback and
+# injects the mutation that drops -sTCP:LISTEN, because a suite that stays green
+# without that flag is not testing the thing the script is for
+# (CommandMate#2473 is the incident).
+#
+# It needs lsof or ss and exits 2 without one, rather than passing vacuously. The
+# CI runner image has neither, so validate.yml installs lsof before this suite;
+# a maintainer's machine normally has it already.
+#
 # workspace-research-fixtures (Issue #245) was wired in the same change that
 # shipped its suite, not after the fact. cmate-workspace-research has no script,
 # so tests/fixtures/cmate-workspace-research/run_tests.sh holds the procedure
@@ -54,6 +66,8 @@
 #   repository-analysis-fixtures   0.3s    (2026-08-05)
 #   delegate-fixtures              4s      (2026-09-07)
 #   workspace-research-fixtures    2s      (2026-09-11)
+#   uat-fixtures                  25s     (2026-09-16; it waits on real loopback
+#                                          sockets and on TERM grace periods)
 #
 # The runner reads a YAML subset: 2-space indent, single-line scalars, no inline
 # comments. Keep it that way — a file it cannot parse is exit 2, not a partial run.
@@ -95,6 +109,9 @@ gates:
   - id: workspace-research-fixtures
     command: "bash tests/fixtures/cmate-workspace-research/run_tests.sh"
     timeoutSec: 300
+  - id: uat-fixtures
+    command: "bash tests/fixtures/cmate-uat/run_tests.sh"
+    timeoutSec: 600
 options:
   baseRef: origin/main
   skipInPrimaryCheckout: false

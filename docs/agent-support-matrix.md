@@ -389,14 +389,15 @@ codex の `$<name>` ではない（[CommandMate#1504](https://github.com/Kewton/
 
 | Skill | 宣言 version | claude | codex | gemini | opencode | command-code | antigravity | claude / codex 実測 | opencode / command-code 実測 |
 |---|---|---|---|---|---|---|---|---|---|
-| `cmate-acceptance-test` | 0.1.4 | native | native | unknown | native | native | — | 0.1.1・2026-07-31 | 2026-09-04（経路） |
+| `cmate-acceptance-test` | 0.2.0 | native | native | unknown | native | native | — | 0.1.1・2026-07-31 | 2026-09-04（経路） |
 | `cmate-delegate` | 0.1.2 | native | native | unknown | native | native | unknown | 未（経路からの敷衍） | 2026-09-04（経路） |
 | `cmate-issue-authoring` | 0.9.1 | native | native | unknown | native | native | — | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
 | `cmate-issue-refinement` | 0.4.1 | native | native | unknown | native | native | — | 0.1.1・2026-07-31 | 2026-09-04（経路） |
-| `cmate-orchestrate` | 0.32.1 | native | native | unknown | native | native | — | 0.9.0・**2026-08-02** | **2026-09-04（Command Code は 0.32.0 を実 package で実測）** |
+| `cmate-orchestrate` | 0.33.0 | native | native | unknown | native | native | — | 0.9.0・**2026-08-02** | **2026-09-04（Command Code は 0.32.0 を実 package で実測）** |
 | `cmate-orchestrate-monitor` | 0.7.1 | native | native | unknown | native | native | — | 0.4.0・**2026-08-02** | 2026-09-04（経路） |
 | `cmate-repository-analysis` | 0.2.1 | native | native | unknown | native | native | — | 0.1.1・2026-07-31 | **2026-09-04（両者とも 0.2.0 を実 package で実測）** |
 | `cmate-task-contract` | 0.2.3 | native | native | unknown | native | native | — | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
+| `cmate-uat` | 0.1.0 | native | native | unknown | native | native | native | 未（経路からの敷衍） | 未（経路からの敷衍） |
 | `cmate-verify` | 0.5.1 | native | native | unknown | native | native | — | 0.1.1・**2026-08-02** | **2026-09-04（Command Code は 0.5.0 を実 package で実測）** |
 | `cmate-verify-advisor` | 0.3.1 | native | native | unknown | native | native | — | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
 | `cmate-worker-development` | 0.2.1 | native | native | unknown | native | native | — | 未（経路からの敷衍） | 2026-09-04（経路） |
@@ -436,6 +437,11 @@ package 単位の追試は第 3.2 節がそうしたように別に行う。
 `gemini` / `copilot` / `vibe-local` は依然としてどの package でも測っていない。
 `cmate-delegate` と `cmate-workspace-research` は、そのうち `copilot` を**省略せず `unknown` として
 明示的に宣言している**。`vibe-local` はどの package も宣言していない。
+
+**`cmate-uat` 0.1.0（#260）は 2026-09-16 に足した package なので、claude / codex / opencode /
+command-code のいずれも package 単位では測っていない**（install 先が package に依存しない
+ことからの敷衍である）。`antigravity` は第 3.5 節で経路を実測したので、この package は最初から
+`native` を宣言している。**この手順を最後まで回した rubric 評価は、どの Agent でも未実施**である。
 
 ## 5. 既知の制約
 

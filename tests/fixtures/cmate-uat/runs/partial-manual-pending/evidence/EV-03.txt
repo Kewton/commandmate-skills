@@ -1,0 +1,2 @@
+$ sqlite3 uat.db 'select warning from execution_logs limit 1'
+exit=0

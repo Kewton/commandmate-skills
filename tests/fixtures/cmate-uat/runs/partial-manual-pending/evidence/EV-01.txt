@@ -1,0 +1,3 @@
+$ curl -fsS 127.0.0.1:3011/api/logs
+exit=0
+{"warning":"..."}

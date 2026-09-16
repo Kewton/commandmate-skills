@@ -187,3 +187,37 @@ jobs:
       # the `validate` job's stated property is stdlib-only Python.
       - name: Run the cmate-workspace-research suite
         run: bash tests/fixtures/cmate-workspace-research/run_tests.sh
+
+      # cmate-uat ships one script, and the property it exists for cannot be read
+      # off the source: a stop that signals a LISTENER but never a process merely
+      # CONNECTED to the same port (CommandMate#2473 is the incident where the
+      # wrong form killed a browser's network service). This suite opens both
+      # sockets on loopback and injects the mutation that drops -sTCP:LISTEN — a
+      # suite that stays green without that flag is not testing the thing the
+      # script is for. Wired here and in .commandmate/verify.yaml in the same
+      # change that adds the suite; the defect class of #57/#69, #70, #241 is a
+      # suite named nowhere.
+      #
+      # bash plus stdlib-only python3, and loopback only: no Node, no outside
+      # network. It sits in this job with the other fixture suites for the reason
+      # the delegate suite does: the `validate` job's stated property is
+      # stdlib-only Python.
+      #
+      # It does need a way to identify a LISTENING socket's pid, and the runner
+      # image has NEITHER lsof NOR ss (measured: the suite exited 2 with
+      # "neither lsof nor ss is available"). The suite refuses to run without one
+      # rather than pass vacuously, so the tool is installed here. That refusal is
+      # the shipped script's behaviour too: "no listeners" and "cannot tell" must
+      # not look the same, because the second one would make a stop silently do
+      # nothing.
+      - name: Ensure a listener lookup tool is available
+        run: |
+          if command -v lsof >/dev/null 2>&1 || command -v ss >/dev/null 2>&1; then
+            echo "already present"; exit 0
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lsof
+          lsof -v 2>&1 | head -2
+
+      - name: Run the cmate-uat suite
+        run: bash tests/fixtures/cmate-uat/run_tests.sh

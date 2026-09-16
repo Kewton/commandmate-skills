@@ -1,0 +1,7 @@
+# isolation.checks の実測（run 20260916-2601-2602）
+$ lsof -p 54321 -Fn | grep -q '<run_dir>/uat.db'
+exit=0
+$ ! lsof -p 54321 -Fn | grep -q '/.commandmate/data/cm.db'
+exit=0
+$ curl -fsS 127.0.0.1:3011/api/repositories | grep -q '<run_dir>/root'
+exit=0
