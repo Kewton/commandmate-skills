@@ -1677,6 +1677,33 @@ PR 本文の対比表は in-scope の変更を「宣言外」として数えて�
 
 ## uat（`scripts/uat.mjs`）
 
+### #259 — 意味ゲートの producer が 1 つに固定されていて、実機 UAT の判定を入れられなかった
+
+`skill.id` の検査が `cmate-acceptance-test` の 1 値決め打ちだったので、**同じ
+`acceptance-result.v1` を書いても別の Skill の判定は `invalid`** になった。これが効いたのは
+[#260](https://github.com/Kewton/commandmate-skills/issues/260) の `cmate-uat` である。
+
+分担はこうなっている。`cmate-acceptance-test` は**渡された対象を検証する判定器**で、環境は立てない。
+サーバや DB を立てないと確かめられない受入条件は `manual_pending` にしか落とせず、runner では
+`acceptance_conditional`（owner `human`）で止まる。`cmate-uat` はその穴を埋めるために環境を起動し・
+隔離を実測し・TC を回し・証跡を残してから判定する。
+
+**両方を直列に回す案は採らなかった。** `cmate-acceptance-test` は自分で check を実行する設計で、
+外から渡された証跡を受け取る入力を持たない。直列にすると受入条件の抽出・test plan の確認・実行・
+証跡の記録がまるごと二重になり、2 本目から得られるのは「判定の語彙と決定表と schema」だけになる。
+そこで `cmate-uat` 側が同じ schema を書き、**runner が producer を 2 値の allowlist で受ける**形にした。
+
+→ `skill.id` の検査を `['cmate-acceptance-test', 'cmate-uat']` の **allowlist** にし、
+per-issue の `acceptance.producer` に `{id, version}` を記録する。**緩和ではない**:
+この 2 つ以外は従来どおり `invalid` で、「v1 に見えるから通す」ことはしない。
+合成規則（第4.2節）は 1 行も変えていない —— 誰が書いたかは裁定を変えないからである。
+
+`producer` を記録したのは、fix prompt の受入判定見出しを**固定文字列にしていた**のが実害だった
+からである。producer が 2 つになった時点で、その Skill が出していない判定にその Skill の名前が乗る。
+見出しは `acceptance.producer` から組み、名乗れる producer が無い state（`missing` / `invalid` /
+`mismatched`）では総称の `semantic gate` に落とす。`uat_schema_version` は 1 のまま、
+`stop_reason` にも `verdict_source` にも新しい値は足していない。
+
 ### #142 — 無人運転の段階 C（`uat`）と、再merge が入る先の検査
 
 `uat.mjs` の再merge は `git merge --no-ff --no-edit <fix-branch>` で **cwd 指定を持たない**ので、fix は

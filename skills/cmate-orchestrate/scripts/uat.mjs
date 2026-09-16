@@ -91,9 +91,22 @@ import {
 const UAT_SCHEMA_VERSION = 1;
 const SUPPORTED_PLAN_SCHEMA_VERSIONS = [1, 2];
 
-// The semantic gate's input contract: cmate-acceptance-test's result document
-// (skills/cmate-acceptance-test/schemas/acceptance-result.v1.json).
-const ACCEPTANCE_SKILL_ID = 'cmate-acceptance-test';
+// The semantic gate's input contract: an acceptance-result.v1 document
+// (skills/cmate-acceptance-test/schemas/acceptance-result.v1.json remains the sole
+// normative copy of that schema).
+//
+// TWO Skills produce that document and this runner accepts either as the PRODUCER.
+// `cmate-acceptance-test` judges a target it did not have to stand up; `cmate-uat`
+// stands the real environment up first and judges from the evidence it collected
+// there (#260). Both write the same schema and both are adjudicated by the same
+// composition rules below — which producer wrote it changes nothing about how the
+// verdict is read, so it is RECORDED (per-issue `acceptance.producer`) rather than
+// branched on.
+//
+// This is an allowlist of known producers, not a relaxation: a `skill.id` outside
+// the set is still `invalid`, exactly as before. Nothing is inferred from an
+// unknown id.
+const ACCEPTANCE_PRODUCER_IDS = ['cmate-acceptance-test', 'cmate-uat'];
 const SUPPORTED_ACCEPTANCE_SCHEMA_VERSION = 1;
 // How many findings/conditions are lifted out of one acceptance document. The
 // report stays bounded; the document itself remains the full record.
@@ -224,10 +237,11 @@ Options:
                          WITHOUT it the loop is a no-mutation preview.
   --max-attempts <1-${MAX_ATTEMPTS_CEILING}>    Fix-attempt cap (default ${DEFAULT_MAX_ATTEMPTS}). The loop never exceeds it;
                          reaching it with failures remaining is reported as blocked.
-  --acceptance-dir <dir> Directory holding one cmate-acceptance-test result document
-                         per issue, named issue-<n>.json. Read-only: this runner
-                         validates and composes them, it never produces a verdict.
-                         Without it the adjudication is the baseline alone.
+  --acceptance-dir <dir> Directory holding one acceptance-result.v1 document per
+                         issue, named issue-<n>.json, written by cmate-acceptance-test
+                         or cmate-uat. Read-only: this runner validates and composes
+                         them, it never produces a verdict. Without it the
+                         adjudication is the baseline alone.
   --require-acceptance   A missing, non-conformant or wrong-issue acceptance result
                          is a FAILURE instead of a recorded limitation. Needs
                          --acceptance-dir.
@@ -566,8 +580,8 @@ function acceptanceNonConformance(doc) {
     return `unsupported result_schema_version ${JSON.stringify(doc.result_schema_version)}; this runner understands ${SUPPORTED_ACCEPTANCE_SCHEMA_VERSION}`;
   }
   const skill = doc.skill;
-  if (!skill || typeof skill !== 'object' || skill.id !== ACCEPTANCE_SKILL_ID) {
-    return `skill.id is not ${ACCEPTANCE_SKILL_ID}`;
+  if (!skill || typeof skill !== 'object' || !ACCEPTANCE_PRODUCER_IDS.includes(skill.id)) {
+    return `skill.id is not one of ${ACCEPTANCE_PRODUCER_IDS.join('/')}`;
   }
   if (typeof skill.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(skill.version)) {
     return 'skill.version is not a semantic version';
@@ -591,6 +605,10 @@ function acceptanceState(state, note) {
     status: null,
     issue_ref: null,
     verdict_reason: '',
+    // Which Skill produced the document. Only a `loaded` state can name one: a
+    // missing document has no producer, and an invalid one has no producer this
+    // runner is willing to vouch for (the id is exactly what failed to conform).
+    producer: null,
     findings: [],
     conditions: [],
     note,
@@ -718,9 +736,10 @@ function loadAcceptance(inputs, number) {
     status: doc.status,
     issue_ref: clip(doc.target.issue_ref, 120),
     verdict_reason: clip(doc.verdict_reason, 300),
+    producer: { id: doc.skill.id, version: doc.skill.version },
     findings: acceptanceFindings(doc),
     conditions: acceptanceConditions(doc),
-    note: `${name}: ${ACCEPTANCE_SKILL_ID} ${doc.skill.version} returned ${doc.verdict} (run status ${doc.status})`,
+    note: `${name}: ${doc.skill.id} ${doc.skill.version} returned ${doc.verdict} (run status ${doc.status})`,
   };
 }
 
@@ -941,6 +960,15 @@ function bullets(items, fallback) {
   return items.map((item) => `- ${redact(String(item))}`).join('\n');
 }
 
+// How to name the producer in a heading. A `loaded` document says who wrote it; any
+// other state has no producer to name, and the honest label is the generic one —
+// writing a Skill's name over a verdict that Skill never produced is how the
+// hard-coded heading misled the worker before #259.
+function acceptanceProducerLabel(acceptance) {
+  const id = acceptance && acceptance.producer ? acceptance.producer.id : null;
+  return typeof id === 'string' && id.length > 0 ? id : 'semantic gate';
+}
+
 // The semantic gate's own words, quoted into the fix prompt. A no_go names WHICH
 // criterion failed and why; handing the worker that instead of "UAT failed" is the
 // difference between a targeted repair and a guess. When acceptance did not run,
@@ -978,7 +1006,12 @@ function buildFixPrompt(plan, issue, failingScenarios, acceptance) {
     '## Failing acceptance scenarios',
     bullets(failingScenarios, 'The UAT report did not name a scenario; reproduce the acceptance check and fix the failure.'),
     '',
-    '## Acceptance verdict (cmate-acceptance-test)',
+    // Name the producer that actually wrote the verdict. Hard-coding one Skill's
+    // name here told the worker the wrong thing as soon as a second producer
+    // existed, and "who judged this" is load-bearing when the worker goes to
+    // reproduce the failure: cmate-uat's evidence came from a real environment
+    // it stood up, cmate-acceptance-test's did not.
+    `## Acceptance verdict (${acceptanceProducerLabel(acceptance)})`,
     acceptanceSection(acceptance),
     '',
     '## Objective (unchanged)',

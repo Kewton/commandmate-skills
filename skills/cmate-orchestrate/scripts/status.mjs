@@ -387,7 +387,7 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   worktree_failed: 'fix worktree を作成できなかった。既存 worktree と base の状態を確認して再実行する。',
   fix_failed: 'fix worker が修正に到達しなかった。fix prompt と worker ログを読み、指示が過大なら Issue を分割する。',
   remerge_failed: 're-merge が conflict した。conflict を手で解消してから再実行する。',
-  acceptance_not_run: 'cmate-acceptance-test を入れて result を用意し、必要なら --require-acceptance で必須にする。',
+  acceptance_not_run: 'cmate-acceptance-test か cmate-uat（実機環境を立ててから判定する方）を入れて result を用意し、必要なら --require-acceptance で必須にする。',
   // ---- uat: unattended 段階 C（#142。ADR 第14.3節の実測）--------------------
   unattended_cwd_detached: 'invocation cwd が detached HEAD である。再merge（`git merge --no-ff`）はどの branch にも残らないのに成功と報告されるため、fix worktree を1つも作らずに停止した。integration branch を checkout してから再実行する。',
   unattended_cwd_branch_mismatch: 'invocation cwd の branch が `--expect-branch` と違う。再merge はその branch に入る（base branch なら review を経ずに入り、push 済みなら不可逆）ため、fix worktree を1つも作らずに停止した。integration branch を checkout してから再実行する。',
