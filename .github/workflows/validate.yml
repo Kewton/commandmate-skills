@@ -199,8 +199,25 @@ jobs:
       # suite named nowhere.
       #
       # bash plus stdlib-only python3, and loopback only: no Node, no outside
-      # network. It needs lsof or ss, which the runner image has. It sits in this
-      # job with the other fixture suites for the reason the delegate suite does:
-      # the `validate` job's stated property is stdlib-only Python.
+      # network. It sits in this job with the other fixture suites for the reason
+      # the delegate suite does: the `validate` job's stated property is
+      # stdlib-only Python.
+      #
+      # It does need a way to identify a LISTENING socket's pid, and the runner
+      # image has NEITHER lsof NOR ss (measured: the suite exited 2 with
+      # "neither lsof nor ss is available"). The suite refuses to run without one
+      # rather than pass vacuously, so the tool is installed here. That refusal is
+      # the shipped script's behaviour too: "no listeners" and "cannot tell" must
+      # not look the same, because the second one would make a stop silently do
+      # nothing.
+      - name: Ensure a listener lookup tool is available
+        run: |
+          if command -v lsof >/dev/null 2>&1 || command -v ss >/dev/null 2>&1; then
+            echo "already present"; exit 0
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq lsof
+          lsof -v 2>&1 | head -2
+
       - name: Run the cmate-uat suite
         run: bash tests/fixtures/cmate-uat/run_tests.sh

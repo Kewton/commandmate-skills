@@ -40,6 +40,10 @@
 # without that flag is not testing the thing the script is for
 # (CommandMate#2473 is the incident).
 #
+# It needs lsof or ss and exits 2 without one, rather than passing vacuously. The
+# CI runner image has neither, so validate.yml installs lsof before this suite;
+# a maintainer's machine normally has it already.
+#
 # workspace-research-fixtures (Issue #245) was wired in the same change that
 # shipped its suite, not after the fact. cmate-workspace-research has no script,
 # so tests/fixtures/cmate-workspace-research/run_tests.sh holds the procedure
