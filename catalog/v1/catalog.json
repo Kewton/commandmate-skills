@@ -3224,6 +3224,90 @@
       ]
     },
     {
+      "id": "cmate-uat",
+      "name": "cmate-uat",
+      "summary": "Issue の受入条件を実機環境で検証する。環境の起動・隔離の実測・TC の実行・証跡・判定・停止を 1 本で行い、acceptance-result.v1 を返す。実装も修正もしない。",
+      "provider": {
+        "name": "CommandMate",
+        "url": "https://github.com/Kewton/CommandMate"
+      },
+      "license": "MIT",
+      "homepage": "https://github.com/Kewton/commandmate-skills",
+      "keywords": [
+        "uat",
+        "acceptance-test",
+        "environment",
+        "isolation",
+        "evidence",
+        "go-no-go",
+        "quality-gate",
+        "issue",
+        "bash"
+      ],
+      "latest": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "changelog": "cmate-uat 0.1.0 — 初回リリース（#260）。Issue の受入条件を実機環境を立ててから検証する手順。リポジトリ単位の宣言 .commandmate/uat.yaml で環境を受け取り、起動・隔離の実測・テストケースの実行・証跡・判定・停止を 1 本で行い、判定を acceptance-result.v1（skill.id: cmate-uat）で返す。isolation.checks が 1 つでも落ちたらテストを 1 つも実行せずに止まる。修正はしない。画面の確認は実行者が可否を判断し、できなければ manual_pending として申し送りに回す（人を待たない）。停止はポートで LISTEN しているプロセスだけに絞る（同梱 scripts/uat-env.sh、実行 bit 無し）。複数 Issue を 1 本の uat-report.md にまとめる。cmate-orchestrate 0.33.0 以降の uat runner が --acceptance-dir でそのまま読み、schema は cmate-acceptance-test 0.2.0 以降のものを共有する。compatibility は install 経路からの敷衍で、antigravity は 2026-09-16 に経路を実測した。",
+          "published_at": "2026-09-16T09:06:47Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-uat-v0.1.0",
+            "commit": "bc2c66c7f750c642f74ff05c3729193bda58a51e"
+          },
+          "artifact": {
+            "asset_name": "cmate-uat-0.1.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-uat-v0.1.0/cmate-uat-0.1.0.tar.gz",
+            "sha256": "c229abf349d46b4a4c9ebe595054ddd04d17fdbe2007c4a053f5ef73d70fb6d0",
+            "size": 25792,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-31 on Claude Code 2.1.220 with CommandMate 0.16.0, as a two-way control: removing .claude/skills/<id> takes the skill out of the palette while .agents/skills is untouched. Package-independent; this package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-08-02 on Codex CLI 0.145.0 with a mechanical trace (the /skills picker lists installed skills under a Skill label). That version exposes no slash command, so invoke by name. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, so restart after install. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0, re-checked 2026-09-05 on 1.49.0: found in .agents/skills (cmd skills list -d); /<name> emits skill_loaded. .claude/skills is not read. No restart needed. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "antigravity",
+                "evidence": "Measured 2026-09-16 on Antigravity CLI 1.2.3: /skills self-reports .agents/skills; /<name> returns a token from SKILL.md. Negative control: .claude/skills alone is never loaded. Trust the project first. Print mode NOT measured. Details in agent-support-matrix 3.5. This package NOT measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured, for this package or any other. The procedure needs only bash plus the commands declared in uat.yaml, so it is usable by hand; discovery and reload are unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "copilot",
+                "evidence": "Not measured, for this package or any other. No discovery, invocation or reload behaviour has been observed, so no support level is claimed.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        }
+      ]
+    },
+    {
       "id": "cmate-verify",
       "name": "cmate-verify",
       "summary": "検証ゲートを .commandmate/verify.yaml に宣言し、未着手ガードとプライマリ checkout skip を挟んで worktree で逐次実行し、出力ではなく実 exit code で合否を判定する bash 3.2 互換ランナー。",
