@@ -1,0 +1,145 @@
+schema_version: 1
+id: cmate-uat
+name: cmate-uat
+version: 0.1.0
+summary: Issue の受入条件を実機環境で検証する。環境の起動・隔離の実測・TC の実行・証跡・判定・停止を 1 本で行い、acceptance-result.v1 を返す。実装も修正もしない。
+description: |-
+  サーバや DB を立てないと確かめられない受入条件を、実機環境を起動してから検証する手順である。環境の起動・隔離できていることの実測・テストケースの実行・証跡の収集・受入判定・環境の停止までを 1 つの手順で行う。
+  環境の立て方はリポジトリ単位の宣言 `.commandmate/uat.yaml`（起動・停止・health・ポート範囲・隔離の実測 command・任意の e2e）から読む。手順書に特定リポジトリの起動コマンドを埋め込まないので、同じ手順が別のリポジトリでも回る。
+  cmate-acceptance-test との使い分けは 1 つの問いで決まる。`.commandmate/uat.yaml` があれば本 Skill、無ければ acceptance-test である。後者は渡された対象を検証する判定器で環境を立てないので、実機が要る受入条件は未検証のまま人へ回る。
+  中心にある規律は 4 つである。1つ目、隔離を実測してからテストを始める。`isolation.checks` が 1 つでも落ちたらテストケースを 1 つも実行せず blocked で止まる。「別ポートで起動したから別環境」は成り立たない。2つ目、検証していないものを pass に丸めない。未実行・環境依存・flaky・手動未確認は固有の outcome として記録する。3つ目、修正しない。不合格は記録して止まり、修正は cmate-orchestrate の fix loop か別手順へ渡す。4つ目、停止はポートで絞る。そのポートで LISTEN しているプロセスだけを止め、接続しているだけのプロセスを巻き込まない。
+  画面を触るテストケースは、実行者が自分の道具で実行できるかをテストケースごとに判断する。できなければ manual_pending として申し送りに回し、人に問い合わせて待たない（無人運転で止まらないため）。
+  出力は人が読む uat-report.md 1 本（複数 Issue をまとめる）と、Issue ごとの acceptance-result.v1 document である。後者は cmate-orchestrate の uat runner が意味ゲートの入力として読む。schema はこの package に複製せず、cmate-acceptance-test 側の 1 本を共有する。
+capabilities:
+  - リポジトリ単位の環境宣言 .commandmate/uat.yaml を読み、無ければ CI 定義や container 定義から起案して承認を得る
+  - 空きポートを検出し、宣言された command で環境を起動し、health が通るまで待つ
+  - 隔離できていることを宣言された command で実測し、1 つでも落ちたらテストを 1 つも実行せず停止する
+  - 受入条件ごとにテストケースを対応づけ、どちらにも対応しない条件とテストケースを明示する
+  - command 出力・exit code・スクリーンショット・隔離の実測結果を証跡として構造化する
+  - 画面を触るテストケースを自分で実行できるか判断し、できなければ manual_pending として申し送りへ回す
+  - pass / fail / flaky / blocked / not_run / manual_pending を区別し、決定表に従って go / conditional_go / no_go を導出する
+  - 複数 Issue を 1 つの環境で受け入れ、報告書を 1 本にまとめる
+  - LISTEN しているプロセスだけを止めて環境を停止し、ポートの解放を確認する
+  - 判定を acceptance-result.v1 として書き、cmate-orchestrate の意味ゲートへそのまま渡す
+expected_outcomes:
+  - 実機環境が要る受入条件が、未検証のまま人へ回らなくなる
+  - UAT が本番のデータを掴んだまま実行されることが、テスト開始前に検知される
+  - 環境の起動手順がリポジトリ側の宣言になり、手順書と実運用が乖離しなくなる
+  - 未検証・環境依存・flaky・手動未確認が pass に丸められなくなる
+  - 実行したテストケースと実行しなかったテストケースが、報告のうえで必ず分かれる
+  - 離席後でも、未確認項目と次 action が報告書の申し送りから復元できる
+  - 検証する側が実装を直すことで、修正の回数上限と branch 規律が素通りされなくなる
+  - ポート単位の停止が、そのポートに接続しているだけの無関係なプロセスを巻き込まなくなる
+provider:
+  name: CommandMate
+  url: https://github.com/Kewton/CommandMate
+license: MIT
+homepage: https://github.com/Kewton/commandmate-skills
+keywords:
+  - uat
+  - acceptance-test
+  - environment
+  - isolation
+  - evidence
+  - go-no-go
+  - quality-gate
+  - issue
+  - bash
+compatibility:
+  commandmate: '>=0.11.0 <1.0.0'
+  agents:
+    - agent: claude
+      support: native
+      evidence: 'Discovery path measured 2026-07-31 on Claude Code 2.1.220 with CommandMate 0.16.0, as a two-way control: removing .claude/skills/<id> takes the skill out of the palette while .agents/skills is untouched. Package-independent; this package was NOT separately measured.'
+    - agent: codex
+      support: native
+      evidence: 'Discovery path measured 2026-08-02 on Codex CLI 0.145.0 with a mechanical trace (the /skills picker lists installed skills under a Skill label). That version exposes no slash command, so invoke by name. This package was NOT separately measured.'
+    - agent: opencode
+      support: native
+      evidence: 'Measured 2026-08-25 on opencode 1.18.22 and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, so restart after install. This package was NOT separately measured.'
+    - agent: command-code
+      support: native
+      evidence: 'Measured 2026-09-04 on Command Code 1.47.0, re-checked 2026-09-05 on 1.49.0: found in .agents/skills (cmd skills list -d); /<name> emits skill_loaded. .claude/skills is not read. No restart needed. This package was NOT separately measured.'
+    - agent: antigravity
+      support: native
+      evidence: 'Measured 2026-09-16 on Antigravity CLI 1.2.3: /skills self-reports .agents/skills; /<name> returns a token from SKILL.md. Negative control: .claude/skills alone is never loaded. Trust the project first. Print mode NOT measured. Details in agent-support-matrix 3.5. This package NOT measured.'
+    - agent: gemini
+      support: unknown
+      evidence: Not measured, for this package or any other. The procedure needs only bash plus the commands declared in uat.yaml, so it is usable by hand; discovery and reload are unverified.
+    - agent: copilot
+      support: unknown
+      evidence: Not measured, for this package or any other. No discovery, invocation or reload behaviour has been observed, so no support level is claimed.
+requirements:
+  commands:
+    - name: bash
+      version_range: '>=3.2.0 <6.0.0'
+    - name: git
+      version_range: '>=2.30.0 <3.0.0'
+    - name: gh
+  network_hosts:
+    - api.github.com
+    - github.com
+declared_permissions:
+  - filesystem_read
+  - filesystem_write
+  - process_execution
+  - network_access
+  - environment_read
+declared_risk: moderate
+risk_rationale: >-
+  Executes processes by design: the build / up / down / health / isolation
+  commands declared in .commandmate/uat.yaml, its own test commands, and
+  read-only gh and git. Signals ONLY processes LISTENING on the port it
+  started (the script filters with lsof -sTCP:LISTEN or ss -l), so one merely
+  connected is never touched. Writes only the run directory and the drafted
+  uat.yaml. Reads env vars for presence, not values. No production code change,
+  no commit, no push. One script, no execute bit.
+files:
+  - path: SKILL.md
+    sha256: 0ef94ce62143d12f1a37c9ea5f4ce8e9afecbe3c7a2ab64ab3c847775f89fcc2
+    size: 19088
+    kind: skill_md
+    executable: false
+    script: false
+  - path: references/agent-compatibility.md
+    sha256: 9daf7ef2e28bf2581c8741c57295914e485912b09e83e385305517e051e0500d
+    size: 5562
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/changelog.md
+    sha256: b9172f939bef428e208551bb4909be56fe6dd5f9a684e4230b6fa77178908403
+    size: 4082
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/environment-profiles.md
+    sha256: 9d85a9ca8d4283c7b90e297001c61c60c4254704dc4404ffec6f5da0d2cc1833
+    size: 5234
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/evidence.md
+    sha256: 6243eee09e2bc66e8f1e7641f17be28a585c67c273e3cdc30272feda7268acb5
+    size: 4594
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/onboarding.md
+    sha256: 8325dbfac20eb2b8db173ac3af6417230bb31dc97181451bc9963551efc55333
+    size: 6624
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/uat-yaml-contract.md
+    sha256: 0869ef4cf3a7d80eebed56f2ad1191b2f0bb7725ec67a4140d0996206316a17a
+    size: 9563
+    kind: instruction
+    executable: false
+    script: false
+  - path: scripts/uat-env.sh
+    sha256: 63adfda2d6ce65b64cfa25cfa703a58695823065c6bfa2c863a00fd435eeafff
+    size: 8572
+    kind: script
+    executable: false
+    script: true

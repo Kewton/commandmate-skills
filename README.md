@@ -135,6 +135,7 @@ export CM="npx commandmate@latest"
 | `cmate-verify-advisor` | 検証履歴から verify.yaml の改善案を出す（強化は適用可・弱体化は提案止まり。Node script 同梱） | moderate |
 | `cmate-worker-development` | Issue や実行契約を受け取ったワーカーの作業方法（読取・調査・計画・実装・検証・証拠の6段） | moderate |
 | `cmate-delegate` | 隣のセッションへ一言頼んで返答を回収する手順（bash ラッパ同梱） | moderate |
+| `cmate-uat` | 実機環境を立ててから受入条件を検証する手順（bash script 同梱） | moderate |
 | `cmate-workspace-research` | 複数の Agent に Web と Workspace を独立に調査させ、相互反証と追加検証を経て Evidence 付きの `final.md` 1 本にまとめる手順 | moderate |
 
 version と risk は `skills/<skill-id>/commandmate.skill.yaml` の `version` /

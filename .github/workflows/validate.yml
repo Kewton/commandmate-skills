@@ -187,3 +187,20 @@ jobs:
       # the `validate` job's stated property is stdlib-only Python.
       - name: Run the cmate-workspace-research suite
         run: bash tests/fixtures/cmate-workspace-research/run_tests.sh
+
+      # cmate-uat ships one script, and the property it exists for cannot be read
+      # off the source: a stop that signals a LISTENER but never a process merely
+      # CONNECTED to the same port (CommandMate#2473 is the incident where the
+      # wrong form killed a browser's network service). This suite opens both
+      # sockets on loopback and injects the mutation that drops -sTCP:LISTEN — a
+      # suite that stays green without that flag is not testing the thing the
+      # script is for. Wired here and in .commandmate/verify.yaml in the same
+      # change that adds the suite; the defect class of #57/#69, #70, #241 is a
+      # suite named nowhere.
+      #
+      # bash plus stdlib-only python3, and loopback only: no Node, no outside
+      # network. It needs lsof or ss, which the runner image has. It sits in this
+      # job with the other fixture suites for the reason the delegate suite does:
+      # the `validate` job's stated property is stdlib-only Python.
+      - name: Run the cmate-uat suite
+        run: bash tests/fixtures/cmate-uat/run_tests.sh

@@ -1,0 +1,97 @@
+{
+  "result_schema_version": 1,
+  "skill": {
+    "id": "cmate-uat",
+    "version": "0.1.0"
+  },
+  "generated_at": "2026-09-16T12:00:00Z",
+  "status": "partial",
+  "verdict": "conditional_go",
+  "verdict_reason": "#2602 の受入条件 2 件のうち 1 件は実機で満たされていたが、画面の確認は実行手段が無く未確認である。",
+  "target": {
+    "issue_ref": "Kewton/CommandMate#2602",
+    "issue_title": null,
+    "repository": "Kewton/CommandMate",
+    "branch": "develop",
+    "commit": "67b4cf89b0a1c2d3e4f5061728394a5b6c7d8e9f",
+    "dirty": false
+  },
+  "environment": {
+    "agent": "command-code",
+    "agent_version": "1.53.1",
+    "commandmate_version": "0.37.0",
+    "invocation": "non_interactive"
+  },
+  "criteria": [
+    {
+      "id": "AC-01",
+      "text": "警告つきの行が記録される",
+      "classification": "automated",
+      "risk_tier": "safe",
+      "outcome": "pass",
+      "evidence_ids": [
+        "EV-03"
+      ],
+      "notes": "execution_logs の当該行を実測した。"
+    },
+    {
+      "id": "AC-02",
+      "text": "Logs タブで警告が判別できる",
+      "classification": "manual",
+      "risk_tier": "safe",
+      "outcome": "manual_pending",
+      "evidence_ids": [],
+      "notes": "ui.e2e が未宣言で、この実行者にブラウザを操作する手段が無い。未確認のまま申し送りへ回した。"
+    }
+  ],
+  "checks": [
+    {
+      "id": "CK-01",
+      "kind": "command",
+      "description": "TC-2602-01: 実行ログの行を確認する",
+      "criterion_ids": [
+        "AC-01"
+      ],
+      "risk_tier": "safe",
+      "executed": true,
+      "skip_reason": null,
+      "evidence_ids": [
+        "EV-03"
+      ]
+    },
+    {
+      "id": "CK-02",
+      "kind": "command",
+      "description": "TC-2602-02: Logs タブを目視する",
+      "criterion_ids": [
+        "AC-02"
+      ],
+      "risk_tier": "safe",
+      "executed": false,
+      "skip_reason": "ブラウザを操作する手段が無く、ui.e2e も宣言されていない。",
+      "evidence_ids": []
+    }
+  ],
+  "confirmations": [],
+  "evidence": [
+    {
+      "id": "EV-03",
+      "type": "command",
+      "collected_at": "2026-09-16T11:59:00Z",
+      "summary": "execution_logs に warning つきの行が 1 件あった。",
+      "redacted": false,
+      "path": "./evidence/EV-03.txt",
+      "command": "sqlite3 uat.db 'select warning from execution_logs limit 1'",
+      "exit_code": 0,
+      "output_excerpt": null,
+      "truncated": false
+    }
+  ],
+  "next_actions": [],
+  "blocking_reasons": [],
+  "limitations": [
+    "画面を確かめる手段が無く、AC-02 は未確認である。"
+  ],
+  "evidence_dir": "./evidence/",
+  "summary_text": null
+}
