@@ -31,7 +31,7 @@ skills/<skill-id>/
 | `cmate-worktree-cleanup` | high | worktree の安全な後始末 |
 | `cmate-worktree-setup` | moderate | 専用 worktree の作成と baseline 取得 |
 
-**上の 15 package のうち 14 件が Catalog に publish 済み**（`cmate-uat` は未 publish）であり、`commandmate skill install`
+**上の 15 package すべてが Catalog に publish 済み**であり、`commandmate skill install`
 で入る（[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開したものと、その後に足したもの）。
 
 この表は目次であって正本ではない。**version は載せない**（package ごとに上がるので、ここに書くと必ずずれる）。

@@ -15,7 +15,7 @@ Claude Code 2.1.220 は `.claude/skills` しか、Codex CLI 0.145.0 は `.agents
 - 親 Epic: [Kewton/CommandMate#1227](https://github.com/Kewton/CommandMate/issues/1227)
 - 本リポジトリの release pipeline: [Kewton/CommandMate#1238](https://github.com/Kewton/CommandMate/issues/1238)
 
-> **状態**: release pipeline と公式 Skill 14 件が揃っている。
+> **状態**: release pipeline と公式 Skill 15 件が揃っている。
 > どの Agent でどこまで確認済みかは
 > [docs/agent-support-matrix.md](./docs/agent-support-matrix.md) を参照。
 
@@ -144,7 +144,7 @@ package（**`cmate-worktree-cleanup` / `cmate-orchestrate` / `cmate-orchestrate-
 `cmate-verify` の 4 件**）は install に `--yes` と `--ack-risk <skill-id>@<version>` の
 完全一致が要る。
 
-**上の表の 14 package すべてが Catalog に publish 済みである**
+**上の表の 15 package すべてが Catalog に publish 済みである**
 （[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開したものと、
 その後に足したもの）。どれも `commandmate skill install` で入るので、手で配置する必要はない。
 
