@@ -276,6 +276,37 @@ cmd skills list -d      # model を呼ばない。どの root から来たかが
    Claude / Codex / opencode と違う点なので、記録にそう書く。
 5. 出た／出ないと **Command Code の exact version** を記録する。
 
+### Antigravity（`agy`）
+
+`/skills` 画面が**探索先を絶対 path で自己申告する**ので、発見は model に聞かずに読める。
+
+1. **私設 socket で起こす。** 本番ペインへ入力を混ぜない。
+
+   ```bash
+   tmux -L agyprobe new-session -d -s p -c <worktree path> -x 200 -y 50 'agy'
+   tmux -L agyprobe capture-pane -t p -p -S -80       # ← 先に読む
+   ```
+
+2. **trust ダイアログを処理する。** 初回は "Do you trust the contents of this project?" が出る。
+   既定が "Yes, I trust this folder" なので Enter で承認できるが、**caret の位置を
+   `capture-pane` で確認してから**送ること。承認は
+   `~/.gemini/antigravity-cli/settings.json` の `trustedWorkspaces` に永続する。
+   **未承認のままでは project の Skill が丸ごと落ちる**ので、install 失敗と区別が付かない。
+3. `/skills` を送信して探索先と列挙を読む。"Create new skills" の 3 行が
+   Workspace（`<ws>/.agents/skills/{name}/SKILL.md`）・Global
+   （`~/.gemini/antigravity-cli/skills/…`）・Shared（`~/.gemini/skills/…`）を自己申告し、
+   install した package は **"Workspace skills · Workspace config" 節**に出る。
+4. 呼出は `/<skill-id>` を送信する（**slash 形**。codex の `$<name>` ではない）。
+   本文に仕込んだ合図（`PROBE_OK_<name>` のような文字列）が返れば、起動まで機械的に取れている。
+5. **陰性対照を必ず用意する。** `.claude/skills/<probe-id>/` に**だけ**置いた probe を
+   同じ手順で呼び、起動されず token も返らないことを確認する。
+   **Antigravity は `.claude/skills` を読まない**ので、CommandMate の両 root install のうち
+   効いているのは `.agents/skills` 側だけである（Command Code と同じ形）。
+6. **print mode を discovery の証跡に使わない。** `agy -p "/skills"` は workspace 節を出さず、
+   `agy -p "/<skill-id>"` は model の返答ではない合成行を返す。測れるのは TUI 経路だけである。
+7. 終わったら `tmux -L agyprobe kill-server` する（`-L` を省くと本番サーバに撃つ）。
+8. 出た／出ないと **agy の exact version** を記録する（`agy --version` は素の数字）。
+
 ### どちらの root を読んでいるかを確定させる（対照実験）
 
 「両 root へ置いたら両方から見えた」だけでは、どちらの root が効いているか分からない。

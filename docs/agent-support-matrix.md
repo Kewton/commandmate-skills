@@ -63,8 +63,8 @@ skills 未導入の新規 git リポジトリ・専用ポート・専用 DB の�
 | OpenCode | 未計測 | 未計測 | — |
 | vibe-local / copilot / antigravity | 未計測 | 未計測 | — |
 
-この表は 2026-07-26 時点の記録である。**OpenCode と Command Code は
-2026-09-04 に実測した**（第 3.4 節）ので、現在の宣言は第 4 節を見ること。
+この表は 2026-07-26 時点の記録である。**OpenCode と Command Code は 2026-09-04 に**（第 3.4 節）、
+**Antigravity は 2026-09-16 に実測した**（第 3.5 節）ので、現在の宣言は第 4 節を見ること。
 
 evidence:
 <https://github.com/Kewton/CommandMate/issues/1513#issuecomment-5083878264>
@@ -304,24 +304,105 @@ invocation: `/probe-agents-root` → NDJSON に
 どちらも model の自己申告ではない。**測ったのは discovery 経路だけである**（第 1 節）。
 cmate-* の各手順を opencode / Command Code で最後まで回した rubric 評価は含まない。
 
+### 3.5 Antigravity 1.2.3（2026-09-16）
+
+第 3.4 節までで `antigravity` は**どの package でも未計測**のままだった
+（第 5 節の「未計測」一覧に載っていた）。2026-09-16 に discovery 経路と invocation を
+**機械的に測った**。この節が antigravity の初計測である。
+
+| 項目 | 値 |
+|---|---|
+| Antigravity CLI（`agy`） | **1.2.3** |
+| OS | macOS（Darwin 27.0.0）。Node 非依存（単一 Mach-O バイナリ） |
+| 測定に使った Skill | probe 2 件（`probe-agents-root` / `probe-claude-root`）。本文に「固定 token だけを返せ」と書いたもの |
+| 配置経路 | **手動配置**。使い捨て git repo の `.agents/skills/` と `.claude/skills/` |
+| 隔離 | 私設 socket `tmux -L agyprobe`（本番ペインを触らない）。測定後に `kill-server` |
+
+`agy` は起動時に **trust ダイアログ**（"Do you trust the contents of this project?"）を出す。
+既定は "Yes, I trust this folder" で、Enter で承認すると
+`~/.gemini/antigravity-cli/settings.json` の `trustedWorkspaces` に**永続**する。
+未承認のままでは project の customization が丸ごと落ちる。
+
+#### 読む root（`/skills` の自己申告）
+
+| root | 発見 |
+|---|---|
+| `<workspace>/.agents/skills/<name>/SKILL.md`（**primary install root**） | **YES**（`/skills` の "Workspace skills · Workspace config" 節に出た） |
+| `<workspace>/.claude/skills/` | **NO — 読まない**（陰性対照は下記） |
+| `~/.gemini/antigravity-cli/skills/` | Global として自己申告 |
+| `~/.gemini/skills/` | Shared として自己申告 |
+
+`/skills` 画面が探索先を**絶対 path で自己申告する**（"Create new skills" の 3 行）ので、
+発見の証跡は model の自己申告ではない。
+
+#### invocation
+
+`/probe-agents-root` を composer へ送ると SKILL.md 本文が読まれ、本文に仕込んだ
+`AGENTSROOT-7731` が返答に出た。**起動トリガは slash 形（`/<name>`）**であり、
+codex の `$<name>` ではない（[CommandMate#1504](https://github.com/Kewton/CommandMate/issues/1504)
+が 1.1.3 で記録したものと同じ。本節は 1.2.3 で再確認し、返答 token による機械的証跡を足した）。
+
+#### 陰性対照
+
+| 対照 | 結果 |
+|---|---|
+| `.claude/skills` に**だけ**置いた probe を呼ぶ（`/probe-claude-root`） | 起動されず、仕込んだ token も返らない |
+
+⇒ `antigravity: native` は **`.agents/skills` への配置**（installer の primary root）に
+だけ依存する。第 2 節の両 root install のうち `.claude/skills` 側は agy には効いていない。
+**Command Code 1.47.0 と同じ形**（第 3.4 節の陰性対照）である。
+
+#### print mode は TUI と挙動が違う（未計測として扱う）
+
+`agy -p "/skills"` は trust の前後いずれでも **workspace 節を出さない**（global と builtin だけ）。
+`agy -p "/<skill-id>"` は `PROBE_OK_<skill-id>` 形の**合成行**を返し、これは model の返答ではない。
+したがって本節が測ったのは **TUI セッションの経路だけ**である。print mode の discovery は
+未計測として扱う。
+
+#### 権限まわり（`support` の外側。記録のみ）
+
+- `agy -p "/permissions"` が `global<TAB>allow<TAB>command(ollama)` 形で規則を列挙する。
+  規則の文法は `command(<prefix>)` で、token は full word 照合（`git` は `git add` に当たり
+  `github` には当たらない）。
+- ダイアログの "Yes, and always allow for commands that start with …" が
+  `~/.gemini/antigravity-cli/settings.json` へ永続する。
+- 起動時のモードは `--mode accept-edits|plan`、全許可は `--dangerously-skip-permissions`、
+  `/settings` の Agent Mode（`default` / `accept-edits` / `plan`）でも決まる。
+- **対話モードは hooks の `PreToolUse` の allow 判定を無視してダイアログを出す**
+  （CommandMate 側の実測。`--print` だけが従う）。これは `support` の意味（第 1 節）の外である。
+
+#### reload
+
+**未計測。** install 後に新しい session が要るかどうかは測っていない。
+
+#### evidence の性質
+
+| Agent | 発見の証跡 | 呼出の証跡 |
+|---|---|---|
+| Antigravity 1.2.3 | **機械的**（`/skills` が返す絶対 path つきの列挙） | **機械的**（本文に仕込んだ token の返答） |
+
+**測ったのは discovery 経路だけである**（第 1 節）。cmate-* の各手順を agy で最後まで
+回した rubric 評価は含まない。また **配置は手動**であり、Catalog install 経由では測っていない
+（install 先は package に依存しないが、経路そのものの追試は別に行う）。
+
 ## 4. package 別の宣言
 
-| Skill | 宣言 version | claude | codex | gemini | opencode | command-code | claude / codex 実測 | opencode / command-code 実測 |
-|---|---|---|---|---|---|---|---|---|
-| `cmate-acceptance-test` | 0.1.4 | native | native | unknown | native | native | 0.1.1・2026-07-31 | 2026-09-04（経路） |
-| `cmate-delegate` | 0.1.2 | native | native | unknown | native | native | 未（経路からの敷衍） | 2026-09-04（経路） |
-| `cmate-issue-authoring` | 0.9.1 | native | native | unknown | native | native | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
-| `cmate-issue-refinement` | 0.4.1 | native | native | unknown | native | native | 0.1.1・2026-07-31 | 2026-09-04（経路） |
-| `cmate-orchestrate` | 0.32.1 | native | native | unknown | native | native | 0.9.0・**2026-08-02** | **2026-09-04（Command Code は 0.32.0 を実 package で実測）** |
-| `cmate-orchestrate-monitor` | 0.7.1 | native | native | unknown | native | native | 0.4.0・**2026-08-02** | 2026-09-04（経路） |
-| `cmate-repository-analysis` | 0.2.1 | native | native | unknown | native | native | 0.1.1・2026-07-31 | **2026-09-04（両者とも 0.2.0 を実 package で実測）** |
-| `cmate-task-contract` | 0.2.3 | native | native | unknown | native | native | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
-| `cmate-verify` | 0.5.1 | native | native | unknown | native | native | 0.1.1・**2026-08-02** | **2026-09-04（Command Code は 0.5.0 を実 package で実測）** |
-| `cmate-verify-advisor` | 0.3.1 | native | native | unknown | native | native | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
-| `cmate-worker-development` | 0.2.1 | native | native | unknown | native | native | 未（経路からの敷衍） | 2026-09-04（経路） |
-| `cmate-workspace-research` | 0.1.2 | native | native | unknown | native | native | 0.1.1・**2026-09-11**（claude を親に実機 run。codex は未） | 2026-09-04（経路） |
-| `cmate-worktree-cleanup` | 0.1.6 | native | native | unknown | native | native | 0.1.2・2026-07-31 | 2026-09-04（経路） |
-| `cmate-worktree-setup` | 0.1.6 | native | native | unknown | native | native | 0.1.2・2026-07-31 | 2026-09-04（経路） |
+| Skill | 宣言 version | claude | codex | gemini | opencode | command-code | antigravity | claude / codex 実測 | opencode / command-code 実測 |
+|---|---|---|---|---|---|---|---|---|---|
+| `cmate-acceptance-test` | 0.1.4 | native | native | unknown | native | native | — | 0.1.1・2026-07-31 | 2026-09-04（経路） |
+| `cmate-delegate` | 0.1.2 | native | native | unknown | native | native | unknown | 未（経路からの敷衍） | 2026-09-04（経路） |
+| `cmate-issue-authoring` | 0.9.1 | native | native | unknown | native | native | — | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
+| `cmate-issue-refinement` | 0.4.1 | native | native | unknown | native | native | — | 0.1.1・2026-07-31 | 2026-09-04（経路） |
+| `cmate-orchestrate` | 0.32.1 | native | native | unknown | native | native | — | 0.9.0・**2026-08-02** | **2026-09-04（Command Code は 0.32.0 を実 package で実測）** |
+| `cmate-orchestrate-monitor` | 0.7.1 | native | native | unknown | native | native | — | 0.4.0・**2026-08-02** | 2026-09-04（経路） |
+| `cmate-repository-analysis` | 0.2.1 | native | native | unknown | native | native | — | 0.1.1・2026-07-31 | **2026-09-04（両者とも 0.2.0 を実 package で実測）** |
+| `cmate-task-contract` | 0.2.3 | native | native | unknown | native | native | — | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
+| `cmate-verify` | 0.5.1 | native | native | unknown | native | native | — | 0.1.1・**2026-08-02** | **2026-09-04（Command Code は 0.5.0 を実 package で実測）** |
+| `cmate-verify-advisor` | 0.3.1 | native | native | unknown | native | native | — | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
+| `cmate-worker-development` | 0.2.1 | native | native | unknown | native | native | — | 未（経路からの敷衍） | 2026-09-04（経路） |
+| `cmate-workspace-research` | 0.1.2 | native | native | unknown | native | native | unknown | 0.1.1・**2026-09-11**（claude を親に実機 run。codex は未） | 2026-09-04（経路） |
+| `cmate-worktree-cleanup` | 0.1.6 | native | native | unknown | native | native | — | 0.1.2・2026-07-31 | 2026-09-04（経路） |
+| `cmate-worktree-setup` | 0.1.6 | native | native | unknown | native | native | — | 0.1.2・2026-07-31 | 2026-09-04（経路） |
 
 「宣言 version」は本 commit 時点で各 package の `commandmate.skill.yaml` が名乗っている
 version である。**evidence の文面を直すだけでも bump が要る**（公開済み version は immutable）
@@ -344,11 +425,17 @@ Command Code はそれに `cmate-verify` と `cmate-orchestrate` を加えた 3 
 第 3 節が Claude / Codex に対して最初に採った立場と同じであり、
 package 単位の追試は第 3.2 節がそうしたように別に行う。
 
-`gemini` / `copilot` / `vibe-local` / `antigravity` は依然としてどの package でも測っていない。
-`cmate-delegate` と `cmate-workspace-research` は、そのうち `copilot` / `antigravity` を**省略せず `unknown` として
-明示的に宣言している**——省略と `unknown` は manifest の上では区別できるが、
-読み手にとっては「まだ考えていない」と「測っていないと判っている」の差だからである。
-`vibe-local` はどの package も宣言していない。
+`antigravity` 列は**宣言の現況**であって第 3.5 節の測定結果ではない。`unknown` は manifest が
+`unknown` と明示的に宣言している package、`—` は `antigravity` の項ごと**省略**している package である
+（省略と `unknown` は manifest の上では区別でき、読み手にとっては「まだ考えていない」と
+「測っていないと判っている」の差になる）。**第 3.5 節（2026-09-16）で経路そのものは実測したが、
+どの package の宣言もまだ更新していない** —— 文面だけの更新にも version bump が要るためで、
+各 package の次回 bump で `native` へ直す。新設 package は最初から `native` と宣言してよい
+（根拠は第 3.5 節）。
+
+`gemini` / `copilot` / `vibe-local` は依然としてどの package でも測っていない。
+`cmate-delegate` と `cmate-workspace-research` は、そのうち `copilot` を**省略せず `unknown` として
+明示的に宣言している**。`vibe-local` はどの package も宣言していない。
 
 ## 5. 既知の制約
 
@@ -378,11 +465,25 @@ package 単位の追試は第 3.2 節がそうしたように別に行う。
   `/skills` picker が `/<name>` を composer へ挿入する形であり、送信すれば Skill は読まれる
   （invocation は 1.18.22 で実測。第 3.4 節）。Codex 0.145.0 と同じく「palette に出ない」は
   配置先の問題ではない。
+- **Antigravity 1.2.3 も `.claude/skills` を読まない。** 読むのは primary install root
+  （`.agents/skills`）と、Global の `~/.gemini/antigravity-cli/skills`、Shared の
+  `~/.gemini/skills` である。`.claude/skills` にだけ置いた probe は起動されず、仕込んだ token も
+  返らない（第 3.5 節の陰性対照）。したがって `antigravity: native` は installer の
+  `.agents/skills` 側の配置にだけ依存する —— **Command Code 1.47.0 と同じ形**である。
+- **Antigravity は project を trust しないと customization が丸ごと落ちる。**
+  初回起動の trust ダイアログ（既定 "Yes, I trust this folder"）を承認すると
+  `~/.gemini/antigravity-cli/settings.json` の `trustedWorkspaces` に永続する。
+  未承認を「install 失敗」と読み違えないこと（Gemini CLI の `trustedFolders.json` と同型の罠である）。
+- **Antigravity の print mode（`-p`）は TUI と挙動が違う。** `-p "/skills"` は workspace 節を
+  出さず、`-p "/<skill-id>"` は model の返答ではない合成行を返す。第 3.5 節が測ったのは
+  **TUI セッションの経路だけ**であり、print mode の discovery は未計測である。
 - **reload の要否は Agent ごとに違う。** opencode は起動時スキャンなので
   **install 後に再起動が要る**。Command Code は **再起動不要**で、TUI 稼働中に足した Skill が
   `/skills` の開き直しで出る。Claude / Codex は新しい session の開始が要る（下記）。
-- **Gemini / vibe-local / copilot / antigravity は未計測。**
-  opencode と Command Code は第 3.4 節（2026-09-04）で実測したので、ここから外した。
+  **Antigravity は未計測。**
+- **Gemini / vibe-local / copilot は未計測。**
+  opencode と Command Code は第 3.4 節（2026-09-04）、antigravity は第 3.5 節（2026-09-16）で
+  実測したので、ここから外した。
 - **CommandMate の config dir（`$HOME/.commandmate`）を `/tmp` や `/var` 配下に置くと
   install できない。** snapshot store が system directory を拒否するため、
   `SKILL_SNAPSHOT_STORE_IO`・exit 1 で失敗する（macOS の `mktemp -d` は `/var/folders/…`）。
