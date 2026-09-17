@@ -136,7 +136,7 @@ commandmate capture <worktree-id> --json > poll.json
 | `verify-completion.sh` | 完了判定（タスク状態が一次・capture がフォールバック） |
 | `hooks-task.sh` / `hooks-git.sh` | 完了フックの参照実装（第4節） |
 | `verify-scope.sh` / `quality-gate.sh` | 偽陽性しないスコープ検証 / exit code を実測する品質ゲート。監視ループとは独立に使う |
-| `monitor-lib.sh` | 共有ヘルパー（JSON scalar 抽出・ANSI 正規化・アンカー検出）。単体では呼ばない |
+| `monitor-lib.sh` | 共有ヘルパー（JSON scalar 抽出・ANSI 正規化・アンカー検出。アンカーは Claude の組と Antigravity の組）。単体では呼ばない |
 
 script は自分の位置から兄弟 script を解決するので、install 先の
 `.agents/skills/cmate-orchestrate-monitor/` と `.claude/skills/cmate-orchestrate-monitor/` の
@@ -177,6 +177,43 @@ manifest の `compatibility.commandmate` は package 全体の下限（`>=0.15.0
 送信先はそのポーリングの capture ペイロードから導出し、`tmux has-session` の完全一致で存在を
 検証してから送る。届かなかった介入は握り潰さず stderr に出し、**`approvals` と再送予算は配信
 できたときだけ動く**（monitor-contract 第3節、Issue #1602）。
+
+### 画面の目印は CLI ごとに選ぶ（CommandMate #2606）
+
+分類順はどの CLI でも同じだが、backoff・`PROMPT`・`GENERATING` の 3 段で読む**画面の目印**は
+capture ペイロードの `cliToolId` で選ぶ。`antigravity` のときだけ Antigravity（agy）の組を使い、
+それ以外（`claude` / `codex` / …、`cliToolId` が無い payload も）は従来の Claude の組のままである。
+
+| | Claude の組（既定） | agy の組（`cliToolId: antigravity`） |
+|---|---|---|
+| 読む範囲 | `realtimeSnippet`（末尾 100 行） | **`realtimeSnippet` と `content` の長い方**の末尾。空行を除いた最後の 64 行を、JSON エスケープを戻して行単位で読む |
+| backoff（→ `GENERATING`） | `Retrying in Ns` / `attempt N/M`。`? for shortcuts` があれば無効 | 同じ文言を下 15 行で。待機中の入力欄か `↑/↓ Navigate` フッターがあれば無効 |
+| `PROMPT` | `❯ N.` / `Do you want to proceed` / `Do you want to make this edit` | 下 3 行に `↑/↓ Navigate` フッターがあり、その上から最寄りの境界行（罫線・`●` / `⎿` / `▸` の行・選択肢でない `>` 行）までに番号つきの選択肢（`> 1. Yes …`）が 2 行以上ある。`Switch Model` 画面は除く |
+| `GENERATING` | `↓ N` / `Waiting for N background agent` / `esc to interrupt` | 下 3 行に `esc to cancel` で始まる行があるか、下 15 行に点字スピナー（U+2800–U+28FF）で始まる行がある。**ただし `↑/↓ Navigate` フッターのある画面では生成中と読まない** |
+| 待機中の証拠 | `? for shortcuts` | 最下部に入力欄の枠（罫線 / `>` か permission mode の行 / 罫線 / 省略可のステータス行）があり、生成中の目印が無い（ステータス行が `? for shortcuts` で始まれば、それだけで待機中）。`? for shortcuts` は必須にしない（agy 1.2.1 はツールを使ったターンの後に出さない。CommandMate #2478） |
+| `RATE_LIMIT` / terminal API error | バナー固有の文言（`realtimeSnippet`） | **agy 向けに広げていない**（Claude の組のまま）。agy のその画面は実機キャプチャが無い |
+
+agy に別の組が要るのは、**文言**と**読む範囲**の両方が違うからである。agy は生成中に
+`esc to cancel` と点字スピナーを出し、許可ダイアログは `Run this command?` /
+`Allow creation of this file?` の下に `> 1. Yes …` と `↑/↓ Navigate` を描く。さらに 200x1000 の
+ペインに**上端寄せ**で描くので、transcript がペインを埋めるまで `realtimeSnippet` は空行しか
+持たない。`content` は同じ capture の（ポーラーのカーソル以降の）末尾部分で、どちらも同じ最下行で
+終わるから、長い方が上まで届く。目印を直しただけでは直らないのはこのためである
+（0.8.0 までは agy の worker が常に `IDLE started=0` だった）。
+
+- **番号の無い矢印キー画面**（trust 画面・`/model` ピッカー・slash コマンドのポップアップ）は、
+  テキストの目印では `PROMPT` にしない。サーバの `sessionStatus=waiting` / `isPromptWaiting` に
+  任せる（従来どおり）。ポップアップとダイアログはステータス行に `esc to cancel` を出すが、
+  フッターがあるので `GENERATING` にもならない。
+- **`Generating` という語は目印にしない。** 終わったターンの transcript に
+  `Generating the specified file` のような思考要約が残る。
+- **どちらのフィールドにもペインの行が無いポーリングは `IDLE` になる**（短いペインで、ポーラーの
+  カーソルが最終行を越えて `content` が空のとき）。agy の worker でも完了の一次ソースは
+  `hooks-task.sh` のタスク状態にする（第4節）。
+- Enter を送るかどうかの判定（下の「プロンプトへの Enter」）は CLI によらず同じである。テキストの目印だけで `PROMPT` に
+  なったフレーム（サーバが `promptData` を付けていない）は `hold:no-prompt-data` で保留される。
+- agy のペインは `<worktree-id>@antigravity` で渡す。worktree の既定 agent が claude なら、付けないと
+  Claude のペインを capture する。
 
 ### 完了判定
 
@@ -315,9 +352,10 @@ read_task_status <worktree-id>   # 契約中の状態 / 契約なしなら空 / 
 「作業の痕跡があり、生成が止まった」であって受入条件の充足ではない）／**マージ可否の裁定**。
 
 実運用実績は延べ 371 ポーリング・誤報 0 件だが、**それはすべて capture ヒューリスティクス
-（フォールバック経路）のものである**。タスク状態経路・修正後の介入経路・プロンプト保留は
-fixture と変異注入で固定してあるだけで、実運用実績はまだ無い。運用条件・状態分布・介入内訳・
-測定の限界は [references/evidence.md](./references/evidence.md) に記録してある。
+（フォールバック経路）のもので、worker はすべて Claude Code である**。タスク状態経路・修正後の
+介入経路・プロンプト保留・Antigravity の目印は fixture と変異注入で固定してあるだけで、実運用実績は
+まだ無い。運用条件・状態分布・介入内訳・測定の限界は
+[references/evidence.md](./references/evidence.md) に記録してある。
 
 ## 6. 参照
 

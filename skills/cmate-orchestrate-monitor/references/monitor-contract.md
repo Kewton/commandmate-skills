@@ -19,8 +19,16 @@ classify-state.sh --json <file>
 | exit 0 | 分類できた |
 | exit 2 | `--json` が無い / file が無い / 未知の引数 |
 
-参照する payload field は `isRunning` / `isPromptWaiting` / `sessionStatus` /
-`realtimeSnippet` のみ。`output` / `text` は存在しない。`isGenerating` は意図的に見ない。
+参照する payload field は `isRunning` / `isPromptWaiting` / `sessionStatus` / `cliToolId` /
+`realtimeSnippet`、および `cliToolId` が `antigravity` のときの `content` のみ。
+`output` / `text` は存在しない。`isGenerating` は意図的に見ない。
+
+`cliToolId` は画面の目印の組を選ぶ（CommandMate #2606）。`antigravity` なら `monitor-lib.sh` の
+`ml_agy_is_retrying` / `ml_agy_has_prompt_marker` / `ml_agy_has_gen_anchor` を、それ以外（欠落を
+含む）なら `ml_is_retrying` / `ml_has_prompt_marker` / `ml_has_gen_anchor` を使う。
+`RATE_LIMIT` の `ml_has_rate_limit` はどの CLI でも共通である。agy の組は `realtimeSnippet` と
+`content` の長い方の末尾（空行を除いた最後の 64 行）を読む。各目印の定義は
+[SKILL.md](../SKILL.md) 第3節「画面の目印は CLI ごとに選ぶ」。
 
 判定順は `NOT_RUNNING → is_retrying(→GENERATING) → PROMPT → GENERATING → RATE_LIMIT → IDLE`。
 **この順序は仕様であり、実装詳細ではない**（[recipe-rationale.md](./recipe-rationale.md)）。

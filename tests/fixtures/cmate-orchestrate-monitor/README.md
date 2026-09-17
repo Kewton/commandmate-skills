@@ -5,9 +5,11 @@
 worker にも tmux にも network にも触れない（launcher と tmux は shim に差し替える）。
 
 ```
-fixtures/*.json      capture --json の生 payload（ANSI エスケープを含む）
-fixtures/scope-*.txt verify-scope 用の入力
-run_tests.sh         テスト harness（bash + git + POSIX ツールのみ）
+fixtures/*.json                capture --json の生 payload（ANSI エスケープを含む）
+fixtures/antigravity/*.json    Antigravity（agy）のペインの payload（CommandMate #2606、後述）
+fixtures/scope-*.txt           verify-scope 用の入力
+run_tests.sh                   テスト harness（bash + git + POSIX ツールのみ）
+build-antigravity-fixtures.mjs fixtures/antigravity/ の生成手順（harness は実行しない）
 ```
 
 ## 実行
@@ -84,11 +86,103 @@ ANSI を剥がした fixture を持ち込むと、この検査が落ちる。
   を移植したもの。**保留を実際に起こす契約を走らせた生採取ではない**
   （その限界は skill 側の `references/evidence.md` 第1e節に書いてある）。
 
+## Antigravity の payload（CommandMate #2606）
+
+`classify-state on Antigravity panes (CommandMate #2606)` セクションが読む 57 件。
+0.8.0 までは agy の worker が**常に `IDLE`** だった（CommandMate #2595 のパイロットで 59 ポーリング中
+59 回）。原因は 2 つで、この fixture は両方を踏むように作ってある。
+
+1. 目印が Claude の文言（`esc to interrupt` / `❯ 1.` / `? for shortcuts`）だけだった。
+2. 読む範囲 `realtimeSnippet`（末尾 100 行）が、agy の上端寄せ 200x1000 ペインでは空行しか持たない。
+
+### 出典
+
+どれも CommandMate の `tests/fixtures/` にある**既存の実機キャプチャ**で（新規収録はしていない）、
+CommandMate e9b8ed75 時点のものを使った。例外は `survey-after-deny.reconstructed.txt` の 1 枚で、
+CommandMate 側が、実機のペイン（`dialog-create-file.txt` のダイアログを拒否した後の画面）の入力欄を、
+一度だけ記録されたアンケートの 3 行へ差し替えて再構成したものである（出典の README に経緯がある）。
+
+| fixture（`<name>`） | 出典（CommandMate `tests/fixtures/`） | agy | 期待 |
+|---|---|---|---|
+| `generating` | `model-info-captures.ts` の `ANTIGRAVITY_GENERATING_CAPTURE_V1_1_13` を 1000 行へ padding | 1.1.13 | `GENERATING` |
+| `dialog-create-file` / `dialog-create-file-highlight-2` | `antigravity-live-2364/` の同名 `.txt` | 1.1.27 | `PROMPT` |
+| `dialog-bash-oneline` / `dialog-bash-wrapped` / `dialog-bash-wrapped-highlight-4` / `dialog-bash-wrapped-six` | 同上 | 1.1.27 | `PROMPT` |
+| `boot-idle` / `idle-after-deny` | 同上 | 1.1.27 | `IDLE` |
+| `after-tool-turn` / `after-plain-turns` | `antigravity-live-2478/` の同名 `.txt` | 1.2.1 | `IDLE` |
+| `mode-default` / `mode-accept-edits` / `mode-plan` | `agent-mode-2592/antigravity-{default,accept-edits,plan}.txt` | 1.2.4 | `IDLE` |
+| `trust-dialog` / `picker-switch-model` / `popup-slash-commands` | `antigravity-live-2364/` の同名 `.txt` | 1.1.27 | `IDLE`（番号の無い矢印キー画面） |
+| `dialog-feedback-category` / `survey-after-deny-reconstructed` | `antigravity-live-2364/` の `dialog-feedback-category.txt` / `survey-after-deny.reconstructed.txt` | 1.1.27 | PROMPT の目印が当たらない（`whole` だけ） |
+
+上の 17 画面は、ポーラーのカーソル位置（`lastCapturedLine`）を変えた 3 通りで置いてある
+（`<name>.<window>.json`）。
+
+| window | `lastCapturedLine` | `content` | `realtimeSnippet` |
+|---|---|---|---|
+| `whole` | 0 | ペイン全体 | 末尾 100 行 ＝ **空行だけ** |
+| `last-turn` | 最後のターン区切り（`─` 60 個） | 最後のターンと、その下のライブ UI | 同上 |
+| `scrolled` | 末尾 | **空**（transcript がペインを埋めた。上に 1000 行の履歴を足し、下の padding を削った） | 画面の行を含む |
+
+payload の組み立ては CommandMate 側のテスト
+（`tests/unit/skills/orchestrate-monitor/classify-state-antigravity.test.ts`）と同じで、サーバ
+（`src/lib/session/current-output-builder.ts`）の `realtimeSnippet = lines.slice(-100)` /
+`content = lines.slice(lastCapturedLine)` をなぞる。**状態フィールドはわざと待機中の値**
+（`sessionStatus: ready` / `isPromptWaiting: false` / `promptData: null`）にしてある。サーバは
+agy のダイアログに `waiting` を返すので、そのままでは目印を読まなくても `PROMPT` が通ってしまう。
+
+### 生成と加工
+
+```bash
+node tests/fixtures/cmate-orchestrate-monitor/build-antigravity-fixtures.mjs <CommandMate の checkout>
+```
+
+harness はこの script も CommandMate の checkout も読まない（生成済みの JSON を commit してある）。
+同じ CommandMate の版に対して再実行すると、commit 済みの 57 件がバイト一致で再現する。
+
+キャプチャから変えたバイトは次の 2 種類だけで、どちらも目印が読まない行である。
+
+- agy を起動したシェルプロンプトの `<user>@<host>` → `user@host`
+- agy のバナーの作業ディレクトリ `~/share/work/<dir>/…` → `~/…`
+
+ANSI は出典どおりで、`antigravity-live-2364/` 由来の 13 画面だけが SGR を持つ（`capture-pane -e`）。
+`antigravity-live-2478/` と `agent-mode-2592/` は `-e` 無しで採られたもので、
+`ANTIGRAVITY_GENERATING_CAPTURE_V1_1_13` も素のテキストである。harness は前者が
+JSON エスケープされた ANSI を保持していることを検査する。
+
+### 派生 payload（`derived-*.whole.json`）
+
+実機キャプチャに無い文字列が要るケースだけ、実フレームに**行を挿入**して作った。
+agy が描いた行は 1 行も変えていない。
+
+| fixture | 土台 | 挿入した行と位置 | 期待 |
+|---|---|---|---|
+| `derived-quoted-footer` | `after-tool-turn` | 入力欄の上に `  The dialog reads:` / `  1. Yes` / `  2. No` / `  ↑/↓ Navigate · tab Amend` / 空行 | `IDLE`（transcript に引用されたフッターを画面と読まない） |
+| `derived-generating-retrying` | `generating` | 入力欄の上に `  429 Too Many Requests · Retrying in 30s · attempt 3/10` | `ml_agy_is_retrying` が真 → `GENERATING` |
+| `derived-idle-stale-retry` | `after-tool-turn` | 同じ行を入力欄の上に | 入力欄の枠が veto → `IDLE` |
+| `derived-dialog-retry` | `dialog-create-file` | 同じ行を `Create file` 見出しの上に | 開いたダイアログが veto → `PROMPT` |
+
+agy のレート制限・リトライの画面は実機キャプチャが無い。backoff の文言は Claude と同じものを
+読んでいるので、これらは「文言が当たったときの veto の順序」を固定するものであって、agy の実際の
+表示を固定するものではない。
+
+### harness が他に作るもの
+
+一時ディレクトリで `sed` によって 1 フィールドだけ変えた payload も読む（fixture としては置かない）。
+
+- 番号の無い 3 画面の `sessionStatus` を `waiting` にする → `PROMPT`（サーバの判定は従来どおり効く）
+- `generating` の `isRunning` を `false` にする → `NOT_RUNNING`
+- `generating.scrolled` の `cliToolId` を `claude` にする → `IDLE`（Claude の組は agy の文言を知らない）
+- `live-generating-pre-token.json` の `cliToolId` を `antigravity` にする → `IDLE`（agy の組は Claude の文言を読まない）
+- `generating.whole` の `content` を空にする → `IDLE`（どちらのフィールドにもペインの行が無い。payload から答えられない唯一のケース）
+
 ## harness が見るもの
 
 1. **構文** — 同梱 script すべてに `bash -n`。
-2. **分類** — 上表の 15 payload に対する `classify-state.sh` の出力。
-3. **fixture 忠実性** — 前節の 4 点。
+2. **分類** — 「fixture 一覧」の 15 payload と、`fixtures/antigravity/` の 57 payload に対する
+   `classify-state.sh` の出力。agy については `monitor-lib.sh` の `ml_agy_*` を 1 つずつ、
+   `ml_agy_frame` が渡す行（範囲・行数・JSON エスケープの戻し方）も確かめる。
+3. **fixture 忠実性** — 前節の 4 点。agy の payload は、capture の形・sanitize・
+   `whole` / `last-turn` の `realtimeSnippet` が空行だけであること・`scrolled` の `content` が空で
+   あること・2364 由来の画面が ANSI を保持していること。
 4. **完了判定** — `verify-completion.sh` の STARTED ガード（未起動・作業ゼロ・
    閾値未満・生成中の 6 通り）と、**一次ソースであるタスク状態**（次節）。
 5. **ガードの偽陽性** — `verify-scope.sh`、`quality-gate.sh`（緑に見える出力＋非 0 終了）。
@@ -278,6 +372,28 @@ delivered / undelivered の 2 本を同じ fixture・同じ hooks で並べ、
 **`monitor.sh` 配下が不変であることは、別のテストが担保している**: `STATE_DIR` を渡した source は
 `mktemp` も trap もせず、実 `monitor.sh` の 4 ポール run は警告 1 行で終わり `$TMPDIR` に何も
 残さない。standalone 側の assertion ではこれを満たせない。
+
+`CommandMate#2606` 分（2026-09-17 実測、それぞれ **suite exit 1**。ベースラインは 642/642 green）。
+変異は一時ディレクトリへ複製した tree に入れ、作業 tree には触れていない。
+
+| 変異 | 落ちるテスト |
+|---|---|
+| `classify-state.sh` と `monitor-lib.sh` を 0.8.0 へ戻す（修正前） | **79 件**。分類は生成中 3/3 と番号つきダイアログ 18 件中 14 件が `IDLE`、slash ポップアップの `scrolled` が `GENERATING`（`↓ 41 more` が Claude の `↓ ?[0-9]` に当たる）。残る 4 件の `scrolled` の bash ダイアログは、Claude の文言 `Do you want to proceed?` にたまたま当たって `PROMPT` だった |
+| `classify-state.sh` の `antigravity)` 分岐を削る（常に Claude の組） | 21 件（生成中 3・ダイアログ 14・ポップアップ 1 ＋ 派生と relabel の 3） |
+| `ml_agy_frame` が常に `realtimeSnippet` を読む | 44 件（`whole` / `last-turn` の生成中とダイアログで 14 ＋ 同じ範囲を読む predicate と frame のケースで 30） |
+| `ml_agy_has_gen_anchor` のフッター veto を外す | 5 件（ポップアップ 3 window ＋ veto の predicate 2） |
+| PROMPT に番号つきの選択肢を要求しない | 12 件（番号の無い 3 画面 × 3 window ＋ predicate 3） |
+| `Generating` の語を生成中の目印に足す | 3 件（`idle-after-deny` の `whole` / `scrolled` ＋ predicate） |
+| 待機中に `? for shortcuts` を必須にする | 5 件（`after-tool-turn` ＝ CommandMate #2478 のフレーム、引用フッター、古い retry 行） |
+| `ml_agy_is_retrying` の入力欄 veto を外す | 2 件 |
+| `ml_agy_is_retrying` のフッター veto を外す | 2 件 |
+| フッターの探索を下 3 行に限らない | 2 件（transcript に引用されたフッターを `PROMPT` と読む） |
+| JSON の `\\` の退避をやめる | 1 件 |
+| 64 行の上限を外す | 1 件 |
+
+**修正前に戻す変異で待機中の 7 画面が赤くならないのは正しい**: 修正前もそれらは `IDLE` だった
+（`whole` / `last-turn` は読む範囲が空行で、`scrolled` にも Claude の目印が無い）。待機中の判定が効いていることは、分類ではなく
+`ml_agy_has_idle_box` の predicate と、`? for shortcuts` 必須化の変異で固定してある。
 
 **「一律保留」の変異が赤くなることが、この節でいちばん重要である**: 型で切る実装は
 一見安全側に見えて、実機の権限プロンプトを 1 件も承認しなくなる。
