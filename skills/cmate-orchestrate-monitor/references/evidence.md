@@ -326,6 +326,51 @@ CommandMate 側のテストが 3 回連続でバイト一致の失敗を再現�
 1 ケースも踏んでいなかった。テストが緑であることは、テストが穴を見ていることを意味しない
 （第1f節と同じ結論に、逆側 —— 隔離しすぎ —— から到達している）。
 
+## 1h. Antigravity のペイン（0.9.0 で修正、CommandMate #2606）
+
+**症状**（CommandMate 側の記録）: CommandMate #2595 のパイロット（2026-09-17）で、Antigravity（agy）の
+worker の 59 ポーリングがすべて `IDLE started=0` だった。`GENERATING` と `PROMPT` は 1 回も出ず、
+裁定に届いたのは `hooks-task.sh` のタスク状態を読んでいたからである。
+
+**原因は 2 つ**あり、片方だけ直しても直らない。
+
+1. 生成中・プロンプト・待機中の目印が Claude Code の文言だけだった（recipe-rationale 8b）。
+2. 読む範囲 `realtimeSnippet`（末尾 100 行）が、agy の上端寄せ 200x1000 ペインでは空行しか
+   持たない。CommandMate が収録した agy のフレームはすべてこの形で、transcript がペインを
+   埋めるまでは、何を探しても見つからない。
+
+**固定したもの**: CommandMate の `tests/fixtures/` にある既存の実機キャプチャ（agy 1.1.13 の
+生成中 1 枚、1.1.27 の 13 枚（うち 1 枚は CommandMate 側で再構成されたアンケート画面）、1.2.1 の 2 枚、1.2.4 の 3 枚。新規収録はしていない）から、サーバと
+同じ形の `capture --json` を 57 件組んだ（17 画面 × ポーラーのカーソル位置 3 通り ＋ PROMPT の目印が
+当たらない 2 画面 ＋ 行を挿入した派生 4 件。出典と加工は
+`tests/fixtures/cmate-orchestrate-monitor/README.md`）。状態フィールドは待機中の値にしてあるので、
+`PROMPT` はテキストの目印からしか出ない。
+
+| script | 生成中（3 件） | 番号つきダイアログ（18 件） | 待機中（21 件） | 番号の無い矢印キー画面（9 件） |
+|---|---|---|---|---|
+| 0.8.0 | **3 件とも `IDLE`** | **14 件が `IDLE`**、4 件が `PROMPT`（下記） | `IDLE` | 8 件が `IDLE`、**1 件が `GENERATING`**（下記） |
+| 0.9.0 | `GENERATING` | `PROMPT` | `IDLE` | `IDLE`（サーバが `waiting` を返せば `PROMPT`） |
+
+0.8.0 で `PROMPT` になった 4 件は、ペインが埋まった（`realtimeSnippet` が画面を持つ）bash の
+ダイアログで、Claude の文言 `Do you want to proceed?` に**たまたま**当たったものである。
+`GENERATING` になった 1 件は、同じくペインが埋まった slash コマンドのポップアップで、`↓ 41 more` が
+Claude のトークンカウンタの目印 `↓ ?[0-9]` に当たった。どちらも agy の画面を読めていたわけではない。
+
+**CommandMate 側との同一性**: agy の判定（`classify-state.sh` の分岐と `monitor-lib.sh` の
+`ml_agy_*`）は、CommandMate e9b8ed75 の同じ 2 ファイルとコメントを除いて同一である。57 件すべてで、
+両者の `ml_agy_*` の真偽と `ml_agy_frame` の出力が一致することを確認した（2026-09-17）。
+
+**実運用実績は未計測である。** 0.9.0 で agy の worker を監視したポーリングはまだ無い。
+次の点は fixture でも確かめられていない。
+
+- 生成中の実機キャプチャは agy 1.1.13 の 1 枚だけで、1.2.x の生成中・ダイアログ・trust 画面・
+  ピッカーのキャプチャは無い（CommandMate 側の README も同じことを書いている）。
+- agy のレート制限・API エラー・リトライの画面はキャプチャが無い。`ml_has_rate_limit` /
+  `ml_has_terminal_api_error` は agy 向けに広げておらず、backoff の検出も Claude と同じ文言を
+  読むだけである。派生 fixture が固定しているのは、その文言が当たったときの veto の順序だけである。
+- ポーラーのカーソルがペインの最終行を越えたポーリング（短いペインで `content` が空）は、
+  payload にペインの行が無いので `IDLE` になる。このときの完了判定はタスク状態に依存する。
+
 ## 2. 測定の限界（この Skill について）
 
 - **修正後の介入経路は fixture / shim テストのみ**。実 worker のペインへ Enter / `a` /
@@ -341,8 +386,10 @@ CommandMate 側のテストが 3 回連続でバイト一致の失敗を再現�
 - **id の突合（3 方式）と生存報告も fixture / shim テストのみ**（第1f節）。実 CommandMate が
   採番した id を実サーバ越しに解決した実績、および実運用で `alive` の途切れから死んだ監視を
   回収した実績は **未計測**である。**exit 144 の再現条件も未特定のまま**である。
-- **worker 側 CLI は Claude Code のみ**。同梱の生成中・idle・プロンプトのアンカーは
-  その TUI から実際に採取した capture に基づく。他の coding CLI の TUI 文字列は **未計測**である。
+- **実運用で監視した worker 側 CLI は Claude Code のみ**。Claude の組の生成中・idle・プロンプトの
+  アンカーはその TUI から実際に採取した capture に基づく。Antigravity の組（0.9.0）は CommandMate が
+  収録した実機キャプチャから作った fixture で固定しただけで、実運用実績は **未計測**である
+  （第1h節）。それ以外の coding CLI の TUI 文字列は **未計測**である。
 - **rate limit・リトライ枯渇の実地発火は 0 回**。この 2 経路は fixture（実機採取した
   429 / 529 / retry-exhausted フレーム）で固定されているが、上記 2 運用中には発生していない。
 - **OS は macOS のみ**。script は bash 3.2 互換で書いてあるが、Linux での運用実績はまだ無い。

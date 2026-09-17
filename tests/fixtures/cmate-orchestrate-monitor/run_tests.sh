@@ -168,6 +168,283 @@ for fixture in live-generating-token.json live-generating-task-text-scrollback.j
 done
 
 echo
+echo "== classify-state on Antigravity panes (CommandMate #2606) =="
+# Before 0.9.0 every poll of an agy worker came out IDLE (59 of 59 in the
+# CommandMate #2595 pilot). Two things were wrong, and these payloads exercise
+# both: the markers were Claude's words (`esc to interrupt`, `❯ 1.`,
+# `? for shortcuts`), and the window they read — realtimeSnippet, the last 100
+# rows — is nothing but blank padding on agy's top-anchored 200x1000 pane.
+#
+# Every payload is a live agy frame from CommandMate's fixtures, wrapped the way
+# the server wraps it (build-antigravity-fixtures.mjs; provenance in README.md).
+# The status fields are the idle-looking ones on purpose: the server reports
+# `waiting` for an open agy dialog, which would make PROMPT pass without the text
+# marker ever being read. Each frame is read in three poller-cursor windows:
+#   whole      lastCapturedLine=0 — content is the whole pane
+#   last-turn  the cursor on the last turn separator — content is the last turn
+#   scrolled   the transcript has filled the pane — content is empty and only
+#              realtimeSnippet carries the frame
+AGY="$FIXTURES/antigravity"
+AGY_WINDOWS="whole last-turn scrolled"
+AGY_GENERATING="generating"
+AGY_NUMBERED_DIALOGS="dialog-create-file dialog-create-file-highlight-2 dialog-bash-oneline dialog-bash-wrapped dialog-bash-wrapped-highlight-4 dialog-bash-wrapped-six"
+AGY_IDLE_FRAMES="boot-idle idle-after-deny after-tool-turn after-plain-turns mode-default mode-accept-edits mode-plan"
+# agy's arrow-key screens that carry no numbered options.
+AGY_UNNUMBERED_SCREENS="trust-dialog picker-switch-model popup-slash-commands"
+# The frames taken from antigravity-live-2364/, the only agy captures with -e.
+AGY_ANSI_FRAMES="dialog-create-file dialog-create-file-highlight-2 dialog-bash-oneline dialog-bash-wrapped dialog-bash-wrapped-highlight-4 dialog-bash-wrapped-six boot-idle idle-after-deny trust-dialog picker-switch-model popup-slash-commands dialog-feedback-category survey-after-deny-reconstructed"
+
+agy_classify() { bash "$CLASSIFY" --json "$1"; }
+
+# agy_expect <expected> <frame>... — every listed frame, in every window.
+agy_expect() {
+  agy__want=$1
+  shift
+  for agy__frame in "$@"; do
+    for agy__window in $AGY_WINDOWS; do
+      check "antigravity/${agy__frame}.${agy__window}.json -> ${agy__want}" "$agy__want" \
+        "$(agy_classify "$AGY/${agy__frame}.${agy__window}.json")"
+    done
+  done
+}
+
+# agy_pred <function> <payload> — `yes` / `no` for a monitor-lib predicate, so a
+# helper that dies (set -u, a missing function) never reads as a clean "no".
+agy_pred() {
+  bash -c 'set -u; . "$1"; if "$2" "$3"; then echo yes; else echo no; fi' _ \
+    "$SCRIPTS/monitor-lib.sh" "$1" "$2" 2>&1
+}
+
+# agy_frame <payload> — the rows ml_agy_frame hands the markers.
+agy_frame() {
+  bash -c 'set -u; . "$1"; ml_agy_frame "$2"' _ "$SCRIPTS/monitor-lib.sh" "$1" 2>&1
+}
+
+# agy_blank_snippet <payload> — `blank` when realtimeSnippet has no visible
+# character once ANSI and the JSON line breaks are gone, `not-blank` otherwise.
+# A token rather than the text: the frames quote prose such as "a blank line".
+agy_blank_snippet() {
+  agy__rest=$(bash -c 'set -u; . "$1"; ml_json_scalar "$2" realtimeSnippet | ml_strip_ansi' _ \
+    "$SCRIPTS/monitor-lib.sh" "$1" | sed 's/\\n//g' | tr -d ' \t')
+  if [ -z "$agy__rest" ]; then echo blank; else echo not-blank; fi
+}
+
+# --- the payloads are what the server would send -------------------------------
+agy_count=$(ls "$AGY"/*.json 2>/dev/null | wc -l | tr -d '[:space:]')
+check "all 57 antigravity payloads are present" 57 "$agy_count"
+
+for fixture in "$AGY"/*.json; do
+  name="antigravity/$(basename "$fixture")"
+  if grep -q '^  "isRunning": true,$' "$fixture" && grep -q '^  "cliToolId": "antigravity",$' "$fixture"; then
+    passed=$((passed + 1)); printf 'ok   %s is a pretty-printed agy capture payload\n' "$name"
+  else
+    failed=$((failed + 1)); printf 'FAIL %s is not the shape capture --json emits for agy\n' "$name"
+  fi
+  # The shell prompt that launched agy is the one row that named a machine.
+  if grep -qE 'session_01[A-Za-z0-9]+|github_kewton|/Users/' "$fixture" \
+    || grep -oE '(\\n|")[A-Za-z0-9._-]+@[A-Za-z0-9._-]+ [^ ]+ %' "$fixture" \
+      | sed -E 's/^(\\n|")//' | grep -qv '^user@host '; then
+    failed=$((failed + 1)); printf 'FAIL %s carries an unsanitized path, session id or host\n' "$name"
+  else
+    passed=$((passed + 1)); printf 'ok   %s is sanitized\n' "$name"
+  fi
+done
+
+# Root cause 2, as it is in production: on these frames the window the Claude
+# anchors read holds no row agy drew, whatever the anchors look for.
+for frame in $AGY_GENERATING $AGY_NUMBERED_DIALOGS $AGY_IDLE_FRAMES $AGY_UNNUMBERED_SCREENS; do
+  for window in whole last-turn; do
+    check "antigravity/${frame}.${window}.json: realtimeSnippet is only padding" blank \
+      "$(agy_blank_snippet "$AGY/${frame}.${window}.json")"
+  done
+  check "antigravity/${frame}.scrolled.json: realtimeSnippet carries the frame" not-blank \
+    "$(agy_blank_snippet "$AGY/${frame}.scrolled.json")"
+  check "antigravity/${frame}.scrolled.json: content is empty" '""' \
+    "$(sed -n 's/^  "content": \(.*\),$/\1/p' "$AGY/${frame}.scrolled.json")"
+done
+
+# The ANSI half of the #1522 lesson: the 2364 captures keep their SGR, so the
+# markers are proven against the raw spelling as well as the plain one.
+for frame in $AGY_ANSI_FRAMES; do
+  if grep -q '\\u001b\[[0-9;]*m' "$AGY/${frame}.whole.json"; then
+    passed=$((passed + 1)); printf 'ok   antigravity/%s.whole.json carries JSON-escaped ANSI\n' "$frame"
+  else
+    failed=$((failed + 1)); printf 'FAIL antigravity/%s.whole.json has had its ANSI stripped\n' "$frame"
+  fi
+done
+
+# --- classification --------------------------------------------------------------
+# The generating capture: `esc to cancel` on the status row, a braille spinner
+# above the input box.
+agy_expect GENERATING $AGY_GENERATING
+# `↑/↓ Navigate` plus `> 1. Yes …`. Their status rows print `esc to cancel` too:
+# the dialog is evaluated first, so an approval is never mistaken for generation.
+agy_expect PROMPT $AGY_NUMBERED_DIALOGS
+# The input box at the bottom. Includes after-tool-turn (agy 1.2.1 draws no
+# `? for shortcuts` after a tool turn, CommandMate #2478; its status row holds only
+# the model label) and idle-after-deny, whose finished transcript still says
+# "Generating the specified file".
+agy_expect IDLE $AGY_IDLE_FRAMES
+# `↑/↓ Navigate` without numbered options is not a prompt to the text marker, and
+# never generation, although the slash popup prints `esc to cancel` on its status
+# row. With neutral status fields nothing names these a prompt; the server's
+# `waiting` does (below), exactly as before. The scrolled popup was GENERATING
+# under the Claude markers: `↓ 41 more` matched `↓ ?[0-9]`.
+check_contains "popup-slash-commands has \`esc to cancel\` on screen" "esc to cancel" \
+  "$(agy_frame "$AGY/popup-slash-commands.whole.json" | tail -n 1)"
+check_contains "…under an \`↑/↓ Navigate\` footer" "↑/↓ Navigate" \
+  "$(agy_frame "$AGY/popup-slash-commands.whole.json")"
+check_contains "the /model picker has the footer as well" "↑/↓ Navigate" \
+  "$(agy_frame "$AGY/picker-switch-model.whole.json")"
+agy_expect IDLE $AGY_UNNUMBERED_SCREENS
+
+# --- server fields and the per-CLI split ------------------------------------------
+AGY_DERIVED="$WORK/agy-derived"
+mkdir -p "$AGY_DERIVED"
+for frame in $AGY_UNNUMBERED_SCREENS; do
+  sed -e 's/^  "sessionStatus": "ready",$/  "sessionStatus": "waiting",/' \
+      -e 's/^  "sessionStatusReason": "input_prompt",$/  "sessionStatusReason": "antigravity_selection_list",/' \
+      "$AGY/${frame}.whole.json" > "$AGY_DERIVED/${frame}-waiting.json"
+  check "${frame} is PROMPT when the server reports waiting" PROMPT \
+    "$(agy_classify "$AGY_DERIVED/${frame}-waiting.json")"
+done
+
+sed 's/^  "isRunning": true,$/  "isRunning": false,/' "$AGY/generating.whole.json" \
+  > "$AGY_DERIVED/generating-not-running.json"
+check "NOT_RUNNING still wins on an agy payload" NOT_RUNNING \
+  "$(agy_classify "$AGY_DERIVED/generating-not-running.json")"
+
+# The markers are chosen by cliToolId. The Claude set does not know agy's words,
+# so the same generating frame is IDLE there — and it is the set every other CLI
+# keeps (codex, and a payload with no cliToolId at all).
+sed 's/^  "cliToolId": "antigravity",$/  "cliToolId": "claude",/' "$AGY/generating.scrolled.json" \
+  > "$AGY_DERIVED/generating-as-claude.json"
+check "an agy frame labelled claude is read with the Claude markers" IDLE \
+  "$(agy_classify "$AGY_DERIVED/generating-as-claude.json")"
+check "codex-rate-limit.json keeps the Claude reading" RATE_LIMIT "$(classify codex-rate-limit.json)"
+check "no-clitoolid-rate-limit.json keeps the Claude reading" RATE_LIMIT "$(classify no-clitoolid-rate-limit.json)"
+
+# live-generating-pre-token.json is GENERATING only through Claude's
+# `esc to interrupt`; relabelled as agy it has none of agy's markers.
+sed 's/^  "cliToolId": "claude",$/  "cliToolId": "antigravity",/' "$FIXTURES/live-generating-pre-token.json" \
+  > "$AGY_DERIVED/claude-frame-as-agy.json"
+check "live-generating-pre-token.json is GENERATING as captured" GENERATING \
+  "$(classify live-generating-pre-token.json)"
+check "…and a Claude frame is not read with the agy markers" IDLE \
+  "$(agy_classify "$AGY_DERIVED/claude-frame-as-agy.json")"
+
+# The one case the payload cannot answer: a short pane (blank realtimeSnippet)
+# and a cursor past its last row (empty content). The default is reported rather
+# than an invented state; hooks-task.sh stays the completion source for such a
+# worker.
+sed -e 's/^  "content": .*,$/  "content": "",/' -e 's/^  "lastCapturedLine": 0,$/  "lastCapturedLine": 1001,/' \
+  "$AGY/generating.whole.json" > "$AGY_DERIVED/generating-no-rows.json"
+check "neither field carries a row of the pane -> IDLE" IDLE \
+  "$(agy_classify "$AGY_DERIVED/generating-no-rows.json")"
+
+# --- the markers one by one -------------------------------------------------------
+check "ml_agy_has_gen_anchor fires on the generating capture" yes \
+  "$(agy_pred ml_agy_has_gen_anchor "$AGY/generating.whole.json")"
+for frame in dialog-create-file popup-slash-commands; do
+  # `esc to cancel` IS on screen; the footer is what vetoes it.
+  check "ml_agy_has_dialog_footer on ${frame}" yes \
+    "$(agy_pred ml_agy_has_dialog_footer "$AGY/${frame}.whole.json")"
+  check "ml_agy_has_gen_anchor is vetoed by the footer on ${frame}" no \
+    "$(agy_pred ml_agy_has_gen_anchor "$AGY/${frame}.whole.json")"
+done
+for frame in $AGY_IDLE_FRAMES; do
+  check "ml_agy_has_gen_anchor does not fire on ${frame}" no \
+    "$(agy_pred ml_agy_has_gen_anchor "$AGY/${frame}.whole.json")"
+done
+
+for frame in $AGY_NUMBERED_DIALOGS; do
+  check "ml_agy_has_prompt_marker fires on ${frame}" yes \
+    "$(agy_pred ml_agy_has_prompt_marker "$AGY/${frame}.whole.json")"
+done
+# The last two have numbered rows, but under `1-6 Select & Continue` (/feedback)
+# or in place of the composer (the survey) — no `↑/↓ Navigate`.
+for frame in $AGY_UNNUMBERED_SCREENS dialog-feedback-category survey-after-deny-reconstructed; do
+  check "ml_agy_has_prompt_marker does not fire on ${frame}" no \
+    "$(agy_pred ml_agy_has_prompt_marker "$AGY/${frame}.whole.json")"
+done
+# A worker on this very change writes exactly this into its summary. The input
+# box is at the bottom, so the quoted footer is not agy's screen.
+check_contains "derived-quoted-footer quotes a footer and numbered options" "↑/↓ Navigate · tab Amend" \
+  "$(agy_frame "$AGY/derived-quoted-footer.whole.json")"
+check "ml_agy_has_prompt_marker ignores a footer quoted in the transcript" no \
+  "$(agy_pred ml_agy_has_prompt_marker "$AGY/derived-quoted-footer.whole.json")"
+check "…because the idle box is at the bottom" yes \
+  "$(agy_pred ml_agy_has_idle_box "$AGY/derived-quoted-footer.whole.json")"
+check "…so the frame is IDLE" IDLE "$(agy_classify "$AGY/derived-quoted-footer.whole.json")"
+
+for frame in $AGY_IDLE_FRAMES; do
+  check "ml_agy_has_idle_box on ${frame}" yes \
+    "$(agy_pred ml_agy_has_idle_box "$AGY/${frame}.whole.json")"
+done
+# CommandMate #2478: the Claude idle footer is not there, the box is.
+check_lacks "after-tool-turn draws no \`? for shortcuts\`" "? for shortcuts" \
+  "$(agy_frame "$AGY/after-tool-turn.whole.json")"
+check "…so ml_has_idle_footer cannot see it" no \
+  "$(agy_pred ml_has_idle_footer "$AGY/after-tool-turn.whole.json")"
+check "…while ml_agy_has_idle_box can" yes \
+  "$(agy_pred ml_agy_has_idle_box "$AGY/after-tool-turn.whole.json")"
+# The box is drawn while agy generates too.
+check "the generating frame draws the input box" ">" \
+  "$(agy_frame "$AGY/generating.whole.json" | grep -x '>')"
+check "…but ml_agy_has_idle_box is false while agy generates" no \
+  "$(agy_pred ml_agy_has_idle_box "$AGY/generating.whole.json")"
+# The /model picker draws the box ABOVE itself; only a box at the bottom counts.
+for frame in $AGY_NUMBERED_DIALOGS $AGY_UNNUMBERED_SCREENS; do
+  check "ml_agy_has_idle_box is false on ${frame}" no \
+    "$(agy_pred ml_agy_has_idle_box "$AGY/${frame}.whole.json")"
+done
+
+# `429 Too Many Requests · Retrying in 30s · attempt 3/10`, inserted into live
+# frames (no agy backoff screen has been captured).
+check "ml_agy_is_retrying on a backoff line during a live turn" yes \
+  "$(agy_pred ml_agy_is_retrying "$AGY/derived-generating-retrying.whole.json")"
+check "…which is GENERATING" GENERATING \
+  "$(agy_classify "$AGY/derived-generating-retrying.whole.json")"
+check "ml_agy_is_retrying is vetoed by the idle box (a stale line)" no \
+  "$(agy_pred ml_agy_is_retrying "$AGY/derived-idle-stale-retry.whole.json")"
+check "…so the finished worker is IDLE" IDLE \
+  "$(agy_classify "$AGY/derived-idle-stale-retry.whole.json")"
+check "ml_agy_is_retrying is vetoed by an open dialog" no \
+  "$(agy_pred ml_agy_is_retrying "$AGY/derived-dialog-retry.whole.json")"
+check "…so the approval is not hidden behind GENERATING" PROMPT \
+  "$(agy_classify "$AGY/derived-dialog-retry.whole.json")"
+
+# --- the frame the markers read ---------------------------------------------------
+# content, when realtimeSnippet is only padding; the frame ends on the status row.
+boot_frame=$(agy_frame "$AGY/boot-idle.whole.json")
+check "ml_agy_frame reads content on a short pane and ends on the status row" 1 \
+  "$(printf '%s\n' "$boot_frame" | tail -n 1 | grep -Ec '^\? for shortcuts +Gemini 3\.8 Flash · hig$')"
+check "…and keeps the input box row" ">" "$(printf '%s\n' "$boot_frame" | grep -x '>')"
+# realtimeSnippet, when content is empty.
+dialog_frame=$(agy_frame "$AGY/dialog-create-file.scrolled.json")
+check_contains "ml_agy_frame reads realtimeSnippet when content is empty" \
+  "Allow creation of this file?" "$dialog_frame"
+check "…and ends on the status row" 1 \
+  "$(printf '%s\n' "$dialog_frame" | tail -n 1 | grep -Ec '^esc to cancel +Gemini 3\.8 Flash · hig$')"
+# At most 64 rows, all from the bottom.
+plain_frame=$(agy_frame "$AGY/after-plain-turns.whole.json")
+check "ml_agy_frame keeps at most 64 rows" 64 "$(printf '%s\n' "$plain_frame" | wc -l | tr -d '[:space:]')"
+check "…from the bottom" 1 "$(printf '%s\n' "$plain_frame" | tail -n 1 | grep -c '^? for shortcuts')"
+# The rules read rows, so the JSON escapes are undone — but an escaped
+# backslash before `n` is a backslash and an `n`, not a line break.
+cat > "$AGY_DERIVED/escapes.json" <<'EOF'
+{
+  "isRunning": true,
+  "cliToolId": "antigravity",
+  "content": "",
+  "realtimeSnippet": "path C:\\new \"quoted\"\n>\nlast"
+}
+EOF
+check "ml_agy_frame undoes JSON escapes, but not an escaped backslash before n" \
+  'path C:\new "quoted"|>|last' \
+  "$(agy_frame "$AGY_DERIVED/escapes.json" | paste -sd '|' -)"
+
+echo
 echo "== verify-completion STARTED guard =="
 verify() { bash "$VERIFY" "$@"; }
 

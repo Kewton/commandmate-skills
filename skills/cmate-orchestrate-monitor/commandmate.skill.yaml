@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-orchestrate-monitor
 name: cmate-orchestrate-monitor
-version: 0.8.0
+version: 0.9.0
 summary: commandmate wait が見ない停滞（プロンプト待ち・rate limit・リトライ枯渇死）を capture の 1 フレームから検知して回収し、介入と判定の全件を機械可読なログに残す監視レシピ。契約付き dispatch の一次監督は cmate-orchestrate の wait ループで、本 Skill はその回収と可観測性のサイドカーである。
 description: >-
   tmux セッション上で走る worker（coding CLI）を監督するための、実運用で検証済みの監視レシピである。
@@ -40,7 +40,7 @@ description: >-
 capabilities:
   - 実行契約のタスク状態を一次ソースとして終局状態だけで裁定し（failed / cancelled は VERIFY_FAILED）、ペイン生存 veto をその前に・非終局状態をフォールバックの後に置いて古い裁定と STARTED ガード無効化を防ぐ
   - タスク状態を引けない CommandMate では worker ごとに 1 度宣言してからフォールバックモードへ入る（黙って劣化しない）
-  - capture の 1 フレームを NOT_RUNNING / GENERATING / PROMPT / RATE_LIMIT / IDLE へ分類する（ANSI と NBSP を正規化し現ペインに限定するのでスクロールバックへ誤マッチしない）
+  - capture の 1 フレームを NOT_RUNNING / GENERATING / PROMPT / RATE_LIMIT / IDLE へ分類する（ANSI と NBSP を正規化し現ペインに限定するのでスクロールバックへ誤マッチしない。目印は cliToolId で選び、Antigravity のペインは専用の目印で読む）
   - 生成中・CLI 自身の backoff 中には注入せず、条件つきプロンプト承認・usage limit からの即時再開・リトライ枯渇後の上限つき再送だけを行い、上限到達でエスカレーションする
   - プロンプトへの Enter を promptData で判定し、デフォルトが承認である二択だけ承認して、契約 autoYes ポリシーの保留・デフォルト無しの選択・promptData 無しのフレームは送らずに理由つきで報告する（--no-auto-approve で全件保留）
   - 介入の宛先を capture ペイロードの cliToolId と `<worktree-id>@<instance-id>` 指定から導出し、分類したペインと入力するペインを一致させる（固定 prefix を連結しない。instance 指定は capture 側にも効く）
@@ -51,7 +51,7 @@ capabilities:
 expected_outcomes:
   - 検証ゲート不合格の worker が COMPLETE と報告されず、マージ候補に混ざらない
   - 完了判定がサーバ側の裁定か推定かをログから区別でき、タスク状態を参照できない環境で黙って推定へ劣化することがない
-  - 生成中の worker が idle と誤分類されず、思考が長い worker も停止扱いされない
+  - 生成中の worker が idle と誤分類されず（Antigravity の worker を含む）、思考が長い worker も停止扱いされない
   - 介入がプロンプト・usage limit・枯渇後の再送に限られ、健全な worker へ入力が注入されない
   - 実行契約が autoYes ポリシーで保留させたプロンプトや、Enter がデフォルト選択肢の確定になる選択が、監視ループのキー送出で意図せず確定されない
   - 介入が空振りのまま「送った」と記録されることがなく、claude / codex 混在でも非既定 instance でもフラグ無しで正しいペインへ届く
@@ -117,38 +117,38 @@ risk_rationale: >-
   mutates a repo.
 files:
   - path: SKILL.md
-    sha256: 1f9fc5f7c6313be9ea27e5087a8f6a60b32b3aecc1ca5c90fb63b1c5c31e483c
-    size: 25731
+    sha256: d9803f5df1c00ea75f2c18f1df9a4ddc7d0f4e6019458c0a1a2e8001d8366f41
+    size: 30262
     kind: skill_md
     executable: false
     script: false
   - path: references/agent-compatibility.md
-    sha256: d488078b35b67b96f1824370462c5288733f159b564a36993bbe2e1df52a5fca
-    size: 4873
+    sha256: 9310d0a56ac0a82992bab514c765b15207cb7f9dd22c5f46009ec5904d9fc3a7
+    size: 8176
     kind: instruction
     executable: false
     script: false
   - path: references/evidence.md
-    sha256: 7c133b5debfb4b2d494cafba27a8e26d224c791745e2c5f6eb0929836d9b0f8b
-    size: 27795
+    sha256: 3a5505a381e7fd5f8be4611e064ab1559d1be09d224f414c24440158af60c8e2
+    size: 31984
     kind: instruction
     executable: false
     script: false
   - path: references/monitor-contract.md
-    sha256: 924af3e078f18b980617aa0ec051c5a74cad51b1bde144b455cd8ae29876b33e
-    size: 25240
+    sha256: a298c2cf9909d147edb185a77e8227f61a7999cb76c7ae958707131af1497c13
+    size: 25929
     kind: instruction
     executable: false
     script: false
   - path: references/recipe-rationale.md
-    sha256: 2208d0994c974dbaabd86138b31e2753db0c604f4ad5ecdee2d27b0c69393ea9
-    size: 24375
+    sha256: 9d8fc776db40f891ae82657e8b828ed86f197e4ed5303b09474bfde8099eab3e
+    size: 28099
     kind: instruction
     executable: false
     script: false
   - path: scripts/classify-state.sh
-    sha256: 41750af3480a11a5b4f2c74a2bc5dfd5111f41291a2ccca4a15f25ff502e072b
-    size: 2590
+    sha256: d9e5eb78e226ffa1fc1f233a6f5c497cc530046babd294703e9a6281e4408271
+    size: 3738
     kind: script
     executable: true
     script: true
@@ -165,8 +165,8 @@ files:
     executable: true
     script: true
   - path: scripts/monitor-lib.sh
-    sha256: 3586971a77c9c0912bc6d8d1900983f84541860f6ed960fbfd7601234781cd6d
-    size: 21955
+    sha256: d37782077aef3911a2db61ab09e42d9361efaf51064ee586b855b584e0e82a8a
+    size: 33715
     kind: script
     executable: true
     script: true

@@ -24,6 +24,7 @@
    含まれていたため当時の裸の `rate.?limit` が一致し、**健全な生成中 worker 2 件に `a` が撃ち込まれた**
    （#1522 / 回帰 7）。逆向きの事故も同時に防ぐ: 履歴に流れた spinner 行（`↓ 14.9k tokens`）を拾うと
    終了済みセッションを永久に GENERATING と誤判定する。
+   **Antigravity（agy）のペインだけは例外**で、`content` も読む（8b）。
 
 4. **生成中アンカーは 3 つ**: トークンカウンタ `↓ 14.9k tokens` /
    `Waiting for [0-9]+ background agent` / フッタヒント `esc to interrupt`。
@@ -57,6 +58,35 @@
    **`PROMPT` は `GENERATING` より先に評価する**: 権限プロンプト表示中もフッタは
    `esc to interrupt` のままで `isPromptWaiting` / `isSelectionListActive` は false（実測）。
    逆順だとプロンプトが永久に承認されない。
+
+8b. **目印は `cliToolId` で CLI ごとに選ぶ。agy のペインは読む範囲も違う**（CommandMate #2606）。
+    4〜8 の目印はすべて Claude Code の文言で、CommandMate #2595 のパイロットでは agy の worker の
+    59 ポーリングがすべて `IDLE started=0` だった（`GENERATING` も `PROMPT` も 1 回も出ず、裁定に
+    届いたのはタスク状態を読んでいたからである）。原因は 2 つある。
+    - **文言**: agy は `esc to cancel` と点字スピナーで生成中を示し、許可ダイアログは
+      `↑/↓ Navigate` フッターの上に `> 1. Yes …` を描き、ツールを使ったターンの後は
+      `? for shortcuts` を出さない（CommandMate #2478）。
+    - **範囲**: agy は 200x1000 のペインに上端寄せで描くので、`realtimeSnippet`（末尾 100 行）は
+      transcript がペインを埋めるまで空行しか持たない。目印を直しただけでは直らない。
+      `content` は同じ capture の末尾部分で、どちらも同じ最下行で終わるので、長い方の末尾
+      （空行を除いた最後の 64 行）を読む。3 の懸念（履歴に残った文字列を拾う）は、目印ごとに
+      読む行を最下部に限って小さくしてある: フッターとステータス行は下 3 行、スピナーと backoff は
+      下 15 行、番号つきの選択肢はフッターから上へ最寄りの境界行まで。ただし短いペインでは、
+      下 15 行に今のターンの指示文が入りうる。
+    判定の要点は実機キャプチャが決めた。
+    - agy のダイアログ・slash コマンドのポップアップは**ステータス行に `esc to cancel` を出す**。
+      そこで `↑/↓ Navigate` フッターのある画面は生成中と読まない（`PROMPT` を先に評価する 8 と
+      同じ理由で、承認待ちを生成中に隠さない）。
+    - フッターは trust 画面・`/model` ピッカー・ポップアップにもある。そこで `PROMPT` の目印には
+      **番号つきの選択肢を 2 行以上**要求し、番号の無い画面はサーバの `waiting` に任せる。
+    - **`Generating` という語は使わない**。終わったターンの transcript に
+      `Generating the specified file` のような思考要約が残る。
+    - 待機中の証拠は `? for shortcuts` ではなく**最下部の入力欄の枠**で、backoff 検出の veto
+      （5 の idle フッタに当たるもの）にもこれを使う。
+    - **レート制限・API エラーの目印（6・再送）は agy 向けに広げていない**。その画面の実機
+      キャプチャが無い。
+    Claude の組はコード上そのままで、`cliToolId` が `antigravity` 以外（欠落を含む）の payload の
+    読み方は変わらない。
 
 ## 介入・自動復旧（`monitor.sh`）
 
@@ -211,6 +241,7 @@
 | 15 | **id の突合がブランチ名だけで、現行のディレクトリ由来 id を 1 件も解決できない**（git は成功するので 13 のガードは発火しない。両カウンタが恒久 0 になり、**STARTED ガードが実測値でない数字で裁定する**） | CommandMate #1728 | `mh_worktree_path()` に `slug(basename(<path>))`（＝`deriveWorktreeId`）を第 1 候補として追加。ブランチ由来の旧 2 規則は残す |
 | 16 | **警告が運用の grep で全て消える**（`monitor hooks: …` に `ERROR`/`WARN` が無く、`grep -Ei "…\|ERROR\|FAIL"` で不可視。15 が 25 分間気付かれなかった直接の理由） | CommandMate #1728 | 診断行に `ERROR`（両カウンタ死）/ `WARN`（片方）のレベル語を付与 |
 | 17 | **監視が黙って死に、死んだことに気付けない**（exit 144・出力は起動行のみ・ワーカーは無監視で稼働継続。健全な沈黙と区別不能） | CommandMate #1728 | 受信シグナルの明示報告 ＋ 正常終端以外の EXIT 報告 ＋ `--heartbeat`（既定 10 ポーリング） |
+| 18 | **Antigravity の worker が常に IDLE**（目印が Claude の文言だけで、読む範囲の `realtimeSnippet` も agy の上端寄せペインでは空行だけ。生成中もダイアログも検知できず、STARTED ガードは `started=0` のまま） | CommandMate #2606 | `cliToolId` で目印の組を選び、agy は `realtimeSnippet` と `content` の長い方の末尾を、フッター veto・番号つき選択肢の要求・入力欄の枠で読む（8b） |
 | 13 | **外部コマンドの終了コードを見ずに次を決める**（`git \| wc -l` が git の失敗を「作業 0」として返し、完走 worker を NOT_STARTED と誤報／`classify-state.sh` が落ちると空 state が完了判定へ渡り、生存ペインとみなされず **稼働中の worker が COMPLETE**／`verify-completion.sh` が落ちると `case` に default が無く **そのポーリングが無言で素通り**） | CommandMate #1614 | `hooks-git.sh` の 3 つの `git` 呼び出しを終了コード判定＋原因ごと worker 1 回の stderr 報告に、`monitor.sh` の `CLASSIFY` / `VERIFY` を `capture`（既存）と同じ扱いに |
 
 いずれも naive 実装で red → ガード実装で green にした。8 は両方向テスト（対照＋変異注入）で
@@ -235,6 +266,9 @@ EXIT 報告を正常終端でも出す → 3 件 red ／ SIGURG を致死 trap �
 固定してある。同じ理由で、シグナル待ちには締切と PID 指定の SIGKILL を置いてある
 （trap を全戻しした `monitor.sh` は**シグナルを受けても走り続ける**ので、締切が無ければ
 テストは赤くならず**ハングする**）。
+
+18 は修正前の script への差し戻しと 11 変異で実測した（修正前は生成中 3/3 と番号つきダイアログ
+18 件中 14 件が `IDLE`。変異の内訳は `tests/fixtures/cmate-orchestrate-monitor/README.md`）。
 
 回帰 fixture と test runner は配布元リポジトリ
 <https://github.com/Kewton/commandmate-skills> の
