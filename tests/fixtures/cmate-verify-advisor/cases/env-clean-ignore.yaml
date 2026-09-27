@@ -1,0 +1,31 @@
+# baseline.yaml plus options.envCleanIgnoreHomeEntries (Issue #2901 / #270) —
+# the key CommandMate #2890 added to its loader and #2901 taught
+# cmate-verify's runner. This case is the block-list form; parser-parity.sh
+# separately exercises the flow-list form for both parsers.
+#
+# The gates are the baseline's, so the layer-1 analysis over the same history
+# is the same analysis; the only thing under test is that the option is read
+# rather than rejected as unknown. Accepting it is not judging it: this
+# advisor never computes env-clean, so a valid value has no effect on the
+# report beyond not being an error.
+version: 1
+gates:
+  - id: lint
+    command: "npm run lint"
+    timeoutSec: 600
+  - id: typecheck
+    command: "npx tsc --noEmit"
+  # 1800s because the suite talks to a container that can take a minute to come up.
+  - id: unit
+    command: "npm run test:unit"
+    timeoutSec: 1800
+  - id: build
+    command: "npm run build"
+    timeoutSec: 900
+options:
+  baseRef: origin/main
+  skipInPrimaryCheckout: false
+  maxLogTailBytes: 4096
+  envCleanIgnoreHomeEntries:
+    - .semgrep
+    - .commandagent

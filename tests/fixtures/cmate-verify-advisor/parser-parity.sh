@@ -70,6 +70,7 @@ sample_value() {
     maxLogTailBytes) printf '4096';;
     requireCommit) printf 'true';;
     requireEnvClean) printf 'true';;
+    envCleanIgnoreHomeEntries) printf '[.semgrep]';;
     *) return 1;;
   esac
 }
@@ -99,6 +100,7 @@ mutex
 retryOnFail
 timeoutSec'
 UPSTREAM_OPTION_KEYS='baseRef
+envCleanIgnoreHomeEntries
 maxLogTailBytes
 requireCommit
 requireEnvClean
@@ -109,9 +111,22 @@ skipInPrimaryCheckout'
 # The awk accept-list: the `KV_K == "..."` chain guarding the `printf "OPT` that
 # emits an option. Anchored on that printf rather than on the key names, so the
 # extraction cannot quietly start matching the top-level or gate key chains.
+#
+# `envCleanIgnoreHomeEntries` (Issue #2901) does not go through that generic
+# chain — it takes a list value, so `home_entry()` emits it with the key
+# spelled literally (`printf "OPT\tenvCleanIgnoreHomeEntries\t%s\n", item`)
+# rather than via `KV_K`. The second rule below catches that literal-key form
+# alongside the KV_K-chain form, so a future option of the same shape is picked
+# up the same way without a one-off case for this key's name.
 awk_keys() {
   awk '
     /printf "OPT\\t/ { for (i = 1; i <= n; i++) print buf[i]; n = 0 }
+    match($0, /printf "OPT\\t[A-Za-z][A-Za-z0-9]*\\t/) {
+      key = substr($0, RSTART, RLENGTH)
+      sub(/^printf "OPT\\t/, "", key)
+      sub(/\\t$/, "", key)
+      print key
+    }
     {
       n = 0
       line = $0
@@ -208,8 +223,20 @@ js_set_keys() { # <SET-NAME>
 js_keys() { js_set_keys OPTION_KEYS; }
 js_gate_keys() { js_set_keys GATE_KEYS; }
 
+# options keys awk accepts (and echoes as an OPT line, so the config still
+# parses) but that the shell dispatch deliberately never assigns to a variable.
+# `envCleanIgnoreHomeEntries` (Issue #2901 / #270) is the one member so far:
+# cmate-verify does not evaluate env-clean, so there is nothing for the shell
+# side to act on, unlike `requireEnvClean` which the dispatch turns into the
+# `env-clean` gate's SKIP reason. This is a deliberate accept-and-ignore, not
+# the silent-drop bug question 1 above exists to catch, so it is the one key
+# excluded from the "shell consumes everything awk emits" comparison below —
+# every other key still must appear in both lists.
+ACCEPT_ONLY_OPTION_KEYS='envCleanIgnoreHomeEntries'
+
 awk_keys > "$WORK/awk.txt"
 shell_keys > "$WORK/shell.txt"
+grep -vxF -f <(printf '%s\n' "$ACCEPT_ONLY_OPTION_KEYS") "$WORK/awk.txt" > "$WORK/awk-consumed.txt"
 js_keys > "$WORK/js.txt"
 awk_gate_keys > "$WORK/awk-gate.txt"
 shell_gate_keys > "$WORK/shell-gate.txt"
@@ -237,7 +264,7 @@ compare_lists() {
     fail "$name" "$(diff "$a" "$b" | sed 's/^/       /')"
   fi
 }
-compare_lists 'verify-run.sh: awk accepts exactly what the shell dispatch consumes' "$WORK/awk.txt" "$WORK/shell.txt"
+compare_lists 'verify-run.sh: awk accepts exactly what the shell dispatch consumes' "$WORK/awk-consumed.txt" "$WORK/shell.txt"
 compare_lists 'verify-advisor.mjs OPTION_KEYS equals the runner accept-list' "$WORK/awk.txt" "$WORK/js.txt"
 compare_lists 'verify-run.sh: awk accepts exactly the gate keys the shell collects' "$WORK/awk-gate.txt" "$WORK/shell-gate.txt"
 compare_lists 'verify-advisor.mjs GATE_KEYS equals the runner gate accept-list' "$WORK/awk-gate.txt" "$WORK/js-gate.txt"
