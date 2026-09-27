@@ -166,6 +166,7 @@ cmate-verify-advisor はこの集合に追随する**（`tests/fixtures/cmate-ve
 | `options` | `maxLogTailBytes` | 整数 0..1048576 | 8192 |
 | `options` | `requireCommit` | `true` / `false` | false |
 | `options` | `requireEnvClean` | `true` / `false` | false |
+| `options` | `envCleanIgnoreHomeEntries` | 文字列のリスト（フロー `[...]` または `- ` の縦列挙）。各要素は空文字・`.`・`..`・`/` を含む値を禁止、最大 32 件。受理するだけで本ランナーは判定に使わない | `[]` |
 
 このランナーは awk / sed で読むため、**YAML のサブセットしか受け付けない**:
 

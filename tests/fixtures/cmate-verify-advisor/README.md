@@ -51,6 +51,7 @@ bash・node・git だけで動く。ネットワークは使わない（`command
 | `empty.json` | 履歴 0 件。exit 3 |
 | `layer2-mixed.json` | 層 2 の提案（追加＝強化 / 削除＝弱体化 / ログ縮小＝弱体化）。**どれも適用されない** |
 | `require-commit.yaml` | `options.requireCommit: true` を持つ設定。Issue #57（advisor が正当な設定を exit 2 で拒否していた）の回帰ケース |
+| `env-clean-ignore.yaml` | `options.envCleanIgnoreHomeEntries`（block 形式）を持つ設定。Issue #2901 / #270 の移植で追加した既知キーが、正当な設定を exit 2 で拒否しないことの回帰ケース |
 | `flaky-measured.json` | `steady.json` と同じ 8 run に `[flaky]` アンカーを載せたもの。run 103 は **outcome=flaky**（構造化 `gates[].flaky` 経由）、run 106 は **outcome=fail**（ログのアンカー経由）—— 読み取り経路の両方と、flakiness の分母を 1 つの fixture で持つ |
 | `mutex-wait.json` | `steady.json` と**同じ duration** に `[mutex] … waited=` を載せたもの。二点測定の相方であり、`timeout:unit` の短縮提案が消えることを測る |
 

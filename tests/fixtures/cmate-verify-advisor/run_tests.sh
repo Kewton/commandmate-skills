@@ -334,6 +334,59 @@ node "$ADVISOR" --cwd "$D7" --config "$D7/verify.yaml" --input "$CASES/steady.js
   --proposals "$WORK/rc-on.json" --apply > /dev/null 2>&1
 assert_absent '--apply did not write the layer-2 strengthening either' "$D7/verify.yaml" 'requireCommit'
 
+printf '\n-- options.envCleanIgnoreHomeEntries (Issue #2901 / #270) --\n'
+# Same shape as requireCommit above: a key the runner accepts and the advisor
+# does not is the advisor refusing to read a config that was never wrong.
+# Unlike requireCommit this key takes a LIST, in either of the two forms
+# verification-config.md documents (a flow one-liner or a block list), and the
+# element rule mirrors verify-run.sh's `home_entry()` exactly — this is
+# accept-only: the advisor never computes env-clean, so a valid value has no
+# effect on the report beyond not being an error.
+ECI="$CASES/env-clean-ignore.yaml"
+node "$ADVISOR" --cwd "$CASES" --config "$ECI" --input "$CASES/steady.json" > "$WORK/eci.txt" 2> "$WORK/eci.err"
+status=$?
+[ "$status" -eq 0 ] && pass 'a config declaring envCleanIgnoreHomeEntries (block form) is read, not refused' \
+  || fail 'a config declaring envCleanIgnoreHomeEntries (block form) is read, not refused' "exit $status: $(cat "$WORK/eci.err")"
+assert_absent 'envCleanIgnoreHomeEntries is not reported as an unknown key' "$WORK/eci.err" 'unknown options key'
+
+printf 'version: 1\ngates:\n  - id: lint\n    command: "npm run lint"\noptions:\n  envCleanIgnoreHomeEntries: [.semgrep, .commandagent]\n' > "$WORK/eci-flow.yaml"
+node "$ADVISOR" --cwd "$WORK" --config "$WORK/eci-flow.yaml" --input "$CASES/steady.json" > /dev/null 2> "$WORK/eci-flow.err"
+[ $? -eq 0 ] && pass 'the flow-list form is read, not refused' || fail 'the flow-list form is read, not refused' "$(cat "$WORK/eci-flow.err")"
+
+printf 'version: 1\ngates:\n  - id: lint\n    command: "npm run lint"\noptions:\n  envCleanIgnoreHomeEntries: []\n' > "$WORK/eci-empty.yaml"
+node "$ADVISOR" --cwd "$WORK" --config "$WORK/eci-empty.yaml" --input "$CASES/steady.json" > /dev/null 2> "$WORK/eci-empty.err"
+[ $? -eq 0 ] && pass 'an empty flow list ("[]") means ignore nothing, not a missing value' \
+  || fail 'an empty flow list ("[]") means ignore nothing, not a missing value' "$(cat "$WORK/eci-empty.err")"
+
+# Same element/shape rules the runner enforces (Issue #2901): a scalar value, or
+# an entry that is empty, ".."/".", or contains "/", or a 33rd entry.
+printf 'version: 1\ngates:\n  - id: lint\n    command: "npm run lint"\noptions:\n  envCleanIgnoreHomeEntries: notalist\n' > "$WORK/eci-scalar.yaml"
+node "$ADVISOR" --cwd "$WORK" --config "$WORK/eci-scalar.yaml" --input "$CASES/steady.json" > /dev/null 2> "$WORK/eci-scalar.err"
+[ $? -eq 2 ] && pass 'a scalar value is exit 2' || fail 'a scalar value is exit 2' "$(cat "$WORK/eci-scalar.err")"
+assert_contains 'the rejected shape is named the way the runner names it' "$WORK/eci-scalar.err" \
+  'options.envCleanIgnoreHomeEntries: must be a flow list "[...]" or an indented "- " block'
+
+printf 'version: 1\ngates:\n  - id: lint\n    command: "npm run lint"\noptions:\n  envCleanIgnoreHomeEntries: [foo/bar]\n' > "$WORK/eci-slash.yaml"
+node "$ADVISOR" --cwd "$WORK" --config "$WORK/eci-slash.yaml" --input "$CASES/steady.json" > /dev/null 2> "$WORK/eci-slash.err"
+[ $? -eq 2 ] && pass 'an entry containing "/" is exit 2' || fail 'an entry containing "/" is exit 2' "$(cat "$WORK/eci-slash.err")"
+assert_contains 'the rejected entry is named' "$WORK/eci-slash.err" 'entry must not contain "/": foo/bar'
+
+printf 'version: 1\ngates:\n  - id: lint\n    command: "npm run lint"\noptions:\n  envCleanIgnoreHomeEntries:\n    - ..\n' > "$WORK/eci-dotdot.yaml"
+node "$ADVISOR" --cwd "$WORK" --config "$WORK/eci-dotdot.yaml" --input "$CASES/steady.json" > /dev/null 2> "$WORK/eci-dotdot.err"
+[ $? -eq 2 ] && pass 'a ".." entry (block form) is exit 2' || fail 'a ".." entry (block form) is exit 2' "$(cat "$WORK/eci-dotdot.err")"
+assert_contains 'the ".." rejection matches the runner wording' "$WORK/eci-dotdot.err" 'entry must not be ".."'
+
+printf 'version: 1\ngates:\n  - id: lint\n    command: "npm run lint"\noptions:\n  envCleanIgnoreHomeEntries:\n    - ""\n' > "$WORK/eci-empty-item.yaml"
+node "$ADVISOR" --cwd "$WORK" --config "$WORK/eci-empty-item.yaml" --input "$CASES/steady.json" > /dev/null 2> "$WORK/eci-empty-item.err"
+[ $? -eq 2 ] && pass 'an empty entry (block form) is exit 2' || fail 'an empty entry (block form) is exit 2' "$(cat "$WORK/eci-empty-item.err")"
+assert_contains 'the empty-entry rejection matches the runner wording' "$WORK/eci-empty-item.err" 'entry must not be empty'
+
+too_many=$(printf 'e%02d, ' $(seq 1 33))
+printf 'version: 1\ngates:\n  - id: lint\n    command: "npm run lint"\noptions:\n  envCleanIgnoreHomeEntries: [%s]\n' "${too_many%, }" > "$WORK/eci-too-many.yaml"
+node "$ADVISOR" --cwd "$WORK" --config "$WORK/eci-too-many.yaml" --input "$CASES/steady.json" > /dev/null 2> "$WORK/eci-too-many.err"
+[ $? -eq 2 ] && pass 'a 33rd entry is exit 2' || fail 'a 33rd entry is exit 2' "$(cat "$WORK/eci-too-many.err")"
+assert_contains 'the count ceiling matches the runner wording' "$WORK/eci-too-many.err" 'at most 32 entries (got 33)'
+
 printf '\n== 3. a truncated failure log raises the budget ==\n'
 advise "$CASES/truncated.json"
 assert_status 'the truncated-log history exits 0' 0

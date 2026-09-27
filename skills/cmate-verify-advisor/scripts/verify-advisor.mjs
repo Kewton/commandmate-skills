@@ -81,6 +81,7 @@ const OPTION_KEYS = new Set([
   'maxLogTailBytes',
   'requireCommit',
   'requireEnvClean',
+  'envCleanIgnoreHomeEntries',
 ]);
 
 // Value domains mirrored from the same two implementations.
@@ -89,6 +90,8 @@ const MAX_GATE_MUTEX_LENGTH = 64;
 // The ceiling is the feature, not a tuning parameter: enough re-runs turn any
 // red green, so 2 is a config error rather than a longer retry.
 const MAX_RETRY_ON_FAIL = 1;
+// Mirrors verify-run.sh's `home_count > 32` (CommandMate #2901 / #2890).
+const MAX_ENV_CLEAN_IGNORE_HOME_ENTRIES = 32;
 
 // What the runner uses when the key is absent, as strings, so "set it to the
 // value it already has" is recognised as a change to nothing rather than as a
@@ -263,6 +266,30 @@ function checkValue(key, value, lineNo, errors) {
   return true;
 }
 
+// Validates one options.envCleanIgnoreHomeEntries element (Issue #2901): the
+// same rule verify-run.sh's `home_entry()` enforces. `state.count` is threaded
+// through by the caller so it accumulates across both the flow and block forms
+// of the same key within one config.
+function homeEntry(item, lineNo, errors, state) {
+  const label = 'options.envCleanIgnoreHomeEntries';
+  if (item === '') {
+    errors.push(`line ${lineNo}: ${label}: entry must not be empty`);
+    return;
+  }
+  if (item === '.' || item === '..') {
+    errors.push(`line ${lineNo}: ${label}: entry must not be "${item}"`);
+    return;
+  }
+  if (item.includes('/')) {
+    errors.push(`line ${lineNo}: ${label}: entry must not contain "/": ${item}`);
+    return;
+  }
+  state.count += 1;
+  if (state.count > MAX_ENV_CLEAN_IGNORE_HOME_ENTRIES) {
+    errors.push(`line ${lineNo}: ${label}: at most ${MAX_ENV_CLEAN_IGNORE_HOME_ENTRIES} entries (got ${state.count})`);
+  }
+}
+
 /**
  * Parse verify.yaml into a line-anchored document.
  *
@@ -284,6 +311,12 @@ function parseConfig(text, path) {
   let gatesLine = -1;
   let gatesEnd = lines.length; // exclusive
   let current = null;
+  // Set once options.envCleanIgnoreHomeEntries: is seen with an empty value,
+  // meaning the entries follow as an indented "- " block (mirrors verify-run.sh's
+  // `home_open`). `homeState.count` accumulates across both the flow and block
+  // forms of the key within one config, mirroring `home_count`.
+  let homeOpen = false;
+  const homeState = { count: 0 };
 
   // `end` is the gate's last FIELD line, set by readGateField — never the line
   // before the next item. The difference is the comment lines in between: they
@@ -318,6 +351,7 @@ function parseConfig(text, path) {
         flush();
         gatesEnd = i;
       }
+      homeOpen = false;
       const kv = splitKeyValue(body);
       if (!kv) {
         errors.push(`line ${lineNo}: expected "key: value" at the top level`);
@@ -361,6 +395,27 @@ function parseConfig(text, path) {
           errors.push(`line ${lineNo}: expected "key: value" inside options:`);
           continue;
         }
+        if (kv.key === 'envCleanIgnoreHomeEntries') {
+          // Issue #2901: this key alone allows a list value, in either of the
+          // two forms verification-config.md documents — a flow one-liner
+          // (kv.value is "[...]", empty "[]" included) or a block list, whose
+          // "- " items follow at indent 4 while homeOpen stays set.
+          if (kv.value === '') {
+            homeOpen = true;
+            continue;
+          }
+          homeOpen = false;
+          if (/^\[.*\]$/.test(kv.value)) {
+            const inner = kv.value.slice(1, -1).trim();
+            if (inner !== '') {
+              for (const part of inner.split(',')) homeEntry(unquote(part.trim()), lineNo, errors, homeState);
+            }
+          } else {
+            errors.push(`line ${lineNo}: options.envCleanIgnoreHomeEntries: must be a flow list "[...]" or an indented "- " block`);
+          }
+          continue;
+        }
+        homeOpen = false;
         if (!checkValue(kv.key, kv.value, lineNo, errors)) continue;
         if (!OPTION_KEYS.has(kv.key)) {
           errors.push(`line ${lineNo}: unknown options key: ${kv.key}`);
@@ -370,6 +425,15 @@ function parseConfig(text, path) {
         continue;
       }
       errors.push(`line ${lineNo}: indented line outside of gates: / options:`);
+      continue;
+    }
+
+    if (indent === 4 && section === 'options' && homeOpen) {
+      if (body.slice(0, 2) !== '- ') {
+        errors.push(`line ${lineNo}: envCleanIgnoreHomeEntries: list items must start with "- "`);
+        continue;
+      }
+      homeEntry(unquote(body.slice(2).trim()), lineNo, errors, homeState);
       continue;
     }
 

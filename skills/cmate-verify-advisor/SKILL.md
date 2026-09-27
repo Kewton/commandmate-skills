@@ -91,8 +91,9 @@ advisor はその数値を duration 系列から**外したまま**別に集計�
 なければならない（片方だけが知らないキーは、正しい設定を exit 2 で拒否する）。正本は
 [cmate-verify の SKILL.md のキー表](../cmate-verify/SKILL.md)、機械的な固定は
 `tests/fixtures/cmate-verify-advisor/parser-parity.sh`。`gates[]` の
-`mutex` / `retryOnFail` / `flakyIsPass` と `options.requireEnvClean` は**値域まで**同じに検査する
-（`retryOnFail` は 0 か 1、`flakyIsPass: true` は `retryOnFail: 1` を伴わなければ設定エラー）。
+`mutex` / `retryOnFail` / `flakyIsPass` と `options.requireEnvClean` / `options.envCleanIgnoreHomeEntries`
+は**値域まで**同じに検査する（`retryOnFail` は 0 か 1、`flakyIsPass: true` は `retryOnFail: 1` を
+伴わなければ設定エラー、`envCleanIgnoreHomeEntries` は各要素が空文字・`.`・`..`・`/` を含まず最大 32 件）。
 
 ### 2.2 層 2 — 検証の意味を変える変更（分析・**提案のみ**）
 
