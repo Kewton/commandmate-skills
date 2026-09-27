@@ -51,12 +51,14 @@
 #                  per-worker state and log lines are keyed by `<id>@<instance>`.
 #
 #   --session-prefix <p>
-#                  LEGACY escape hatch. Session names are derived from the capture
-#                  payload's cliToolId by default (`mcbd-<cliToolId>-<worktree-id>`),
-#                  which is what makes a heterogeneous fleet work without any flag.
-#                  Passing this replaces the derived `mcbd-<cliToolId>` head with
-#                  <p>; the instance suffix is still appended. Only needed for a
-#                  session this tool did not create.
+#                  LEGACY escape hatch. By default the intervention target is the
+#                  capture payload's own `sessionName` — the name the server
+#                  actually created, namespace and all — and only an older server
+#                  that carries no `sessionName` falls back to deriving one from
+#                  `cliToolId` (`mcbd-<cliToolId>-<worktree-id>`). Passing this
+#                  flag ignores both and replaces the derived head with <p>
+#                  instead; the instance suffix is still appended. Only needed
+#                  for a session this tool did not create (Issue #268).
 #
 #   --max-polls N  stop after N poll rounds and exit 0 even if workers are still
 #                  working; 0 (default) keeps polling until every worker is
@@ -275,7 +277,7 @@ send_to_pane() {
   shift 3
 
   if [ -z "$sp__session" ]; then
-    echo "monitor[$sp__label]: $sp__what NOT delivered — no tmux session could be derived (capture payload carries no cliToolId; pass --session-prefix)" >&2
+    echo "monitor[$sp__label]: $sp__what NOT delivered — no tmux session could be derived (capture payload carries no sessionName or cliToolId; pass --session-prefix)" >&2
     return 1
   fi
 
@@ -491,8 +493,23 @@ while [ "$done_count" -lt "$n_ids" ]; do
     # pane we just classified. Announced once per worker because a misdirected
     # intervention is otherwise invisible until the first one is needed — and by
     # then a missed approval has already stalled the worker (Issue #1602).
+    #
+    # A server with a namespace, or one that adopted a legacy session under a
+    # name this loop would not reconstruct, still reports the name it actually
+    # created in the poll's own `sessionName` — so that is read FIRST, and the
+    # `mcbd-<cliToolId>-<worktree-id>` this loop derives is only a fallback for
+    # an older server that carries no `sessionName` at all. `--session-prefix`
+    # keeps meaning what it always has (an escape hatch for a session this tool
+    # did not create) and still wins over both when it is given (Issue #268).
     cli_tool=$(ml_json_scalar "$poll" cliToolId)
-    session=$(ml_session_name "$wid" "$cli_tool" "$inst" "$SESSION_PREFIX") || session=""
+    if [ -n "$SESSION_PREFIX" ]; then
+      session=$(ml_session_name "$wid" "$cli_tool" "$inst" "$SESSION_PREFIX") || session=""
+    else
+      session=$(ml_json_scalar "$poll" sessionName)
+      if [ -z "$session" ]; then
+        session=$(ml_session_name "$wid" "$cli_tool" "$inst" "") || session=""
+      fi
+    fi
     if [ ! -f "$STATE_DIR/$lbl.target" ] && [ -n "$session" ]; then
       echo "$session" > "$STATE_DIR/$lbl.target"
       echo "monitor[$lbl]: intervention target = $session"
