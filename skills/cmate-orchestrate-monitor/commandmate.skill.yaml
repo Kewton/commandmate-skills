@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-orchestrate-monitor
 name: cmate-orchestrate-monitor
-version: 0.9.0
+version: 0.10.0
 summary: commandmate wait が見ない停滞（プロンプト待ち・rate limit・リトライ枯渇死）を capture の 1 フレームから検知して回収し、介入と判定の全件を機械可読なログに残す監視レシピ。契約付き dispatch の一次監督は cmate-orchestrate の wait ループで、本 Skill はその回収と可観測性のサイドカーである。
 description: >-
   tmux セッション上で走る worker（coding CLI）を監督するための、実運用で検証済みの監視レシピである。
@@ -22,8 +22,8 @@ description: >-
   未知の型は Enter を送らず理由つきで 1 度だけ報告して held に数える。`--no-auto-approve` で全件保留に
   できる（契約付き dispatch を監督するときの形）。再送は IDLE かつ idle 閾値到達かつ現ペインに
   terminal API error があるときのみ発火し、上限到達後はオペレータへエスカレーションする。介入の宛先は
-  固定 prefix の連結ではなく、そのポーリングの capture ペイロードの cliToolId から
-  `mcbd-<cliToolId>-<worktree-id>[-<instance suffix>]` として導出するため、分類したペインと入力する
+  固定 prefix の連結ではなく、capture ペイロードの `sessionName`（無ければ `cliToolId`）から
+  `mcbd-<cliToolId>-<worktree-id>` を組み立てる（`--session-prefix` 優先）。分類したペインと入力する
   ペインが同一であることが構造的に保証され、claude と codex が混在する fleet でもフラグ無しで成立する。
   送信前に tmux has-session で完全一致指定（`=<name>:`）の存在を検証し、失敗は握り潰さず stderr へ
   報告する。ログは送信の結果を書き、承認カウンタと再送予算は配信できたときだけ動く。worktree-id は
@@ -117,8 +117,8 @@ risk_rationale: >-
   mutates a repo.
 files:
   - path: SKILL.md
-    sha256: d9803f5df1c00ea75f2c18f1df9a4ddc7d0f4e6019458c0a1a2e8001d8366f41
-    size: 30262
+    sha256: 9174be8b0c0cdcea8f49fb2acdd610245240c5797f0ea1b953b969d102c6475f
+    size: 30673
     kind: skill_md
     executable: false
     script: false
@@ -135,8 +135,8 @@ files:
     executable: false
     script: false
   - path: references/monitor-contract.md
-    sha256: a298c2cf9909d147edb185a77e8227f61a7999cb76c7ae958707131af1497c13
-    size: 25929
+    sha256: 74c5c795c7af654988b9a572577681fe246cb507dd2364ed588a32e9b9af78bf
+    size: 26579
     kind: instruction
     executable: false
     script: false
@@ -171,8 +171,8 @@ files:
     executable: true
     script: true
   - path: scripts/monitor.sh
-    sha256: 2285f534ba6760e45f0bc32e378be3b0fd7cc38ad53c2272c417e7c76eea5cdd
-    size: 34506
+    sha256: 3b30c3ecbf2fb053f3b97a7b79b0bb4690abe1b50e6f51c6da22527f058609c7
+    size: 35475
     kind: script
     executable: true
     script: true

@@ -947,6 +947,42 @@ check "an id that is not safe to interpolate into a tmux target is rejected" 2 "
 check_contains "…and names the expected shape" "expected [a-zA-Z0-9][a-zA-Z0-9_-]*" "$bad_out"
 
 echo
+echo "== the payload's own sessionName is the intervention target (Issue #268) =="
+# A server with a namespace (CommandMate #2866), or one that adopted a legacy
+# session, does not create `mcbd-<cliToolId>-<worktree-id>` — it reports the name
+# it actually used in the poll's own `sessionName`. Typing into the derived name
+# instead would be exactly the misdirected intervention #1602 already fixed once,
+# reopened by a server topology this loop's own derivation cannot reconstruct.
+LOOP_SESSIONS="mcbd-a1b2c3d4-claude-w1"
+run_loop target-payload-sessionname 1 rate-limit-namespaced.json
+LOOP_SESSIONS=AUTO
+check "a payload's own sessionName is preferred over the derived mcbd-<cliToolId>-<id>" \
+  "mcbd-a1b2c3d4-claude-w1" \
+  "$(printf '%s\n' "$LOOP_STDOUT" | sed -n 's/^monitor\[w1\]: intervention target = //p')"
+check "the intervention lands on the namespaced session, not the derived one" \
+  "has-session -t =mcbd-a1b2c3d4-claude-w1:
+send-keys -t =mcbd-a1b2c3d4-claude-w1: a Enter" "$LOOP_TMUX"
+
+# An older server that carries no sessionName at all still gets the pre-#268
+# derived name — this is the exact fixture/behaviour target-default above pins,
+# repeated here as the control arm for this section.
+run_loop target-no-sessionname 1 rate-limit.json
+check "no sessionName in the payload falls back to the derived name" "mcbd-claude-w1" \
+  "$(printf '%s\n' "$LOOP_STDOUT" | sed -n 's/^monitor\[w1\]: intervention target = //p')"
+
+# --session-prefix is the escape hatch for a session this tool did not create,
+# and stays the top override: it must win even over a sessionName the payload
+# does carry, or the flag stops meaning what its own documentation says.
+LOOP_ID="w1@codex-2"
+LOOP_SESSIONS="zz-w1-2"
+run_loop target-prefix-over-sessionname 1 codex-rate-limit-namespaced.json --session-prefix zz
+LOOP_ID=w1
+LOOP_SESSIONS=AUTO
+check "--session-prefix outranks a payload sessionName" \
+  "has-session -t =zz-w1-2:
+send-keys -t =zz-w1-2: a Enter" "$LOOP_TMUX"
+
+echo
 echo "== counters and budgets move only on a delivered intervention (Issue #1602) =="
 # `approvals=` on the COMPLETE line is the skill's evidence that prompts were
 # answered. Before #1602 it counted attempts at a session that never existed, so

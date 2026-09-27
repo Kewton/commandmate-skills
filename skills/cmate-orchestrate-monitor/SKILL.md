@@ -83,6 +83,10 @@ MONITOR_HOOKS_BASE=origin/main \
   [monitor-contract.md](./references/monitor-contract.md) 第3節。
 - `CM` の既定は `npx commandmate@latest` で、npm registry への network access が出る。
 - `<worktree-id>@<instance-id>`（例 `w1@codex-2`）は capture 側と送信先の両方に効く。
+- 介入先セッション名は、そのポーリングの capture payload が持つ `sessionName`（サーバが実際に
+  作ったセッション名。名前空間つきサーバや旧セッション採用時もこれが正）を優先し、無い旧サーバ
+  だけ従来どおり `cliToolId` から組み立てる。`--session-prefix` 指定時はどちらより prefix が勝つ
+  （Issue #268）。
 - 契約付き dispatch を監督するなら `--no-auto-approve` を足す（第1節・第3節）。
 - 全 worker が COMPLETE になると `monitor: all N worker(s) complete` を出して exit 0。
   `--max-polls N` は N ポーリングで抜ける停止条件で、判定ロジックには一切関与しない。
