@@ -232,6 +232,19 @@ mutant planner_ready "$MINIMAL" set /issues/0/body '"profile lookup の read 経
 expect_no_rule 'a document named under 成果物 is planner-ready' planner_ready "$MINIMAL" \
   set /issues/0/body '"profile cache の設計判断を ADR として残す。\n\n## 成果物\n\n- `docs/adr/0002-profile-cache.md`\n\n## 受入条件\n\n- [ ] ADR が採用案と却下案を述べている\n"'
 
+# Planner CommandMate #3002: once an Issue has a deliverable heading, a path it
+# writes only OUTSIDE that heading (やること / 受入条件 / 追記) is a mention, not a
+# declaration. A heading that lists nothing readable therefore leaves the scope
+# empty however many paths the prose names — the planner asks "affected files
+# are unclear", and so must this mirror.
+mutant planner_ready "$MINIMAL" set /issues/0/body '"profile lookup の read 経路に read-through cache を挟む。\n\n## 対象ファイル\n\n- 後で決める\n\n## やること\n\n- `src/cache/profile.ts` を実装する\n\n## 受入条件\n\n- [ ] 同一 profile の連続参照が DB を 1 回だけ読む\n"'
+
+# Kewton/commandmate-skills#273, folded into #3002: `### 新規ファイル` does not
+# close `## 対象ファイル`, so a document listed under the subsection is still a
+# deliverable and the Issue is planner-ready.
+expect_no_rule 'a document under a subsection of 対象ファイル is planner-ready' planner_ready "$MINIMAL" \
+  set /issues/0/body '"profile cache の設計判断を ADR として残す。\n\n## 対象ファイル\n\n### 新規ファイル\n\n- `docs/adr/0002-profile-cache.md`\n\n## 受入条件\n\n- [ ] ADR が採用案と却下案を述べている\n"'
+
 # The acceptance-gates notation (Issue #124). The producing side may only write a
 # gate id it has SEEN, so every case here runs against a real .commandmate/verify.yaml
 # — this repository's own, which is also what makes the ids in the fixture real.

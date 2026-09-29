@@ -493,6 +493,41 @@ plan は展開しない（ADR 不変条件3）ので、可視にできるのは�
 
 ---
 
+### CommandMate #3002（+ #273） — 「変えるな」と書いたファイルほど scope に入っていた
+
+planner は Issue 本文の**全体**から path を拾い、`## 対象ファイル` を持つ Issue でも地の文の
+path を `scope.allow` に入れていた。実測（Kewton/Musunest）:
+
+- 完了条件に「（依存の宣言の）ファイルの差分が 0 であること」と書いたら、そのファイルに
+  **書き換えの許可が付いた**（#181）。「`ci.yml` に手を入れる必要が出たら止めて返す」でも
+  `ci.yml` が scope に入った（#183）
+- `/` の無い `app.spec.yaml` も拾われ、宣言外の path として dispatch できなかった（#211）
+- 追記の説明文に書いた見本の短い綴りが `ambiguous_file_candidate` を立て、2 日止まった（#180）
+
+利用側は「地の文に path を書かない」運用で補っていた。**禁じた path ほど権限になる**ので、
+指示で禁じるより危ない。
+
+→ 成果物見出しを持つ Issue では、**その範囲の外の path を `suspected_files` に入れず**
+`reference_files` に回し、Issue ごとに1件の `prose_path_ignored`（notice）で名指す。
+**既定で有効にした**（利用者と Issue 上で確認済み。成果物見出しを持つ Issue はすべて挙動が変わる）。
+見出しの無い Issue は変えない —— そこでは散文が唯一の記述である。#219 が pattern に引いた線
+（明示の宣言が言及に優る）を path 全般へ延ばした。
+
+同じ変更に2つを含めた。どちらが欠けても、この変更が新しい穴を開ける:
+
+- **#273: 成果物見出しの範囲を下位の `###` で切らない。** 以前は `### 新規ファイル` で範囲が
+  切れ、その下の path は「地の文」として（偶然）scope に入っていた。地の文を外すだけだと、
+  小見出しで整理した Issue の path がすべて scope から消える（文書 path は以前から
+  `reference_files` に落ちていた。Kewton/CommandAgent #500）。
+- **否定で終わる見出しを成果物見出しから除く。** `DELIVERABLE_HEADING_RE` は語が含まれていれば
+  一致するので、`## 変更対象外` / `## 対象ファイル外` が成果物見出しだった。地の文を外した後では、
+  「変えるな」を見出しで書くことが**権限を配る最後の書き方**になる。
+
+受け入れた副作用: 完了条件にしか書いていないテスト path は scope に入らず、受入条件がテストを
+求めていれば question で止まる（fixture 93）。短い綴りの `ambiguous_file_candidate` は
+立たなくなる（fixture 57 の期待値をこの向きに改めた。question そのものは見出しの無い fixture 19 が
+固定し続ける）。起票側（cmate-issue-authoring の `validate-plan.mjs`）の写しも同じ commit で揃えた。
+
 ## dispatch（`scripts/dispatch.mjs`）
 
 ### CommandMate #1447 — 公式経路は public `commandmate` である（ADR）

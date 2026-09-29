@@ -158,8 +158,8 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: d73940ccd7f58544036942f6cb4bd797df9a963f662729776ae68ff939ae83cd
-    size: 97916
+    sha256: a3e2ac484ca7db85da704087cd6cea8121b7ab372c3cae46a8a38ada03e65217
+    size: 99666
     kind: instruction
     executable: false
     script: false
@@ -188,8 +188,8 @@ files:
     executable: false
     script: false
   - path: references/plan-contract.md
-    sha256: dd9073b06e10d07cc1ffc37498afc6a020d6b31eea730505743020de18e9aa1f
-    size: 67631
+    sha256: b230afb3d90fe819c3929dd3d38daa4252d9a1f5b5a4be823b57c48042e27276
+    size: 72249
     kind: instruction
     executable: false
     script: false
@@ -200,8 +200,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 533c9abf6bbc3e044a2272b7b137571cd721d06fa0025dd469ebb0ab206fa252
-    size: 231762
+    sha256: b43f2489fa7704e85360b5bb718c2ce925a821e91ce282d70e1d50e6476afe35
+    size: 234734
     kind: instruction
     executable: false
     script: false
@@ -230,8 +230,8 @@ files:
     executable: false
     script: false
   - path: schemas/execution-plan.v2.json
-    sha256: 4930d3ef60e928a1e8016d6a5a8a10ee5f92d0182661ed78decd2dd63ebcce1a
-    size: 32670
+    sha256: ed4f765bbad570620bc195bb5c43ad38d9827230b0b4d5f7bc183765a4595e15
+    size: 32934
     kind: asset
     executable: false
     script: false
@@ -290,8 +290,8 @@ files:
     executable: true
     script: true
   - path: scripts/orchestrate.mjs
-    sha256: c561f47725187474218d2f4a8f05e1b8c025f23bff746770d1828fae6c1c93a2
-    size: 201780
+    sha256: '0b801cda7920d94ba3a3e7abc3928292f3a0b84d0d6ca55b50abf330bd9b1643'
+    size: 207214
     kind: script
     executable: true
     script: true
@@ -302,8 +302,8 @@ files:
     executable: true
     script: true
   - path: scripts/status.mjs
-    sha256: 582497ec72e3e86e978ca3cad8453ad57635cc6d35977166019bf504cc6778e5
-    size: 73498
+    sha256: 8dc818f5774eca1c67b867c5536628cdaed03c6cb5f394d69523341fc6860c06
+    size: 73767
     kind: script
     executable: true
     script: true

@@ -307,6 +307,7 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   shadowed_file_candidate: '他候補の suffix だったため候補から落ちた。Issue 本文で path を完全形で書き直す。',
   scope_pattern_declared: 'notice。宣言 scope に glob / ディレクトリが入っている。plan は展開しないので、pattern そのものを権限として読む（`**` は階層を跨ぐ）。',
   scope_pattern_dropped: 'notice。成果物見出しの外に書いた glob / ディレクトリは scope に入っていない。worker に書かせるなら `## 対象ファイル` へ移して re-plan する。',
+  prose_path_ignored: 'notice。成果物見出しを持つ Issue の、見出しの外にだけ書いた path は scope に入らず reference_files に回っている。worker に書かせるなら `## 対象ファイル` の下へ書き足して re-plan する。',
   cycle_detected: 'dependency-plan.md の edge reason を見て、Issue 本文か --depends で cycle を解く。',
   override_incomplete: '--depends の override が不完全である。両端が plan 内にある形にして再実行する。',
   dependency_order_violation: '--order の主張が DAG と矛盾している。順序を直すか --order を外す。',

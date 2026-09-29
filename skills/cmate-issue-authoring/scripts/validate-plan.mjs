@@ -849,21 +849,38 @@ const SCOPE_PATTERN_RE = /[*?{]|\/$/;
 // (planner Issue #50). Byte-identical to the planner's.
 const DELIVERABLE_HEADING_RE = /(deliverable|成果物|対象ファイル|変更対象|変更ファイル|作成ファイル|編集対象|出力ファイル|生成ファイル|affected files|target files|output files|files to (?:change|edit|create|write|add))/i;
 
+// A heading ending in a negation (`## 変更対象外`, `## 対象ファイル以外`,
+// `## 変更しない`) is NOT a deliverable heading (planner CommandMate #3002).
+// Byte-identical to the planner's.
+const NEGATED_HEADING_RE = /(?:外|以外|しない)[\s:：]*$/;
+
+function plannerIsDeliverableHeading(line) {
+  return DELIVERABLE_HEADING_RE.test(line) && !NEGATED_HEADING_RE.test(line);
+}
+
 // Headings under which a path is cited, not claimed (planner Issue #54).
 // Byte-identical to the planner's.
 const CONTEXT_HEADING_RE = /(根拠|出典|参考|参照|背景|関連|references?|context|background|see also|appendix)/i;
 
-function plannerHeadingSpans(text, matches) {
+// With `nested`, a section runs to the next heading of the same or a higher
+// level, so its `###` subsections belong to it — what a deliverable heading uses
+// (planner Kewton/commandmate-skills#273, folded into CommandMate #3002).
+function plannerHeadingSpans(text, matches, nested = false) {
   const spans = [];
   let offset = 0;
   let open = null;
+  let openLevel = 0;
   for (const line of text.split('\n')) {
     if (HEADING_RE.test(line.trim())) {
-      if (open !== null) {
+      const level = /^#+/.exec(line.trim())[0].length;
+      if (open !== null && (!nested || level <= openLevel)) {
         spans.push([open, offset]);
         open = null;
       }
-      if (matches(line.trim())) open = offset + line.length + 1;
+      if (open === null && matches(line.trim())) {
+        open = offset + line.length + 1;
+        openLevel = level;
+      }
     }
     offset += line.length + 1;
   }
@@ -871,12 +888,11 @@ function plannerHeadingSpans(text, matches) {
   return spans;
 }
 
-const plannerDeliverableSpans = (text) =>
-  plannerHeadingSpans(text, (line) => DELIVERABLE_HEADING_RE.test(line));
+const plannerDeliverableSpans = (text) => plannerHeadingSpans(text, plannerIsDeliverableHeading, true);
 
 // A heading that reads as both is a deliverable heading, as in the planner.
 const plannerContextSpans = (text) =>
-  plannerHeadingSpans(text, (line) => !DELIVERABLE_HEADING_RE.test(line) && CONTEXT_HEADING_RE.test(line));
+  plannerHeadingSpans(text, (line) => !plannerIsDeliverableHeading(line) && CONTEXT_HEADING_RE.test(line));
 
 function plannerFileCandidates(text) {
   // The fourth source is PATTERN-ONLY: CANDIDATE_PATTERN also matches plain
@@ -918,6 +934,12 @@ function plannerFileCandidates(text) {
   }
   // Excluded only when every mention is under a context heading (planner #54).
   const contextOnly = new Set([...inContext].filter((candidate) => !outsideContext.has(candidate)));
+  // In an Issue WITH a deliverable heading, a path written only outside it is a
+  // mention, not a declaration, and does not reach suspected_files (planner
+  // CommandMate #3002). An Issue with no deliverable heading is read as before.
+  const proseOnly = spans.length === 0
+    ? new Set()
+    : new Set(found.filter((candidate) => !deliverable.has(candidate)));
   // A candidate that is a path-boundary suffix of another used to be dropped as
   // a partial of it (planner Issue #49). It is NOT dropped any more (planner
   // Issue #182): which of the two overlapping spellings the Issue means is a
@@ -927,7 +949,7 @@ function plannerFileCandidates(text) {
   // reach suspected_files, so this mirror keeps both too: an Issue whose only
   // paths shadow each other is planner-READY, and a copy that still dropped one
   // would call the same body unready.
-  return { paths: found, deliverable, contextOnly };
+  return { paths: found, deliverable, contextOnly, proseOnly };
 }
 
 // A documentation path is context to read, not a file the Issue is expected to
@@ -942,11 +964,18 @@ function plannerFileCandidates(text) {
 // whatever its extension (Issue #54). An Issue that names its files ONLY as
 // evidence therefore reads as planner-unready here, which is what the planner
 // will conclude too.
+//
+// And the mirror of the prose rule (planner CommandMate #3002): once an Issue
+// has a deliverable heading, only what is under it reaches suspected_files. An
+// Issue whose deliverable heading lists nothing the extraction can read is
+// therefore planner-unready here however many paths its prose names — the
+// planner asks "affected files are unclear" for the same body.
 function plannerSuspectedFiles(text) {
-  const { paths, deliverable, contextOnly } = plannerFileCandidates(text);
+  const { paths, deliverable, contextOnly, proseOnly } = plannerFileCandidates(text);
   return paths.filter(
     (candidate) =>
       !contextOnly.has(candidate) &&
+      !proseOnly.has(candidate) &&
       (deliverable.has(candidate) || (!/^docs\//.test(candidate) && !/\.(md|rst|txt)$/i.test(candidate))),
   );
 }

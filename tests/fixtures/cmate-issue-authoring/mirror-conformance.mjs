@@ -75,6 +75,7 @@ const MIRRORED_CONSTANTS = [
   'CANDIDATE_PATTERN',
   'SCOPE_PATTERN_RE',
   'DELIVERABLE_HEADING_RE',
+  'NEGATED_HEADING_RE',
   'CONTEXT_HEADING_RE',
 ];
 
@@ -103,6 +104,7 @@ export function analyze(text) {
     extraction.paths,
     extraction.deliverable,
     extraction.contextOnly,
+    extraction.proseOnly,
   );
   return {
     objective: firstNonEmptyLine(text),
@@ -110,6 +112,7 @@ export function analyze(text) {
     paths: extraction.paths,
     deliverable: [...extraction.deliverable].sort(),
     context_only: [...extraction.contextOnly].sort(),
+    prose_only: [...extraction.proseOnly].sort(),
     suspected: classified.suspected,
   };
 }
@@ -124,6 +127,7 @@ export function analyze(text) {
     paths: extraction.paths,
     deliverable: [...extraction.deliverable].sort(),
     context_only: [...extraction.contextOnly].sort(),
+    prose_only: [...extraction.proseOnly].sort(),
     suspected: plannerSuspectedFiles(text),
   };
 }
@@ -352,6 +356,44 @@ const CORPUS = [
       '- 単独の `**` は宣言として受け取る（planner が over_broad で落とす）',
     ].join('\n'),
   },
+  // Planner CommandMate #3002. Once a deliverable heading exists, a path written
+  // only outside it — prose, 完了条件, an addendum, with or without a "/" — is a
+  // mention and stays out of suspected_files.
+  {
+    name: 'a path outside the deliverable heading is prose once one exists',
+    text: [
+      '依存の宣言を更新する。',
+      '',
+      '## 対象ファイル',
+      '- `src/loader.ts`',
+      '',
+      '## 完了条件',
+      '- [ ] `pkg/app/package.json` の差分が 0',
+      '- [ ] `ci.yml` に手を入れる必要が出たら止めて返す',
+      '- [ ] src/loader.ts が読み込む',
+    ].join('\n'),
+  },
+  // Kewton/commandmate-skills#273: a deliverable heading's subsections belong
+  // to it, so a document under `### 新規ファイル` is still a deliverable; and a
+  // heading ending in a negation is not a deliverable heading (#3002).
+  {
+    name: 'subsections stay inside a deliverable heading and a negated heading is not one',
+    text: [
+      '見出しの入れ子。',
+      '',
+      '## 対象ファイル',
+      '### 既存ファイル',
+      '- `src/nested/a.ts`',
+      '### 新規ファイル',
+      '- `docs/nested/b.md`',
+      '',
+      '## 変更対象外',
+      '- `src/nested/untouched.ts`',
+      '',
+      '## 対象ファイル以外',
+      '- `src/nested/other.ts`',
+    ].join('\n'),
+  },
   {
     name: 'an empty body extracts nothing',
     text: '',
@@ -410,6 +452,29 @@ const LIVENESS = [
         (entry) =>
           entry.planner.paths.includes('web/src/lib/filter.ts') &&
           entry.planner.paths.includes('src/lib/filter.ts'),
+      ),
+  },
+  // Planner CommandMate #3002 / Kewton/commandmate-skills#273.
+  {
+    name: 'the corpus reaches a prose path an issue with a deliverable heading does not claim',
+    holds: (results) =>
+      results.some(
+        (entry) =>
+          entry.planner.suspected.includes('src/loader.ts') &&
+          entry.planner.prose_only.includes('pkg/app/package.json') &&
+          entry.planner.prose_only.includes('ci.yml') &&
+          !entry.planner.suspected.includes('ci.yml'),
+      ),
+  },
+  {
+    name: 'the corpus reaches a nested subsection and a negated heading',
+    holds: (results) =>
+      results.some(
+        (entry) =>
+          entry.planner.suspected.includes('docs/nested/b.md') &&
+          entry.planner.suspected.includes('src/nested/a.ts') &&
+          !entry.planner.suspected.includes('src/nested/untouched.ts') &&
+          !entry.planner.suspected.includes('src/nested/other.ts'),
       ),
   },
   {

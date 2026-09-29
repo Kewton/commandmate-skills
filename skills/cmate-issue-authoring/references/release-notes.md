@@ -19,6 +19,20 @@ install 先で走らせるよう案内している箇所は無い。
 
 ## Changelog
 
+### 成果物見出しの外の path は scope に入らない（planner CommandMate #3002 / #273）
+
+- **planner の抽出規則が変わったので、mirror も同じ commit で揃えた。** 成果物見出しを持つ本文では、
+  見出しの範囲の外にだけ書いた path が `suspected_files` に入らない（`plannerFileCandidates` が
+  `proseOnly` を返し、`plannerSuspectedFiles` がそれを除く）。見出しの範囲は下位の `###` で切れず
+  （#273）、「外」「以外」「しない」で終わる見出しは成果物見出しではない（新定数
+  `NEGATED_HEADING_RE`。planner と byte 同一）。
+- **これが消しに来た事象**: 完了条件に「`package.json` の差分が 0」「`ci.yml` に手を入れるなら止める」
+  と書いた file に書き込み権限が付いていた（Kewton/Musunest #181 / #183）。
+- **`planner_ready` の判定が変わる本文がある。** 成果物見出しはあるが、その下に読める path が無く、
+  散文にだけ path を書いた本文は、これまで ready だったが今は unready である —— planner が
+  `no_suspected_files` を立てるのと同じ判定である。書き方は
+  [issue-body-contract.md](./issue-body-contract.md) 第 2.3 節に足した。
+
 ### 0.9.0 — 対象ファイル節に glob / ディレクトリを書け、閾値は散文でなくゲートで書く（planner Issue #219 / #218）
 
 - **planner の抽出に4つ目の source（`CANDIDATE_PATTERN`）が入ったので、mirror も同時に更新した。**

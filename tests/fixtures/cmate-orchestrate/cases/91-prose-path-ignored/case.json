@@ -1,0 +1,66 @@
+{
+  "description": "CommandMate #3002 (+ Kewton/commandmate-skills#273): an issue WITH a deliverable heading has declared its scope, so a path it writes anywhere else — `## やること`, `## 完了条件`, `## 追記 N`, with or without a `/` (`app.spec.yaml`) — is a mention, not a declaration. Measured on Kewton/Musunest: \"the diff of package.json is zero\" (#181) and \"stop if ci.yml needs a change\" (#183) GRANTED write permission on the file they forbade; a bare `app.spec.yaml` (#211) became an undeclared scope entry; and a short sample spelling in an addendum (#180) raised `ambiguous_file_candidate` for two days. All of them now go to `reference_files` and ONE `prose_path_ignored` notice per issue names them (a harness path is left out: #177 already denies it silently by design). Three more halves are pinned here: `### 既存ファイル` / `### 新規ファイル` do NOT close `## 対象ファイル` (#273 — the document under a subsection stays a deliverable), and `## 変更対象外` is NOT a deliverable heading even though it contains 変更対象 (its file stays out of scope).",
+  "args": [
+    "910",
+    "--profile",
+    "node-commandmate"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [
+      "prose_path_ignored"
+    ],
+    "suspected_files": {
+      "910": [
+        "packages/appspec/src/loader.ts",
+        "docs/user/appspec.md",
+        "packages/appspec/src/schema.ts",
+        "packages/appspec/src/loader.test.ts",
+        "packages/appspec/src/loader.spec.ts",
+        "packages/appspec/src/__tests__/loader.ts",
+        "packages/appspec/src/__tests__/loader.test.ts",
+        "packages/appspec/src/schema.test.ts",
+        "packages/appspec/src/schema.spec.ts",
+        "packages/appspec/src/__tests__/schema.ts",
+        "packages/appspec/src/__tests__/schema.test.ts"
+      ]
+    },
+    "scope_defaults": {
+      "910": [
+        "packages/appspec/src/loader.test.ts",
+        "packages/appspec/src/loader.spec.ts",
+        "packages/appspec/src/__tests__/loader.ts",
+        "packages/appspec/src/__tests__/loader.test.ts",
+        "packages/appspec/src/schema.test.ts",
+        "packages/appspec/src/schema.spec.ts",
+        "packages/appspec/src/__tests__/schema.ts",
+        "packages/appspec/src/__tests__/schema.test.ts"
+      ]
+    },
+    "reference_files": {
+      "910": [
+        "packages/appspec/package.json",
+        "packages/appspec/src/legacy.ts",
+        ".github/workflows/ci.yml",
+        "app.spec.yaml",
+        "src/loader.ts",
+        ".claude/skills/cmate-verify/scripts/verify-run.sh"
+      ]
+    },
+    "questions_count": {
+      "910": 0
+    },
+    "risk_level": "low",
+    "warning_severities": [
+      "notice"
+    ],
+    "warning_details_include": [
+      "`packages/appspec/package.json`",
+      "`.github/workflows/ci.yml`",
+      "`app.spec.yaml`",
+      "`src/loader.ts`",
+      "5 path(s)"
+    ]
+  }
+}

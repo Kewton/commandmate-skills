@@ -1045,6 +1045,21 @@ const SCOPE_PATTERN_RE = /[*?{]|\/$/;
 // decide that. Mirrored in cmate-issue-authoring scripts/validate-plan.mjs.
 const DELIVERABLE_HEADING_RE = /(deliverable|成果物|対象ファイル|変更対象|変更ファイル|作成ファイル|編集対象|出力ファイル|生成ファイル|affected files|target files|output files|files to (?:change|edit|create|write|add))/i;
 
+// A heading that NEGATES the vocabulary above (CommandMate #3002).
+// DELIVERABLE_HEADING_RE matches a word anywhere in the heading, so
+// `## 変更対象外` and `## 対象ファイル外` — the headings an author writes to say
+// "do not touch these" — used to be deliverable headings, and the files listed
+// under them reached scope.allow. Once prose paths stop reaching the scope, that
+// would be the one way left to grant write permission by forbidding it. The
+// negation is read only at the END of the heading, where Japanese puts it; a
+// trailing colon is tolerated. Mirrored in cmate-issue-authoring
+// scripts/validate-plan.mjs.
+const NEGATED_HEADING_RE = /(?:外|以外|しない)[\s:：]*$/;
+
+function isDeliverableHeading(line) {
+  return DELIVERABLE_HEADING_RE.test(line) && !NEGATED_HEADING_RE.test(line);
+}
+
 // The counterpart of DELIVERABLE_HEADING_RE (Issue #54). #50 gave an issue a way
 // to say "this path IS what I produce" but no way to say the opposite, and a bug
 // report cites the file it reproduces in — as `path:line`, under 根拠 — far more
@@ -1063,18 +1078,32 @@ const CONTEXT_HEADING_RE = /(根拠|出典|参考|参照|背景|関連|reference
 // Character offsets covered by the sections whose heading `matches`, so a
 // candidate's position in the body decides how it is classified. A section runs
 // from the line after its heading to the next heading of any level (or end of
-// text).
-function headingSpans(text, matches) {
+// text) — or, with `nested`, to the next heading of the SAME OR A HIGHER level,
+// so its subsections belong to it.
+//
+// `nested` is what a deliverable heading uses (Kewton/commandmate-skills#273,
+// folded into CommandMate #3002). `## 対象ファイル` split into `### 既存ファイル`
+// / `### 新規ファイル` ended at the first `###`, so a document listed under a
+// subsection was not a deliverable and fell to `reference_files`. While prose
+// paths still reached the scope that cost only documents; once they do not, it
+// would cost every path under every subsection. Context headings keep the old
+// reach: nothing measured asks for more.
+function headingSpans(text, matches, nested = false) {
   const spans = [];
   let offset = 0;
   let open = null;
+  let openLevel = 0;
   for (const line of text.split('\n')) {
     if (HEADING_RE.test(line.trim())) {
-      if (open !== null) {
+      const level = /^#+/.exec(line.trim())[0].length;
+      if (open !== null && (!nested || level <= openLevel)) {
         spans.push([open, offset]);
         open = null;
       }
-      if (matches(line.trim())) open = offset + line.length + 1;
+      if (open === null && matches(line.trim())) {
+        open = offset + line.length + 1;
+        openLevel = level;
+      }
     }
     offset += line.length + 1;
   }
@@ -1082,23 +1111,25 @@ function headingSpans(text, matches) {
   return spans;
 }
 
-const deliverableSpans = (text) => headingSpans(text, (line) => DELIVERABLE_HEADING_RE.test(line));
+const deliverableSpans = (text) => headingSpans(text, isDeliverableHeading, true);
 
 // A heading that reads as both ("## 対象ファイル（参考）") is a deliverable
 // heading: the statement that something is produced outranks the one that it is
 // only context, the same precedence a candidate gets below.
 const contextSpans = (text) =>
-  headingSpans(text, (line) => !DELIVERABLE_HEADING_RE.test(line) && CONTEXT_HEADING_RE.test(line));
+  headingSpans(text, (line) => !isDeliverableHeading(line) && CONTEXT_HEADING_RE.test(line));
 
 function inSpans(spans, index) {
   return spans.some(([start, end]) => index >= start && index < end);
 }
 
-// Returns { paths, deliverable, contextOnly, shadowed, droppedPatterns }: the
-// de-duplicated candidates in order of first appearance, the subset a
-// deliverable heading covers, the subset that appears ONLY under a context
-// heading, the pairs where one candidate is a path-boundary suffix of another,
-// and the scope patterns no deliverable heading claimed.
+// Returns { paths, deliverable, contextOnly, proseOnly, shadowed,
+// droppedPatterns }: the de-duplicated candidates in order of first appearance,
+// the subset a deliverable heading covers, the subset that appears ONLY under a
+// context heading, the subset an issue WITH a deliverable heading wrote only
+// outside it (CommandMate #3002), the pairs where one candidate is a
+// path-boundary suffix of another, and the scope patterns no deliverable
+// heading claimed.
 function extractFileCandidates(text) {
   // The fourth source is PATTERN-ONLY. CANDIDATE_PATTERN also matches plain
   // paths — including shapes the first three deliberately refuse, such as
@@ -1156,10 +1187,25 @@ function extractFileCandidates(text) {
   // the instruction. This also gives deliverable headings their precedence for
   // free, since a deliverable span is never a context span.
   const contextOnly = new Set([...inContext].filter((candidate) => !outsideContext.has(candidate)));
+  // An issue that HAS a deliverable heading has said which files it produces,
+  // and a path it wrote anywhere else — prose, 完了条件, the title — is a
+  // mention, not a declaration (CommandMate #3002). Measured on Kewton/Musunest:
+  // "the diff of <manifest> is zero" (#181) and "stop if `ci.yml` needs a change"
+  // (#183) both GRANTED write permission on the file they forbade, so the files
+  // an author most wanted untouched were the ones that reached scope.allow. It is
+  // the rule #219 drew for patterns, extended to every candidate, and it applies
+  // only where the issue gave the planner a declaration to prefer: an issue with
+  // no deliverable heading is read exactly as before, because there the prose IS
+  // the only statement of what changes. A path written both under the heading
+  // and elsewhere is a deliverable — the stronger statement wins, as above.
+  const proseOnly = spans.length === 0
+    ? new Set()
+    : new Set(found.filter((candidate) => !deliverable.has(candidate)));
   return {
     paths: found,
     deliverable,
     contextOnly,
+    proseOnly,
     shadowed: shadowedCandidates(found),
     // A pattern the issue declares under `## 対象ファイル` and ALSO cites under
     // `## 根拠` is not a drop: the declaration already won above.
@@ -1385,6 +1431,24 @@ function extractionWarnings(analyses) {
         ),
       });
     }
+    // The same finding for plain paths (CommandMate #3002), in the same shape:
+    // one entry per issue, a tally, the first few by name, one sentence of fix.
+    if (analysis._prosePathsIgnored.length > 0) {
+      const ignored = analysis._prosePathsIgnored;
+      const samples = ignored.slice(0, 5).map((path) => `\`${path}\``).join(', ');
+      const more = ignored.length > 5 ? `, …and ${ignored.length - 5} more` : '';
+      out.push({
+        code: 'prose_path_ignored',
+        detail: redact(
+          `#${analysis.number} has a deliverable heading, and writes ${ignored.length} path(s) only outside it: ` +
+            `${samples}${more}. An issue that lists its files under \`## 対象ファイル\` / \`## 成果物\` / ` +
+            '`## Deliverables` (DELIVERABLE_HEADING_RE) has declared its scope, so a path in the prose, the ' +
+            'acceptance criteria or the title is read as a mention — "do not touch X" names X too — and goes to ' +
+            '`reference_files` (read, not in `scope.allow`). If the worker must WRITE one of them, add it under the ' +
+            'deliverable heading and re-plan.',
+        ),
+      });
+    }
   }
   return out;
 }
@@ -1553,19 +1617,30 @@ function openQuestionWarnings(analyses) {
 // The symmetric statement is a path mentioned only under a context heading
 // (Issue #54): the issue is citing it, not claiming it. Extension says nothing
 // about that case — a cited `src/foo.ts` is code — so the position has to.
-function classifyFileCandidates(candidates, deliverable, contextOnly) {
+//
+// The third statement is position again (CommandMate #3002): in an issue that
+// has a deliverable heading, a path written only outside it is read, not
+// written. It is checked LAST, so `ignored` holds exactly the paths this rule
+// moved — the ones that would have reached scope.allow before it existed — and
+// a cited path or a document, which were references already, is not reported a
+// second time.
+function classifyFileCandidates(candidates, deliverable, contextOnly, proseOnly = new Set()) {
   const suspected = [];
   const references = [];
+  const ignored = [];
   for (const candidate of candidates) {
     if (contextOnly.has(candidate)) {
       references.push(candidate);
     } else if (!deliverable.has(candidate) && (/^docs\//.test(candidate) || /\.(md|rst|txt)$/i.test(candidate))) {
       references.push(candidate);
+    } else if (proseOnly.has(candidate)) {
+      references.push(candidate);
+      ignored.push(candidate);
     } else {
       suspected.push(candidate);
     }
   }
-  return { suspected, references };
+  return { suspected, references, ignored };
 }
 
 // Ecosystem lockfiles that a dependency-manifest edit drags along (CommandMate
@@ -2562,6 +2637,7 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
     extraction.paths,
     extraction.deliverable,
     extraction.contextOnly,
+    extraction.proseOnly,
   );
   // Deny-by-default for the agent harness (Issue #177), applied HERE — after the
   // context/product split, before any default is derived. Both halves of that
@@ -2760,6 +2836,12 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
     // Harness paths a deliverable heading claimed, hence granted (Issue #177).
     // The denied ones need no private field: they are in `reference_files`.
     _harnessPathsInScope: harness.declared,
+    // Paths an issue with a deliverable heading wrote only outside it
+    // (CommandMate #3002). They are in `reference_files`; this is what names
+    // them in `prose_path_ignored`. A harness path is left out: outside a
+    // deliverable heading it is denied by #177 anyway, silently by design, and
+    // naming it here would re-raise the noise that design avoids.
+    _prosePathsIgnored: classified.ignored.filter((path) => !isHarnessPath(path)),
   };
 }
 
@@ -3531,10 +3613,16 @@ function completionChecks(plan, dependencyErrors, ranOverwriteGuard) {
 //     `unverified_profile` factor at `high` and `profile.verified` is still
 //     `false` in the plan. Only the colour moved.
 //
+// CommandMate #3002 added `prose_path_ignored`, on the side and for the reason
+// `scope_pattern_dropped` is there: an issue that HAS a deliverable heading has
+// declared its scope, and the warning reports that a path written only outside
+// it was not read as a declaration — a fact about where the author wrote it,
+// raised on correctly written issues too ("the diff of X is zero").
+//
 // `harness_path_in_scope` is unchanged in every other respect: it still fires, it
 // still names the path, it still sits in `plan.warnings` and in the recovery
 // table. Only the colour moved.
-const NOTICE_WARNING_CODES = new Set(['harness_path_in_scope', 'profile_repository_override', 'scope_pattern_declared', 'scope_pattern_dropped']);
+const NOTICE_WARNING_CODES = new Set(['harness_path_in_scope', 'profile_repository_override', 'scope_pattern_declared', 'scope_pattern_dropped', 'prose_path_ignored']);
 
 // `severity` is written on NOTICE entries only. `blocking` stays implicit, which
 // buys two things at once:
