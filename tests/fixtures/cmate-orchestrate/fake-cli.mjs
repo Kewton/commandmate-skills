@@ -167,7 +167,7 @@ function measureScript(values) {
 }
 
 // commandmate subcommands this fake emulates. Only these are contract-checked.
-const COMMANDMATE_SUBS = new Set(['ls', 'send', 'wait', 'capture', 'respond', 'verify', 'sync']);
+const COMMANDMATE_SUBS = new Set(['ls', 'send', 'wait', 'capture', 'respond', 'verify', 'sync', 'interrupt']);
 
 // The flags a pre-0.17.0 commandmate does not have. A scenario without
 // `cli_contract: true` refuses them and hides them from --help, so the runner's
@@ -185,6 +185,7 @@ const HELP_FLAGS = {
   ls: ['--json', '--quiet', '--branch', '--id', '--token'],
   verify: ['--instance', '--gates', '--json', '--timeout', '--token'],
   sync: ['--json', '--token'],
+  interrupt: ['--json', '--instance', '--token'],
 };
 
 // wait exit codes (mirror the real CLI's WaitExitCode).
@@ -480,6 +481,20 @@ function bumpSends(issue) {
   } catch {
     // best effort; commit progression simply will not advance if we cannot record it
   }
+}
+
+// The question screen an earlier turn left on this worker's session
+// (CommandMate#3007): `workers.<n>.stale_screen` names a `capture --json`
+// document under stale-screens/, served until a `commandmate interrupt` has
+// cleared it. Null when there is none (any more).
+function interruptedMarkerPath(issue) {
+  const dir = process.env.CMATE_FAKE_STATE;
+  return dir && issue != null ? join(dir, `interrupted-${issue}`) : null;
+}
+function staleScreenFor(worker, issue) {
+  if (typeof worker.stale_screen !== 'string') return null;
+  if (markerExists(interruptedMarkerPath(issue))) return null;
+  return JSON.parse(readFileSync(join(HERE, 'stale-screens', worker.stale_screen), 'utf8'));
 }
 
 // Per-issue send-ATTEMPT counter for `send_refusals` (CommandMate#3006). Kept
@@ -1547,6 +1562,15 @@ function main() {
     // a row of the contract's `send_failures` (exit code and stderr verbatim), or
     // null for "this attempt goes through". The list running out means every
     // later attempt goes through.
+    // A question screen an earlier turn left behind (CommandMate#3007) holds the
+    // composer, and upstream refuses the send the way it refuses it for real: a
+    // prompt the server can read is 409 PROMPT_WAITING (exit 2), a selection
+    // screen it cannot read only times the composer wait out (exit 99).
+    const stale = staleScreenFor(worker, issue);
+    if (stale !== null) {
+      const row = sendFailure(stale.isPromptWaiting === true ? 'prompt_waiting' : 'prompt_not_ready');
+      fail(row.stderr.replace(/<worktree-id>/g, worktreeId), row.exit);
+    }
     const refusal = nextSendRefusal(worker, issue);
     if (refusal !== null) {
       const row = sendFailure(refusal);
@@ -1810,9 +1834,17 @@ function main() {
       process.stdout.write('Session: <no output captured>\n');
       process.exit(0);
     }
+    // The stale screen first (CommandMate#3007): it is what the session shows
+    // before this run has sent anything, and until an interrupt clears it.
+    const stale = staleScreenFor(worker, issue);
+    if (stale !== null) emit(stale);
     const marker = respondedMarkerPath(issue);
     const responded = Boolean(marker && existsSync(marker));
-    if (worker.state === 'prompt' && !responded) {
+    // A worker's OWN prompt belongs to a turn this run started, so it appears
+    // only once something has been sent. Before #3007 nothing read the session
+    // ahead of the first send and the distinction did not show; now the pre-send
+    // look would read a prompt that has not happened yet as a stale one.
+    if (worker.state === 'prompt' && !responded && readSends(issue) >= 1) {
       const prompt = promptQuestion(worker);
       emit({
         isRunning: true,
@@ -1856,6 +1888,30 @@ function main() {
       cliToolId: 'claude',
       ...extra,
     });
+  }
+  if (sub === 'interrupt') {
+    // `commandmate interrupt <worktree-id>` (CommandMate 0.28.0+): the GUI's
+    // interrupt button — Esc on a question or plan-review screen. `workers.<n>.
+    // interrupt` tunes it: "fail" is the CLI's exit 30 (no active session, nothing
+    // interrupted), "no_effect" succeeds but leaves the screen up (the case the
+    // runner must re-read for). Reaching here never answers anything: `respond`
+    // stays uncalled, which is what the cases assert.
+    const worktreeId = argv[1];
+    const issue = issueFromId(worktreeId);
+    const worker = workerSpec(spec, issue);
+    if (worker.interrupt === 'fail') {
+      fail(`Error: No active sessions found for worktree '${worktreeId}'. Nothing was interrupted.`, 30);
+    }
+    const marker = interruptedMarkerPath(issue);
+    if (marker && worker.interrupt !== 'no_effect') {
+      try {
+        writeFileSync(marker, 'interrupted');
+      } catch {
+        // best effort; the screen simply stays up
+      }
+    }
+    process.stdout.write('Interrupted.\n');
+    process.exit(0);
   }
   if (sub === 'respond') {
     // `commandmate respond <worktree-id> <answer>`. Reaching here at all is the

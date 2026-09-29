@@ -522,6 +522,14 @@ Options:
                          The plan's profile may declare this default instead
                          (dispatch_defaults.max_turns); the flag always wins.
   --poll-limit <n>       Retained for compatibility; wait now blocks (default ${DEFAULT_POLL_LIMIT}).
+  --interrupt-stale-prompt
+                         Before a worker's first send, dispatch reads the
+                         session (capture --json). A question or selection screen
+                         left by an earlier turn stops that issue with
+                         stale_prompt_on_session (the default). With this flag it
+                         runs "commandmate interrupt" instead, re-reads the
+                         session, and sends only once the composer is back. The
+                         question is never answered.
   --help                 Show this help.
 
 The dispatch runner mutates: it sends work to real workers, nudging each until it
@@ -561,6 +569,7 @@ function parseCli(argv) {
         'wait-timeout': { type: 'string' },
         'max-turns': { type: 'string' },
         'poll-limit': { type: 'string' },
+        'interrupt-stale-prompt': { type: 'boolean' },
         help: { type: 'boolean' },
       },
     });
@@ -811,6 +820,7 @@ function resolveInputs(parsed) {
     waitTimeout: stated.waitTimeout ?? DEFAULT_WAIT_TIMEOUT_SECONDS,
     maxTurns: stated.maxTurns ?? DEFAULT_MAX_TURNS,
     pollLimit: positiveInt(values['poll-limit'], 'poll-limit', DEFAULT_POLL_LIMIT),
+    interruptStalePrompt: Boolean(values['interrupt-stale-prompt']),
     stated,
     // Filled in by applyDispatchDefaults, and read by emptyReport. Empty on a run
     // whose profile declares nothing, which is what keeps such a run's report
@@ -3900,14 +3910,14 @@ async function sendAndConfirm(inputs, worktreeId, message, { armAutoYes = false 
 }
 
 // What happened on the send side of each worker, keyed by worktree id and read
-// back once its supervision has returned (CommandMate#3006). A side
+// back once its supervision has returned (CommandMate#3006 / #3007). A side
 // table rather than a field on every return of the two supervision loops: those
 // have a dozen exits each, and a fact that only some of them remembered to carry
 // is a fact the report would lose on the others.
 const sendTraces = new Map();
 
 function sendTraceOf(worktreeId) {
-  if (!sendTraces.has(worktreeId)) sendTraces.set(worktreeId, { notReadyRetries: [] });
+  if (!sendTraces.has(worktreeId)) sendTraces.set(worktreeId, { notReadyRetries: [], stalePrompt: null });
   return sendTraces.get(worktreeId);
 }
 
@@ -3954,6 +3964,106 @@ function notReadyRetryLimitation(issue, entry) {
       + (entry.contract && entry.outcome === 'sent'
         ? '. The refused `send --contract` had already marked its task failed, so the recorded task id is the retry\'s'
         : '')),
+  };
+}
+
+// A question left on the session by an EARLIER turn (CommandMate#3007).
+//
+// MEASURED (Kewton/Musunest #201 / #204): a worker that stopped on a question in a
+// previous run still shows it when the next contract is sent to the same session,
+// and the question UI holds the composer. Upstream refuses such a send in two
+// different ways, neither of which says "a stale question": a question the
+// scraper can read is 409 PROMPT_WAITING (exit 2), while one it cannot read — and
+// Command Code's plan review, which the send guard deliberately does not count —
+// only times out the composer wait (exit 99, "prompt not ready"). So dispatch
+// LOOKS before the first send: one `capture --json`, and either of the two flags
+// the server publishes for "a human has to decide on this screen" stops it.
+//
+//   isPromptWaiting        a prompt the server can answer (AskUserQuestion, y/n)
+//   isSelectionListActive  a selection screen it cannot answer for anyone
+//                          (an unreadable question UI, the plan review)
+//
+// The question is NEVER answered — not with --auto-yes either: it belongs to a
+// turn whose context this run does not have. The default is to stop with
+// `stale_prompt_on_session`. `--interrupt-stale-prompt` dismisses it with
+// `commandmate interrupt` (the GUI's interrupt button; Esc on these screens),
+// reads the session again, and sends only when neither flag is up any more.
+//
+// A capture that cannot be read does not stop the send: this check is a
+// narrowing on top of the server's own guard, which is fail-open for the same
+// reason (a false refusal makes a session nobody can talk to), and the send
+// itself is still refused upstream if a readable prompt is there.
+const STALE_PROMPT_SETTLE_MS = 3000;
+const STALE_SCREEN_FLAGS = ['isPromptWaiting', 'isSelectionListActive'];
+
+function readStaleScreen(result) {
+  const payload = parseCliJson(result);
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const flags = STALE_SCREEN_FLAGS.filter((flag) => payload[flag] === true);
+  const question = typeof payload.promptData?.question === 'string' ? payload.promptData.question : '';
+  return {
+    flags,
+    excerpt: excerpt(question || (typeof payload.content === 'string' ? payload.content : '')) ?? 'a question or selection screen',
+  };
+}
+
+// Null when the first send may go ahead; otherwise the stop, already recorded in
+// the worker's send trace.
+async function clearStalePrompt(inputs, worktreeId) {
+  const screen = readStaleScreen(await runCmAsync(inputs, ['capture', worktreeId, '--json']));
+  if (screen === null || screen.flags.length === 0) return null;
+  const record = { flags: screen.flags, excerpt: screen.excerpt, action: 'stopped', detail: null };
+  sendTraceOf(worktreeId).stalePrompt = record;
+  if (!inputs.interruptStalePrompt) return record;
+  const interrupted = await runCmAsync(inputs, ['interrupt', worktreeId]);
+  if (!interrupted.ok) {
+    record.action = 'interrupt_failed';
+    record.detail = `\`commandmate interrupt\` exited ${interrupted.status ?? 'with an error'} (${excerpt(interrupted.stderr || interrupted.stdout) ?? 'no output'})`;
+    return record;
+  }
+  await sleepMs(sendPauseMs(STALE_PROMPT_SETTLE_MS));
+  const after = readStaleScreen(await runCmAsync(inputs, ['capture', worktreeId, '--json']));
+  if (after === null) {
+    record.action = 'not_confirmed';
+    record.detail = 'the session could not be read after the interrupt, so nothing shows the composer is back';
+    return record;
+  }
+  if (after.flags.length > 0) {
+    record.action = 'still_on_screen';
+    record.detail = `the session still reports ${after.flags.join(' / ')} after the interrupt (${after.excerpt})`;
+    return record;
+  }
+  record.action = 'interrupted';
+  return null;
+}
+
+// The supervision result for a worker stopped by a stale screen. `prompt`,
+// because that is what it is — a session waiting on a human's decision — and the
+// halt ladder already stops the run for a human on it.
+function stalePromptStop(stale) {
+  return `a question from an earlier turn is still on this session (${stale.flags.join(' / ')}); nothing was sent and it was not answered`
+    + (stale.detail ? `; --interrupt-stale-prompt did not clear it: ${stale.detail}` : '');
+}
+
+function stalePromptBlockingReason(issue, stale) {
+  return {
+    code: 'stale_prompt_on_session',
+    detail: redact(`#${issue}: before the first send, \`commandmate capture --json\` showed ${stale.flags.join(' and ')} — a question or selection screen `
+      + `left by an earlier turn holds the composer: "${stale.excerpt}". Nothing was sent, and the question was NOT answered. `
+      + (stale.detail
+        ? `--interrupt-stale-prompt was given and did not clear it: ${stale.detail}. Look at the session (\`commandmate capture <worktree-id>\`) before doing anything else. `
+        : 'Look at it (`commandmate capture <worktree-id>`); if it belongs to a turn that is over, dismiss it WITHOUT answering with `commandmate interrupt <worktree-id>` '
+          + '(or re-run with --interrupt-stale-prompt, which does that and sends only once the composer is back); if it still matters, answer it yourself. ')
+      + 'Then re-dispatch this issue with --resume'),
+  };
+}
+
+function stalePromptInterruptedLimitation(issue, stale) {
+  return {
+    code: 'stale_prompt_interrupted',
+    detail: redact(`#${issue}: before the first send the session showed ${stale.flags.join(' and ')} from an earlier turn ("${stale.excerpt}"). `
+      + 'Under --interrupt-stale-prompt it was dismissed with `commandmate interrupt` WITHOUT being answered, a second capture showed the composer back, and only then was this run\'s work sent. '
+      + 'Whatever that question asked was not decided by anyone'),
   };
 }
 
@@ -4323,6 +4433,13 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
   const startedAtMs = Date.now();
   let autoResponded = false;
 
+  const stale = await clearStalePrompt(inputs, worktreeId);
+  if (stale !== null) {
+    return {
+      state: 'prompt', taskId: null, verdict: null, notJudged: false,
+      promptExcerpt: stale.excerpt, nudges: 0, autoResponded, note: stalePromptStop(stale),
+    };
+  }
   const sent0 = await sendContractAndConfirm(inputs, worktreeId, relativeContractPath);
   if (!sent0.sent) {
     // A send that failed after the deadline failed BECAUSE of the deadline: the
@@ -4622,6 +4739,13 @@ async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMes
   // #136): `--auto-yes` promises "prompts do not stop this run", and which
   // dispatch path a CLI version put the run on is not something the operator who
   // passed the flag chose.
+  // The stale-screen check (CommandMate#3007), BEFORE auto-yes is armed: a
+  // worktree whose session holds an old question must not be given a window in
+  // which the server could answer it.
+  const stale = await clearStalePrompt(inputs, worktreeId);
+  if (stale !== null) {
+    return { state: 'prompt', promptExcerpt: stale.excerpt, nudges: 0, autoResponded, note: stalePromptStop(stale) };
+  }
   const sent0 = await sendAndConfirm(inputs, worktreeId, initialMessage, { armAutoYes: true });
   if (!sent0.sent) {
     // As on the contract path: a send the budget killed is a stopped clock.
@@ -5851,8 +5975,8 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   // the report by whichever worker happened to finish first and two runs of the
   // same plan could differ.
   const scopeUnsatisfiable = new Map();
-  // What the send side did for each issue (CommandMate#3006): a not-ready
-  // retry. Read out
+  // What the send side did for each issue (CommandMate#3006 / #3007): a
+  // not-ready retry, or a stale question found before the first send. Read out
   // in plan order by recordScopeAndLivenessReasons, like the entries above.
   const sendTraceByIssue = new Map();
 
@@ -6282,12 +6406,19 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
       });
     }
 
-    // The send side (CommandMate#3006), in `workers` order for the same reason
-    // as everything in this pass. Every not-ready retry is a limitation: the run
-    // went on, and the report still has to say a send was repeated.
+    // The send side (CommandMate#3006 / #3007), in `workers` order for the same
+    // reason as everything in this pass. A stale question that stopped the send
+    // is a blocking reason — it is why this worker never started; one that was
+    // interrupted, and every not-ready retry, is a limitation: the run went on,
+    // and the report still has to say it did so by acting on the session.
     for (const worker of workers) {
       const trace = sendTraceByIssue.get(worker.issue);
       if (!trace) continue;
+      if (trace.stalePrompt && trace.stalePrompt.action === 'interrupted') {
+        report.limitations.push(stalePromptInterruptedLimitation(worker.issue, trace.stalePrompt));
+      } else if (trace.stalePrompt) {
+        report.blocking_reasons.push(stalePromptBlockingReason(worker.issue, trace.stalePrompt));
+      }
       for (const entry of trace.notReadyRetries) report.limitations.push(notReadyRetryLimitation(worker.issue, entry));
     }
 

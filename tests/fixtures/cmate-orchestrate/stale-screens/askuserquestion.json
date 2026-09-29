@@ -1,0 +1,45 @@
+{
+  "isRunning": true,
+  "isGenerating": false,
+  "thinking": false,
+  "cliToolId": "command-code",
+  "sessionStatus": "waiting",
+  "isPromptWaiting": true,
+  "isSelectionListActive": false,
+  "content": "❯ Draft a dispatch plan for the sample backlog.\n\n✻ Thought for 1 second [ctrl+o to expand]\n\n⠶ Here is the plan. I will wait for your decision before creating anything.\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\n● Dispatch | ◯ Review\n\nApprove proceeding from the plan into worktree creation and dispatch?\n\n❯ 1. Prepare worktrees + dispatch (Recommended)\n     I create the worktrees and pause for you to answer.\n  2. Worktrees only, then pause\n     I create the worktrees and stop for inspection.\n  3. Stop at the plan\n     No worktrees, no workers.\n  4. Type something...",
+  "promptData": {
+    "type": "multiple_choice",
+    "question": "Approve proceeding from the plan into worktree creation and dispatch?",
+    "options": [
+      {
+        "number": 1,
+        "label": "Prepare worktrees + dispatch (Recommended) I create the worktrees and pause for you to answer.",
+        "isDefault": true,
+        "requiresTextInput": false
+      },
+      {
+        "number": 2,
+        "label": "Worktrees only, then pause I create the worktrees and stop for inspection.",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 3,
+        "label": "Stop at the plan No worktrees, no workers.",
+        "isDefault": false,
+        "requiresTextInput": false
+      },
+      {
+        "number": 4,
+        "label": "Type something...",
+        "isDefault": false,
+        "requiresTextInput": true
+      }
+    ],
+    "status": "pending",
+    "instructionText": "Approve proceeding from the plan into worktree creation and dispatch?\n\n❯ 1. Prepare worktrees + dispatch (Recommended)\n     I create the worktrees and pause for you to answer.\n  2. Worktrees only, then pause\n     I create the worktrees and stop for inspection.\n  3. Stop at the plan\n     No worktrees, no workers.\n  4. Type something...",
+    "approvalTarget": "Approve proceeding from the plan into worktree creation and dispatch?\n\n❯ 1. Prepare worktrees + dispatch (Recommended)\n     I create the worktrees and pause for you to answer.\n  2. Worktrees only, then pause\n     I create the worktrees and stop for inspection.\n  3. Stop at the plan\n     No worktrees, no workers.\n  4. Type something...",
+    "submitMode": "answer_only",
+    "isAskUserQuestion": true
+  }
+}

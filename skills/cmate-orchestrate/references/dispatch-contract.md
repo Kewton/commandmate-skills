@@ -115,6 +115,8 @@ limitation `dispatch_defaults_no_infer_not_applied` を残して「`--no-infer` 
 | `wait` | `<worktree-id> --on-prompt agent --timeout <sec>` | **exit code**: 0 idle / 10 prompt / 124 timeout / その他 failed | 裁定済み（pass 後）の commit 待ち・フォールバック時の idle 待ち |
 | `verify` | `<worktree-id> --json` | 検証 run document（`{ status, gates: [{ gateId, status, exitCode, logTail }] }`） | exit 20 のとき**失敗ゲートを特定**する（裁定そのものではない。第2.3節） |
 | `respond` | `<worktree-id> yes` | exit 0 | prompt への応答（`--auto-yes` 時のみ） |
+| `capture` | `<worktree-id> --json`（最初の send の前） | `isPromptWaiting` / `isSelectionListActive` | 前の回の質問画面が残っていないかを見る（第2.14節） |
+| `interrupt` | `<worktree-id>` | exit 0 で中断。30 は「動いているセッションが無く何も中断していない」 | `--interrupt-stale-prompt` 時だけ、残った質問画面を**答えずに**畳む（第2.14節。CommandMate 0.28.0+） |
 | `send`/`wait` | `--help` | 出力に `--contract` / `--verify` が載るか | 実行冒頭のバージョンゲート（第2.7節） |
 
 **`--on-prompt` は「誰が prompt に答えるか」である。** `agent`（既定）は prompt を**呼び出し元へ
@@ -806,6 +808,45 @@ exit 99 であり、stderr の文言で区別する（写しは
   1件、`workers` 順）に残す。detail は断り方・待った秒数・結果を名指しする。
 - UAT の fix worker への送信も同じ判定・同じ定数で送り直す（[uat-contract.md](./uat-contract.md)
   第5節）。
+
+### 2.14 前の回の質問画面が残るセッションには、見てから送る（[CommandMate#3007](https://github.com/Kewton/CommandMate/issues/3007)）
+
+ワーカーが前の回に質問を返して止まったまま、同じセッションへ新しい契約を送ると、残った質問画面が
+composer を塞いで送信が通らない。上流の断り方は画面によって違い、どちらも「古い質問が残っている」
+とは言わない —— 上流が読める質問（AskUserQuestion など）は 409 `PROMPT_WAITING`（exit 2）、
+読めない質問 UI と Command Code の plan レビューは送信ガードが**意図的に素通りさせる**ので、
+composer 待ちの時間切れ（exit 99 prompt not ready）になるだけである。
+
+そこで dispatch は **各 worker の最初の send の前に** `commandmate capture <worktree-id> --json` を
+1回読む（契約経路・fallback 経路とも。`--auto-yes` の arming より前）。
+
+| capture の欄 | 意味 |
+|---|---|
+| `isPromptWaiting: true` | 上流が答えられる prompt（AskUserQuestion・y/n） |
+| `isSelectionListActive: true` | 上流が誰の代わりにも答えない選択画面（読めない質問 UI・plan レビュー） |
+
+どちらかが true なら:
+
+- **既定**: 送らずに止める。blocking reason **`stale_prompt_on_session`** に、どの欄が立っていたか・
+  画面の抜粋（`promptData.question`、無ければ画面の末尾）・`commandmate interrupt <worktree-id>` の
+  案内を載せる。worker は `worker_state: prompt`（`prompt.excerpt` に同じ抜粋）で、run は
+  `human_required` として止まる（第5節の順位は `prompt` と同じ）。
+- **`--interrupt-stale-prompt`**（既定 off）: `commandmate interrupt <worktree-id>` で畳み、少し置いて
+  capture を**もう一度**読む。両方の欄が下りている（composer に戻った）ことを確かめてから送る。
+  interrupt が失敗した・再読が読めない・まだ欄が立っている、のいずれでも送らずに同じ
+  `stale_prompt_on_session` で止める（detail が理由を名指しする）。畳んで送ったときは limitation
+  **`stale_prompt_interrupted`**（Issue ごとに1件、画面の抜粋つき）を残す。
+
+規則:
+
+- **質問には答えない。** `respond` はこの経路から一度も呼ばれない。`--auto-yes` でも同じである ——
+  その質問は、この run が文脈を持たない前の回のターンのものである。
+- 見るのは**最初の send の前だけ**である。それより後の send（nudge・再指示）は、この run の `wait` が
+  idle を返した後にしか打たれない。
+- 最初の capture が読めない（失敗・JSON でない）ときは**送信を止めない**。この確認は上流の送信ガードに
+  重ねる絞り込みであり、上流のガードも同じ理由（誤って止めれば誰も話しかけられないセッションになる）
+  で fail-open である。読める prompt が残っていれば、送信自体が上流で断られる。
+- UAT は見ない: fix worktree はその run が作るので、前の回のターンが存在しない。
 
 ## 3. 監督ループと gate
 

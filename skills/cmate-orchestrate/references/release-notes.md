@@ -1435,6 +1435,30 @@ prompt not ready の2つだけを「未送信・送り直してよい」と読�
 UAT の fix worktree もその run が作るので最初の送信は必ず起動を伴い、同じ判定を共有する
 （`scripts/lib.mjs`）。正本: [dispatch-contract.md](./dispatch-contract.md) 第2.13節。
 
+### CommandMate #3007 — 前の回の質問画面が composer を塞いで、送信が理由なく落ちていた
+
+Kewton/Musunest #201・#204 で、前の回に質問を返して止まったワーカーのセッションへ新しい契約を
+送ると、残った質問画面が composer を塞いで送信が通らなかった。#201 の送信は #3006 と同じ
+`prompt not ready`（exit 99）で落ちており、report からは「起動が遅かった」と区別がつかなかった。
+上流の送信ガード（#1708）は読める質問なら 409 で止めるが、読めない質問 UI と plan レビューは
+意図的に素通りさせる（Codex の pager や `/model` まで止めないため）ので、上流だけでは直らない。
+管理は質問に答えずに `commandmate interrupt` で古いターンを畳んでから送り直していた。
+
+→ dispatch が最初の send の**前に** `capture --json` を読み、`isPromptWaiting` か
+`isSelectionListActive` が立っていれば送らずに `stale_prompt_on_session` で止める（画面の抜粋と
+`commandmate interrupt` の案内つき）。サーバ側のガードは変えない（上流 Issue での決定）。
+`--interrupt-stale-prompt`（既定 off）は管理の手順を runner がやるもので、interrupt の後に
+**capture を読み直して composer に戻ったことを確かめてから**送る —— Command Code の
+AskUserQuestion / plan レビューに Esc を送ったときにキャンセルになるのかは実測されていないので、
+interrupt の exit code だけを信じない。戻らなければ同じ code で止める。どの経路でも質問には
+答えない。fixture は CommandMate 側の Command Code 検出 fixture（AskUserQuestion・読めない
+質問 UI・plan レビュー）を capture の JSON として渡す（`tests/fixtures/cmate-orchestrate/stale-screens/`）。
+
+各 worker の最初の send の前に capture が1回増えるので、capture の回数を数えていた既存の
+fixture（d76〜d78）は回数だけを直した。最初の capture が読めない場合は送信を止めない（上流の
+ガードと同じく fail-open）ので、capture が読めない世界の既存 case の結論は変わらない。
+正本: [dispatch-contract.md](./dispatch-contract.md) 第2.14節。
+
 ## merge（`scripts/merge.mjs`）
 
 ### #142 — 無人運転の段階 C（`merge --merge-prs`）

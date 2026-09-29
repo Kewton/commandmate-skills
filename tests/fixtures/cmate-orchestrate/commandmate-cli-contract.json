@@ -3,6 +3,7 @@
   "source": "commandmate 0.17.0 --help; `sync` from commandmate 0.21.x --help",
   "flag_values": "`flag_values` closes a flag whose argument is an ENUM rather than free text. `send --duration` is the only one so far (Issue #136): CommandMate's DURATION_MAP accepts 1h / 3h / 8h and nothing else, and an unlisted value makes the CLI print \"Error: Invalid duration\" and exit BEFORE it sends anything — so a runner that computed a duration in seconds would abort the dispatch, not merely widen a window. The fake CLI refuses an unlisted value the same way, and the live `--help` check asserts the real binary still lists exactly these.",
   "version_gating": "`since` marks a subcommand, and `since_flags` marks individual flags, that a specific CommandMate version introduced (Issue #1588: the execution contract and the contract verdict both arrived in 0.17.0; Issue #91: `sync`, the server-side worktree re-scan, arrived in 0.21.0). The live `--help` parity check skips those entries when the installed binary predates them, and says out loud which ones it skipped — an older CLI legitimately does not list them, and asserting anyway would report a supported fallback as a contract drift. Entries with no `since` are asserted against every version.",
+  "capture_fields_note": "The `capture --json` fields the dispatch runner reads before a worker's first send (CommandMate#3007), from CommandMate `src/cli/types/api-responses.ts` / `src/lib/session/current-output-builder.ts`: `isPromptWaiting` (a prompt the server can answer — the same answer the send guard of #1708 uses) and `isSelectionListActive` (`status === 'waiting'` with a selection-list reason: an unreadable question UI, Command Code's plan review — screens the send guard deliberately lets through). Either one true means a human has to decide on that screen. `interrupt` (0.28.0+) is the GUI's interrupt button; exit 30 means no session was running and nothing was interrupted.",
   "send_failures_note": "How `commandmate send` reports the refusals the runners branch on (CommandMate#3006), transcribed from CommandMate `src/cli/commands/send.ts` + `src/cli/utils/api-client.ts` handleApiError + `src/app/api/worktrees/[id]/send/route.ts`. A 5xx reaches stderr as `Error: Server error: <the server's error>` and exits 99; a 409 other than PROMPT_WAITING has no sentence of its own (`Unexpected HTTP status: 409`) and also exits 99; PROMPT_WAITING is the one refusal send.ts maps itself, to exit 2. `retry` is the runners' reading: only the two not-ready refusals typed nothing because the session had not started yet, so only those are re-sent (once). The fake CLI prints exactly these lines.",
   "send_failures": {
     "session_starting": {
@@ -63,6 +64,11 @@
       "positionals": "0",
       "flags": ["--json", "--token", "--help"],
       "since": "0.21.0"
+    },
+    "interrupt": {
+      "positionals": "1",
+      "flags": ["--json", "--instance", "--token", "--help"],
+      "since": "0.28.0"
     }
   }
 }
