@@ -1,0 +1,30 @@
+{
+  "description": "CommandMate#3005: `pr_title_template` を宣言した profile は plan 段階を通り、宣言は plan.profile へ **そのまま echo** される。merge.mjs --create-prs は profile を開かず plan.profile.pr_title_template だけを読むので、echo が唯一の経路である。欄は optional field の最後に載る（欄の無い profile の plan は byte 一致のまま）。",
+  "args": [
+    "461",
+    "--profile-json",
+    "PROFILE:pr-title-template-declared.json",
+    "--run-id",
+    "fixture-pr-title-declared"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "waves": [
+      [
+        461
+      ]
+    ],
+    "profile_keys": [
+      "id",
+      "repository",
+      "base",
+      "branch_template",
+      "worktree_template",
+      "baseline",
+      "verified",
+      "pr_title_template"
+    ],
+    "profile_pr_title_template": "{{type}}({{scope}}): {{title}} (#{{number}})"
+  }
+}

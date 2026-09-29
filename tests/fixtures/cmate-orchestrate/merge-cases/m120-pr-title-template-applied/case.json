@@ -1,0 +1,95 @@
+{
+  "description": "CommandMate#3005: profile の `pr_title_template` が `--create-prs` の PR タイトルを決める。Conventional Commits を CI（semantic-pull-request）で求めるリポジトリでは、Issue タイトルそのままの PR は squash の件名として merge できなかった。type と scope はブランチ自身のコミット件名から取る（#201 は2コミットで type も scope も一致、#200 は1コミットで `!` 付き）。照合は report の note ではなく **fake の `gh pr create --title` に届いた argv** で行う。template は plan_patch で plan に載せる（planner 側の echo は plan case 120 が測る）。",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "plan_patch": {
+    "profile": {
+      "pr_title_template": "{{type}}({{scope}}): {{title}} (#{{number}})"
+    }
+  },
+  "merge_args": [
+    "--approve"
+  ],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": {
+      "repo_access": true
+    },
+    "git": {
+      "base_resolvable": true
+    },
+    "prs": {
+      "200": {
+        "create": "ok"
+      },
+      "201": {
+        "create": "ok"
+      }
+    },
+    "log": {
+      "201": {
+        "commits": [
+          {
+            "subject": "feat(config): add the loader",
+            "body": ""
+          },
+          {
+            "subject": "feat(config): cover defaults",
+            "body": ""
+          }
+        ]
+      },
+      "200": {
+        "commits": [
+          {
+            "subject": "feat(store)!: add a session store",
+            "body": ""
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [
+      201,
+      200
+    ],
+    "targets_outcome": {
+      "201": "pr_created",
+      "200": "pr_created"
+    },
+    "push_calls": 2,
+    "pr_create_calls": 2,
+    "pr_create_titles": {
+      "201": "feat(config): feat: add base configuration loader (#201)",
+      "200": "feat(store): feat: add a session store (#200)"
+    },
+    "absent_blocking_codes": [
+      "pr_title_undetermined"
+    ],
+    "absent_limitation_codes": [
+      "worker_declarations_transcribed",
+      "worker_declarations_unread"
+    ],
+    "git_calls": {
+      "log": 2
+    }
+  }
+}

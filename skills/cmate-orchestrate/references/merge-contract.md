@@ -93,6 +93,7 @@ merge runner は次を呼ぶ。各呼び出しは失敗で非0を返し、握り
 | create_prs | `gh repo view <repo> --json defaultBranchRef` | `{ "defaultBranchRef": { "name": "…" } }` | Issue 自動クローズの到達性（invocation あたり1回） |
 | create_prs | `git diff --name-only -z <base>...<branch>`（cwd = その Issue の worktree） | NUL 終端の変更 file 一覧 | PR 本文の「実変更」（読めなければ本文に「読めなかった」と書く） |
 | create_prs | `git diff --numstat -z <base>...<branch>`（cwd = 同上） | `<added>\t<deleted>\t<path>` の NUL 終端レコード | PR 本文の diff 規模 |
+| create_prs | `git log --no-merges --format=%s%x1f%b%x1e <base>..<branch>`（cwd = 同上） | コミットごとの件名と本文 | PR タイトルの type / scope（5.7節）と、ワーカーの申告（5.8節）。**Issue あたり1回** |
 | create_prs | `git push --set-upstream origin <branch>` | exit 0 | verification pass branch を push |
 | create_prs | `gh pr create --repo R --base B --head <branch> --title T --body-file F` | PR URL を stdout | PR 作成 |
 | merge_prs | `gh pr view <branch> --repo R --json number,url,state` | `{ "number", "url", "state" }` | PR 発見 |
@@ -109,6 +110,7 @@ merge runner は次を呼ぶ。各呼び出しは失敗で非0を返し、握り
 - PR body は objective・受入条件・**検証証拠**（5.2節）・`Resolves #n` からなる self-contained な
   内容とし、`<out>/pr-bodies/issue-<n>.md` に artifact として残す。
 - `--base` は profile の base（例 `origin/develop`）から先頭 remote 節を除いた branch 名にする。
+- `--title` は profile の `pr_title_template` が無ければ Issue タイトル、あればその型を埋めたもの（5.7節）。
 - CI の green 判定は、check state を pass（`SUCCESS`/`NEUTRAL`/`SKIPPED`）・pending
   （`PENDING`/`QUEUED`/`IN_PROGRESS`/…）・それ以外（failure 扱い）に分け、
   **1件以上 かつ 全て pass** のときだけ green とする。check が0件なら green にしない。
@@ -454,6 +456,44 @@ PR 本文の「Declared scope vs. actual changes」節（第5.2節）は、変�
 **同じ関数を planner も使う。** 2つの Issue が同じ wave に入れるかの判定
 （`scopeEntriesOverlap`）は同じ移植の上に載っている。1つの関係に対する実装が
 package 内に2つあれば、その2つは黙って食い違う。
+
+## 5.7 PR タイトルの型（`pr_title_template`。既定 off。`--create-prs` のみ）
+
+CommandMate#3005。profile 側の定義は [profile-contract.md](./profile-contract.md) 第13節。
+
+- **欄が無い plan では何も変えない。** タイトルは Issue タイトルのまま、target の `note` も従来の文面のまま。
+- 欄があれば、Issue ごとに `git log`（5節の表）でブランチのコミットを読み、型が使う placeholder を埋める。
+  `{{type}}` / `{{scope}}` は **コミット件名から取る**。squash merge ではコミットが PR タイトルに
+  置き換わるので、タイトルはコミット件名の後継であり、その type / scope を継ぐのが自然である。
+  Issue の label は type の語彙ではない（`enhancement` と `feat` の対応表は、この runner が発明する第二の規約になる）。
+- **決まらなければ、その PR は作らずに止める。** push もしない。target は `pr_failed`、
+  `blocking_reasons` に `pr_title_undetermined`（detail に template と、どの件名がなぜ決めさせなかったか）、
+  `stop_reason: pr_create_failed` / `partial`（exit 7）。以降の Issue は `skipped`（他の PR 作成失敗と同じ）。
+  preview（`--approve` 無し）でも同じ判定をする —— 作れない PR の preview は何も示さない。
+- 決まったタイトルは `redact()` を通し、target の `note` に `titled "<title>"` として残す。
+- `merge_schema_version`・`stop_reason` の enum・target の field は変えていない。
+
+## 5.8 ワーカーの申告（`--create-prs`。常に on。申告が無ければ何も足さない）
+
+CommandMate#3005。ワーカーが Issue を読み替えた・Issue が決めていないことを判断した、という申告は、
+merge を止めるかどうかを人が決める材料である。それがワーカーの最後の報告（この runner が読まない場所）に
+しか無いと、PR を読んだ人には届かない。
+
+**規約**（ワーカー側の正本は `cmate-worker-development` の `references/evidence-vocabulary.md`）:
+ブランチ上のコミットの**メッセージ本文**の行で、行頭が `読み替え` / `判断` / `本文に無い指摘` の
+いずれかと `:`（全角 `：` も可）で始まるものを1件の申告とする。直下の字下げ行はその申告の続き。
+行頭でない・コロンが無い行は申告ではない。置き場所をコミットメッセージにしたのは、ワーカーが既に
+書いている場所で、ブランチと一緒に運ばれ、他の誰も書き込まないからである（`.commandmate/` は
+人が書く場所なので、ワーカーにファイルを置かせない）。
+
+| 状態 | PR 本文 | report |
+|---|---|---|
+| 申告あり | `Resolves #n` の直前に `## ワーカーの申告` 節。古いコミットから順に `- <ラベル>: <本文>`（`redact()` 済み、1件 500 字・20 件まで。打ち切った件数は本文に書く） | limitation `worker_declarations_transcribed`（Issue ごとに1件） |
+| 申告なし | **節を出さない**（#3005 以前と同じ本文） | 何も足さない |
+| `git log` が読めない | 節に「読めなかった。申告が無い証拠ではない」と書く | limitation `worker_declarations_unread` |
+
+**申告は merge を止めない。** 止めるかどうかは人が読んで決める（転記したことは、読まれたことではない）。
+PR も止めない（読めないことは PR 作成を止めない。`--unattended` でも limitation のまま）。
 
 ## 6. 停止と status / stop_reason / exit
 

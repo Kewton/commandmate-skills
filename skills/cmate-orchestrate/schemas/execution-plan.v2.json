@@ -523,6 +523,12 @@
           "items": {
             "$ref": "#/$defs/observation"
           }
+        },
+        "pr_title_template": {
+          "description": "Optional PR title template for the merge runner's --create-prs (CommandMate#3005). Placeholders are the closed set {{type}} / {{scope}} (from the branch's own Conventional-Commits commit subjects; when they do not determine a value, that PR is NOT opened and the phase stops with pr_title_undetermined), {{title}} (the issue title) and {{number}} (the issue number). Absent keeps the pre-#3005 title (the issue title). Echoed by the planner only when the profile declared it, and last among the optional fields, so a plan built without it is byte-identical to the plans produced before it existed.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
         }
       }
     },

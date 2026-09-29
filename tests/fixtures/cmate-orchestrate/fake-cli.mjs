@@ -1233,6 +1233,25 @@ function main() {
     process.stdout.write(body.length ? `${body.join(nul ? '\0' : '\n')}${nul ? '\0' : '\n'}` : '');
     process.exit(0);
   }
+  if (sub === 'log') {
+    // `git log --no-merges --format=%s%x1f%b%x1e <base>..<branch>`, run by
+    // merge.mjs --create-prs inside the issue's worktree (CommandMate#3005): the
+    // commit subjects a `pr_title_template` takes its type/scope from, and the
+    // bodies the worker's declarations are transcribed from.
+    //
+    // Scenario shape, per issue: `{ commits: [{ subject, body }] }` listed OLDEST
+    // first (the order a reader writes them in; printed newest first, as git
+    // does), or the string "fail". A case that says nothing models a branch
+    // whose log reads as empty — no declaration, and no type to take — which is
+    // what keeps every pre-#3005 case's body and report unchanged.
+    const range = argv[argv.length - 1];
+    const issue = issueFromBranch(range) ?? issueFromCwd();
+    const log = (spec.log ?? {})[issue] ?? (spec.log ?? {})[String(issue)] ?? {};
+    if (log === 'fail') fail(`fatal: ambiguous argument '${range}': unknown revision or path not in the working tree`, 128);
+    const commits = Array.isArray(log.commits) ? [...log.commits].reverse() : [];
+    process.stdout.write(commits.map((commit) => `${commit.subject ?? ''}\x1f${commit.body ?? ''}\x1e\n`).join(''));
+    process.exit(0);
+  }
   if (sub === 'push') {
     // `git push --set-upstream origin <branch>` from merge.mjs --create-prs.
     const branch = argv[argv.length - 1];

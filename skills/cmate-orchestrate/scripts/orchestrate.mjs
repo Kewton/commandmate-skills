@@ -39,6 +39,7 @@ import {
   scopeEntriesOverlap,
   isOverBroadScope,
   normalizeObservations,
+  normalizePrTitleTemplate,
 } from './lib.mjs';
 
 const PLAN_SCHEMA_VERSION = 2;
@@ -112,6 +113,9 @@ const PROFILE_FIELDS = [
   'dispatch_defaults',
   'integration_baseline',
   'observations',
+  // CommandMate#3005 — read by merge.mjs --create-prs. Appended last, like every
+  // optional field before it, so a profile without it plans the same bytes.
+  'pr_title_template',
 ];
 
 // =============================================================================
@@ -478,6 +482,11 @@ function normalizeProfile(raw) {
   // declaration means (references/profile-contract.md §12).
   const observations = normalizeObservations(raw.observations);
   if (observations !== null) profile.observations = observations;
+  // ABSENT-stays-absent a fifth time (CommandMate#3005): the merge runner titles
+  // a PR with the issue title exactly as before when the key is missing. The
+  // rules live in lib.mjs because merge.mjs re-validates the plan's copy.
+  const prTitleTemplate = normalizePrTitleTemplate(raw.pr_title_template, 'profile.pr_title_template', 'load_error', 6);
+  if (prTitleTemplate !== null) profile.pr_title_template = prTitleTemplate;
   return profile;
 }
 
@@ -3374,6 +3383,9 @@ function publicProfile(profile) {
   // profile-contract.md §12). Appended LAST, so a profile that does not declare
   // it produces the plan bytes it produced before the field existed.
   if (profile.observations !== undefined) out.observations = profile.observations;
+  // `pr_title_template` is here for merge.mjs --create-prs (CommandMate#3005,
+  // profile-contract.md §13), and last for the same byte-order reason.
+  if (profile.pr_title_template !== undefined) out.pr_title_template = profile.pr_title_template;
   return out;
 }
 
