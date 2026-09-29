@@ -19,6 +19,17 @@ install 先で走らせるよう案内している箇所は無い。
 
 ## Changelog
 
+### 成果物見出しの下は backtick の file 名を拡張子によらず拾う（planner CommandMate #3003 / #272）
+
+- **planner の抽出に5つ目の source（`CANDIDATE_DECLARED`）が入ったので、mirror も同じ commit で揃えた**
+  （定数は byte 同一、`plannerFileCandidates` の `declaredOnly` 分岐も同じ）。
+- **これが消しに来た事象**: `## 対象ファイル` に書いた `expression.ebnf`・`Cargo.lock`・
+  `requirements/ci.txt` が `FILE_EXT` の外なので scope に入らなかった（Kewton/Musunest#212、
+  Kewton/CommandAgent#520）。
+- **profile で拡張子を足す案を採らなかったのは、この写しのためである。** 起票時の検査は profile を
+  読まないので、欄で足した拡張子は起票時の判定と planner の判定を食い違わせる。
+- 書き方は [issue-body-contract.md](./issue-body-contract.md) 第 2.3 節に足した。
+
 ### 成果物見出しの外の path は scope に入らない（planner CommandMate #3002 / #273）
 
 - **planner の抽出規則が変わったので、mirror も同じ commit で揃えた。** 成果物見出しを持つ本文では、

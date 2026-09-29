@@ -841,6 +841,14 @@ const PATTERN_SEGMENT = '(?:[A-Za-z0-9_.*?-]|\\{[A-Za-z0-9_.,*?-]+\\})+';
 // `docs/企画書.md` to `docs/`, granting a whole directory for one document.
 const CANDIDATE_PATTERN = PATH_START + '(?<![*?}])(\\*{1,2}(?:/\\*{1,2})*|(?:' + PATTERN_SEGMENT + '/)+(?:' + PATTERN_SEGMENT + ')?)(?![A-Za-z0-9_.*?{/-]|[^\\x00-\\x7f])';
 
+// The fifth candidate source (planner CommandMate #3003, folding in
+// Kewton/commandmate-skills#272): a backtick-quoted file name under a
+// deliverable heading, whatever its extension or none (`expression.ebnf`,
+// `Cargo.lock`, `requirements/ci.txt`, `Makefile`, `.gitignore`). DECLARED-ONLY:
+// outside every deliverable heading it is discarded, so prose is read exactly
+// as before. Byte-identical to the planner's.
+const CANDIDATE_DECLARED = '`((?!\\.{0,2}/)(?=[A-Za-z0-9_./-]*[A-Za-z])(?:[A-Za-z0-9_.-]*[./][A-Za-z0-9_./-]*[A-Za-z0-9_-]|[A-Z][A-Za-z0-9]*file|[A-Z][A-Z0-9_]*))`';
+
 // Which candidates the deliverable-heading rule governs, on candidates from
 // every source: the backtick source has always matched patterns too.
 const SCOPE_PATTERN_RE = /[*?{]|\/$/;
@@ -903,6 +911,7 @@ function plannerFileCandidates(text) {
     { pattern: new RegExp(CANDIDATE_KNOWN_ROOT, 'g'), patternsOnly: false },
     { pattern: new RegExp(CANDIDATE_WITH_EXT, 'g'), patternsOnly: false },
     { pattern: new RegExp(CANDIDATE_PATTERN, 'g'), patternsOnly: true },
+    { pattern: new RegExp(CANDIDATE_DECLARED, 'g'), declaredOnly: true },
   ];
   const spans = plannerDeliverableSpans(text);
   const cSpans = plannerContextSpans(text);
@@ -917,6 +926,7 @@ function plannerFileCandidates(text) {
       if (!plannerIsSafeRepoPath(candidate)) continue;
       const isPattern = SCOPE_PATTERN_RE.test(candidate);
       if (source.patternsOnly && !isPattern) continue;
+      if (source.declaredOnly && !spans.some(([start, end]) => match.index >= start && match.index < end)) continue;
       // A pattern is permission over files nobody has enumerated, so the planner
       // honours it only where the Issue declares it as a product. Cited under
       // 根拠 / 参考 or written in passing prose it is dropped — and the planner

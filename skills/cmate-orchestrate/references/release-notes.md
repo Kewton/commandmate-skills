@@ -528,6 +528,23 @@ path を `scope.allow` に入れていた。実測（Kewton/Musunest）:
 立たなくなる（fixture 57 の期待値をこの向きに改めた。question そのものは見出しの無い fixture 19 が
 固定し続ける）。起票側（cmate-issue-authoring の `validate-plan.mjs`）の写しも同じ commit で揃えた。
 
+### CommandMate #3003（+ #272） — `## 対象ファイル` に書いた `.ebnf` / `Cargo.lock` が scope に入らなかった
+
+`## 対象ファイル` に `packages/appspec-schema/contract/expression.ebnf` を宣言したが、`FILE_EXT` に
+`.ebnf` が無いので scope に入らず、利用側はファイルを `expression-grammar.md` に**改名して**回避した
+（Kewton/Musunest#212）。同じ形で `Cargo.lock`・`requirements/ci.txt` も入らず、依存更新の Issue を
+worker に出せなかった（#272、Kewton/CommandAgent#520）。`Cargo.lock` は `/` が無いので
+`unrecognized_file_extension` すら出なかった。#43・#56 に続く同じ形の3度目である。
+
+→ **成果物見出しの下では、backtick の file 名を拡張子によらず拾う**（案 B。拡張子の無い `Makefile`・
+`.gitignore` と `/` の無い名前も含む）。backtick 無しと見出しの外は従来どおり。
+
+**案 A（profile の欄 `planner.extra_extensions`）を採らなかった理由**: cmate-issue-authoring の
+`validate-plan.mjs` は profile を読まないので、欄で足した拡張子は**起票時の検査と planner の判定を
+食い違わせる**。案 B は本文だけで決まり、写しにそのまま載る。拡張子を足し続ける運用（#43・#56・#272）も
+要らなくなる。`FILE_EXT` が閉じている理由（散文の token を権限にしない）は、見出しの下では
+成り立たない —— #219 が glob について下したのと同じ判断である。利用者と Issue 上で確定した。
+
 ## dispatch（`scripts/dispatch.mjs`）
 
 ### CommandMate #1447 — 公式経路は public `commandmate` である（ADR）

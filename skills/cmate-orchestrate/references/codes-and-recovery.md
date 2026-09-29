@@ -89,7 +89,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | `ambiguous_dependency_direction` | blocking | 1行に順方向と逆方向の方向語が同居し、依存の向きを一意に読めない。**blocking が正しい。** 「planner が読めなかった」の報告そのものである。しかも planner は片方の読みで edge を作っているので、読み違えていれば wave 順が違う |
 | `no_acceptance_criteria` | blocking | 受入条件を1件も読み取れない。**blocking が正しい。** 何をもって完了かが宣言されていない |
 | `no_suspected_files` | blocking | 対象 file を1件も読み取れない。**blocking が正しい。** worker に与える scope が空になる（＝書き込み権限が空）。dispatch 側では同じ事実が `contract_scope_unknown` になり、その wave は advance しない |
-| `unrecognized_file_extension` | blocking | 既知拡張子外の backtick path が抽出から落ちた。**blocking が正しい。** 著者は宣言したが planner が**運べなかった**ので、`harness_path_in_scope`（宣言を honour した報告）とは向きが逆である。scope が宣言より狭いまま dispatch される |
+| `unrecognized_file_extension` | blocking | 既知拡張子外の backtick path が抽出から落ちた。**blocking が正しい。** 著者は宣言したが planner が**運べなかった**ので、`harness_path_in_scope`（宣言を honour した報告）とは向きが逆である。scope が宣言より狭いまま dispatch される 成果物見出しを持つ Issue では出ない（CommandMate #3003）: 見出しの下の backtick の file 名は拡張子によらず拾われ、見出しの外の path は `prose_path_ignored` に回る。直し方は「`## 対象ファイル` の下に backtick で書く」である（[plan-contract.md](./plan-contract.md) 第5.9節） |
 | `ambiguous_file_candidate` | blocking | 同じ file の2つの綴り（一方が他方の path 境界つき suffix）が本文に在り、どちらを意図したか決められない。**どちらも落とさず**両方 scope に入れたうえで訊いている。**blocking が正しい。** どちらが対象かを著者が決めていない |
 | `unconfirmed_lexical_dependency` | blocking | 生産者/消費者の推論が**共有 topic token だけ**を根拠にしていたので、依存 edge にしなかった。順序が要るなら人間が述べる。**blocking が正しい。** 2 Issue が独立かどうかを、それを決められる人間がまだ決めていない |
 | `harness_path_in_scope` | **notice** | agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を、Issue が**成果物見出しで明示的に宣言した**ので scope に入れた。既定は「入れない」である。**notice**（#199）。著者が本文に書いて決めたことを honour した記録であり、ハーネスを in-repo で保守しているリポジトリでは**正しい書き方に対して毎回出る**（後述） |

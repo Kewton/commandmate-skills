@@ -143,6 +143,12 @@ scope gate に弾かれて構造的に解決不能だった）。
 `wrangler.jsonc` / `deno.jsonc` は framework が決めた名前なので改名では回避できない）。
 `json5` / `jsonl` は入っていない。
 
+**成果物の見出しの下では、backtick で囲んだ file 名は拡張子によらず拾われる**（planner CommandMate #3003 /
+planner #272）。`` `expression.ebnf` `` も `` `Cargo.lock` `` も `` `requirements/ci.txt` `` も、拡張子の無い
+`` `Makefile` `` / `` `Dockerfile` `` / `` `.gitignore` `` も、`/` が無くても `suspected_files` に入る。
+上の既知拡張子の制約と `unrecognized_file_extension` は、**見出しの外**と **backtick 無し**の書き方にだけ残る。
+だから `FILE_EXT` に無い file を worker に書かせるときは、`## 対象ファイル` の下に backtick で書くこと。
+
 対象ファイルに依存 manifest（`package.json` / `Cargo.toml` / `go.mod` /
 `pyproject.toml` / `Gemfile`）を含めると、planner は同 directory の lockfile
 （`package-lock.json` / `pnpm-lock.yaml` / `yarn.lock` / `Cargo.lock` / `go.sum` /

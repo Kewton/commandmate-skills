@@ -787,6 +787,38 @@ Issue は scope を既に宣言している —— それ以外の言及を権�
 「著者が成果物見出しで scope を宣言したので、それ以外を**宣言として読まなかった**」という
 著者が書いた位置についての事実である（`scope_pattern_dropped` と同じ側）。
 
+## 5.9 成果物見出しの下は拡張子によらず拾う（CommandMate #3003）
+
+**規範。** 成果物見出しの範囲（第5.8節。下位の `###` を含む）で **backtick に囲まれた file 名**は、
+拡張子によらず `suspected_files` に入る。`FILE_EXT` に無い拡張子（`expression.ebnf`・`Cargo.lock`・
+`requirements/ci.txt`）も、拡張子の無い名前（`Makefile`・`Dockerfile`・`.gitignore`・`LICENSE`）も、
+`/` の無い名前も同じである（[#272](https://github.com/Kewton/commandmate-skills/issues/272) をここに統合した）。
+
+| 書き方 | 成果物見出しの範囲 | 範囲の外 |
+|---|---|---|
+| backtick の file 名（拡張子不問） | `suspected_files` | 読まない（第5.8節の地の文。backtick の path なら `prose_path_ignored` に名指す） |
+| backtick 無しの path | 従来どおり（`FILE_EXT` と既知 root で判定） | 第5.8節 |
+
+file 名とみなす token（`CANDIDATE_DECLARED`）は、`/` か `.` を含み名前の文字で終わるもの、
+または `…file`（`Makefile` / `Justfile`）か全大文字（`LICENSE` / `CODEOWNERS`）の拡張子無し名である。
+camelCase の識別子（`parseFoo`）・flag（`--json`）・数字列（`0.33.0`）・`./x` / `../x` / `/x` は拾わない。
+`console.log` のような点つき識別子は拾う —— 成果物見出しの下にしか書けず、代価は誰も使わない
+許可1件である（使われない許可のコストはゼロ。[ADR](./adr-scope-derivation.md) 第2節）。
+
+**なぜ profile の欄（拡張子を足す）ではないか。** 起票時の検査（cmate-issue-authoring の
+`validate-plan.mjs`）は profile を読まないので、欄で足した拡張子は**起票時の判定と planner の判定を
+食い違わせる**。見出しの下の規則は本文だけで決まり、写しにそのまま載る（Issue 上で利用者と確定）。
+
+**なぜ見出しの下だけか、なぜ backtick だけか。** `FILE_EXT` が閉じているのは**散文の token を書き込み権限に
+しない**ためであり、成果物見出しの下は宣言であって散文ではない —— #219 が pattern について下した判断と
+同じである。backtick を要求するのは、見出しの下の箇条書きにも散文（「`src/a.ts` を直す（例: node.js 側）」）が
+混ざるからである。
+
+**`unrecognized_file_extension` の範囲が変わる。** 成果物見出しを持つ Issue では、見出しの下の backtick path は
+すべて拾われ、見出しの外の path は拡張子と無関係に scope の外なので、見出しの外の未知拡張子 path は
+`prose_path_ignored` と `reference_files` に回る（拡張子を直せと言うのは誤診になる）。見出しの無い Issue では
+従来どおり `unrecognized_file_extension`（blocking）が出る。
+
 ## 6. risk
 
 `risk.level` は factor の最大 severity である。factor は決定的に導く。

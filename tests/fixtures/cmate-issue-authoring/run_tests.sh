@@ -245,6 +245,14 @@ mutant planner_ready "$MINIMAL" set /issues/0/body '"profile lookup の read 経
 expect_no_rule 'a document under a subsection of 対象ファイル is planner-ready' planner_ready "$MINIMAL" \
   set /issues/0/body '"profile cache の設計判断を ADR として残す。\n\n## 対象ファイル\n\n### 新規ファイル\n\n- `docs/adr/0002-profile-cache.md`\n\n## 受入条件\n\n- [ ] ADR が採用案と却下案を述べている\n"'
 
+# Planner CommandMate #3003 / #272: under a deliverable heading a backtick file
+# name is taken whatever its extension, so an Issue that declares only
+# `Cargo.lock` is planner-ready; the same kind of name written only in prose is
+# not a declaration, and the Issue is unready.
+expect_no_rule 'a lockfile declared under 対象ファイル is planner-ready' planner_ready "$MINIMAL" \
+  set /issues/0/body '"依存を修正版へ上げる。\n\n## 対象ファイル\n\n- `Cargo.lock`\n- `requirements/ci.txt`\n\n## 受入条件\n\n- [ ] 修正版に上がっている\n"'
+mutant planner_ready "$MINIMAL" set /issues/0/body '"式の文法を更新する。\n\n## 対象ファイル\n\n- 後で決める\n\n## やること\n\n- `packages/schema/contract/expression.ebnf` を直す\n\n## 受入条件\n\n- [ ] 文法どおりに読める\n"'
+
 # The acceptance-gates notation (Issue #124). The producing side may only write a
 # gate id it has SEEN, so every case here runs against a real .commandmate/verify.yaml
 # — this repository's own, which is also what makes the ids in the fixture real.

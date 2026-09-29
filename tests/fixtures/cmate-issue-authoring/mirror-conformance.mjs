@@ -73,6 +73,7 @@ const MIRRORED_CONSTANTS = [
   'CANDIDATE_WITH_EXT',
   'PATTERN_SEGMENT',
   'CANDIDATE_PATTERN',
+  'CANDIDATE_DECLARED',
   'SCOPE_PATTERN_RE',
   'DELIVERABLE_HEADING_RE',
   'NEGATED_HEADING_RE',
@@ -394,6 +395,26 @@ const CORPUS = [
       '- `src/nested/other.ts`',
     ].join('\n'),
   },
+  // Planner CommandMate #3003 / Kewton/commandmate-skills#272: under a
+  // deliverable heading a backtick file name is taken whatever its extension,
+  // or none; the same names in prose, or unquoted, are not.
+  {
+    name: 'a backtick file name under a deliverable heading is taken whatever its extension',
+    text: [
+      '依存と文法を更新する。',
+      '',
+      '## 対象ファイル',
+      '- `packages/appspec-schema/contract/expression.ebnf`',
+      '- `Cargo.lock`',
+      '- `requirements/ci.txt`',
+      '- `Makefile` と `.gitignore` と `LICENSE`',
+      '- `parseFoo` と `--json` と `0.33.0` と `./x.ebnf` はファイル名ではない',
+      '- 裸の grammar/other.ebnf は拾わない',
+      '',
+      '## やること',
+      '- `packages/prose/only.ebnf` と `Dockerfile` は地の文である',
+    ].join('\n'),
+  },
   {
     name: 'an empty body extracts nothing',
     text: '',
@@ -475,6 +496,17 @@ const LIVENESS = [
           entry.planner.suspected.includes('src/nested/a.ts') &&
           !entry.planner.suspected.includes('src/nested/untouched.ts') &&
           !entry.planner.suspected.includes('src/nested/other.ts'),
+      ),
+  },
+  {
+    name: 'the corpus reaches a declared file name of any extension and refuses non-names',
+    holds: (results) =>
+      results.some(
+        (entry) =>
+          ['packages/appspec-schema/contract/expression.ebnf', 'Cargo.lock', 'requirements/ci.txt',
+            'Makefile', '.gitignore', 'LICENSE'].every((path) => entry.planner.suspected.includes(path)) &&
+          !['parseFoo', '--json', '0.33.0', './x.ebnf', 'grammar/other.ebnf', 'packages/prose/only.ebnf',
+            'Dockerfile'].some((path) => entry.planner.paths.includes(path)),
       ),
   },
   {
