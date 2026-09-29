@@ -1,0 +1,58 @@
+{
+  "description": "CommandMate#3009: --nudge-message は profile の worker_messages.nudge に勝つ（優先順位 flag → profile → 既定）。届く追記は flag の文だけで、profile の文は届かない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "plan_patch": {
+    "profile": {
+      "worker_messages": {
+        "nudge": "PROFILE-NOTE: この repo では docs/x.md を必ず更新すること。"
+      }
+    }
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--nudge-message",
+    "FLAG-NOTE: 今回だけの但し書き。"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [
+      true,
+      true
+    ],
+    "sent": [
+      201,
+      200
+    ],
+    "send_counts": {
+      "201": 3,
+      "200": 1
+    },
+    "sent_message_includes": {
+      "201": [
+        "続けて作業を進め",
+        "指示どおりに書けないと分かったら、進めずに止めて報告してください。",
+        "まだ変更が commit されていません。",
+        "FLAG-NOTE: 今回だけの但し書き。"
+      ]
+    },
+    "limitation_details_include": [
+      "--nudge-message overrode profile"
+    ]
+  }
+}

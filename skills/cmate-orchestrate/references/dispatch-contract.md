@@ -47,6 +47,7 @@ CommandMate の exit code へ移しただけで、report 上の表現（field �
 | `--verify-gates <ids>` | 任意 | なし | 契約の `verify.gates` に載せる gate id（comma 区切り）。既定は省略＝全ゲート |
 | `--expect-branch <name>` | 任意 | なし | plan 承認時の統合 branch。dispatch 時に不一致なら drift |
 | `--wait-timeout <sec>` | 任意 | 300（profile 既定可） | `commandmate wait` に渡す1回あたり timeout。profile の `dispatch_defaults.wait_timeout`（第1.1節） |
+| `--nudge-message <text>` | 任意 | なし（profile 可） | 監督 nudge の既定文の**後ろに追記**する文。空白のみ・2000 文字超は `invalid_input`。優先順位は flag → profile の `worker_messages.nudge`（[profile-contract.md](./profile-contract.md) 第13節）→ 追記なし。既定文（単一 commit が完了の合図の行を含む）は消せない。解決結果は limitation `worker_messages_applied`（文字数のみ） |
 | `--max-turns <n>` | 任意 | 8（profile 既定可） | 各 worker を駆動する最大ターン数（初回 send + nudge / 再指示）。未 commit のまま到達で当該 worker を failed とする。profile の `dispatch_defaults.max_turns`（第1.1節） |
 | `--poll-limit <n>` | 任意 | 120 | 互換のため保持（wait は block するので poll しない） |
 

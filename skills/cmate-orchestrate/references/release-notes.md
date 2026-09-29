@@ -1417,6 +1417,21 @@ transcript は `cliToolId` が `claude` のときだけ読み、**候補が2つ�
 **どちらも実作業が在る**（判定されて落ちた変更／未 commit の変更）ので、「なぜ何も無いのか」という
 問い自体が立たない。
 
+### CommandMate #3009 — 監督の nudge が固定文で、ワーカーに「進めてよい許可」と読まれた
+
+dispatch の nudge（「完遂してください」）は固定文だった。指示どおりに書けない状況のワーカーが
+これを許可と読み、指示を読み替えて完遂した（Musunest #159）。利用側は「書けないと分かったら
+止めて報告する」を必ず添えると決めたが、runner の文面が固定なので添える手段が無かった。
+
+→ 既定文に「指示どおりに書けないと分かったら、進めずに止めて報告してください。」を足し、
+profile の `worker_messages.nudge` と `--nudge-message` で**追記**できるようにした（優先順位は
+flag → profile）。差し替えにしなかったのは、既定文の「単一 commit が完了の合図」の行を消せると、
+commit を待つ監督ループの前提が profile 1 行で崩れるため。`dispatch_defaults` に置かなかったのは、
+あちらが真偽値と整数だけで未知 key を拒否する object だから。止まったワーカーを max-turns まで
+nudge して最後に failed にする扱いは変えていない。commit 依頼と `cmate-uat` の fix nudge も対象外。
+
+---
+
 ## merge（`scripts/merge.mjs`）
 
 ### #142 — 無人運転の段階 C（`merge --merge-prs`）

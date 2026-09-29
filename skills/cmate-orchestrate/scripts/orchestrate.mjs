@@ -39,6 +39,7 @@ import {
   scopeEntriesOverlap,
   isOverBroadScope,
   normalizeObservations,
+  workerMessageProblem,
 } from './lib.mjs';
 
 const PLAN_SCHEMA_VERSION = 2;
@@ -112,6 +113,7 @@ const PROFILE_FIELDS = [
   'dispatch_defaults',
   'integration_baseline',
   'observations',
+  'worker_messages',
 ];
 
 // =============================================================================
@@ -478,7 +480,42 @@ function normalizeProfile(raw) {
   // declaration means (references/profile-contract.md §12).
   const observations = normalizeObservations(raw.observations);
   if (observations !== null) profile.observations = observations;
+  // ABSENT-stays-absent a fifth time (CommandMate#3009). Lives outside
+  // `dispatch_defaults` on purpose: that object is booleans and counts and refuses
+  // an unknown key, so a string there would be a second kind of thing in it.
+  const workerMessages = normalizeWorkerMessages(raw.worker_messages);
+  if (workerMessages !== null) profile.worker_messages = workerMessages;
   return profile;
+}
+
+// worker_messages — text the runners append to the messages they send workers
+// (CommandMate#3009, references/profile-contract.md §13). Closed like
+// dispatch_defaults: an unknown key is refused so a profile written for a newer
+// runner is not half-honored. REBUILT rather than passed through, for the
+// run-id reason normalizeDispatchDefaults gives.
+const WORKER_MESSAGE_KEYS = ['nudge'];
+function normalizeWorkerMessages(raw) {
+  if (raw === undefined) return null;
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new SkillError('load_error',
+      `profile.worker_messages must be a JSON object of ${WORKER_MESSAGE_KEYS.join(' / ')}, got ${JSON.stringify(raw)}`, 6);
+  }
+  for (const key of Object.keys(raw)) {
+    if (!WORKER_MESSAGE_KEYS.includes(key)) {
+      throw new SkillError('load_error',
+        `profile.worker_messages has an unknown key "${key}"; this runner understands ${WORKER_MESSAGE_KEYS.join(', ')}`, 6);
+    }
+  }
+  const declared = {};
+  for (const key of WORKER_MESSAGE_KEYS) {
+    if (!(key in raw)) continue;
+    const problem = workerMessageProblem(raw[key]);
+    if (problem !== null) {
+      throw new SkillError('load_error', `profile.worker_messages.${key} ${problem}`, 6);
+    }
+    declared[key] = raw[key];
+  }
+  return declared;
 }
 
 // =============================================================================
@@ -3374,6 +3411,9 @@ function publicProfile(profile) {
   // profile-contract.md §12). Appended LAST, so a profile that does not declare
   // it produces the plan bytes it produced before the field existed.
   if (profile.observations !== undefined) out.observations = profile.observations;
+  // `worker_messages` is here because dispatch reads `plan.profile.worker_messages`
+  // and never opens the profile. Appended LAST, like every optional field.
+  if (profile.worker_messages !== undefined) out.worker_messages = profile.worker_messages;
   return out;
 }
 

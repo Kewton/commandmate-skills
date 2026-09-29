@@ -1,0 +1,17 @@
+{
+  "description": "CommandMate#3009: profile.worker_messages の未知の keyは拒否する。load_error / exit 6、profile load の時点で止まる。",
+  "args": [
+    "461",
+    "--profile-json",
+    "PROFILE:worker-messages-invalid-unknown-key.json"
+  ],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "profile.worker_messages has an unknown key \"commit_request\""
+    ],
+    "plan_null": true
+  }
+}
