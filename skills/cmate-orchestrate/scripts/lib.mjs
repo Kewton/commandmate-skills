@@ -269,6 +269,74 @@ export function parseCliJson(result) {
 }
 
 // =============================================================================
+// `send` refused because the session was not ready yet (CommandMate#3006)
+// =============================================================================
+//
+// Written here FIRST, like resolveLauncher: dispatch and uat both open a brand-new
+// session with their first `send`, and a rule that only one of them knows is the
+// rule the other one fails on.
+//
+// MEASURED (Kewton/Musunest #201 / #213 / #217 / #233 — every one the FIRST send
+// into a session that very send had started): the server refuses a send it could
+// not deliver because the agent had not reached its composer yet, and it has typed
+// NOTHING when it does. Two spellings reach the CLI, both as exit 99
+// (ExitCode.UNEXPECTED_ERROR, `handleApiError`'s 5xx branch), and both are
+// transcribed in tests/fixtures/cmate-orchestrate/commandmate-cli-contract.json
+// (`send_failures`):
+//
+//   session_starting   HTTP 503 `SESSION_STARTING` (CommandMate #1637; Command
+//                      Code joins Claude there in CommandMate#3006): stderr
+//                      "Error: Server error: <tool> did not reach its input prompt
+//                      within <n>s (initialization timeout). … Retry the send in a
+//                      few seconds …"
+//   prompt_not_ready   the pre-send composer wait timing out (Command Code /
+//                      Codex / Antigravity): stderr "… prompt not ready: timed out
+//                      waiting for the composer before sending"
+//
+// So the refusal is recognised by BOTH halves, never by one: exit 99 alone is
+// every unexpected error the CLI has — a 409 surfaces as "Unexpected HTTP status:
+// 409" under the same 99, and a message that "did not arrive intact" is also 99
+// and may have been half-typed — and the sentence alone could sit inside some other
+// failure's text. PROMPT_WAITING is exit 2 and never matches. Only the pair means
+// "unsent, a retry is safe", and the answer does not depend on which agent it is.
+export const SEND_NOT_READY_EXIT = 99;
+export const SEND_NOT_READY_PATTERNS = [
+  { kind: 'session_starting', re: /\bSESSION_STARTING\b|did not reach its input prompt/i },
+  { kind: 'prompt_not_ready', re: /prompt not ready/i },
+];
+
+// Which not-ready refusal this `send` result is, or null when it is anything else.
+export function sendNotReadyKind(result) {
+  if (!result || result.ok || result.status !== SEND_NOT_READY_EXIT) return null;
+  const text = `${result.stderr ?? ''}\n${result.stdout ?? ''}`;
+  return SEND_NOT_READY_PATTERNS.find((entry) => entry.re.test(text))?.kind ?? null;
+}
+
+// How long to let a new session finish booting before the ONE retry. A constant,
+// not a flag: the retry absorbs a start-up race, it is not a knob to tune per run.
+// `CMATE_ORCHESTRATE_SEND_PAUSE_MS` overrides every send-side pause for the
+// fixture suite only (the same `CMATE_ORCHESTRATE_*` precedent as the unattended
+// lock root), so the tests exercise the retry without sleeping; anything that is
+// not a non-negative integer falls back to the constant rather than to "no wait".
+export const SEND_NOT_READY_RETRY_DELAY_MS = 15000;
+export const SEND_PAUSE_ENV = 'CMATE_ORCHESTRATE_SEND_PAUSE_MS';
+
+export function sendPauseMs(fallbackMs, env = process.env) {
+  const raw = env[SEND_PAUSE_ENV];
+  if (typeof raw === 'string' && /^\d+$/.test(raw.trim())) return Number(raw.trim());
+  return fallbackMs;
+}
+
+// A synchronous pause, for uat.mjs, which is synchronous end to end. dispatch.mjs
+// supervises a wave concurrently and must NOT use this: blocking its event loop
+// would stall every other worker's supervision for the delay, so it awaits a timer
+// instead.
+export function pauseMs(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// =============================================================================
 // Launcher resolution (Issue #37)
 // =============================================================================
 

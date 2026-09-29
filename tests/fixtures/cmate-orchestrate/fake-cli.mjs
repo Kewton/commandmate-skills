@@ -482,6 +482,39 @@ function bumpSends(issue) {
   }
 }
 
+// Per-issue send-ATTEMPT counter for `send_refusals` (CommandMate#3006). Kept
+// apart from the turn counter above: an attempt the server refused typed
+// nothing, so it must not advance the worker.
+function sendAttemptsPath(issue) {
+  const dir = process.env.CMATE_FAKE_STATE;
+  return dir && issue != null ? join(dir, `send-attempts-${issue}`) : null;
+}
+function nextSendRefusal(worker, issue) {
+  const refusals = Array.isArray(worker.send_refusals) ? worker.send_refusals : [];
+  if (refusals.length === 0) return null;
+  const path = sendAttemptsPath(issue);
+  let attempts = 0;
+  try {
+    attempts = Number.parseInt(readFileSync(path, 'utf8'), 10) || 0;
+  } catch {
+    attempts = 0;
+  }
+  try {
+    writeFileSync(path, String(attempts + 1));
+  } catch {
+    // best effort; an unrecorded attempt replays the same refusal
+  }
+  return attempts < refusals.length ? (refusals[attempts] ?? null) : null;
+}
+// One row of the contract's `send_failures`, so the fake prints what the real
+// CLI prints and not a sentence somebody wrote for the test.
+function sendFailure(name) {
+  const contract = JSON.parse(readFileSync(join(HERE, 'commandmate-cli-contract.json'), 'utf8'));
+  const row = contract.send_failures?.[name];
+  if (!row) fail(`fake-cli: scenario names an unknown send refusal "${name}"`, 2);
+  return row;
+}
+
 // `commandmate sync` (CommandMate 0.21.0+) re-scans repositories and registers
 // their worktrees with the server; it creates nothing. The fake models exactly
 // that: a scenario's `sync_worktrees` rows are worktrees that exist on disk but
@@ -1508,6 +1541,17 @@ function main() {
     if (!issue) fail('send: could not determine worktree');
     const worker = workerSpec(spec, issue);
     if (worker.send === 'fail') fail('send: worker dispatch refused');
+    // A refusal the SERVER makes before anything is typed (CommandMate#3006).
+    // `send_refusals` is consumed one entry per send ATTEMPT — a refused attempt
+    // is not a turn, so it does not bump the turn counter — and each entry names
+    // a row of the contract's `send_failures` (exit code and stderr verbatim), or
+    // null for "this attempt goes through". The list running out means every
+    // later attempt goes through.
+    const refusal = nextSendRefusal(worker, issue);
+    if (refusal !== null) {
+      const row = sendFailure(refusal);
+      fail(row.stderr.replace(/<worktree-id>/g, worktreeId), row.exit);
+    }
     const contractPath = optionValue('--contract');
     if (contractPath !== null) {
       if (worker.contract === 'reject') {

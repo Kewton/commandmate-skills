@@ -119,6 +119,10 @@ function baseEnv() {
   // `~/.claude/projects` would be reading somebody's actual sessions, and the
   // answer would differ between machines.
   delete env.CLAUDE_CONFIG_DIR;
+  // The send-side pauses (CommandMate#3006: the wait before a not-ready retry).
+  // Zero for every run the suite starts, so a retry is exercised without the
+  // suite sleeping; the runners' constants are what a real run waits.
+  env.CMATE_ORCHESTRATE_SEND_PAUSE_MS = '0';
   return env;
 }
 
@@ -2929,6 +2933,14 @@ function runUatCase(caseId) {
 
   if (expect.worktree_add_calls !== undefined) check(worktreeAddCalls === expect.worktree_add_calls, `worktree add called ${worktreeAddCalls} time(s) !== ${expect.worktree_add_calls}`);
   if (expect.send_calls !== undefined) check(sendCalls === expect.send_calls, `send called ${sendCalls} time(s) !== ${expect.send_calls}`);
+  // What a fix record's note says about how its worker was reached
+  // (CommandMate#3006: a not-ready first send that was re-sent). Every fix of
+  // every attempt for the issue is searched; one of them has to carry ALL needles.
+  for (const [num, needles] of Object.entries(expect.fix_notes_include ?? {})) {
+    const notes = (report.attempts ?? []).flatMap((a) => a.fixes ?? []).filter((f) => f.issue === Number(num)).map((f) => String(f.note ?? ''));
+    check(notes.some((note) => needles.every((needle) => note.includes(needle))),
+      `no fix note for #${num} contains ${JSON.stringify(needles)}; notes: ${JSON.stringify(notes)}`);
+  }
   if (expect.merge_calls !== undefined) check(mergeCalls === expect.merge_calls, `git merge called ${mergeCalls} time(s) !== ${expect.merge_calls}`);
   if (expect.uat_calls_min !== undefined) check(uatCalls >= expect.uat_calls_min, `uat called ${uatCalls} time(s) < ${expect.uat_calls_min}`);
   if (expect.uat_calls_max !== undefined) check(uatCalls <= expect.uat_calls_max, `uat called ${uatCalls} time(s) > ${expect.uat_calls_max}`);

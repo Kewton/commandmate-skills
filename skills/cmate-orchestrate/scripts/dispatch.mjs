@@ -72,6 +72,10 @@ import {
   issueOf,
   matchUpstreamFault,
   parseCliJson,
+  SEND_NOT_READY_EXIT,
+  SEND_NOT_READY_RETRY_DELAY_MS,
+  sendNotReadyKind,
+  sendPauseMs,
   parseGateLine,
   redact,
   redactionsList,
@@ -3881,7 +3885,7 @@ function autoYesSendFlags(inputs) {
 // purpose. The re-send below stays plain for the same reason — it exists to submit
 // a message the first send may have left in the input box, not to re-arm anything.
 async function sendAndConfirm(inputs, worktreeId, message, { armAutoYes = false } = {}) {
-  const first = await runCmAsync(inputs, ['send', worktreeId, message, ...(armAutoYes ? autoYesSendFlags(inputs) : [])]);
+  const first = await sendRetryingNotReady(inputs, worktreeId, ['send', worktreeId, message, ...(armAutoYes ? autoYesSendFlags(inputs) : [])]);
   if (!first.ok) {
     return { sent: false, note: excerpt(first.stderr || first.stdout || 'send failed') };
   }
@@ -3893,6 +3897,64 @@ async function sendAndConfirm(inputs, worktreeId, message, { armAutoYes = false 
     return { sent: true, confirmed: false, note: 'send may not have submitted and the re-send failed' };
   }
   return { sent: true, confirmed: false, note: 're-sent after an unconfirmed first send' };
+}
+
+// What happened on the send side of each worker, keyed by worktree id and read
+// back once its supervision has returned (CommandMate#3006). A side
+// table rather than a field on every return of the two supervision loops: those
+// have a dozen exits each, and a fact that only some of them remembered to carry
+// is a fact the report would lose on the others.
+const sendTraces = new Map();
+
+function sendTraceOf(worktreeId) {
+  if (!sendTraces.has(worktreeId)) sendTraces.set(worktreeId, { notReadyRetries: [] });
+  return sendTraces.get(worktreeId);
+}
+
+function sleepMs(ms) {
+  return ms > 0 ? new Promise((resolveSleep) => { setTimeout(resolveSleep, ms); }) : Promise.resolve();
+}
+
+// ONE `commandmate send`, retried exactly once when the server refused it as
+// not-ready (CommandMate#3006; the rule and both spellings are in lib.mjs
+// `sendNotReadyKind`). Everything else — exit 2 PROMPT_WAITING, a 409, a
+// contract rejection — is returned untouched, as before: those are refusals a
+// second identical send cannot change. A retry that the wall-clock budget cannot
+// fit is not made; the budget's own timeout then reports the stop.
+async function sendRetryingNotReady(inputs, worktreeId, args) {
+  const first = await runCmAsync(inputs, args);
+  const kind = sendNotReadyKind(first);
+  if (kind === null) return first;
+  const delayMs = sendPauseMs(SEND_NOT_READY_RETRY_DELAY_MS);
+  const entry = { kind, delay_ms: delayMs, contract: args.includes('--contract'), outcome: 'not_retried', first: excerpt(first.stderr || first.stdout), second: null };
+  sendTraceOf(worktreeId).notReadyRetries.push(entry);
+  if (wallClockDeadline !== null && Date.now() + delayMs >= wallClockDeadline) return first;
+  await sleepMs(delayMs);
+  if (wallClockExhausted()) return first;
+  const second = await runCmAsync(inputs, args);
+  entry.outcome = second.ok ? 'sent' : 'refused_again';
+  if (!second.ok) entry.second = excerpt(second.stderr || second.stdout);
+  return second;
+}
+
+// The report's half of a not-ready retry: one limitation per retry, sent or not.
+function notReadyRetryLimitation(issue, entry) {
+  const cause = entry.kind === 'session_starting'
+    ? 'the session was still starting (503 SESSION_STARTING)'
+    : 'the agent\'s composer was not ready (prompt not ready)';
+  const outcome = {
+    sent: 'the retry went through',
+    refused_again: `the retry was refused too (${entry.second ?? 'no output'}), so this send failed exactly as it did before the retry existed`,
+    not_retried: 'no retry was made: the --wall-clock-budget could not fit the wait before it',
+  }[entry.outcome];
+  return {
+    code: 'send_retried_not_ready',
+    detail: redact(`#${issue}: a \`commandmate send\` exited ${SEND_NOT_READY_EXIT} because ${cause}; nothing had been typed. `
+      + `Waited ${Math.round(entry.delay_ms / 1000)}s and sent it once more — ${outcome}`
+      + (entry.contract && entry.outcome === 'sent'
+        ? '. The refused `send --contract` had already marked its task failed, so the recorded task id is the retry\'s'
+        : '')),
+  };
 }
 
 // The message that nudges an idle-but-uncommitted worker to keep going.
@@ -3934,7 +3996,11 @@ const COMMIT_REQUEST_MESSAGE = [
 // (see AUTO_YES_ALLOWED_PROMPT_TYPES). This send is where the state is enabled,
 // because it is the send that opens the supervision.
 async function sendContractAndConfirm(inputs, worktreeId, relativeContractPath) {
-  const first = await runCmAsync(inputs, ['send', worktreeId, '--contract', relativeContractPath, ...autoYesSendFlags(inputs)]);
+  // A not-ready retry re-sends WITH --contract, and that is not a double send:
+  // the refused attempt typed nothing, and `send --contract` marks the task it
+  // created `failed` before it exits (CommandMate `send.ts`), so the retry's task
+  // row is the only one anybody works on. `readTaskId` below reads the retry's.
+  const first = await sendRetryingNotReady(inputs, worktreeId, ['send', worktreeId, '--contract', relativeContractPath, ...autoYesSendFlags(inputs)]);
   if (!first.ok) {
     return { sent: false, taskId: null, note: excerpt(first.stderr || first.stdout || 'contract send failed') };
   }
@@ -5785,6 +5851,10 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   // the report by whichever worker happened to finish first and two runs of the
   // same plan could differ.
   const scopeUnsatisfiable = new Map();
+  // What the send side did for each issue (CommandMate#3006): a not-ready
+  // retry. Read out
+  // in plan order by recordScopeAndLivenessReasons, like the entries above.
+  const sendTraceByIssue = new Map();
 
   // Step 3a for ONE issue: build its worker record, take its already-resolved
   // worktree id/path, write its prompt artifact and place its contract. Workers
@@ -6096,6 +6166,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     if (supervised.turnEvidence) worker.worker_turn_evidence = supervised.turnEvidence;
     if (supervised.autoResponded) autoResponded = true;
     if (supervised.scopeUnsatisfiable) scopeUnsatisfiable.set(worker.issue, supervised.scopeUnsatisfiable);
+    if (sendTraces.has(worktreeId)) sendTraceByIssue.set(worker.issue, sendTraces.get(worktreeId));
     if (supervised.state === 'prompt') {
       worker.prompt = { detected: true, excerpt: supervised.promptExcerpt };
     }
@@ -6209,6 +6280,15 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
           + '. '
           + 'The verdict is untouched: verification really did fail, and that is CommandMate\'s exit code to give — what this stops is the run going further'),
       });
+    }
+
+    // The send side (CommandMate#3006), in `workers` order for the same reason
+    // as everything in this pass. Every not-ready retry is a limitation: the run
+    // went on, and the report still has to say a send was repeated.
+    for (const worker of workers) {
+      const trace = sendTraceByIssue.get(worker.issue);
+      if (!trace) continue;
+      for (const entry of trace.notReadyRetries) report.limitations.push(notReadyRetryLimitation(worker.issue, entry));
     }
 
     // The liveness of every worker whose `commandmate wait` timed out (Issue

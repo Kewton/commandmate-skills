@@ -1,0 +1,54 @@
+{
+  "description": "[CommandMate#3006] dispatch で新しく起動したセッションへの最初の `send --contract` が、起動が間に合わず **503 SESSION_STARTING（exit 99、stderr `Server error: … did not reach its input prompt … (initialization timeout)`）** で断られる世界。このとき上流は何も打鍵していないので、runner は間を置いて**1回だけ**送り直し、それが通れば従来どおり完走する。空振り防止: (1) send は 2 回（断られた1回＋再送1回）であって 3 回以上ではない、(2) 再送の事実が limitation `send_retried_not_ready` として report に残る（黙って再送した実装を落とす）、(3) task id は再送側のもの。待ち時間は `CMATE_ORCHESTRATE_SEND_PAUSE_MS=0` で 0 にしてあり、テストは実時間を待たない。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "100",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "1",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      100
+    ],
+    "send_counts": {
+      "100": 2
+    },
+    "worker_states": {
+      "100": "completed"
+    },
+    "verification_outcomes": {
+      "100": "pass"
+    },
+    "task_ids": {
+      "100": "task-issue-100"
+    },
+    "limitation_codes": [
+      "send_retried_not_ready"
+    ],
+    "limitation_code_counts": {
+      "send_retried_not_ready": 1
+    },
+    "limitation_details_include": [
+      "#100: a `commandmate send` exited 99 because the session was still starting (503 SESSION_STARTING)",
+      "the retry went through",
+      "the recorded task id is the retry's"
+    ]
+  }
+}

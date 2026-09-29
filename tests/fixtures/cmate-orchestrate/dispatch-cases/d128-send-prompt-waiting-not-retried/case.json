@@ -1,0 +1,42 @@
+{
+  "description": "[CommandMate#3006] 陰性。send が **exit 2（409 PROMPT_WAITING）** で断られる世界。これはセッションが質問を抱えているという拒否であり、同じ send をもう一度送っても変わらない（しかも質問の入力欄へ打鍵しかねない）ので、**再送しない**。send は 1 回、limitation `send_retried_not_ready` は出ない、dispatch は従来どおり失敗として返る。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "100",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "1",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "send_counts": {
+      "100": 1
+    },
+    "worker_states": {
+      "100": "failed"
+    },
+    "absent_limitation_codes": [
+      "send_retried_not_ready"
+    ],
+    "worker_notes_include": {
+      "100": [
+        "is waiting on a prompt"
+      ]
+    }
+  }
+}

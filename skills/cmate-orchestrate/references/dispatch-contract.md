@@ -778,6 +778,35 @@ no work evidence after 12 turn(s); gave up at the --max-turns 12 cap
 上流側だけである。誤る向きとしても安全な側である: 実は過大だった Issue を待って `--resume` すれば run 1回を失うが、
 健全な Issue を分割させれば人間が正しい Issue を書き直すことになる。
 
+### 2.13 起動が間に合わなかった send は 1 回だけ送り直す（[CommandMate#3006](https://github.com/Kewton/CommandMate/issues/3006)）
+
+dispatch が新しく起動したセッションへの最初の `send` は、エージェントの起動が送信側の待ち枠に
+間に合わず断られることがある。このとき上流は**何も打鍵していない**。断り方は2つで、どちらも
+exit 99 であり、stderr の文言で区別する（写しは
+`tests/fixtures/cmate-orchestrate/commandmate-cli-contract.json` の `send_failures`）。
+
+| 断り方 | 上流 | exit | stderr（抜粋） | 再送 |
+|---|---|---|---|---|
+| `session_starting` | 503 `SESSION_STARTING` | 99 | `Server error: <tool> did not reach its input prompt within <n>s (initialization timeout)` | **する（1回）** |
+| `prompt_not_ready` | 送信前の composer 待ちの時間切れ | 99 | `… prompt not ready: timed out waiting for the composer before sending` | **する（1回）** |
+| `prompt_waiting` | 409 `PROMPT_WAITING` | 2 | `<id> is waiting on a prompt …` | しない |
+| その他の 409 | 409 | 99 | `Unexpected HTTP status: 409` | しない |
+
+規則:
+
+- 判定は **exit 99 と文言の両方**で行う。exit 99 だけでは 409 や「本文が届かなかった」（半端に
+  打鍵されうる）も含むので、それだけで送り直さない。**エージェントの種類には依らない**。
+- 待ち時間は定数（`SEND_NOT_READY_RETRY_DELAY_MS` = 15 秒、`scripts/lib.mjs`）で、flag ではない。
+  `--wall-clock-budget` の残りに収まらないときは送り直さず、1回目の失敗をそのまま返す。
+- 送り直すのは**1回だけ**。2回目も断られたら、再送が無かったときと同じ dispatch 失敗として返す。
+- 対象は runner が打つすべての `send`（`send --contract`・fallback の最初の送信・nudge・再指示）で
+  ある。`send --contract` の再送は新しい task 行になる —— 断られた側の task は CLI が `failed` に
+  してから終了するので、**二重に作業されることはない**。report の `task_id` は再送側のものである。
+- 再送したことは、送れたかどうかに関わらず limitation **`send_retried_not_ready`**（再送1回ごとに
+  1件、`workers` 順）に残す。detail は断り方・待った秒数・結果を名指しする。
+- UAT の fix worker への送信も同じ判定・同じ定数で送り直す（[uat-contract.md](./uat-contract.md)
+  第5節）。
+
 ## 3. 監督ループと gate
 
 ### 3.0 blocking pre-flight（`--out` を消費する前）

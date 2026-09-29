@@ -158,14 +158,14 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: d73940ccd7f58544036942f6cb4bd797df9a963f662729776ae68ff939ae83cd
-    size: 97916
+    sha256: 5995235463176507f7e83249defe6f48245c42f006358841b8d1458b0acf33d2
+    size: 98781
     kind: instruction
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: 6a4d8042d0f8d9418bcdaf50523ab91bbfca86604e60d5dc7134aada657f8c30
-    size: 151436
+    sha256: ee8f9197b487968d3e9ce538d0823fdd3fb3e792c94920ba2cc4f571ac594306
+    size: 153996
     kind: instruction
     executable: false
     script: false
@@ -200,8 +200,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 533c9abf6bbc3e044a2272b7b137571cd721d06fa0025dd469ebb0ab206fa252
-    size: 231762
+    sha256: 6260131585fc1d2e4a42fdd44a27f1cd2761b21d5ab81485c266029ff9385494
+    size: 233476
     kind: instruction
     executable: false
     script: false
@@ -212,8 +212,8 @@ files:
     executable: false
     script: false
   - path: references/uat-contract.md
-    sha256: 01c1dde27edc680aa1df6e4c6604daba214cac342cee4ddc682e9408642c3e9f
-    size: 30682
+    sha256: 7b71510e23351295aebefe988da5ce16e2bf677c18bcbd86841c350c3c243263
+    size: 31089
     kind: instruction
     executable: false
     script: false
@@ -260,8 +260,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: 8f19d3f4854e4f50368f410984097244a3532acd58a78dfd039b60452a2656ae
-    size: 453035
+    sha256: ab80b4f999c8e509a3d9f68a8ba366d73f0b3b71bac10a2de673b4bc89a30cff
+    size: 457348
     kind: script
     executable: true
     script: true
@@ -272,8 +272,8 @@ files:
     executable: true
     script: true
   - path: scripts/lib.mjs
-    sha256: 719e3b827cd33ec03301587d0db0b2d9d832aeaf46a044df27eb224f088e2629
-    size: 67253
+    sha256: 197353535216163de9f06a36659104f853b413bd424c1a2a173e34c3604a26ec
+    size: 71111
     kind: script
     executable: false
     script: true
@@ -308,8 +308,8 @@ files:
     executable: true
     script: true
   - path: scripts/uat.mjs
-    sha256: 828c3a6dee940c69d2d90de962ffb6bac7e87b1c1fffa474b77b8efe6958ba22
-    size: 88382
+    sha256: 33b524fe8016eb86143b43bc140470e1e04f6925ec375a0f0ff276550e989fe9
+    size: 89878
     kind: script
     executable: true
     script: true
