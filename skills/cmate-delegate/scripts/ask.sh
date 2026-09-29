@@ -13,9 +13,13 @@
 # exit    THE EXIT CODE OF `wait`, passed through unchanged.
 #           0 turn ended / 10 prompt / 21 not started / 99 target unresolved
 #           124 timeout / 1 server down / 2 bad arguments
+#           11 upstream fault; id=context-limit on stderr when the reply ended in
+#              a context-limit error and the CLI did not say so itself
 #         `send` failing before that returns send's code instead; nothing was
 #         delegated in that case. When `commandmate ask` exists, its code is
-#         returned instead and this wrapper does nothing else.
+#         returned instead, with one exception below.
+#         The one exception: a reply that ENDS in a context-limit error turns an
+#         upstream 0 into 11 with id=context-limit. Only 0 is ever rewritten.
 #
 # The pass-through is the whole point. `commandmate wait ... ; echo done` turns
 # every one of those codes into 0, and the caller then reports a timeout as a
@@ -30,6 +34,11 @@
 set -u
 
 EXIT_USAGE=2
+# UPSTREAM_FAULT. A CLI that knows about context limits returns 11 with
+# id=context-limit itself and it passes through untouched; this is the fallback
+# for a CLI that does not: the turn "ended" (wait/ask said 0) but the model
+# refused the request because the session's context was already full.
+EXIT_CONTEXT_LIMIT=11
 
 usage() {
   cat <<'USAGE'
@@ -170,12 +179,46 @@ cm() {
   "${CM_ARGV[@]}" "$@"
 }
 
+CONTEXT_LIMIT_DECOR="^(●|⎿|⏺|✗|⚠|[[:space:]>*•-])*((API )?Error:? *)?([0-9]{3}:? +)?"
+CONTEXT_LIMIT_RE="${CONTEXT_LIMIT_DECOR}This model's maximum context length is [0-9]+ tokens"
+
+# Does this reply END in a context-limit error? Reads the reply on stdin.
+#
+# The error has to be a line of its own, not a sentence that mentions it: a
+# reply that quotes "Prompt is too long" while explaining something is a normal
+# reply. So each pattern is anchored at the start of the line (after only
+# bullet/indent decoration, an optional "API Error:" / "Error:" and an optional
+# HTTP status), and only the last 20 non-blank lines are looked at, so an error
+# that scrolled past in an earlier turn does not condemn this one.
+#   ⚠ Error: 400 This model's maximum context length is N tokens ...  (measured)
+# Claude's "Prompt is too long" and OpenAI's context_length_exceeded are left
+# out on purpose (separate issue).
+# The literal `\n` of a --json reply is turned into a real newline first.
+has_context_limit_error() {
+  awk '{ gsub(/\\n/, "\n"); print }' | grep -v '^[[:space:]]*$' | tail -n 20 | grep -E -q "$CONTEXT_LIMIT_RE"
+}
+
+context_limit_advice() {
+  printf 'ask.sh: id=context-limit: the other session refused the request, its context is full. Nothing was done.\n' >&2
+  printf 'ask.sh: id=context-limit: waiting and resending will not help. Start a fresh session and send it again: commandmate instances %s kill %s\n' \
+    "$WORKTREE_ID" "$INSTANCE_ID" >&2
+}
+
 # `commandmate ask` (CommandMate#2376) does send+wait+capture server-side. When
 # it exists it is the real thing and this wrapper gets out of the way, exit code
 # included.
 if cm ask --help >/dev/null 2>&1; then
-  cm ask "$WORKTREE_ID" --instance "$INSTANCE_ID" "$MESSAGE" --timeout "$TIMEOUT" --json
-  exit $?
+  # The reply is held (byte for byte, via the trailing sentinel) so it can be
+  # read before it is printed. Only an upstream 0 can become 11.
+  ask_out=$(cm ask "$WORKTREE_ID" --instance "$INSTANCE_ID" "$MESSAGE" --timeout "$TIMEOUT" --json; printf 'x%s' "$?")
+  ask_rc=${ask_out##*x}
+  ask_out=${ask_out%x*}
+  printf '%s' "$ask_out"
+  if [ "$ask_rc" -eq 0 ] && printf '%s' "$ask_out" | has_context_limit_error; then
+    context_limit_advice
+    exit "$EXIT_CONTEXT_LIMIT"
+  fi
+  exit "$ask_rc"
 fi
 
 cm send "$WORKTREE_ID" "$MESSAGE" --instance "$INSTANCE_ID" >&2
@@ -194,11 +237,18 @@ if [ -n "$wait_out" ]; then
   printf '%s\n' "$wait_out" >&2
 fi
 
-cm capture "$WORKTREE_ID" --instance "$INSTANCE_ID" --pane --tail "$TAIL"
-capture_rc=$?
+capture_out=$(cm capture "$WORKTREE_ID" --instance "$INSTANCE_ID" --pane --tail "$TAIL"; printf 'x%s' "$?")
+capture_rc=${capture_out##*x}
+capture_out=${capture_out%x*}
+printf '%s' "$capture_out"
 if [ "$capture_rc" -ne 0 ]; then
   printf 'ask.sh: capture failed (exit %s). The reply was not read back; wait said %s.\n' \
     "$capture_rc" "$wait_rc" >&2
+fi
+
+if [ "$wait_rc" -eq 0 ] && printf '%s' "$capture_out" | has_context_limit_error; then
+  context_limit_advice
+  exit "$EXIT_CONTEXT_LIMIT"
 fi
 
 exit "$wait_rc"
