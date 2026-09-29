@@ -82,7 +82,13 @@ guarded ref delete・宣言 command の実行・merge 証跡の取得に限る�
 
 ## 3. 実行してよい command
 
-`requirements.commands` に宣言した `git` / `gh` / `commandmate` に限る。
+`requirements.commands` に宣言した `git` / `gh` / `commandmate` / `node` に限る。
+
+- `node` — 同梱の runner `scripts/cleanup.mjs` だけを実行する。Step 1〜8 の判定と削除を
+  そのまま実装したもので、**点検スクリプトを自分で書かず、これを使う**（手書きの点検は条件の
+  入れ忘れで規則に反した削除を起こした。CommandMate#3010）。dry-run が既定で、削除は
+  `--apply --confirm <branch,...>` のときだけ。flag・出力・exit code は
+  [`references/runner-contract.md`](./references/runner-contract.md) が正本である。
 
 - `git` — `worktree list --porcelain`、`status --porcelain`、`branch --show-current`、
   `rev-parse`、`merge-base --is-ancestor`、`fetch <remote> <base> --prune`、`cat-file -e`、
@@ -130,6 +136,8 @@ clean な候補ごとに proof を求める。型は `direct` / `merged_equivale
 3つだけで、各型の成立条件（`merged_equivalent` の **4条件すべて** を含む）と
 `unverifiable` に落ちる事由は [`references/proof-algorithm.md`](./references/proof-algorithm.md)
 が正本である。**1つでも欠けたら `unverifiable` = 削除しない。迷ったら `unverifiable`。**
+条件4は正味の diff のバイト一致で判定し、`git cherry` の `+` は evidence として記録するだけで
+単独の否決理由にしない（BEHIND で base を merge してから squash された branch のため）。
 
 `decision: delete` は `state: clean` かつ `proof.type ∈ {direct, merged_equivalent}` のときだけ。
 
@@ -212,6 +220,9 @@ result を返す前に `completion_check` の6件を自分で実行して記録�
 - [`references/proof-algorithm.md`](./references/proof-algorithm.md) — direct / merged-equivalent / unverifiable の判定と drift 再検査
 - [`references/safety.md`](./references/safety.md) — 禁止操作、除外、削除方式、入力の安全性、sync、診断、redaction
 - [`references/result-contract.md`](./references/result-contract.md) — plan / result の各 field、status、completion check、summary の構成
+- [`references/runner-contract.md`](./references/runner-contract.md) — 同梱 runner `scripts/cleanup.mjs` の呼び方・出力・exit code
+- [`references/codes-and-recovery.md`](./references/codes-and-recovery.md) — exit code・条件4の evidence・apply の skip と回復
+- [`references/release-notes.md`](./references/release-notes.md) — 変更の経緯
 - [`references/agent-compatibility.md`](./references/agent-compatibility.md) — Agent 差異と fallback
 - [`schemas/cleanup-plan.v1.json`](./schemas/cleanup-plan.v1.json) — plan 文書 schema
 - [`schemas/cleanup-result.v1.json`](./schemas/cleanup-result.v1.json) — result 文書 schema
