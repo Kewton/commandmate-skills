@@ -1,0 +1,46 @@
+{
+  "description": "CommandMate#3008: plan に無い番号を `--only` に書くと、既存の引数エラーと同じ `invalid_input`（exit 3）で断る。detail は plan の Issue 一覧を出し、1 度も CLI を呼ばず、`--out` も作らない（同じコマンドを直して再実行できる）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-only-five.json",
+    "orchestrate_args": [
+      "300",
+      "301",
+      "302",
+      "303",
+      "304",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "2",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--only",
+    "300,999"
+  ],
+  "expect": {
+    "exit": 3,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "waves_count": 0,
+    "never_sent": [
+      300,
+      301,
+      302,
+      303,
+      304
+    ],
+    "no_cli_calls": true,
+    "out_dir_created": false,
+    "blocking_codes": [
+      "invalid_input"
+    ],
+    "blocking_details_include": [
+      "--only names #999, which is not in the plan",
+      "#300, #301, #302, #303, #304"
+    ]
+  }
+}

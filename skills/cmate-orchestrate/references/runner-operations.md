@@ -253,6 +253,22 @@ runner は wait が timeout した時点で `capture --json` を1回だけ叩き
 規則の正本は [dispatch-contract.md](./dispatch-contract.md) 第8.5節。
 
 
+## 8.5 dispatch: plan の一部だけ dispatch する（`--only`）
+
+**条件の揃った Issue だけ先に走らせる（`--only 12,14,15`）** — 5 本の plan のうち 2 本が宣言の不備で
+止まっているとき、plan を組み直さずに残り 3 本を dispatch できる。
+
+1. `--only` には plan にある番号だけを書く。無い番号は `invalid_input`。
+2. 選んだ Issue が依存する Issue も一緒に選ぶ（前回 attempt が pass させた依存を `--resume` で引き継ぐ場合は
+   不要）。選ばないと `invalid_input`（何も dispatch せず、`--out` も作らない。detail の
+   「#N depends on #M」を見て足すか外す）。
+3. 走った結果は report の `plan_scope` で読む。`deselected` の Issue は worker_state `not_dispatched`
+   （note `excluded by --only`）で、失敗ではなく**未着手**である。選んだ Issue がすべて pass なら `success`。
+4. 残りは、条件を直したあとに `--resume <前回の --out> --only <残り>`（部分集合を広げる）か、
+   `--only` を付けずに `--resume`（前回の部分集合を引き継ぐ）で進める。
+
+正本: [dispatch-contract.md](./dispatch-contract.md) 第3.0.5節。
+
 ## 9. dispatch: 契約経路とフォールバック
 
 契約経路では plan だけから **実行契約 yaml** を決定的に生成して worktree に置き、

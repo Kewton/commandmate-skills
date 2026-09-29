@@ -1,0 +1,20 @@
+{
+  "cli_available": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "301": {
+      "state": "completed",
+      "verify": "pass"
+    },
+    "303": {
+      "state": "completed",
+      "verify": "pass"
+    }
+  }
+}

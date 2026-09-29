@@ -495,6 +495,37 @@ plan は展開しない（ADR 不変条件3）ので、可視にできるのは�
 
 ## dispatch（`scripts/dispatch.mjs`）
 
+### CommandMate #3008 — plan の一部だけを dispatch する方法が無く、組み直していた
+
+5 本の plan のうち 2 本が条件（宣言外のパス・宣言が scope に入らない）を満たさなかった。dispatch は
+plan 全体を走らせるので、条件の揃った 3 本だけ動かすには plan を組み直すしかなかった。
+
+→ `dispatch.mjs --only 12,14,15` を足した。plan ファイルは触らず、起動直後に `issues` / `waves` /
+`dependencies` を選んだ Issue だけに絞る（絞りを 1 か所にしたので、barrier・pre-flight・lock・report が
+別々の「一部」を見ることが無い）。
+
+判断したこと:
+
+- **断り方は「全体を断る」にした（利用者との問答で確定）。** 選んだ Issue が選外の Issue に依存しているとき、
+  その Issue だけを外して残りを走らせる案もあった。しかしそれだと、argv に書いた 3 本のうち 2 本しか走らない
+  run になり、「なぜ 2 本か」を report を読まないと再構成できない。全体断り（`invalid_input`、exit 3、
+  `--out` 未作成）なら、直して同じコマンドを再実行するだけで済む。code は新設せず、plan に無い番号と同じ
+  `invalid_input` にした。ただし依存先が `--resume` で引き継いだ pass 済みの記録なら断らない（すでに満たされて
+  いる）。main に merge 済みかは調べない。依存として数えるのはスケジューラが辿る辺だけ（`lexical` の辺と plan 外への
+  辺は数えない）。
+- **pre-flight は選んだ Issue だけを見る。** 絞った plan を全工程が読むので、選外の Issue の宣言不備・
+  worktree 欠落は run を止めない（止めていたのが、この Issue の原因そのもの）。
+- **選外の Issue は `not_dispatched`（note `excluded by --only`）で記録し、blocking にしない。** 選んだ Issue が
+  すべて pass なら run は `success`。前回 attempt が pass させていたものは、その記録を転記する（最後の記録が
+  勝つ読み手の上に「excluded」を上書きしないため）。
+- **report は「plan 全体」と「今回の部分集合」の両方を残す。** 任意の `plan_scope` と `only_subset` limitation。
+  required にしていないので既存 report は検証を通り、`--only` を使わない run は byte 一致のまま。
+- **wave は plan の順序を保ったまま選外を除き、空になった wave は飛ばす。** `max_parallel` は変えない。
+- **`--resume` / `--reverify` と併用できる。** `--only` を渡さない resume は前回 report の部分集合を
+  引き継ぐ。引き継がないと「部分集合の run を再開したつもりが、選外まで dispatch される」矛盾が出る。
+
+正本: [dispatch-contract.md](./dispatch-contract.md) 第3.0.5節。
+
 ### CommandMate #1447 — 公式経路は public `commandmate` である（ADR）
 
 `commandmatedev` は使わない。explicit phase flag 設計（1 invocation で mutating phase を

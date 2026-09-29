@@ -339,6 +339,9 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | dispatch `blocked_by_upstream_failure`（**`--schedule dag`**。`stop_reason` は原因側に付く。`partial`） | その Issue の依存が `completed` かつ `verification.outcome: pass` に到達しなかったので、**下流である当該 Issue を投入しなかった**（[dispatch-contract.md](./dispatch-contract.md) 第3.2節）。**この Issue の worktree は1度も駆動していない**（`worker_state: not_dispatched` / `task_id: null`）。**独立系列は止めていない** —— wave 方式ならその wave ごと止まっていた Issue が、この run では走り切っている | **上流の Issue を直してから `dispatch.mjs --plan <plan.json> --resume <その run の dispatch ディレクトリ>`。** blocking detail が上流の Issue 番号を名指ししている。上流が止まった理由は、その Issue 自身の停止 code（`worker_failed` / `verification_failed` / `worker_timeout` / …）を本表で引く。**この Issue 自体をデバッグしない** —— 何も送っていない |
 | dispatch `schedule_halted_unattended`（**`--schedule dag --unattended`**。同上） | **この Issue の依存はすべて pass していた。** 別の Issue が green にならなかったので、無人運転として**新規投入をやめた**（人間が読む運転では下流だけを止め、この Issue は走っていた）。既に走っていた worker は最後まで見届けている | **失敗した Issue を直してから `--resume`。** この Issue には何も問題が無く、再開すればそのまま走る。**「下流だけ止める」側で運転してよいと判断したなら `--unattended` を外す** —— それは「止まった半分を読んで、続けてよいかを決める人間が居る」という宣言である |
 | dispatch `verification_failed` / `worker_failed` / `timeout` で **一部の Issue だけ**落ちた | pass 済みの Issue と落ちた Issue が同じ run に混ざっている | 落ちた分を直したうえで **`dispatch.mjs --plan <plan.json> --resume <その run の dispatch ディレクトリ>`**。pass 済みは再 dispatch されず記録だけ引き継がれる（[SKILL.md](../SKILL.md) 第3.2節）。**re-plan は不要** |
+| dispatch `invalid_input`（`--only` の依存違反。`stop_reason: dispatch_error`。exit 3） | `--only` で選んだ Issue が、**選ばれていない Issue に依存**している（`plan.dependencies`。`lexical` の辺は数えない。前回 attempt が pass させた依存を `--resume` で引き継ぐ場合は数えない）。**何も dispatch しておらず、`--out` も作っていない** | detail の「#N depends on #M」に従い、依存先を `--only` に足すか、依存元を外す。**全体を断っているので、直して同じコマンドを再実行してよい**（[dispatch-contract.md](./dispatch-contract.md) 第3.0.5節） |
+| dispatch `invalid_input`（`--only` が plan に無い番号を名指し / 番号でない値。exit 3） | `--only` の値が `12,14,15` の形でない、または plan の Issue 番号に無い | detail が plan の Issue 一覧を出している。番号を直して再実行（何も dispatch していない） |
+| dispatch `only_subset`（limitation。report の `plan_scope` と対） | 今回の run が plan の**一部だけ**を扱った（`--only`、または resume / reverify が前回の部分集合を引き継いだ） | 停止ではない。`deselected` は worker_state `not_dispatched`（note `excluded by --only`）で、失敗でなく未着手。続きは `--resume <dir> --only <残り>` |
 | dispatch `resume_plan_mismatch`（`stop_reason: dispatch_error`） | `--resume` 先の report が**別 plan**のものだった（`run_id` / repository / base 不一致） | その plan 自身の dispatch ディレクトリを `--resume` に渡す。新規に走らせるなら `--out` で始める。**何も dispatch していないので、直して同じコマンドを再実行してよい** |
 | dispatch `resume_invalid`（同上） | `--resume` 先の report が `dispatch-report.v1` として読めない（schema version 違い / JSON 破損） | detail が「何がどう合わないか」を名指ししている。報告どおりの report を指すか、`--out` で新規 run にする。**壊れた report を半分だけ信じて引き継がない** |
 | dispatch `resume_no_work`（`status: success`） | 再実行対象が1件も無い（全 Issue が completed かつ pass） | 停止ではない。その attempt の report をそのまま merge / uat に渡す |
@@ -391,7 +394,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 起動し（実行時間・課金・通知）、PR 作成は reviewer に通知を出す。
 
 `worktree_setup_unavailable` / `worktree_setup_failed` / `worktree_profile_mismatch` と
-`resume_attempt` / `resume_no_work` / `resume_invalid` / `resume_plan_mismatch`、
+`resume_attempt` / `resume_no_work` / `resume_invalid` / `resume_plan_mismatch` / `only_subset`、
 そして `scope_unsatisfiable` / `contract_scope_dropped` / `harness_path_in_scope` /
 `ambiguous_file_candidate` / `unconfirmed_lexical_dependency` /
 `open_question_declared` / `open_question_block_invalid` /

@@ -1,0 +1,160 @@
+{
+  "description": "CommandMate#3008: `--only 300,302,304` の run（attempt 1）で #304 が不合格になり partial 停止した。`--only` を渡さずに `--resume` した attempt 2 は、前回 report の `plan_scope.selected` を引き継ぐ（`inherited: true`）ので、選外の #301 / #303 を dispatch せず、#304 だけを再実行する。引き継がないと「部分集合の run を再開したつもりが選外まで走る」矛盾が出る。 attempt 3 は `--resume` と `--only` を一緒に指定して部分集合を全体へ広げる: 引き継いだ subset は使われず（`inherited: false`）、まだ走っていない #301 / #303 だけが dispatch される。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-only-five.json",
+    "orchestrate_args": [
+      "300",
+      "301",
+      "302",
+      "303",
+      "304",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "2",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "attempts": [
+    {
+      "scenario": "attempt-1.json",
+      "dispatch_args": [
+        "--only",
+        "300,302,304",
+        "--expect-branch",
+        "feature/integration"
+      ],
+      "expect": {
+        "exit": 7,
+        "status": "partial",
+        "stop_reason": "verification_failed",
+        "sent": [
+          300,
+          302,
+          304
+        ],
+        "never_sent": [
+          301,
+          303
+        ],
+        "plan_scope": {
+          "plan_issues": [
+            300,
+            301,
+            302,
+            303,
+            304
+          ],
+          "selected": [
+            300,
+            302,
+            304
+          ],
+          "deselected": [
+            301,
+            303
+          ],
+          "inherited": false
+        },
+        "report_file": "dispatch-report.json",
+        "history_length": 1
+      }
+    },
+    {
+      "scenario": "attempt-2.json",
+      "resume": true,
+      "dispatch_args": [
+        "--expect-branch",
+        "feature/integration"
+      ],
+      "expect": {
+        "exit": 0,
+        "status": "success",
+        "stop_reason": "completed",
+        "sent": [
+          304
+        ],
+        "never_sent": [
+          300,
+          301,
+          302,
+          303
+        ],
+        "plan_scope": {
+          "plan_issues": [
+            300,
+            301,
+            302,
+            303,
+            304
+          ],
+          "selected": [
+            300,
+            302,
+            304
+          ],
+          "deselected": [
+            301,
+            303
+          ],
+          "inherited": true
+        },
+        "limitation_codes": [
+          "resume_attempt",
+          "only_subset"
+        ],
+        "limitation_details_include": [
+          "the subset recorded by the prior attempt (--only was not typed again)",
+          "Re-dispatched here: #304"
+        ],
+        "report_file": "resume-attempt-2/dispatch-report.json",
+        "history_length": 2
+      }
+    },
+    {
+      "scenario": "attempt-3.json",
+      "resume": true,
+      "dispatch_args": [
+        "--only",
+        "300,301,302,303,304",
+        "--expect-branch",
+        "feature/integration"
+      ],
+      "expect": {
+        "exit": 0,
+        "status": "success",
+        "stop_reason": "completed",
+        "sent": [
+          301,
+          303
+        ],
+        "never_sent": [
+          300,
+          302,
+          304
+        ],
+        "plan_scope": {
+          "plan_issues": [
+            300,
+            301,
+            302,
+            303,
+            304
+          ],
+          "selected": [
+            300,
+            301,
+            302,
+            303,
+            304
+          ],
+          "deselected": [],
+          "inherited": false
+        },
+        "report_file": "resume-attempt-3/dispatch-report.json",
+        "history_length": 3
+      }
+    }
+  ]
+}

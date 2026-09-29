@@ -1,0 +1,66 @@
+{
+  "description": "CommandMate#3008: pre-flight の検査（ここでは open questions の gate）は `--only` で選んだ Issue だけが対象である。#301 は未回答の planner question を抱えており、`--only` なしなら `open_questions` で 1 人も dispatch せずに止まる。`--only 300,302` では #301 を見ず、選んだ 2 本が dispatch されて success になる。#301 は `not_dispatched`（excluded by --only）で、blocking ではない。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-only-open-question.json",
+    "orchestrate_args": [
+      "300",
+      "301",
+      "302",
+      "303",
+      "304",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "2",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--only",
+    "300,302",
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "sent": [
+      300,
+      302
+    ],
+    "never_sent": [
+      301,
+      303,
+      304
+    ],
+    "worker_states": {
+      "300": "completed",
+      "302": "completed",
+      "301": "not_dispatched"
+    },
+    "blocking_codes": [],
+    "plan_scope": {
+      "plan_issues": [
+        300,
+        301,
+        302,
+        303,
+        304
+      ],
+      "selected": [
+        300,
+        302
+      ],
+      "deselected": [
+        301,
+        303,
+        304
+      ],
+      "inherited": false
+    }
+  }
+}

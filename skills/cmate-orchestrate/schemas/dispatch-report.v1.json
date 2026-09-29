@@ -63,6 +63,18 @@
       "enum": ["wave", "dag"],
       "description": "OPTIONAL, and written ONLY by a `--schedule dag` run (Issue #183). Which reading max_parallel and waves[] below take. ABSENT means the default wave scheduling — the plan's waves with a barrier between them — and it is absent rather than written as \"wave\" so a run without the flag is byte-for-byte the run it was before the flag existed. \"dag\": issues were admitted by DEPENDENCY SATISFACTION — an issue was dispatched as soon as every EFFECTIVE dependency of it (plan.dependencies minus the `basis: lexical` edges Issue #182 refuses to treat as edges) reached `completed` AND `verification.outcome: pass`, and a slot was free. There max_parallel is the concurrency cap and nothing else, plan.waves is reference information, and the waves[] entries below are ADMISSION ROUNDS whose `barrier` is descriptive rather than a gate. Added optionally, so reports written before this field keep validating and dispatch_schema_version stays 1."
     },
+    "plan_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan_issues", "selected", "deselected", "inherited"],
+      "description": "OPTIONAL, and written ONLY by a run that dispatched a SUBSET of the plan (`--only`, CommandMate#3008; or a `--resume` / `--reverify` that kept the subset the prior report recorded). ABSENT means the whole plan was in scope, so a run without the flag is byte-for-byte the run it was before the field existed. It states the whole plan and the chosen subset side by side. An issue in `deselected` was neither dispatched nor judged, which is not the same as failed: it appears in the LAST waves[] entry (`dispatched: []`) as `not_dispatched` with a note saying `excluded by --only` (or as the carried pass record a prior attempt left), and is never a blocking reason. Added optionally, so reports written before this field keep validating and dispatch_schema_version stays 1.",
+      "properties": {
+        "plan_issues": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "description": "Every issue of the plan, ascending." },
+        "selected": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 1 }, "description": "The issues this run was allowed to dispatch, ascending." },
+        "deselected": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "description": "plan_issues minus selected." },
+        "inherited": { "type": "boolean", "description": "True when --only was not typed on this --resume / --reverify and the subset was carried from the prior report." }
+      }
+    },
     "profile": {
       "type": "object",
       "additionalProperties": false,
@@ -104,7 +116,7 @@
     },
     "waves": {
       "type": "array",
-      "description": "Ordered waves, in plan order. A wave is only present if the loop reached it; a wave present with an empty dispatched list means drift halted it before any send. Under `schedule: \"dag\"` (Issue #183) an entry is an ADMISSION ROUND instead — the issues admitted at one scheduling decision, in the order the decisions were made — and rounds OVERLAP in time, so a later entry may have been dispatched while an earlier one was still running. A trailing entry with an empty dispatched list then carries the issues that were never started at all, each with a blocking reason naming why (blocked_by_upstream_failure / schedule_halted_unattended).",
+      "description": "Ordered waves, in plan order. A wave is only present if the loop reached it; a wave present with an empty dispatched list means drift halted it before any send. Under `schedule: \"dag\"` (Issue #183) an entry is an ADMISSION ROUND instead — the issues admitted at one scheduling decision, in the order the decisions were made — and rounds OVERLAP in time, so a later entry may have been dispatched while an earlier one was still running. A trailing entry with an empty dispatched list then carries the issues that were never started at all, each with a blocking reason naming why (blocked_by_upstream_failure / schedule_halted_unattended). On a `--only` run (see plan_scope) a trailing entry with an empty dispatched list carries the deselected issues instead, as `not_dispatched` with no blocking reason.",
       "items": { "$ref": "#/$defs/wave" }
     },
     "blocking_reasons": { "type": "array", "items": { "$ref": "#/$defs/entry" } },

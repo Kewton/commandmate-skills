@@ -417,6 +417,18 @@ Options:
                          record is transcribed unchanged. Artifacts append under
                          <dir>/${RESUME_ATTEMPT_PREFIX}<n>/ exactly as a resume's
                          do. Mutually exclusive with --out and --resume.
+  --only <issues>        Dispatch only these issues of the plan (comma-separated
+                         issue numbers, e.g. --only 12,14,15) without re-planning.
+                         Refused, with nothing dispatched and --out unconsumed,
+                         (invalid_input) when a number is not in the plan, or a
+                         selected issue depends (plan.dependencies, not a
+                         lexical-only edge) on an unselected issue that no
+                         prior attempt passed (--resume carries that pass). The
+                         report keeps the whole plan and the chosen subset
+                         (plan_scope); unselected issues are recorded as
+                         not_dispatched, not as a failure. With
+                         --resume / --reverify and no --only, the subset the
+                         prior report recorded is kept.
   --cli <launcher>       The CommandMate launcher to drive: an executable plus
                          fixed leading arguments, split on whitespace and run
                          WITHOUT a shell — "commandmate" (default),
@@ -535,6 +547,7 @@ function parseCli(argv) {
         out: { type: 'string' },
         resume: { type: 'string' },
         reverify: { type: 'string' },
+        only: { type: 'string' },
         cli: { type: 'string' },
         git: { type: 'string' },
         gh: { type: 'string' },
@@ -786,6 +799,7 @@ function resolveInputs(parsed) {
     outDir: values.out ?? null,
     resumeDir: values.resume ?? null,
     reverifyDir: values.reverify ?? null,
+    only: resolveOnly(values.only),
     cliArgv,
     cli: cliArgv.join(' '),
     git: values.git ?? 'git',
@@ -812,6 +826,150 @@ function resolveInputs(parsed) {
     // whose profile declares nothing, which is what keeps such a run's report
     // byte-for-byte the one it was before this field existed.
     dispatchDefaultNotes: [],
+    // Filled in by run() when `--only` (or a resumed subset) narrowed the plan;
+    // null otherwise, so emptyReport writes nothing for an ordinary run.
+    onlyScope: null,
+    onlyCarried: new Map(),
+  };
+}
+
+// =============================================================================
+// --only: dispatch a subset of the plan (CommandMate#3008)
+// =============================================================================
+//
+// A plan is approved as a whole, but the set of issues that are READY is not: a
+// declaration outside the scope or an unmet condition can hold back two of five,
+// and the only way forward used to be re-planning the other three. `--only`
+// restricts THIS run to the named issues and leaves the plan file untouched.
+//
+// It is done by narrowing the plan the runner works on (issues, waves,
+// dependencies) once, before anything else reads it, so the barrier, the
+// pre-flight, the locks and the report all see the same smaller plan and no
+// second code path exists to drift from the first.
+//
+// A refusal is WHOLE, never partial: a selected issue whose dependency is not
+// selected is not silently dropped from the run, because a run that quietly
+// dispatches two of the three the operator typed is a run nobody can reconstruct
+// from the argv. Both refusals happen before `--out` is created, so the same
+// command can be corrected and re-run.
+
+function resolveOnly(raw) {
+  if (raw === undefined) return null;
+  const tokens = raw.split(',').map((token) => token.trim());
+  if (tokens.some((token) => !/^\d+$/.test(token) || Number.parseInt(token, 10) < 1)) {
+    throw new SkillError('invalid_input',
+      '--only must be a comma-separated list of issue numbers (e.g. --only 12,14,15)', 3);
+  }
+  return [...new Set(tokens.map((token) => Number.parseInt(token, 10)))].sort((a, b) => a - b);
+}
+
+// The prior report `--resume` / `--reverify` continues, or null on a first
+// attempt. Read here (and again by buildResume) because the subset a resume runs
+// is decided BEFORE the plan is narrowed, and the narrowed plan is what
+// buildResume reads.
+function priorForOnly(inputs, plan) {
+  const reverifying = inputs.reverifyDir !== null;
+  const dir = reverifying ? inputs.reverifyDir : inputs.resumeDir;
+  if (dir === null) return null;
+  const op = reverifying ? REVERIFY_OP : RESUME_OP;
+  const found = priorReport(dir, op);
+  const doc = loadResumeReport(found.path, plan, op);
+  return { attempt: found.attempt, doc, records: priorWorkerRecords(doc) };
+}
+
+// Returns { plan, scope, carried }. `scope` is null when no subset applies, which
+// is what keeps a run without the flag byte-for-byte the run it was before it
+// existed. `carried` maps a DESELECTED issue to the pass record a prior attempt
+// left for it: that record is what satisfies a selected issue's dependency on it,
+// and it is transcribed into this report so a later reader that takes the last
+// record of an issue never finds "excluded" written over a pass.
+function restrictToOnly(inputs, plan) {
+  const prior = priorForOnly(inputs, plan);
+  let selected = inputs.only;
+  let inherited = false;
+  if (selected === null && prior !== null) {
+    const recorded = prior.doc.plan_scope?.selected;
+    if (Array.isArray(recorded) && recorded.length > 0 && recorded.every(Number.isInteger)) {
+      selected = [...recorded].sort((a, b) => a - b);
+      inherited = true;
+    }
+  }
+  if (selected === null) return { plan, scope: null, carried: new Map() };
+
+  const planIssues = plan.issues.map((issue) => issue.number).sort((a, b) => a - b);
+  const known = new Set(planIssues);
+  const unknown = selected.filter((number) => !known.has(number));
+  if (unknown.length > 0) {
+    throw new SkillError('invalid_input',
+      `--only names ${unknown.map((n) => `#${n}`).join(', ')}, which ${unknown.length === 1 ? 'is' : 'are'} not in the plan `
+        + `(the plan holds ${planIssues.map((n) => `#${n}`).join(', ')})`, 3);
+  }
+  const chosen = new Set(selected);
+  const carried = new Map();
+  if (prior !== null) {
+    for (const number of planIssues) {
+      const record = prior.records.get(number);
+      if (!chosen.has(number) && record !== undefined && isCarryable(record)) carried.set(number, carriedWorkerRecord(record, prior.attempt));
+    }
+  }
+  const missing = [];
+  for (const edge of plan.dependencies ?? []) {
+    // Only the edges the scheduler honours: a lexical-only edge is advisory, and
+    // an edge naming an issue outside the plan waits for nothing. A dependency a
+    // prior attempt already passed is satisfied, not missing.
+    if (edge.basis === 'lexical' || !chosen.has(edge.issue) || chosen.has(edge.depends_on) || !known.has(edge.depends_on)) continue;
+    if (carried.has(edge.depends_on)) continue;
+    missing.push(`#${edge.issue} depends on #${edge.depends_on}`);
+  }
+  if (missing.length > 0) {
+    throw new SkillError('invalid_input',
+      `--only selects ${selected.map((n) => `#${n}`).join(', ')}, but ${[...new Set(missing)].join('; ')}, which is not selected `
+        + 'and has no passed record from a prior attempt to --resume. Nothing was dispatched: add the dependency to --only, or drop the dependent issue from it', 3);
+  }
+  const waves = plan.waves.map((wave) => wave.filter((number) => chosen.has(number))).filter((wave) => wave.length > 0);
+  if (selected.some((number) => !waves.flat().includes(number))) {
+    throw new SkillError('plan_invalid', '--only names an issue that no wave of the plan schedules', 3);
+  }
+  const narrowed = {
+    ...plan,
+    issues: plan.issues.filter((issue) => chosen.has(issue.number)),
+    dependencies: (plan.dependencies ?? []).filter((edge) => chosen.has(edge.issue) && chosen.has(edge.depends_on)),
+    waves,
+  };
+  return {
+    plan: narrowed,
+    scope: {
+      plan_issues: planIssues,
+      selected,
+      deselected: planIssues.filter((number) => !chosen.has(number)),
+      inherited,
+    },
+    carried,
+  };
+}
+
+// The trailing wave entry that accounts for every deselected issue: a pass a
+// prior attempt left is transcribed, everything else is `not_dispatched` with a
+// note saying WHY. Not a blocking reason: the operator asked for the subset.
+function onlyExcludedWorkers(inputs) {
+  return inputs.onlyScope.deselected.map((number) => inputs.onlyCarried.get(number) ?? {
+    issue: number,
+    task_id: null,
+    worker_state: 'not_dispatched',
+    verification: { ran: false, report_schema_version: null, outcome: 'not_run', gates: [], checks: [] },
+    prompt: { detected: false, excerpt: null },
+    note: 'excluded by --only: this issue was not selected for this run, so it was neither dispatched nor judged (not a failure)',
+  });
+}
+
+function onlyLimitation(scope) {
+  const list = (numbers) => (numbers.length === 0 ? 'なし' : numbers.map((n) => `#${n}`).join(', '));
+  return {
+    code: 'only_subset',
+    detail: `${scope.inherited ? 'the subset recorded by the prior attempt (--only was not typed again)' : '--only'}: this run dispatches ${list(scope.selected)} `
+      + `of the plan's ${list(scope.plan_issues)}; NOT dispatched, and not judged here: ${list(scope.deselected)}. `
+      + 'They are recorded in a trailing waves[] entry as `not_dispatched` ("excluded by --only") or, when a prior attempt already passed them, as that carried record; '
+      + 'either way it is not a failure and not a blocking reason',
   };
 }
 
@@ -5568,6 +5726,10 @@ function emptyReport(inputs, plan, outDir) {
       base: plan.profile.base,
       verified: plan.profile.verified === true,
     },
+    // Written ONLY when `--only` narrowed the plan (CommandMate#3008): the whole
+    // plan and the subset this run took, side by side, so a reader can tell "not
+    // selected" from "not dispatched". Absent otherwise.
+    ...(inputs.onlyScope === null ? {} : { plan_scope: inputs.onlyScope }),
     drift_checks: [],
     waves: [],
     blocking_reasons: [],
@@ -5578,7 +5740,7 @@ function emptyReport(inputs, plan, outDir) {
     // decided there, and a reader who does not know which of them came from the
     // profile cannot reconstruct the run from the argv. Empty (and therefore
     // invisible) on a plan whose profile declares nothing.
-    limitations: [...inputs.dispatchDefaultNotes],
+    limitations: [...inputs.dispatchDefaultNotes, ...(inputs.onlyScope === null ? [] : [onlyLimitation(inputs.onlyScope)])],
     redactions: [],
     completion_check: { passed: false, checks: [] },
     summary_markdown: '',
@@ -6994,6 +7156,19 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   // recorded whatever the outcome — including on the runs it made succeed.
   recordSyncAttempt(report);
 
+  // `--only` (CommandMate#3008): account for the issues this run was told not to
+  // touch. After every wave, so it cannot be mistaken for a scheduling decision,
+  // and it changes neither the status nor the completion check: a run whose
+  // SELECTED issues all passed is a success.
+  if (inputs.onlyScope !== null && inputs.onlyScope.deselected.length > 0) {
+    report.waves.push({
+      index: report.waves.length,
+      dispatched: [],
+      workers: onlyExcludedWorkers(inputs),
+      barrier: { all_workers_completed: false, all_verifications_passed: false, advanced: false },
+    });
+  }
+
   // Completion self-check. `no_auto_prompt_response` guards the safe default: a
   // prompt is never answered UNLESS --auto-yes was explicitly set.
   // A resume with nothing left to dispatch mutates nothing, so there is no
@@ -7480,7 +7655,12 @@ async function run(argv) {
   // worktree preparation stage are part of what it pays for (Issue #122).
   startWallClockBudget(inputs.wallClockBudget);
   const rawPlan = loadPlan(inputs.planPath);
-  const plan = validatePlan(rawPlan);
+  const validatedPlan = validatePlan(rawPlan);
+  // `--only` narrows the plan ONCE, here, before anything reads it (CommandMate#3008).
+  const restricted = restrictToOnly(inputs, validatedPlan);
+  const plan = restricted.plan;
+  inputs.onlyScope = restricted.scope;
+  inputs.onlyCarried = restricted.carried;
   // The profile's operating defaults (Issue #180), resolved against the flags
   // actually typed. It happens HERE — after the plan is readable and before the
   // resume decision, the lock, the pre-flight and `--out` — because the values it
