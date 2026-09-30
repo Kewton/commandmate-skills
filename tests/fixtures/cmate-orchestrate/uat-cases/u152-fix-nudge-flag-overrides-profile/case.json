@@ -1,0 +1,75 @@
+{
+  "description": "#288: --fix-nudge-message は profile の fix_nudge に勝つ（flag → profile → 既定）。届く追記は flag の文だけで、profile の文は届かない。limitation には上書きしたことが残る。",
+  "phase": "fix_uat",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ],
+    "profile_json": "worker-messages-fix-nudge-only.json"
+  },
+  "uat_args": [
+    "--approve",
+    "--max-attempts",
+    "2",
+    "--fix-nudge-message",
+    "FLAG-FIX-NOTE: 今回だけの但し書き。"
+  ],
+  "uat_scenario": {
+    "uat": {
+      "200": {
+        "fix_on": 1
+      },
+      "201": "pass"
+    },
+    "workers": {
+      "200": {
+        "state": "completed",
+        "commit_on": 2
+      },
+      "201": {
+        "state": "completed"
+      }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "attempts_used": 1,
+    "eligible": [
+      201,
+      200
+    ],
+    "unresolved": [],
+    "attempts_count": 2,
+    "worktree_add_calls": 1,
+    "send_calls": 2,
+    "merge_calls": 1,
+    "completion_passed": true,
+    "sent_message_includes": {
+      "200": [
+        "指示どおりに書けないと分かったら、進めずに止めて報告してください。",
+        "まだ変更が commit されていません。",
+        "FLAG-FIX-NOTE: 今回だけの但し書き。"
+      ]
+    },
+    "sent_message_excludes": {
+      "200": [
+        "PROFILE-FIX-NOTE"
+      ]
+    },
+    "limitation_details_include": [
+      "fix_nudge=25 chars (--fix-nudge-message overrode profile"
+    ]
+  }
+}

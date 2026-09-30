@@ -52,6 +52,7 @@ uat.mjs --plan <plan.json> --dispatch <dispatch-report.json> (--write-uat | --cr
 | `--gh <path>` | 任意 | `gh` | repo 到達性 preflight に使う gh |
 | `--wait-timeout <sec>` | 任意 | `300` | fix worker の1回あたり wait timeout |
 | `--max-turns <n>` | 任意 | `8` | fix worker を駆動する最大ターン数（初回 send + nudge）。未 commit のまま到達で当該 fix worker を failed とする |
+| `--fix-nudge-message <text>` | 任意 | なし | fix worker の nudge の既定文の**後ろ**へ追記する文面。優先順は flag → plan の `profile.worker_messages.fix_nudge` → 追記なし。空白のみ・2000 文字超は `invalid_input`（plan 側の不正は `plan_invalid`）。既定文の commit 行は消えない。採用結果は limitations（`worker_messages_applied`）に文字数だけ残す（`fix_uat` のみ） |
 | `--poll-limit <n>` | 任意 | `120` | 互換のため保持（wait は block するので poll しない） |
 
 `commandmatedev` は使わない。公式経路は public `commandmate`/`gh`/`git` である。

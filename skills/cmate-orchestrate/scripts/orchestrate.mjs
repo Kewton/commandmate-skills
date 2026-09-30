@@ -41,6 +41,7 @@ import {
   normalizeObservations,
   normalizePrTitleTemplate,
   workerMessageProblem,
+  WORKER_MESSAGE_KEYS,
 } from './lib.mjs';
 
 const PLAN_SCHEMA_VERSION = 2;
@@ -502,7 +503,6 @@ function normalizeProfile(raw) {
 // dispatch_defaults: an unknown key is refused so a profile written for a newer
 // runner is not half-honored. REBUILT rather than passed through, for the
 // run-id reason normalizeDispatchDefaults gives.
-const WORKER_MESSAGE_KEYS = ['nudge'];
 function normalizeWorkerMessages(raw) {
   if (raw === undefined) return null;
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {

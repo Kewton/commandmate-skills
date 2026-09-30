@@ -1,0 +1,22 @@
+{
+  "description": "#288: worker_messages.fix_nudge だけを持つ profile は planner を通り、宣言は plan.profile.worker_messages へ echo される（dispatch は使わないが拒否もしない。uat が plan から読む）。",
+  "args": [
+    "461",
+    "--profile-json",
+    "PROFILE:worker-messages-fix-nudge-only.json",
+    "--run-id",
+    "fixture-fix-nudge-only"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "waves": [
+      [
+        461
+      ]
+    ],
+    "profile_worker_messages": {
+      "fix_nudge": "PROFILE-FIX-NOTE: この repo では docs/x.md を必ず更新すること。"
+    }
+  }
+}

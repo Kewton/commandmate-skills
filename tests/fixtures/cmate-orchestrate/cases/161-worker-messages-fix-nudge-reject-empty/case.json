@@ -1,0 +1,17 @@
+{
+  "description": "#288: profile.worker_messages.fix_nudge の空白のみは拒否する（nudge と同じ規則）。load_error / exit 6、profile load の時点で止まる。",
+  "args": [
+    "461",
+    "--profile-json",
+    "PROFILE:worker-messages-invalid-fix-nudge-empty.json"
+  ],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "profile.worker_messages.fix_nudge must be a non-empty string"
+    ],
+    "plan_null": true
+  }
+}

@@ -71,6 +71,12 @@ export function workerMessageProblem(value) {
   return null;
 }
 
+// The keys a profile's `worker_messages` may carry. `nudge` is dispatch's, `fix_nudge`
+// is the uat fix loop's; the planner and dispatch both accept the full set (a
+// runner ignores the keys it does not use) so a profile is never refused by the
+// runner that has no use for a key.
+export const WORKER_MESSAGE_KEYS = ['nudge', 'fix_nudge'];
+
 // Stamped into the `skill_version` field of every report the four runners write,
 // which is the field a bug report against this package is triaged by. It must
 // equal `version:` in commandmate.skill.yaml, and scripts/validate.py fails the

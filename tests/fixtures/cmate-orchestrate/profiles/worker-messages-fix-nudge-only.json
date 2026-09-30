@@ -1,0 +1,14 @@
+{
+  "id": "worker-messages-fix-nudge-only",
+  "repository": "Kewton/CommandMate",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": [
+    "cat cmate-verify-ok"
+  ],
+  "verified": true,
+  "worker_messages": {
+    "fix_nudge": "PROFILE-FIX-NOTE: この repo では docs/x.md を必ず更新すること。"
+  }
+}
