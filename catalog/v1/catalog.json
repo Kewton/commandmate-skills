@@ -1383,7 +1383,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.34.0",
+      "latest": "0.35.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -2641,6 +2641,55 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.34.0/cmate-orchestrate-0.34.0.tar.gz",
             "sha256": "8259dbb254384463fbb5ce5d9731df805f5007a195c469f17a9be45f07ea26d9",
             "size": 845451,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.35.0",
+          "changelog": "cmate-orchestrate 0.35.0 — 人がやる Issue と、止まって返したワーカーを runner が扱えるようにした（#286 / #287 / #288）。破壊的変更は無く、schema の版は据え置き。\n\n- #286: labels に human-only を持つ Issue を、planner は plan に残したまま wave / merge_order から外し（dispatch_excluded: \"human_only\"、notice human_only_excluded）、dispatch は worker を送らずに report へ not_dispatched として残す。human-only の Issue への依存は待たず、plan の blocking と report の limitation human_only_dependency で名指す。全 Issue が human-only の plan は plan_invalid、--only に human-only を書くと invalid_input。\n- #287: nudge で開いたターンが進捗なしで終わり、ワーカーの返答があるとき、nudge を止めて返答を worker_report に残し、blocking worker_stopped_with_report を出す（裁定は failed のまま）。現状は Claude のワーカーだけが対象で、Command Code などへの拡張は上流 CommandMate#3039（CLI からターンの返答を読む）待ち。\n- #288: uat の修正ループの nudge にも「指示どおりに書けないと分かったら、進めずに止めて報告してください。」を足し、profile の worker_messages.fix_nudge と uat --fix-nudge-message で追記できるようにした。planner と dispatch も fix_nudge を受理する。",
+          "published_at": "2026-09-30T09:36:48Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.35.0",
+            "commit": "84f57700deb8c34d2e77fb331012983a0a48bd07"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.35.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.35.0/cmate-orchestrate-0.35.0.tar.gz",
+            "sha256": "15215e831fb4acc08319c9e85df68395b32aaaa4062a96bbc53a9c4e3828080f",
+            "size": 862271,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
