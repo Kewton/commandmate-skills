@@ -4271,7 +4271,7 @@
         "issue",
         "contract"
       ],
-      "latest": "0.2.1",
+      "latest": "0.3.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -4375,6 +4375,55 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worker-development-v0.2.1/cmate-worker-development-0.2.1.tar.gz",
             "sha256": "14affa41574fd97ddd57653b093fb7e97c148f5fa57a1a89e28f937d72a6322e",
             "size": 18752,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. The package ships instructions only, so the procedure is readable and usable by hand; discovery and reload are unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.3.0",
+          "changelog": "cmate-worker-development 0.3.0 — 委譲先の「未 install」を確かめた結果として書かせ、申告行の規約を定めた（CommandMate#3012 / #3005）。\n\n- #3012: 利用側のワーカーが、worktree の中にある cmate-verify を「未 install」と申告していた。利用側の cmd skills list -d でもこちらの実測（Command Code 1.66.0、mktemp の git worktree）でも skill は見えており、原因はモデルの推測だった。references/delegate-discovery-contract.md を新設し、install 済みかは <worktree>/.agents/skills/<id>/SKILL.md（Claude は .claude/skills/<id>/SKILL.md も）の有無で判定する、見つからないときは確かめたパスと理由を成果物に書く、と定めた。Claude / Codex / Command Code で同じ判定。\n- #3005: cmate-orchestrate 0.34.0 の merge.mjs --create-prs が、ワーカーのコミット本文の申告行（読み替え: / 判断: / 本文に無い指摘:）を PR 本文の「## ワーカーの申告」へ写すようになった。行の書き方を evidence-vocabulary.md に書いた。ワーカーが push も PR も作らない既定は変えていない。",
+          "published_at": "2026-09-30T03:44:08Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-worker-development-v0.3.0",
+            "commit": "929ea88a4578b7034bd444aaa6a1c4cfb702c3ec"
+          },
+          "artifact": {
+            "asset_name": "cmate-worker-development-0.3.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worker-development-v0.3.0/cmate-worker-development-0.3.0.tar.gz",
+            "sha256": "b5ea99e271938b056e6a2a611721baa0cac350a561781f390339b979f00dab22",
+            "size": 25082,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
