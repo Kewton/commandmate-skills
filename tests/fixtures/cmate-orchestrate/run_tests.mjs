@@ -1194,6 +1194,13 @@ function runDispatchCase(caseId) {
   if (expect.auto_yes !== undefined) {
     check(report.auto_yes === expect.auto_yes, `report.auto_yes ${report.auto_yes} !== ${expect.auto_yes}`);
   }
+  // CommandMate#3008: `plan_scope` is present ONLY on a subset run. `null` in a
+  // case asserts the absence, which is what keeps a run without `--only`
+  // byte-identical to what it was before the field existed.
+  if (expect.plan_scope !== undefined) {
+    check(JSON.stringify(report.plan_scope ?? null) === JSON.stringify(expect.plan_scope),
+      `plan_scope ${JSON.stringify(report.plan_scope)} !== ${JSON.stringify(expect.plan_scope)}`);
+  }
   if (expect.waves_count !== undefined) {
     check(report.waves.length === expect.waves_count, `waves ${report.waves.length} !== ${expect.waves_count}`);
   }
@@ -2055,6 +2062,13 @@ function assertResumeAttempt(label, spec, exit, stdout, cliLog, outDir, planPath
   if (expect.completion_check_passed !== undefined) {
     check(report.completion_check.passed === expect.completion_check_passed,
       `${label}: completion_check.passed ${report.completion_check.passed} !== ${expect.completion_check_passed}`);
+  }
+  // CommandMate#3008: `plan_scope` is present ONLY on a subset run. `null` in a
+  // case asserts the absence, which is what keeps a run without `--only`
+  // byte-identical to what it was before the field existed.
+  if (expect.plan_scope !== undefined) {
+    check(JSON.stringify(report.plan_scope ?? null) === JSON.stringify(expect.plan_scope),
+      `${label}: plan_scope ${JSON.stringify(report.plan_scope)} !== ${JSON.stringify(expect.plan_scope)}`);
   }
   if (expect.waves_count !== undefined) {
     check(report.waves.length === expect.waves_count, `${label}: waves ${report.waves.length} !== ${expect.waves_count}`);

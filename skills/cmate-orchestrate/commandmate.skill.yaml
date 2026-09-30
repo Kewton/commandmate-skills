@@ -158,14 +158,14 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: 9d0c68f8a5e4711f5365583a6fe1d9b8690e106afcf669e61e216b1a9aef9b8e
-    size: 104567
+    sha256: 3cafc8c339ebe972aff6c1d2ef9647a9ca55138c46e93e7b9b93339d7b970ff3
+    size: 105969
     kind: instruction
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: 27fc6da775cfa9fec5f1bd87656afb9da084a7b0a80e976f40acc76f45914348
-    size: 158935
+    sha256: c9101ada798899b23db85c2bd055009fe6fe65d584e8c799f6e4ebd510871698
+    size: 163146
     kind: instruction
     executable: false
     script: false
@@ -200,14 +200,14 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 7d74d28699d17f7e839f719e63676ccb2a91f3b9eaf762271bd5c06c207369d3
-    size: 247141
+    sha256: 372e7bbb640e2b2a0c8e968ec24fc8ddffe2c3bad1f5b71ae5c16972e27d79b4
+    size: 250088
     kind: instruction
     executable: false
     script: false
   - path: references/runner-operations.md
-    sha256: 2940b591a8ffc1af3c09d5bc066d06e8847d62056e4969104dc4a5f5d242bf75
-    size: 52291
+    sha256: bc3e9b92b4fdd0f72a42aac43e50a9c15c35cbc1c2e89fadb8aced85dce5e761
+    size: 53528
     kind: instruction
     executable: false
     script: false
@@ -218,8 +218,8 @@ files:
     executable: false
     script: false
   - path: schemas/dispatch-report.v1.json
-    sha256: 28360e13e5c84f0a2196aed682c7c278caf49a15ab2927af7f9f7f11785bc6f9
-    size: 28293
+    sha256: e6ea1bd31451771cd8575cf9e78dcbfa7f203faa03f7ccc305d51536db2e4332
+    size: 30074
     kind: asset
     executable: false
     script: false
@@ -260,8 +260,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: 8bf18ce4bc957bf5a93a9b3ba5486c3280ba3906e26f100b6069019edcd39ca8
-    size: 470153
+    sha256: c785256bf666b5bae19922b812ab89386b2de8b08b3b0eebd9e691a61b3290b9
+    size: 479722
     kind: script
     executable: true
     script: true

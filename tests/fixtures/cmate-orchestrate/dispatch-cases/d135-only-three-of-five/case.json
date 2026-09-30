@@ -1,0 +1,93 @@
+{
+  "description": "CommandMate#3008: 5 本の plan（max_parallel 2）から `--only 300,302,304` の 3 本だけを、plan を組み直さずに dispatch する。plan の wave の順番は保ったまま選外を除く（空の wave は飛ばす）。選外の #301 / #303 は 1 度も send されず、worker_state `not_dispatched`・note `excluded by --only` で最後の wave entry に記録され、blocking にはならない。選んだ 3 本がすべて pass なので run は success。report は `plan_scope` に plan 全体と部分集合の両方を、`only_subset` limitation に選外は失敗でなく未着手だと残す。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-only-five.json",
+    "orchestrate_args": [
+      "300",
+      "301",
+      "302",
+      "303",
+      "304",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "2",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--only",
+    "304,300,302,300",
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "completion_check_passed": true,
+    "sent": [
+      300,
+      302,
+      304
+    ],
+    "never_sent": [
+      301,
+      303
+    ],
+    "worker_states": {
+      "300": "completed",
+      "302": "completed",
+      "304": "completed",
+      "301": "not_dispatched",
+      "303": "not_dispatched"
+    },
+    "verification_outcomes": {
+      "300": "pass",
+      "302": "pass",
+      "304": "pass"
+    },
+    "max_dispatched_per_wave": 2,
+    "plan_scope": {
+      "plan_issues": [
+        300,
+        301,
+        302,
+        303,
+        304
+      ],
+      "selected": [
+        300,
+        302,
+        304
+      ],
+      "deselected": [
+        301,
+        303
+      ],
+      "inherited": false
+    },
+    "limitation_codes": [
+      "only_subset"
+    ],
+    "limitation_details_include": [
+      "--only: this run dispatches #300, #302, #304 of the plan's #300, #301, #302, #303, #304",
+      "NOT dispatched, and not judged here: #301, #303"
+    ],
+    "worker_notes_include": {
+      "301": [
+        "excluded by --only"
+      ],
+      "303": [
+        "excluded by --only"
+      ]
+    },
+    "absent_blocking_codes": [
+      "not_dispatched"
+    ],
+    "blocking_codes": []
+  }
+}

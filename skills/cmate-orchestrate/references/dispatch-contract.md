@@ -42,6 +42,7 @@ CommandMate の exit code へ移しただけで、report 上の表現（field �
 | `--prepare-worktrees` | 任意 | **off** | pre-flight で未解決だった worktree を `cmate-worktree-setup` provider に作らせてから dispatch する（第3.0.1節）。既定 off＝従来どおり停止する |
 | `--worktree-setup <launcher>` | 任意（`--prepare-worktrees` 指定時は実質必須） | なし | 上記 provider のランチャー（`--cli` と同じ argv 規約・同じ guard。シェルは経由しない）。`--prepare-worktrees` 無しに渡すと `invalid_input` |
 | `--worker-method <skill-id>` | 任意 | **なし（off）** | worker が従うべき開発スキルの id（例 `cmate-worker-development`）。指定すると、dispatch 対象 worktree に**その skill が install されていることを実測**してから dispatch し、契約 goal と worker prompt の**両方**に `## Method` 節を1つ足す（第3.0.2節）。**指定しない run は、この flag が存在しなかった頃と byte 一致する。** id は `^[a-z0-9][a-z0-9-]{0,63}$`（path に展開されるので、それ以外は `invalid_input`） |
+| `--only <issues>` | 任意 | なし（plan 全体） | plan のうち**指定した Issue だけ**を dispatch する（カンマ区切り。例 `--only 12,14,15`）。plan は組み直さない（第3.0.5節）。plan に無い番号は `invalid_input`、選外の Issue への依存（`plan.dependencies`）を持つ Issue を選ぶと、その依存が `--resume` で引き継いだ pass 済みの記録でない限り同じく `invalid_input`（どちらも exit 3・**何も dispatch せず `--out` も作らない**）。選外の Issue は worker_state `not_dispatched`（note に `excluded by --only`）で記録し、blocking にしない。report は `plan_scope` に plan 全体と選んだ部分集合の両方を残す。`--resume` / `--reverify` とは併用でき、`--only` を渡さなければ前回 report の部分集合を引き継ぐ |
 | `--schedule <mode>` | 任意 | **`wave`** | `wave`（既定）/ `dag`。**いつ dispatch してよいか**の決め方（第3.2節）。`wave` は plan の wave と barrier をそのまま使う。`dag` は **その Issue 自身の依存**が completed かつ verification pass になった時点で空き枠へ投入する。`--schedule` を渡さない run は、この flag が存在しなかった頃と **report が byte 一致**する（fixture `d87-schedule-wave-default-nonregression`）。`--reverify` との併用は `invalid_input` |
 | `--contract-mode <m>` | 任意 | `auto` | `auto` / `require` / `off`。契約非対応 CLI での挙動を決める（第2.7節） |
 | `--verify-gates <ids>` | 任意 | なし | 契約の `verify.gates` に載せる gate id（comma 区切り）。既定は省略＝全ゲート |
@@ -1129,6 +1130,39 @@ acceptance コマンドは `execFileSync` に `timeout` を渡さずに実行さ
 という事実**を残すためである。人間が居る運転では既定を黙認した人がその決定者になるが、
 無人ではその瞬間が無く、**job 定義を書く時点でしか決められない**（uat の `--max-attempts` を
 明示必須にしたのと同じ型。ADR 第5節）。
+
+### 3.0.5 plan の一部だけ dispatch する（`--only`。既定 off。CommandMate#3008）
+
+5 本の plan のうち 2 本が条件（宣言外のパス・scope に入らない宣言）を満たさないとき、残り 3 本を
+動かすために plan を組み直すしかなかった。`--only <issues>` は plan ファイルを触らずに、この run が
+扱う Issue を指定したものに絞る。
+
+- **絞り方は 1 か所。** 起動直後に plan の `issues` / `waves` / `dependencies` を選んだ Issue だけに
+  絞り、以降（barrier・pre-flight・lock・`--max-parallel`・report）は絞った plan を読む。wave は選外を
+  除いて詰める（空になった wave は無くなる）ので、wave の幅は `max_parallel` 以下のまま。
+- **断り方は全体断り（`invalid_input`、exit 3）。** 選外の Issue を黙って外して残りだけ走らせると、
+  argv から run を再構成できない。番号が plan に無い場合と、選んだ Issue が選ばれていない Issue に依存している
+  場合（detail に「#N depends on #M」を全件並べる）がこれに当たる。**1 人も dispatch せず `--out` も
+  作らない**ので、直して同じコマンドを再実行できる。ただし、その依存が `--resume` で引き継いだ
+  「worker completed かつ verification pass」の記録なら断らない（すでに満たされている）。main に merge
+  済みかどうかは調べない。依存として数えるのはスケジューラが辿る辺だけで、`basis: lexical` の辺と plan 外の
+  Issue への辺は数えない。
+- **pre-flight は選んだ Issue だけが対象。** scope 宣言・open questions・worktree の解決・
+  `--prepare-worktrees`・`--unattended` の all-or-nothing 検査は、絞った plan に対して走る。選外の
+  Issue の宣言不備や worktree 欠落は、この run を止めない（それが `--only` の目的である）。
+- **report。** 任意の `plan_scope`（`plan_issues` / `selected` / `deselected` / `inherited`）と、
+  `only_subset` の limitation を書く。選外の Issue は `waves[]` の**最後の entry**（`dispatched: []`）に
+  worker_state `not_dispatched`・note `excluded by --only` で並べる（前回 attempt が pass させていた
+  ものは、その記録の転記）。blocking reason にはせず、status / completion_check も動かさない: 選んだ Issue が
+  すべて pass なら run は `success` である。`--only` を使わない run は byte 一致のまま。
+- **wave の順序。** plan の wave の順番を保ったまま選外を除き、空になった wave は飛ばす。
+  `max_parallel` は変えない。
+- **`--resume` / `--reverify` との組み合わせ。** 併用できる（`--resume <dir> --only 12,14,15,16` で
+  部分集合を広げることもできる）。`--only` を渡さない resume / reverify は、前回 report の
+  `plan_scope.selected` を引き継ぐ（`inherited: true`）: 部分集合の run を「そのまま再開」したつもりで
+  選外まで dispatch しないため。plan が別物なら従来どおり `resume_plan_mismatch`。
+- **`--schedule dag` とは独立**に効く（絞った plan に対して dag が走る）。merge / uat は選んだ
+  Issue の記録だけを読む。
 
 ### 3.1 Wave ループ
 

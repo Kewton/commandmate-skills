@@ -1,0 +1,44 @@
+{
+  "issues": [
+    {
+      "number": 300,
+      "title": "feat: add the alpha module",
+      "body": "Add the alpha module in `src/alpha.ts`.\n\n## Acceptance criteria\n- [ ] `src/alpha.ts` exports the alpha function\n",
+      "labels": [
+        "feature"
+      ]
+    },
+    {
+      "number": 301,
+      "title": "feat: add the bravo module",
+      "body": "Add the bravo module in `src/bravo.ts`.\n\n## Acceptance criteria\n- [ ] `src/bravo.ts` exports the bravo function\n\n```open-questions\nversion: 1\nquestions:\n  - この module を同期にするか非同期にするか\n```\n",
+      "labels": [
+        "feature"
+      ]
+    },
+    {
+      "number": 302,
+      "title": "feat: add the charlie module",
+      "body": "Add the charlie module in `src/charlie.ts`.\n\n## Acceptance criteria\n- [ ] `src/charlie.ts` exports the charlie function\n",
+      "labels": [
+        "feature"
+      ]
+    },
+    {
+      "number": 303,
+      "title": "feat: add the delta module",
+      "body": "Add the delta module in `src/delta.ts`.\n\n## Acceptance criteria\n- [ ] `src/delta.ts` exports the delta function\n",
+      "labels": [
+        "feature"
+      ]
+    },
+    {
+      "number": 304,
+      "title": "feat: add the echo module",
+      "body": "Add the echo module in `src/echo.ts`.\n\n## Acceptance criteria\n- [ ] `src/echo.ts` exports the echo function\n",
+      "labels": [
+        "feature"
+      ]
+    }
+  ]
+}

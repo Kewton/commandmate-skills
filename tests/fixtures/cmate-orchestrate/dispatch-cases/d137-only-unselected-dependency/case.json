@@ -1,0 +1,40 @@
+{
+  "description": "CommandMate#3008: #200 は #201 に依存している（plan の依存辺）。`--only 200` は選外の #201 に依存する Issue を選んでいるので、**全体を** `invalid_input`（exit 3）で断る。#200 だけを外して走らせることはしない（argv から run を再構成できなくなる）。何も send せず、`--out` も作らない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--only",
+    "200"
+  ],
+  "expect": {
+    "exit": 3,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "waves_count": 0,
+    "never_sent": [
+      200,
+      201
+    ],
+    "no_cli_calls": true,
+    "out_dir_created": false,
+    "blocking_codes": [
+      "invalid_input"
+    ],
+    "blocking_details_include": [
+      "#200 depends on #201",
+      "Nothing was dispatched"
+    ]
+  }
+}
