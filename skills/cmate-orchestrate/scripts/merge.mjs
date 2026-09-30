@@ -41,9 +41,14 @@ import {
   SKILL_ID,
   SKILL_VERSION,
   SkillError,
+  extractWorkerDeclarations,
   isFlakyVerdict,
   issueOf,
   loadJson,
+  normalizePrTitleTemplate,
+  parseConventionalSubject,
+  prTitlePlaceholders,
+  renderPrTitleTemplate,
   parseCliJson,
   redact,
   redactionsList,
@@ -224,6 +229,11 @@ Usage:
 
 Exactly one mutating phase is enabled per invocation:
   --create-prs           Push each verification-passed branch and open a PR.
+                         The title follows the plan profile's pr_title_template
+                         when it declares one (type/scope from the branch's
+                         commit subjects; undetermined -> that PR is not
+                         opened), and the worker's commit-message declarations
+                         are transcribed into the body.
   --merge-prs            Confirm each PR's CI and, if green, merge it (guarded).
 
 Options:
@@ -390,6 +400,10 @@ function validatePlan(plan) {
   if (!Array.isArray(plan.issues)) {
     throw new SkillError('plan_invalid', 'plan.issues is missing', 3);
   }
+  // CommandMate#3005. Checked here, before anything is probed, because a plan
+  // can reach this runner without having passed the planner's loader
+  // (profile-contract.md §13): the same rule, reported against the plan file.
+  normalizePrTitleTemplate(profile.pr_title_template, 'plan.profile.pr_title_template', 'plan_invalid', 3);
   return plan;
 }
 
@@ -815,6 +829,149 @@ function fitPrBody(body) {
   return `${head}${marker}`;
 }
 
+// =============================================================================
+// The branch's commits: PR title and worker declarations (CommandMate#3005)
+// =============================================================================
+//
+// ONE read-only `git log` per issue, run in the issue's worktree beside the
+// `git diff` above, answers both halves of #3005:
+//
+//   - the Conventional-Commits TYPE and SCOPE a `pr_title_template` asks for.
+//     They come from the commit subjects because that is where this repository's
+//     own convention is already enforced on the worker (its commit rules, its
+//     hooks), and because a squash merge REPLACES those commits with the PR
+//     title — the title is the commit subject's successor, so it inherits its
+//     type and scope. Issue labels were the alternative and were rejected: a
+//     label vocabulary (`enhancement`, `bug`) is not the type vocabulary, and a
+//     mapping between them would be a second convention this runner invented.
+//   - the worker's declarations of what it reinterpreted or decided, which a
+//     reviewer must see before merging and which otherwise lived only in the
+//     worker's final chat report — a place this runner never reads.
+//
+// A merge commit is skipped (`--no-merges`): a base merged INTO the branch is
+// not the worker's statement about its change.
+const MAX_DECLARATIONS = 20;
+const MAX_DECLARATION_TEXT = 500;
+const DECLARATIONS_UNREAD_CODE = 'worker_declarations_unread';
+const DECLARATIONS_TRANSCRIBED_CODE = 'worker_declarations_transcribed';
+const PR_TITLE_UNDETERMINED_CODE = 'pr_title_undetermined';
+
+function branchCommits(inputs, plan, issue) {
+  const branch = safeBranch(issue.branch);
+  const worktree = typeof issue.worktree === 'string' && issue.worktree !== '' ? issue.worktree : null;
+  const range = branch === null ? null : `${plan.profile.base}..${branch}`;
+  if (branch === null || worktree === null) {
+    return { ok: false, range, reason: 'the plan names no worktree or no safe branch for this issue', commits: [] };
+  }
+  // %x1f / %x1e: a unit and a record separator no commit message contains, so a
+  // body holding blank lines or `---` cannot be split into two commits.
+  const result = runCli(inputs.git, ['log', '--no-merges', '--format=%s%x1f%b%x1e', range], { cwd: worktree });
+  if (!result.ok) {
+    return { ok: false, range, reason: excerpt(result.stderr || result.stdout || 'git log failed', 200) || 'git log failed', commits: [] };
+  }
+  const commits = result.stdout
+    .split('\x1e')
+    .map((record) => record.replace(/^\n+/, ''))
+    .filter((record) => record.trim() !== '')
+    .map((record) => {
+      const [subject, body = ''] = record.split('\x1f');
+      return { subject: subject.trim(), body };
+    })
+    // git log prints newest first; a reader of the declarations reads the
+    // branch in the order it was written.
+    .reverse();
+  return { ok: true, range, reason: '', commits };
+}
+
+// The declarations as the PR body will carry them, or `{ ok: false }` when the
+// log could not be read — which the body states, rather than showing no section
+// and letting "nothing declared" and "never read" look alike.
+function workerDeclarations(commits) {
+  if (!commits.ok) return { ok: false, reason: commits.reason, range: commits.range, entries: [], dropped: 0 };
+  const all = commits.commits.flatMap((commit) => extractWorkerDeclarations(commit.body));
+  const entries = all.slice(0, MAX_DECLARATIONS).map((entry) => {
+    const text = redact(entry.text);
+    return { label: entry.label, text: text.length > MAX_DECLARATION_TEXT ? `${text.slice(0, MAX_DECLARATION_TEXT - 1)}…` : text };
+  });
+  return { ok: true, reason: '', range: commits.range, entries, dropped: all.length - entries.length };
+}
+
+// No section at all when the worker declared nothing: the body of a branch
+// without declarations is the body this runner wrote before #3005.
+function declarationLines(declarations) {
+  if (!declarations) return [];
+  if (!declarations.ok) {
+    return [
+      '## ワーカーの申告',
+      `The branch's commit messages could NOT be read (\`git log ${declarations.range ?? '<range>'}\`: ${cell(declarations.reason)}), `
+        + 'so any reinterpretation or decision the worker declared there is not shown here. **This is not evidence that it declared none.**',
+      '',
+    ];
+  }
+  if (declarations.entries.length === 0) return [];
+  const lines = [
+    '## ワーカーの申告',
+    'Transcribed verbatim from the worker\'s commit message body (lines opening with 読み替え / 判断 / 本文に無い指摘). '
+      + 'A declaration is the worker\'s own statement, not a measurement: read it before merging.',
+    '',
+    ...declarations.entries.map((entry) => `- ${entry.label}: ${entry.text.replace(/\s+/g, ' ')}`),
+  ];
+  if (declarations.dropped > 0) lines.push('', droppedNote(declarations.dropped, 'declaration(s)'));
+  lines.push('');
+  return lines;
+}
+
+function recordDeclarationFindings(report, number, declarations) {
+  if (!declarations.ok) {
+    report.limitations.push({
+      code: DECLARATIONS_UNREAD_CODE,
+      detail: `#${number}: the branch's commit messages could not be read (${redact(declarations.reason)}); the PR body says the worker's declarations are unread rather than showing none`,
+    });
+    return;
+  }
+  if (declarations.entries.length === 0) return;
+  const total = declarations.entries.length + declarations.dropped;
+  report.limitations.push({
+    code: DECLARATIONS_TRANSCRIBED_CODE,
+    detail: `#${number}: the worker declared ${total} reinterpretation(s)/decision(s) in its commit message (${[...new Set(declarations.entries.map((entry) => entry.label))].join(', ')}); `
+      + 'they are transcribed into the PR body under 「ワーカーの申告」. Transcribed is not reviewed: read them before merging',
+  });
+}
+
+// The title `gh pr create` receives. Without `pr_title_template` it is the issue
+// title, byte for byte what this runner sent before #3005. With one, every
+// placeholder it uses must be DETERMINED; a value this runner would have to guess
+// is refused, because a guessed type is a PR the repository's title check either
+// rejects (visible, but after a push) or — worse — accepts under the wrong type.
+function resolvePrTitle(plan, issue, commits) {
+  const issueTitle = issue.title ?? `Resolve issue #${issue.number}`;
+  const template = plan.profile.pr_title_template;
+  if (template === undefined) return { ok: true, templated: false, title: redact(issueTitle), reason: '' };
+  const used = new Set(prTitlePlaceholders(template));
+  const values = { title: issueTitle, number: String(issue.number) };
+  const undetermined = (reason) => ({ ok: false, templated: true, title: null, reason });
+  if (used.has('type') || used.has('scope')) {
+    if (!commits.ok) return undetermined(`the branch's commits could not be read (${redact(commits.reason)})`);
+    if (commits.commits.length === 0) return undetermined(`the branch carries no commit over ${plan.profile.base}`);
+    const parsed = commits.commits.map((commit) => ({ subject: commit.subject, cc: parseConventionalSubject(commit.subject) }));
+    const loose = parsed.find((entry) => entry.cc === null);
+    if (loose) return undetermined(`the commit subject "${cell(loose.subject)}" is not in Conventional-Commits form (\`type(scope): description\`)`);
+    if (used.has('type')) {
+      const types = [...new Set(parsed.map((entry) => entry.cc.type))];
+      if (types.length > 1) return undetermined(`the branch's commits disagree on the type (${types.join(', ')})`);
+      values.type = types[0];
+    }
+    if (used.has('scope')) {
+      const unscoped = parsed.find((entry) => entry.cc.scope === null);
+      if (unscoped) return undetermined(`the commit subject "${cell(unscoped.subject)}" declares no scope, and the template asks for {{scope}}`);
+      const scopes = [...new Set(parsed.map((entry) => entry.cc.scope))];
+      if (scopes.length > 1) return undetermined(`the branch's commits disagree on the scope (${scopes.map((scope) => cell(scope)).join(', ')})`);
+      values.scope = scopes[0];
+    }
+  }
+  return { ok: true, templated: true, title: redact(renderPrTitleTemplate(template, values)).trim(), reason: '' };
+}
+
 function buildPrBody(plan, issue, autoCloseNote, evidence) {
   const lines = [
     `## Summary`,
@@ -828,6 +985,7 @@ function buildPrBody(plan, issue, autoCloseNote, evidence) {
     '',
     ...scopeLines(issue, evidence.change),
     '',
+    ...declarationLines(evidence.declarations),
     `Resolves #${issue.number}.`,
   ];
   if (autoCloseNote) lines.push('', autoCloseNote);
@@ -912,8 +1070,7 @@ function pushBranch(inputs, branch) {
   return { ok: result.ok, note: result.ok ? '' : excerpt(result.stderr || result.stdout || 'push failed') };
 }
 
-function createPr(inputs, plan, issue, branch, bodyFile) {
-  const title = redact(issue.title ?? `Resolve issue #${issue.number}`);
+function createPr(inputs, plan, title, branch, bodyFile) {
   const result = runCli(inputs.gh, [
     'pr', 'create',
     '--repo', plan.profile.repository,
@@ -1154,12 +1311,35 @@ function runCreatePrs(inputs, plan, dispatch, eligible, outDir, report) {
       continue;
     }
 
+    // CommandMate#3005: the title and the declarations, from one read of the
+    // branch's commits. The title is decided BEFORE the body is written and
+    // before anything is pushed, preview included — a preview that shows a PR
+    // this runner would then refuse to open is a preview of nothing.
+    const commits = branchCommits(inputs, plan, issue);
+    const titled = resolvePrTitle(plan, issue, commits);
+    if (!titled.ok) {
+      const detail = `#${number}: profile pr_title_template ${JSON.stringify(plan.profile.pr_title_template)} cannot be filled — ${titled.reason}. `
+        + 'No branch was pushed and no PR was opened: a guessed type or scope is a title the repository\'s check rejects, or accepts under the wrong type. '
+        + 'Reword the commit subject(s) on the branch to `type(scope): description` and re-run --create-prs';
+      target.outcome = 'pr_failed';
+      target.note = redact(`PR title undetermined: ${titled.reason}`);
+      report.targets.push(target);
+      halt(report, 'partial', 'pr_create_failed', PR_TITLE_UNDETERMINED_CODE, redact(detail));
+      stopped = true;
+      continue;
+    }
+    evidence.declarations = workerDeclarations(commits);
+    recordDeclarationFindings(report, number, evidence.declarations);
+
     const bodyFile = join(bodyDir, `issue-${number}.md`);
     writeFileSync(bodyFile, `${buildPrBody(plan, issue, autoCloseNote, evidence)}\n`, 'utf8');
+    // Named in the note only when a template produced it, so the note of a run
+    // without the field is the note it always was.
+    const titledAs = titled.templated ? ` titled "${titled.title}"` : '';
 
     if (!inputs.approve) {
       target.outcome = 'previewed';
-      target.note = `would push ${branch} and open a PR onto ${baseBranchName(plan.profile.base)} (preview; --approve to execute)`;
+      target.note = `would push ${branch} and open a PR${titledAs} onto ${baseBranchName(plan.profile.base)} (preview; --approve to execute)`;
       report.targets.push(target);
       continue;
     }
@@ -1177,7 +1357,7 @@ function runCreatePrs(inputs, plan, dispatch, eligible, outDir, report) {
       continue;
     }
 
-    const created = createPr(inputs, plan, issue, branch, bodyFile);
+    const created = createPr(inputs, plan, titled.title, branch, bodyFile);
     if (!created.ok) {
       target.outcome = 'pr_failed';
       target.note = redact(`pr create failed: ${created.note}`);
@@ -1190,7 +1370,7 @@ function runCreatePrs(inputs, plan, dispatch, eligible, outDir, report) {
     target.pr_number = created.number;
     target.pr_url = created.url;
     target.outcome = 'pr_created';
-    target.note = created.number ? `opened PR #${created.number}` : 'opened PR (number not parsed)';
+    target.note = `${created.number ? `opened PR #${created.number}` : 'opened PR (number not parsed)'}${titledAs}`;
     report.targets.push(target);
   }
 }

@@ -1,0 +1,18 @@
+{
+  "description": "CommandMate#3005: `pr_title_template` の未知の placeholder（`{{kind}}`）は、タイトルに文字のまま残すのではなく profile 読込で拒否する（load_error / exit 6）。文字どおりの `{{kind}}` を持つ PR タイトルは誰も意図していない。",
+  "args": [
+    "461",
+    "--profile-json",
+    "PROFILE:pr-title-template-invalid-placeholder.json"
+  ],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "profile.pr_title_template uses the unknown placeholder \"{{kind}}\"",
+      "{{type}}, {{scope}}, {{title}}, {{number}}"
+    ],
+    "plan_null": true
+  }
+}

@@ -1362,3 +1362,110 @@ export function normalizeObservations(raw) {
   }
   return out;
 }
+
+// =============================================================================
+// pr_title_template — the PR title the merge runner writes (CommandMate#3005)
+// =============================================================================
+//
+// MEASURED (Kewton/Musunest, run plan-01ba9bc589cb, #248). `merge.mjs --create-prs`
+// titled every PR with the issue title verbatim. That repository requires a
+// Conventional-Commits PR title in CI (semantic-pull-request), and a squash merge
+// makes the PR title the commit subject, so every PR this runner opened was one
+// the repository could not merge. The workers were therefore told to push and
+// open the PRs themselves — the double-PR path cmate-worker-development §4 exists
+// to close. The fix is to let the repository say what its titles look like.
+//
+// The placeholders are a CLOSED set, and an unknown one is refused rather than
+// left in the title: a PR titled `{{kind}}: …` is a title nobody meant.
+//   {{type}} / {{scope}}  from the branch's own commit subjects (merge.mjs
+//                         resolvePrTitle). Never guessed: when the commits do not
+//                         determine them, no PR is opened.
+//   {{title}}             the issue title (the pre-#3005 PR title).
+//   {{number}}            the issue number.
+//
+// Shared by the planner (load_error / exit 6, about the profile file) and the
+// merge runner (plan_invalid / exit 3, about the plan file), for the reason
+// profile-contract.md §10.2 gives for dispatch_defaults: the same rule, reported
+// against the file the reader has to open.
+export const PR_TITLE_PLACEHOLDERS = ['type', 'scope', 'title', 'number'];
+const PR_TITLE_TOKEN_RE = /\{\{\s*([^{}]*?)\s*\}\}/g;
+const MAX_PR_TITLE_TEMPLATE = 200;
+
+export function prTitlePlaceholders(template) {
+  return [...template.matchAll(PR_TITLE_TOKEN_RE)].map((match) => match[1]);
+}
+
+export function normalizePrTitleTemplate(raw, where, code, exitCode) {
+  if (raw === undefined) return null;
+  const fail = (why) => new SkillError(code, `${where} ${why}`, exitCode);
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    throw fail(`must be a non-empty string such as "{{type}}({{scope}}): {{title}} (#{{number}})", got ${JSON.stringify(raw)}. `
+      + 'Omit the key to keep the issue title as the PR title');
+  }
+  if (raw.length > MAX_PR_TITLE_TEMPLATE || /[\r\n]/.test(raw)) {
+    throw fail(`must be a single line of at most ${MAX_PR_TITLE_TEMPLATE} characters`);
+  }
+  for (const name of prTitlePlaceholders(raw)) {
+    if (!PR_TITLE_PLACEHOLDERS.includes(name)) {
+      throw fail(`uses the unknown placeholder "{{${name}}}"; this runner understands ${PR_TITLE_PLACEHOLDERS.map((p) => `{{${p}}}`).join(', ')}. `
+        + 'An unknown placeholder is refused rather than left in the title: a PR titled with a literal placeholder is a title nobody meant');
+    }
+  }
+  return raw;
+}
+
+// A Conventional-Commits subject: `type(scope)!: description`. The type is
+// lower-case, as the spec's own tooling (commitlint's type-case) and
+// semantic-pull-request's default type list expect. A subject that does not
+// match is NOT read as "type unknown, carry on": it is the commit that makes the
+// type undetermined.
+const CONVENTIONAL_SUBJECT_RE = /^([a-z][a-z0-9-]*)(?:\(([^()\s][^()]*)\))?!?: \S/;
+
+export function parseConventionalSubject(subject) {
+  const match = CONVENTIONAL_SUBJECT_RE.exec(String(subject));
+  if (match === null) return null;
+  return { type: match[1], scope: match[2] === undefined ? null : match[2].trim() };
+}
+
+// =============================================================================
+// Worker declarations (CommandMate#3005) — the convention both Skills share
+// =============================================================================
+//
+// A worker that reinterpreted the issue or made a call the issue did not make
+// says so in its COMMIT MESSAGE BODY, one declaration per line, each line opening
+// with one of the labels below and a colon (ASCII or full-width). Indented lines
+// directly under a declaration continue it. The commit message is the carrier
+// because it is the one place a worker already writes, that travels with the
+// branch, and that nobody else writes into (a file under `.commandmate/` is the
+// operator's, and a worker's final chat report never reaches a merge runner).
+// cmate-worker-development's references/evidence-vocabulary.md states the same
+// convention for the worker side.
+export const WORKER_DECLARATION_LABELS = ['読み替え', '判断', '本文に無い指摘'];
+const WORKER_DECLARATION_RE = new RegExp(`^(${WORKER_DECLARATION_LABELS.join('|')})\\s*[:：]\\s*(\\S.*)$`);
+
+export function extractWorkerDeclarations(body) {
+  const out = [];
+  let current = null;
+  for (const raw of String(body ?? '').split('\n')) {
+    const line = raw.replace(/\s+$/, '');
+    const match = WORKER_DECLARATION_RE.exec(line);
+    if (match !== null) {
+      current = { label: match[1], text: match[2].trim() };
+      out.push(current);
+      continue;
+    }
+    if (current !== null && /^\s+\S/.test(line)) {
+      current.text = `${current.text} ${line.trim()}`;
+      continue;
+    }
+    current = null;
+  }
+  return out;
+}
+
+// Fills a template normalizePrTitleTemplate accepted. `values` holds a string
+// for every placeholder the template uses; the caller decides what "cannot be
+// determined" means before it gets here.
+export function renderPrTitleTemplate(template, values) {
+  return template.replace(PR_TITLE_TOKEN_RE, (_, name) => String(values[name]));
+}

@@ -836,6 +836,13 @@ function runCase(caseId) {
     );
   }
 
+  // The same channel a third time (CommandMate#3005): merge --create-prs reads
+  // `plan.profile.pr_title_template` and never opens the profile.
+  if (expect.profile_pr_title_template !== undefined) {
+    check(plan.profile.pr_title_template === expect.profile_pr_title_template,
+      `plan.profile.pr_title_template ${JSON.stringify(plan.profile.pr_title_template)} !== ${JSON.stringify(expect.profile_pr_title_template)}`);
+  }
+
   // max_parallel is honored: no wave is wider than the bound.
   check(plan.waves.every((w) => w.length <= plan.max_parallel), `a wave exceeds max_parallel ${plan.max_parallel}`);
 
@@ -2574,6 +2581,16 @@ function runMergeCase(caseId) {
   }
   // CI gate: a non-green CI must never reach gh pr merge.
   if (expect.no_merge) check(mergeCalls === 0, `pr merge was called ${mergeCalls} time(s) when CI was not green`);
+  // The title `gh pr create` actually received (CommandMate#3005), read from the
+  // fake's argv rather than from the report's note: the note is the runner's own
+  // account, and the argv is what the repository's title check would see.
+  for (const [num, title] of Object.entries(expect.pr_create_titles ?? {})) {
+    const call = cliLog.find((entry) => entry.sub === 'pr' && entry.args[0] === 'create'
+      && entry.args[entry.args.indexOf('--head') + 1]?.includes(`issue-${num}`));
+    if (!check(call !== undefined, `#${num}: no gh pr create call was logged`)) continue;
+    const actual = call.args[call.args.indexOf('--title') + 1];
+    check(actual === title, `#${num}: gh pr create --title ${JSON.stringify(actual)} !== ${JSON.stringify(title)}`);
+  }
 
   if (expect.redaction_token) {
     check(!stdout.includes(expect.redaction_token), 'a raw token survived into the merge report');

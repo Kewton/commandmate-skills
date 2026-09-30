@@ -1531,6 +1531,40 @@ fixture（d76〜d78）は回数だけを直した。最初の capture が読め�
 
 ## merge（`scripts/merge.mjs`）
 
+### CommandMate#3005 — `--create-prs` の PR が、利用側の運用では merge できなかった
+
+利用側（Kewton/Musunest）は「検証が緑になったらワーカーが push して PR を作り、管理が merge する」で
+回しており、**毎回あとから追加のメッセージで push を指示していた**。1件はワーカーが「skill 第4節と
+実行契約が禁じている」として断った（Kewton/Musunest#210）。起票時の提案は「実行契約でワーカーに
+push と PR を許可する」だったが、問答で確かめると、**PR を作る経路はすでに `merge.mjs --create-prs`
+にあった**（run `plan-01ba9bc589cb` の #248 に preview で実行。push・PR 準備までそのまま使え、本文の
+検証証跡はワーカーに書かせていたものより充実していた）。使われていなかった理由は2つだった。
+
+1. **PR タイトルが Issue タイトルそのものだった。** 利用側は PR タイトルを Conventional Commits で
+   CI 検査しており（semantic-pull-request）、squash の件名＝PR タイトルなので、日本語の Issue
+   タイトルのままでは merge できない。
+2. **ワーカーの「読み替え・判断」の申告が PR 本文に載らなかった。** 本文は dispatch report から作られ、
+   申告はワーカーの最後の報告にしか無い。利用側は「読み替えの申告があれば merge せず窓口へ返す」を
+   決まりにしていて（先に merge された Kewton/Musunest#233 から）、申告は merge を止める合図である。
+
+→ **ワーカーは push も PR も作らない既定のまま**にした（二重 PR を防ぐ `cmate-worker-development`
+第4節と実行契約の文面は変えていない）。代わりに `--create-prs` を利用側の運用で使えるようにした。
+
+- profile に `pr_title_template` を足した（[profile-contract.md](./profile-contract.md) 第13節、
+  [merge-contract.md](./merge-contract.md) 第5.7節）。`{{type}}` / `{{scope}}` は**ブランチ自身の
+  コミット件名**から取る。Issue の label から取る案は採らなかった —— label の語彙（`enhancement` /
+  `bug`）は type の語彙ではなく、対応表はこの runner が発明する第二の規約になる。コミット件名は
+  ワーカーが既にリポジトリの規約で書いているもので、squash ではそれが PR タイトルに置き換わる
+  （タイトルは件名の後継である）。**決まらなければ推測せず、その PR を作らずに止める**
+  （`pr_title_undetermined`）。推測した type は、タイトル検査に push の後で落とされるか、違う type の
+  まま通るかのどちらかである。欄が無ければタイトルは従来どおり（既存 golden は byte 一致）。
+- ワーカーのコミットメッセージ本文の申告行（`読み替え:` / `判断:` / `本文に無い指摘:`）を PR 本文の
+  「ワーカーの申告」節へ原文転記し、report に `worker_declarations_transcribed` を出す（第5.8節）。
+  置き場所をコミットメッセージにしたのは、ワーカーが既にそこへ書いていて、ブランチと一緒に運ばれ、
+  他の誰も書き込まないからである。利用側では `.commandmate/` は人だけが書く場所なので、
+  ファイルは置かせない。申告が無い run の本文は変わらない。読めなかったときは「読めなかった」と書き
+  （`worker_declarations_unread`）、「申告なし」と見分けがつくようにした。
+
 ### #142 — 無人運転の段階 C（`merge --merge-prs`）
 
 段階 A / B が到達する最遠点は PR であり、**PR は人間が読む場所である**。「lint と test が通った」を

@@ -143,6 +143,37 @@ dispatch runner はワーカーの出力 file を読まないし、merge runner 
  delegate-discovery-contract.md の「書き方」）
 ```
 
+## コミットメッセージの申告行 — 読み替え・判断を PR 本文へ届ける
+
+Issue を**読み替えた**・Issue が決めていないことを**判断した**・Issue 本文に無い問題に**気づいた**なら、
+それは証拠の markdown だけでなく、**commit のメッセージ本文にも**次の形で書く。
+
+```
+feat(store): add a session store
+
+判断: TTL は Issue に無いので 30 分にした
+  設定で変えられる
+読み替え: 「一覧」は管理画面の一覧のことと読んだ
+本文に無い指摘: 既存の cache と名前が衝突する
+```
+
+- 1件1行。**行頭**が `読み替え` / `判断` / `本文に無い指摘` のいずれかで、直後に `:`（全角 `：` も可）。
+- 直下の**字下げした行**はその申告の続きとして読まれる。字下げの無い行が来たら、その申告は終わる。
+- 行頭でない・コロンの無い行（`判断は特になし`、`なお 判断: …`）は申告として読まれない。
+  申告が無ければ何も書かない（「該当なし」の行も書かない）。
+- 件名は、そのリポジトリが PR タイトルに求める Conventional Commits の形（`type(scope): description`）で書く。
+  `cmate-orchestrate` の merge runner は、profile が `pr_title_template` を宣言していれば PR タイトルの
+  type / scope を**この件名から取り**、決まらなければその PR を作らずに止まる。
+
+**なぜコミットメッセージか。** オーケストレーション配下では、merge runner（`merge.mjs --create-prs`）が
+ブランチのコミットを読み、これらの行を PR 本文の「ワーカーの申告」節へ原文転記する
+（`cmate-orchestrate` の `references/merge-contract.md` 第5.8節。規約の実装は同 `scripts/lib.mjs` の
+`extractWorkerDeclarations`）。ワーカーの最後の報告は merge runner に届かず、申告は merge を止めるかを
+人が決める材料なので、**ブランチと一緒に運ばれる場所**に書く。`.commandmate/` など他の場所に
+ファイルを置かない —— そこは人が書く場所である。
+
+これは**書く場所の規約であって、権限ではない**。push も PR 作成も、この節のために行わない（[SKILL.md](../SKILL.md) 第4節）。
+
 ## 参照
 
 - [work-discipline.md](./work-discipline.md) — 8 項目の作業規律と、破ったときに何が起きるか
