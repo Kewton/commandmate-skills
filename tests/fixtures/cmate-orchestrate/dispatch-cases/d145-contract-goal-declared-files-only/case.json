@@ -1,7 +1,7 @@
 {
   "description": "CommandMate #3004: the contract goal's `## Files you may change` lists the files the ISSUE declared — here `src/cart/total.ts` and the test it named, `src/cart/__tests__/total.test.ts` — and NOT the paths the planner derived from them (`scope_defaults`: `total.test.ts` / `total.spec.ts` / `__tests__/total.ts`). The derived ones are still in the contract's `scope.allow` (a permission is unchanged; ADR §15.2 stands), and the goal says how many there are in one line. Measured on Kewton/Musunest: 55 / 61 / 60 listed paths for 20 / 22 / 22 real files (#180 / #182 / #181), which spent the 8000-character goal on files that do not exist and made the issue look three times its size. A test path the issue itself declared is a declared file and stays.",
   "plan": {
-    "issues_fixture": "dispatch-cases/d96-contract-goal-declared-files-only/issues.json",
+    "issues_fixture": "dispatch-cases/d145-contract-goal-declared-files-only/issues.json",
     "orchestrate_args": [
       "960",
       "--profile",
