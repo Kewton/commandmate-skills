@@ -1,0 +1,129 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "235": {
+      "state": "completed",
+      "verify_exits": [
+        21
+      ]
+    }
+  },
+  "claude_transcripts": {
+    "235": [
+      {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "上の実行契約に従って作業を開始してください。"
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "src/bookmark.ts の現状を読みます。"
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "Read",
+              "input": {
+                "file_path": "src/bookmark.ts"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t1",
+              "content": "42 lines"
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "保存先を確認しています。"
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "続けて作業を進め、この Issue の実装を最後まで完遂してください。\n指示どおりに書けないと分かったら、進めずに止めて報告してください。\nまだ変更が commit されていません。完了したら work ブランチに単一 commit を作成してください（それが完了の合図です）。\n作業ログは docs/ に残してください。"
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "Read",
+              "input": {
+                "file_path": "src/storage.ts"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t1",
+              "content": "42 lines"
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "止めて報告します。Issue は `src/bookmark.ts` に書くよう指示していますが、ブックマークの保存先 `src/storage.ts` が対象ファイルに無いため、指示どおりには書けません。対象ファイルに `src/storage.ts` を加えるか、保存先を指定してください。"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

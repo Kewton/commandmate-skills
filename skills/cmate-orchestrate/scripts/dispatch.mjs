@@ -4835,6 +4835,9 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
   // given to act on, and it belongs in the record rather than only in the message
   // that was sent — a report listing 20 paths must not read as a run that had 20.
   let scopeViolationCut = null;
+  // Whether the send that opened the CURRENT turn was the supervision nudge —
+  // the only turn a stop-and-report is read from (Issue #287).
+  let nudgedThisTurn = false;
   const scopeCutClause = () => (scopeViolationCut === null
     ? ''
     : `; a scope re-instruction was bounded: ${scopeViolationCut.shown.length} of ${scopeViolationCut.total} violating line(s) were transcribed `
@@ -4946,6 +4949,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       if (!asked.sent) return budgetCutoff() ?? done('failed', `commit request failed: ${asked.note}`);
       closeTurn();
       turns += 1;
+      nudgedThisTurn = false;
       continue;
     }
 
@@ -4962,6 +4966,18 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
           ...droppedGateChecks(startGates),
         ],
       };
+      // A worker that answered the nudge by stopping and reporting (Issue #287)
+      // is not nudged again — read BEFORE the cap, so a report given on the last
+      // turn is recorded as one rather than as the cap's "why there is nothing".
+      if (nudgedThisTurn) {
+        const workerReport = await readWorkerStopReport(inputs, worktreeId, worktreePath, turns);
+        if (workerReport !== null) {
+          return {
+            ...done('failed', workerReportNoteClause(workerReport, inputs, 'no work evidence (no commit, no uncommitted change)')),
+            workerReport,
+          };
+        }
+      }
       if (turns >= inputs.maxTurns) {
         // One collection, here (Issue #220), for the same reason #179 reads the
         // liveness at a wait timeout: this cap is either "the worker ran N turns
@@ -4988,6 +5004,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       if (!nudged.sent) return budgetCutoff() ?? done('failed', `nudge failed: ${nudged.note}`);
       closeTurn();
       turns += 1;
+      nudgedThisTurn = true;
       continue;
     }
 
@@ -5052,6 +5069,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       if (!resent.sent) return budgetCutoff() ?? done('failed', `re-instruction failed: ${resent.note}`);
       closeTurn();
       turns += 1;
+      nudgedThisTurn = false;
       continue;
     }
 
@@ -5096,6 +5114,9 @@ async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMes
     };
   }
   let turns = 1;
+  // As on the contract path (Issue #287): every later turn here is opened by
+  // the nudge, and only those turns are read for a stop-and-report.
+  let nudgedThisTurn = false;
   const budgetCutoff = () => (wallClockExhausted()
     ? {
       state: 'timeout', promptExcerpt: null, nudges: turns - 1, autoResponded,
@@ -5159,6 +5180,15 @@ async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMes
       const note = turns > 1 ? `completed after ${turns - 1} nudge(s); new commit detected` : 'completed; new commit detected';
       return { state: 'completed', promptExcerpt: null, nudges: turns - 1, autoResponded, note };
     }
+    if (nudgedThisTurn) {
+      const workerReport = await readWorkerStopReport(inputs, worktreeId, worktreePath, turns);
+      if (workerReport !== null) {
+        return {
+          state: 'failed', promptExcerpt: null, nudges: turns - 1, autoResponded, workerReport,
+          note: workerReportNoteClause(workerReport, inputs, 'no new commit'),
+        };
+      }
+    }
     if (turns >= inputs.maxTurns) {
       return {
         state: 'failed',
@@ -5175,6 +5205,7 @@ async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMes
       return { state: 'failed', promptExcerpt: null, nudges: turns - 1, autoResponded, note: `nudge failed: ${nudged.note}` };
     }
     turns += 1;
+    nudgedThisTurn = true;
   }
   return { state: 'failed', promptExcerpt: null, nudges: turns - 1, autoResponded, note: 'supervision exceeded its hard iteration bound' };
 }
@@ -5412,22 +5443,25 @@ function assistantEntryParts(entry) {
 // counts as OUTPUT.
 const TUI_CHROME_LINE = /^(?:[\s─-╿▀-▟|+._=-]*|[>❯»]\s*|\?\s*for shortcuts.*|esc to interrupt.*|Press up to edit queued messages.*|⏵+.*|Bypassing Permissions.*)$/i;
 
-// The transcript half of the evidence. Returns the object the report carries
-// plus the sentences (if any) it supports. Nothing in here can FAIL the probe:
-// every unreadable path becomes `{ read: false, reason }`, which is a fact about
-// this run and not an error in it.
-function readWorkerTranscript(worktreePath, cliToolId) {
-  const notRead = (reason) => ({ record: { read: false, reason: redact(reason) }, upstream: null, turn: null, signature: null });
+// Where a worker's Claude Code transcript is, and its bounded tail as parsed
+// JSONL entries — or why it could not be read. Shared by the #220 cap probe and
+// the #287 stop-report reader, so the two can never disagree about WHICH file
+// is this worker's (or refuse for different reasons).
+function transcriptNotRead(reason) {
+  return { ok: false, reason };
+}
+
+function readTranscriptEntries(worktreePath, cliToolId) {
   // dispatch is deliberately agent-agnostic — it drives worktrees, not CLIs — so
   // the only thing that can name the agent is `capture --json`'s `cliToolId`.
   // Not naming it is not permission to guess: Codex keeps rollouts under
   // `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, a layout this runner does
   // not read, and reading the wrong layout would produce confident nonsense.
   if (typeof cliToolId !== 'string' || cliToolId.length === 0) {
-    return notRead('`commandmate capture <worktree-id> --json` did not name the CLI tool (`cliToolId`), so which agent\'s transcript layout to read is unknown');
+    return transcriptNotRead('`commandmate capture <worktree-id> --json` did not name the CLI tool (`cliToolId`), so which agent\'s transcript layout to read is unknown');
   }
   if (cliToolId !== 'claude') {
-    return notRead(`this runner reads Claude Code's transcript layout only; \`cliToolId\` is "${excerpt(cliToolId, 24)}" (Codex keeps its rollouts under ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl)`);
+    return transcriptNotRead(`this runner reads Claude Code's transcript layout only; \`cliToolId\` is "${excerpt(cliToolId, 24)}" (Codex keeps its rollouts under ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl)`);
   }
   let absolute;
   try {
@@ -5442,21 +5476,21 @@ function readWorkerTranscript(worktreePath, cliToolId) {
   try {
     names = readdirSync(dir).filter((name) => name.endsWith('.jsonl')).sort();
   } catch {
-    return notRead('no Claude Code transcript directory exists for this worktree (CLAUDE_CONFIG_DIR/projects/<encoded cwd>)');
+    return transcriptNotRead('no Claude Code transcript directory exists for this worktree (CLAUDE_CONFIG_DIR/projects/<encoded cwd>)');
   }
-  if (names.length === 0) return notRead('the Claude Code transcript directory for this worktree holds no *.jsonl file');
+  if (names.length === 0) return transcriptNotRead('the Claude Code transcript directory for this worktree holds no *.jsonl file');
   if (names.length > 1) {
     // Picking "the newest" would be a guess dressed as a measurement: several
     // sessions can share one worktree, and the wrong one answers a different
     // question. The operator has the whole directory and can read them all.
-    return notRead(`the Claude Code transcript directory for this worktree holds ${names.length} *.jsonl files and this runner will not guess which session was this worker's (read them with: ${MANUAL_TRANSCRIPT_COMMAND})`);
+    return transcriptNotRead(`the Claude Code transcript directory for this worktree holds ${names.length} *.jsonl files and this runner will not guess which session was this worker's (read them with: ${MANUAL_TRANSCRIPT_COMMAND})`);
   }
   const path = join(dir, names[0]);
   let tail;
   try {
     tail = readFileTail(path, TRANSCRIPT_TAIL_BYTES);
   } catch (error) {
-    return notRead(`the Claude Code transcript for this worktree could not be read: ${excerpt(error.message, 80)}`);
+    return transcriptNotRead(`the Claude Code transcript for this worktree could not be read: ${excerpt(error.message, 80)}`);
   }
   const lines = tail.text.split('\n').filter((line) => line.trim().length > 0);
   // A tail read can start mid-entry; that first fragment is not a record.
@@ -5470,7 +5504,19 @@ function readWorkerTranscript(worktreePath, cliToolId) {
       // direction. It is skipped, not counted.
     }
   }
-  if (entries.length === 0) return notRead('the Claude Code transcript for this worktree holds no readable JSONL entry');
+  if (entries.length === 0) return transcriptNotRead('the Claude Code transcript for this worktree holds no readable JSONL entry');
+  return { ok: true, path, tail, lines, entries };
+}
+
+// The transcript half of the evidence. Returns the object the report carries
+// plus the sentences (if any) it supports. Nothing in here can FAIL the probe:
+// every unreadable path becomes `{ read: false, reason }`, which is a fact about
+// this run and not an error in it.
+function readWorkerTranscript(worktreePath, cliToolId) {
+  const notRead = (reason) => ({ record: { read: false, reason: redact(reason) }, upstream: null, turn: null, signature: null });
+  const read = readTranscriptEntries(worktreePath, cliToolId);
+  if (!read.ok) return notRead(read.reason);
+  const { path, tail, lines, entries } = read;
   const assistants = entries.filter((entry) => entry?.type === 'assistant').map(assistantEntryParts);
   const bounded = tail.truncated || lines.length > TRANSCRIPT_MAX_ENTRIES
     ? ` (only the last ${TRANSCRIPT_MAX_ENTRIES} entr(ies) of the final ${TRANSCRIPT_TAIL_BYTES} byte(s) were read)`
@@ -5701,6 +5747,127 @@ function turnEvidenceNoteClause(evidence) {
     return `why there is nothing: ${TURN_EVIDENCE_NOTHING} — turns really ran and produced no commit and no uncommitted change; ${turnsClause}`;
   }
   return `why there is nothing: ${TURN_EVIDENCE_UNREADABLE} — neither "the upstream was unavailable" nor "turns ran and produced nothing" was measured; ${turnsClause}. Read neither into it`;
+}
+
+// =============================================================================
+// A worker that stopped and reported (Issue #287)
+// =============================================================================
+//
+// The supervision nudge asks a worker that finds it cannot write what it was told
+// to STOP AND REPORT instead of pressing on (CommandMate#3009, 0.34.0). A worker
+// that did exactly that used to be nudged on to the `--max-turns` cap and then
+// recorded as "no commit / no work evidence" — the same `failed` as a worker that
+// said nothing — and its report was nowhere in the report. The consumer
+// (Kewton/Musunest) treats that stop as a GOOD stop, so the words have to survive
+// and the run has to be able to tell it from silence.
+//
+// What counts as "stopped and reported", decided here and nowhere else:
+//
+//   - the turn was opened by the supervision NUDGE (the message that carries the
+//     stop-and-report instruction) — a first turn or a commit request / gate
+//     re-instruction is not one;
+//   - it ended without progress: exit 21 on the contract path (work-evidence: no
+//     commit, no uncommitted change), no new commit on the fallback path;
+//   - the worker's transcript records THAT nudge as its last human message, and
+//     after it the worker's last word is text — not a tool call left hanging,
+//     not an upstream error line.
+//
+// The third condition is what makes "the reply of THIS turn" a measurement
+// rather than a guess: a transcript whose last human message is not our nudge
+// (a session that has not recorded it, a stale file) has no reply this runner
+// can attribute to the turn, and is read as "no report" — the conventional loop
+// goes on exactly as before. So does every world in which the reply could not be
+// read at all (a failed or unparseable `capture`, a non-Claude agent, no or
+// several transcripts): "we could not look" is never a report, and it is never a
+// reason to stop either. The screen (`realtimeSnippet`) is deliberately not
+// used: it holds the nudge's own echo beside the reply, and a pane cannot say
+// which lines belong to which turn.
+//
+// Found, the nudge STOPS: another nudge would ask the same question of a worker
+// that has already answered it, spend turns up to the cap, and bury the answer.
+// The adjudication does not move — `verification.outcome` stays what the turn's
+// `wait --verify` returned, `worker_state` stays `failed`, blocking
+// `worker_failed` still says why the run stopped. What is added is the report
+// itself (`worker_report`) and a blocking `worker_stopped_with_report` that
+// sends a human to read it.
+const WORKER_STOPPED_WITH_REPORT = 'worker_stopped_with_report';
+// The same excerpt rule as every other transcribed text in this report (tail
+// kept, whitespace collapsed, redacted), with a wider bound: a report is the
+// deliverable of this turn, and its conclusion is at the end.
+const WORKER_REPORT_EXCERPT_LIMIT = 600;
+// How a transcript's human message is recognized as this runner's nudge. The
+// first line only: `--nudge-message` / `worker_messages.nudge` append after it.
+const NUDGE_MARKER = NUDGE_MESSAGE.split('\n')[0];
+
+// The text of a transcript entry that a HUMAN (or this runner) sent, or null.
+// Claude Code records tool results as `type: user` too; those are not messages.
+function humanEntryText(entry) {
+  if (entry?.type !== 'user') return null;
+  const content = entry?.message?.content ?? entry?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return null;
+  if (content.some((part) => part?.type === 'tool_result')) return null;
+  const texts = content.filter((part) => typeof part?.text === 'string').map((part) => part.text);
+  return texts.length > 0 ? texts.join('\n') : null;
+}
+
+// ONE `capture` (for `cliToolId`, which names the transcript layout — the #220
+// rule), then the transcript. Returns the `worker_report` object, or null for
+// every world that is not a readable stop-and-report.
+async function readWorkerStopReport(inputs, worktreeId, worktreePath, turns) {
+  const capture = await runCmAsync(inputs, ['capture', worktreeId, '--json']);
+  if (!capture.ok) return null;
+  const payload = parseCliJson(capture);
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const read = readTranscriptEntries(worktreePath, payload.cliToolId);
+  if (!read.ok) return null;
+  let lastHuman = -1;
+  for (let i = read.entries.length - 1; i >= 0; i -= 1) {
+    if (humanEntryText(read.entries[i]) !== null) {
+      lastHuman = i;
+      break;
+    }
+  }
+  if (lastHuman < 0 || !humanEntryText(read.entries[lastHuman]).includes(NUDGE_MARKER)) return null;
+  const replies = read.entries.slice(lastHuman + 1)
+    .filter((entry) => entry?.type === 'assistant')
+    .map(assistantEntryParts);
+  // The FINAL reply: the text entries after the last tool call (Claude Code
+  // writes one entry per content block, so one answer can span several).
+  const finalTexts = [];
+  for (let i = replies.length - 1; i >= 0; i -= 1) {
+    if (replies[i].hasTool) break;
+    const text = replies[i].text.trim();
+    if (text.length > 0) finalTexts.unshift(text);
+  }
+  if (finalTexts.length === 0) return null;
+  const text = finalTexts.join('\n');
+  if (matchUpstreamFault(text) !== null) return null;
+  const clipped = excerpt(text, WORKER_REPORT_EXCERPT_LIMIT);
+  if (clipped === null) return null;
+  return {
+    code: WORKER_STOPPED_WITH_REPORT,
+    turn: turns,
+    source: 'claude_transcript',
+    text: clipped,
+    truncated: clipped.startsWith('…'),
+  };
+}
+
+// The one-sentence version for the worker `note`, rendered FROM the record
+// (Issue #83's rule).
+function workerReportNoteClause(report, inputs, progress) {
+  return `the worker stopped and reported on turn ${report.turn} (opened by the supervision nudge) with ${progress}; `
+    + `no further nudge was sent (the --max-turns cap is ${inputs.maxTurns}) — ${WORKER_STOPPED_WITH_REPORT}: read its report (worker_report) before deciding`;
+}
+
+function workerReportBlockingDetail(issue, report) {
+  return `#${issue}: after the supervision nudge that opened turn ${report.turn} — which tells a worker that cannot write what it was told to stop and report — `
+    + 'the worker ended that turn without progress and with a reply, so supervision stopped nudging it rather than spending the rest of --max-turns on a worker that had already answered. '
+    + `Its report, transcribed from its Claude Code transcript${report.truncated ? ` (the tail, cut to ${WORKER_REPORT_EXCERPT_LIMIT} characters)` : ''}: "${report.text}". `
+    + 'Read it, then either fix the Issue (or its 対象ファイル / 受入条件) and re-plan, or — when the report says the obstacle is gone — re-dispatch the same plan with '
+    + '`dispatch.mjs --plan <plan.json> --resume <this run\'s dispatch directory>`. '
+    + 'The adjudication is unchanged: `worker_state` stays `failed` and blocking `worker_failed` still says why the run stopped; this entry is what the worker said';
 }
 
 // =============================================================================
@@ -6634,6 +6801,9 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     // (Issue #220), and for the same reason: its ABSENCE means no collection was
     // made, which must never read as "there was nothing to find".
     if (supervised.turnEvidence) worker.worker_turn_evidence = supervised.turnEvidence;
+    // Only the workers that stopped and reported after a nudge carry this (Issue
+    // #287); absent means no report was read, not that the worker said nothing.
+    if (supervised.workerReport) worker.worker_report = supervised.workerReport;
     if (supervised.autoResponded) autoResponded = true;
     if (supervised.scopeUnsatisfiable) scopeUnsatisfiable.set(worker.issue, supervised.scopeUnsatisfiable);
     if (sendTraces.has(worktreeId)) sendTraceByIssue.set(worker.issue, sendTraces.get(worktreeId));
@@ -6805,6 +6975,18 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
       report.blocking_reasons.push({
         code: evidence.code,
         detail: redact(`#${worker.issue}: ${evidence.detail}`),
+      });
+    }
+
+    // And for a worker that stopped and reported (Issue #287): beside
+    // `worker_failed`, for the reason #220 gave — that code says why the run
+    // stopped, this one says what the worker said.
+    for (const worker of workers) {
+      const workerReport = worker.worker_report;
+      if (!workerReport) continue;
+      report.blocking_reasons.push({
+        code: WORKER_STOPPED_WITH_REPORT,
+        detail: redact(workerReportBlockingDetail(worker.issue, workerReport)),
       });
     }
   };
@@ -7900,6 +8082,9 @@ function renderSummary(report, contractMode = false, openQuestions = [], resume 
     }
     if (report.blocking_reasons.some((reason) => reason.code === TURN_EVIDENCE_NOTHING)) {
       lines.push('- next: **worker は実際にターンを回したうえで、commit も未 commit の変更も残していない**（blocking の `worker_produced_nothing`）。worker のログを読み、**Issue の粒度か指示の曖昧さ**を疑う。分割か書き直しをして re-plan する。`--resume` だけでは同じ所で止まる（owner: human）。');
+    }
+    if (report.blocking_reasons.some((reason) => reason.code === WORKER_STOPPED_WITH_REPORT)) {
+      lines.push('- next: worker が nudge に従って**止めて報告した**（blocking の `worker_stopped_with_report` と該当 worker の `worker_report.text` に報告の文がある）。**報告を読んでから決める** —— 書けない理由が Issue 側（対象ファイル・受入条件・指示の矛盾）にあるなら Issue を直して re-plan し、障害が解消済みなら `dispatch.mjs --plan <plan.json> --resume <この run の dispatch ディレクトリ>` で再開する。報告の無い無進捗（`worker_produced_nothing` など）とは別の停止である（owner: human）。');
     }
     if (report.blocking_reasons.some((reason) => reason.code === TURN_EVIDENCE_UNREADABLE)) {
       lines.push('- next: `--max-turns` に到達した理由を**測れていない**（blocking の `worker_output_unreadable`）。**「ターンを回して何も出なかった」とも「上流が落ちていた」とも読み替えない。** `commandmate capture <worktree-id> --json` と、Claude worker なら `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/<cwd を非英数字ごと "-" にしたもの>/*.jsonl` の末尾を手で読んでから、上の2つのどちらかへ進む（owner: operator）。');

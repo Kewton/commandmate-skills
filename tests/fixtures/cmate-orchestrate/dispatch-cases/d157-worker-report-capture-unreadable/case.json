@@ -1,0 +1,53 @@
+{
+  "description": "[#287] **報告を読めなかったとき。** transcript には d155 と同じ「nudge → 報告の文」があるが、`capture` の呼び出しが失敗するので `cliToolId`（どの agent の transcript 形式を読むか）が分からず、runner は報告を読めない。**「読めなかった」は報告ではなく、止める理由でもない** —— 従来どおり `--max-turns 3` まで nudge を送り（`capture` が送信確認も返さないので各 send は 1 回ずつ再送される —— d113 と同じ世界）、cap で `failed` と `worker_output_unreadable` を記録する。`worker_report` は付かない。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "234",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      234
+    ],
+    "worker_states": {
+      "234": "failed"
+    },
+    "verification_outcomes": {
+      "234": "fail"
+    },
+    "worker_report": {
+      "234": null
+    },
+    "worker_turn_evidence": {
+      "234": {
+        "code": "worker_output_unreadable",
+        "turns": 3
+      }
+    },
+    "blocking_codes": [
+      "worker_output_unreadable",
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_stopped_with_report"
+    ]
+  }
+}

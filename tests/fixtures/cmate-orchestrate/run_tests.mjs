@@ -1551,6 +1551,32 @@ function runDispatchCase(caseId) {
         `#${num} worker_turn_evidence carries no detail`);
     }
   }
+  // What a worker said when it stopped and reported after a nudge (Issue #287).
+  // Same rules as the two objects above: `null` asserts the field is ABSENT (no
+  // report was read — a worker that said nothing, or one whose reply could not
+  // be read), an object pins its keys partially, and `text_includes` pins the
+  // transcribed words, which are the whole point of the field.
+  if (expect.worker_report) {
+    for (const [num, expected] of Object.entries(expect.worker_report)) {
+      const worker = allWorkers(report).find((w) => w.issue === Number(num));
+      if (!check(worker !== undefined, `#${num} has no worker record`)) continue;
+      if (expected === null) {
+        check(worker.worker_report === undefined,
+          `#${num} carries a worker_report ${JSON.stringify(worker.worker_report)} on a worker that did not stop and report`);
+        continue;
+      }
+      if (!check(worker.worker_report !== undefined, `#${num} has no worker_report after stopping and reporting`)) continue;
+      const { text_includes: needles = [], ...fields } = expected;
+      for (const [key, value] of Object.entries(fields)) {
+        check(matchesPartial(worker.worker_report[key], value),
+          `#${num} worker_report.${key} ${JSON.stringify(worker.worker_report[key])} does not match ${JSON.stringify(value)}`);
+      }
+      for (const needle of needles) {
+        check(String(worker.worker_report.text ?? '').includes(needle),
+          `#${num} worker_report.text does not include ${JSON.stringify(needle)}: ${JSON.stringify(worker.worker_report.text)}`);
+      }
+    }
+  }
   // The prose a human acts on. Pinned separately from the structured fields for
   // the reason #83 gave: the sentence and the object are one claim, and the
   // `worker_output_unreadable` case is ONLY useful if its detail refuses to round

@@ -789,6 +789,44 @@ no work evidence after 12 turn(s); gave up at the --max-turns 12 cap
 上流側だけである。誤る向きとしても安全な側である: 実は過大だった Issue を待って `--resume` すれば run 1回を失うが、
 健全な Issue を分割させれば人間が正しい Issue を書き直すことになる。
 
+### 2.12.1 nudge に「止めて報告」で答えた worker は、報告を残して nudge を止める（[#287](https://github.com/Kewton/commandmate-skills/issues/287)）
+
+監督 nudge は「指示どおりに書けないと分かったら、進めずに止めて報告してください。」を含む
+（cmate-orchestrate 0.34.0、CommandMate#3009）。これに従って止まった worker を、runner は
+`--max-turns` まで nudge し続け、最後は第2.12節の cap（no work evidence）の `failed` にしていた。
+**worker が書いた報告の文は report のどこにも残らず**、報告の無い無進捗と区別できなかった。
+
+**「止めて報告した」ターンの見分け方**（runner が決めるのはここだけ）:
+
+1. そのターンを開いた send が**監督 nudge**である（最初の send・commit 依頼・gate 再指示のターンは対象外）
+2. そのターンが**進捗なしで終わった**: 契約経路は `wait --verify` exit 21（commit も未 commit の変更も無い）、
+   fallback 経路は新しい commit が無い
+3. worker の transcript（第2.12節と同じ読み方: `capture --json` の `cliToolId` が `claude`、
+   その worktree の `*.jsonl` がちょうど1つ）で、**最後の human message がその nudge**
+   （既定 nudge の1行目を含む。`--nudge-message` / `worker_messages.nudge` の追記はその後ろに付くので影響しない）であり、
+   その後の worker の**最後の発話が文**（最後の tool 呼び出しより後の text。上流エラー署名に一致するものは除く）である
+
+3 の「最後の human message がその nudge」が、**この返答がこのターンのものだ**と言える根拠である。
+それが言えない transcript（nudge がまだ記録されていない・別の古い file）は「報告なし」と読む。
+**画面（`realtimeSnippet`）は使わない** —— nudge 自身のエコーが返答と並んでおり、どの行がどのターンのものかを
+画面は言えない。
+
+見分けたら:
+
+- **その時点で nudge を止める**（cap より先に判定する。cap のターンの報告も報告として残る）。
+  同じ問いに既に答えた worker へ同じ nudge を送り続けても、ターンを cap まで使って報告を埋もれさせるだけである。
+- worker 記録に **`worker_report`**（`code: worker_stopped_with_report` / `turn` / `source: claude_transcript` /
+  `text` / `truncated`）を書く。`text` は既存の抜粋規則（redaction・空白の畳み込み・**末尾を残す**）で上限 600 字。
+- blocking に **`worker_stopped_with_report`**（Issue ごとに1件、`workers` 順）を `worker_failed` の**隣に**足す。
+  detail は報告の文と、次の一手（報告を読んで Issue を直して re-plan するか、障害が解消済みなら `--resume`）を言う。
+- **裁定は動かさない**: `verification.outcome` はそのターンの `wait --verify` の結果のまま、`worker_state` は `failed`、
+  `stop_reason` は `worker_failed`（enum に値を足していない）。`worker_turn_evidence` は cap に到達していないので付かない。
+
+**報告を読めなかったとき**（`capture` が失敗・JSON でない・Claude 以外・transcript が無い / 2つ以上）と、
+**報告の無い無進捗**（最後が tool 呼び出し・nudge が記録されていない）は、どちらも「報告なし」として
+**従来どおり** `--max-turns` まで nudge し、cap で第2.12節の `worker_turn_evidence` を記録する。
+「読めなかった」は報告ではなく、止める理由でもない。`worker_report` が**無い**ことは「worker が何も言わなかった」ではない。
+
 ### 2.13 起動が間に合わなかった send は 1 回だけ送り直す（[CommandMate#3006](https://github.com/Kewton/CommandMate/issues/3006)）
 
 dispatch が新しく起動したセッションへの最初の `send` は、エージェントの起動が送信側の待ち枠に
@@ -1445,6 +1483,7 @@ pre-flight（第3.0節）で停止した failure は artifact を書かないの
 | `worker_failed` | `worker_upstream_unavailable` | exit 21 で cap に到達した時点で、**1ターンも実行できていない肯定的証拠**があった（第2.12節）。`worker_failed` の**隣に**出る Issue ごとの1件で、「なぜ止まったか」ではなく「**なぜ何も無いのか**」を言う。**`stop_reason` の enum に値を足していない**。next action は「待って `--resume`」であり、Issue の分割ではない |
 | `worker_failed` | `worker_produced_nothing` | 同じ cap で、**ターンが成立した肯定的証拠**があった（第2.12節）。Issue ごとに1件。next action は Issue の分割か書き直しと re-plan |
 | `worker_failed` | `worker_output_unreadable` | 同じ cap で、**どちらの肯定的証拠も得られなかった**（第2.12節）。Issue ごとに1件。**どちらとも読み替えない**（merge の `change_evidence_unavailable` と同型） |
+| `worker_failed` | `worker_stopped_with_report` | nudge の後のターンが進捗なしで終わり、worker の transcript がその nudge への**返答の文**で終わっていた ——「止めて報告」した（第2.12.1節）。`worker_failed` の**隣に**出る Issue ごとの1件で、detail と worker 記録の `worker_report.text` に報告の文がある。その時点で nudge を止めている。**`stop_reason` の enum に値を足していない**。next action は報告を読んでから、Issue を直して re-plan か `--resume`（owner: human） |
 | `timeout` | `worker_timeout` | `commandmate wait` が timeout した |
 | `timeout` | `wait_window_exhausted` | その timeout の時点で `capture` が**稼働中**を示した（第2.11節）。`worker_timeout` の**隣に**出る Issue ごとの1件で、「なぜ止まったか」ではなく「その timeout はどちらだったか」を言う。**`stop_reason` の enum に値を足していない**。next action は「待って `--reverify`」であり、再 dispatch ではない |
 | `timeout` | `worker_stalled` | 同じ時点で `capture` が答えたが、**稼働の証拠が無かった**（第2.11節）。Issue ごとに1件 |
@@ -1453,7 +1492,8 @@ pre-flight（第3.0節）で停止した failure は artifact を書かないの
 | `verification_failed` / `worker_failed` | `scope_unsatisfiable` | scope ゲートの違反 path が2ターン連続で同一だったため、再指示ループを収束しないと判定して打ち切った（第2.3.1節）。**`stop_reason` の enum に値を足していない**（commit があれば `verification_failed`、無ければ `worker_failed`）。detail に違反 path が入る。対処は Issue の対象ファイルへの追加と re-plan（owner: human） |
 
 timeout の生死3 code（`wait_window_exhausted` / `worker_stalled` / `worker_liveness_unreadable`）と
-cap の3 code（`worker_upstream_unavailable` / `worker_produced_nothing` / `worker_output_unreadable`）は
+cap の3 code（`worker_upstream_unavailable` / `worker_produced_nothing` / `worker_output_unreadable`）、
+止めて報告した worker の `worker_stopped_with_report` は
 **停止理由ではなく所見**である。したがって同じ wave に prompt や exit 99 が在って `stop_reason` が
 そちらに決まった run でも、該当する worker が在れば出る —— 測った事実は、どの停止理由が勝ったかで
 消えない。上表で `timeout` / `worker_failed` の行に置いてあるのは、単独で出るときの典型的な組を
