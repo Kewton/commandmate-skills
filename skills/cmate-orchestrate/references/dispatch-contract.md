@@ -1202,6 +1202,32 @@ acceptance コマンドは `execFileSync` に `timeout` を渡さずに実行さ
 - **`--schedule dag` とは独立**に効く（絞った plan に対して dag が走る）。merge / uat は選んだ
   Issue の記録だけを読む。
 
+### 3.0.6 human-only の Issue は dispatch しない（[#286](https://github.com/Kewton/commandmate-skills/issues/286)）
+
+plan が `issues[].dispatch_excluded: "human_only"` の印を付けた Issue（`labels` に `human-only` を持つ。
+[plan-contract.md](./plan-contract.md) 第3.3節）には worker を割り当てない。
+
+- **読むのは plan の印だけ。** ラベルは読まない。plan は承認された成果物であり、印の無い古い plan
+  （0.34.0 以前の planner が書いたもの）は書かれたとおりに dispatch する。
+- **外し方は `--only` と同じ 1 か所で、`--only` より先。** 起動直後に、印の付いた Issue と、それに触れる
+  辺（どちら側でも）を plan の `issues` / `dependencies` / `waves` から外す。以降（`--only`・barrier・
+  `--schedule dag`・pre-flight・lock・report）は外した後の plan を読む。したがって human-only の Issue の
+  question・scope 宣言・worktree の有無は、この run を止めない。
+- **report。** 印の付いた Issue は `waves[]` の**最後の entry**（`dispatched: []`）に worker_state
+  `not_dispatched`・note `human-only: …` で並べる（`--only` の選外と同じ entry。Issue 番号順）。limitation
+  `human_only_excluded` が理由を残す。blocking reason にはせず、status / completion_check も動かさない。
+- **依存。** human-only の Issue に依存する Issue は**待たずに**送る。dispatch は人の作業の完了を見る
+  手段を持たない —— plan の外の Issue への依存（`external_dependency`）を待たないのと同じ理由である。
+  その代わり limitation `human_only_dependency` が「#N depends on human-only #M」を、この run が
+  dispatch した依存側についてだけ全件並べる。人の作業が終わったことを確かめてから依存側を merge する。
+- **`--only` との組み合わせ。** human-only の Issue を `--only` に書くと `invalid_input`（exit 3）で全体を
+  断る（どの run も dispatch しないので、選べる対象ではない）。human-only への辺は `--only` の依存検査より
+  先に外れているので、human-only に依存する Issue だけを選んでも断らない。`plan_scope.plan_issues` は
+  dispatch できる Issue だけを数える。
+- **全 Issue が human-only の plan** は wave が空なので `plan_invalid`（exit 3）で断り、detail がその理由を名指す。
+- 印の無い plan の run は byte 一致のまま（limitation も entry も増えない）。merge / uat は
+  `not_dispatched` を適格にしないので変更は無い。
+
 ### 3.1 Wave ループ
 
 各 Wave について、plan の順に次を行う。

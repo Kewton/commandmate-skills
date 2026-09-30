@@ -78,6 +78,10 @@ const MIRRORED_CONSTANTS = [
   'DELIVERABLE_HEADING_RE',
   'NEGATED_HEADING_RE',
   'CONTEXT_HEADING_RE',
+  // The label both sides read as "a person does this Issue" (Issue #286): the
+  // validator names such an Issue dispatch_excluded, the planner keeps it out of
+  // every wave. A one-character drift would make the two disagree silently.
+  'HUMAN_ONLY_LABEL',
 ];
 
 // Path safety is outside the mirrored region and belongs to the planner alone.

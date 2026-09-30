@@ -1,0 +1,21 @@
+{
+  "issues": [
+    {
+      "number": 1530,
+      "title": "docs: walk through the demo on a phone",
+      "body": "A person runs the demo on a phone and writes up what happened in `docs/demo-walkthrough.md`.\n\n## Acceptance criteria\n- [ ] `docs/demo-walkthrough.md` records every screen of the demo\n",
+      "labels": [
+        "human-only"
+      ]
+    },
+    {
+      "number": 1531,
+      "title": "docs: walk through the demo on a phone",
+      "body": "A person runs the demo on a phone and writes up what happened in `docs/demo-walkthrough.md`.\n\n## Acceptance criteria\n- [ ] `docs/demo-walkthrough.md` records every screen of the demo\n",
+      "labels": [
+        "documentation",
+        "human-only"
+      ]
+    }
+  ]
+}
