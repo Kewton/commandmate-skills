@@ -80,6 +80,11 @@ import {
   issueOf,
   loadJson,
   parseCliJson,
+  pauseMs,
+  SEND_NOT_READY_EXIT,
+  SEND_NOT_READY_RETRY_DELAY_MS,
+  sendNotReadyKind,
+  sendPauseMs,
   redact,
   redactionsList,
   resolveLauncher,
@@ -1047,12 +1052,29 @@ function worktreeHeadSha(inputs, worktreePath) {
   return sha.length > 0 ? sha : null;
 }
 
+// ONE `commandmate send`, retried once when refused as not ready (CommandMate#3006): a fix
+// worktree is created by this run, so its first send is always the one that
+// starts a brand-new session — exactly the send that races the agent's start-up.
+// The rule is lib.mjs's, shared with dispatch; each retry is recorded in
+// `retries` so the fix record's note can say it happened.
+function sendRetryingNotReady(inputs, args, retries) {
+  const first = runCm(inputs, args);
+  const kind = sendNotReadyKind(first);
+  if (kind === null) return first;
+  const delayMs = sendPauseMs(SEND_NOT_READY_RETRY_DELAY_MS);
+  pauseMs(delayMs);
+  const second = runCm(inputs, args);
+  retries.push(`a send was refused as not ready (${kind === 'session_starting' ? '503 SESSION_STARTING' : 'prompt not ready'}, exit ${SEND_NOT_READY_EXIT}, nothing typed) `
+    + `and was re-sent once after ${Math.round(delayMs / 1000)}s: ${second.ok ? 'the retry went through' : 'the retry was refused too'}`);
+  return second;
+}
+
 // `commandmate send`, then confirm the fix worker actually started (Issue #1468).
 // A send can leave the message unsubmitted; if the capture right after shows the
 // worker is neither generating nor prompting, re-send once. Best-effort — the
 // commit check below is the ground truth.
-function sendAndConfirm(inputs, worktreeId, message) {
-  const first = runCm(inputs, ['send', worktreeId, message]);
+function sendAndConfirm(inputs, worktreeId, message, retries = []) {
+  const first = sendRetryingNotReady(inputs, ['send', worktreeId, message], retries);
   if (!first.ok) {
     return { sent: false, note: excerpt(first.stderr || first.stdout || 'send failed') };
   }
@@ -1077,8 +1099,15 @@ const FIX_NUDGE_MESSAGE = [
 // fails, or the --max-turns cap is reached with no commit. Returns the worker state,
 // whether a fix was dispatched at all, and a note.
 function superviseFixUntilCommit(inputs, worktreeId, worktreeDir, message) {
+  const retries = [];
+  const supervised = superviseFixLoop(inputs, worktreeId, worktreeDir, message, retries);
+  if (retries.length === 0) return supervised;
+  return { ...supervised, note: [supervised.note, ...retries].filter(Boolean).join('; ') };
+}
+
+function superviseFixLoop(inputs, worktreeId, worktreeDir, message, retries) {
   const baseSha = worktreeHeadSha(inputs, worktreeDir);
-  const sent0 = sendAndConfirm(inputs, worktreeId, message);
+  const sent0 = sendAndConfirm(inputs, worktreeId, message, retries);
   if (!sent0.sent) {
     return { state: 'failed', dispatched: false, note: `fix dispatch failed: ${sent0.note}` };
   }
@@ -1103,7 +1132,7 @@ function superviseFixUntilCommit(inputs, worktreeId, worktreeDir, message) {
     if (turns >= inputs.maxTurns) {
       return { state: 'failed', dispatched: true, note: `fix worker made no new commit after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap` };
     }
-    const nudged = sendAndConfirm(inputs, worktreeId, FIX_NUDGE_MESSAGE);
+    const nudged = sendAndConfirm(inputs, worktreeId, FIX_NUDGE_MESSAGE, retries);
     if (!nudged.sent) {
       return { state: 'failed', dispatched: true, note: `fix nudge failed: ${nudged.note}` };
     }

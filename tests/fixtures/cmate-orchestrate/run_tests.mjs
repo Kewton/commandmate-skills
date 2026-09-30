@@ -119,6 +119,10 @@ function baseEnv() {
   // `~/.claude/projects` would be reading somebody's actual sessions, and the
   // answer would differ between machines.
   delete env.CLAUDE_CONFIG_DIR;
+  // The send-side pauses (CommandMate#3006: the wait before a not-ready retry).
+  // Zero for every run the suite starts, so a retry is exercised without the
+  // suite sleeping; the runners' constants are what a real run waits.
+  env.CMATE_ORCHESTRATE_SEND_PAUSE_MS = '0';
   return env;
 }
 
@@ -787,6 +791,12 @@ function runCase(caseId) {
     }
   }
   if (expect.risk_level) check(plan.risk.level === expect.risk_level, `risk ${plan.risk.level} !== ${expect.risk_level}`);
+  // The human-readable half of a plan (CommandMate #3004): what a reviewer reads
+  // before deciding whether an issue is dispatchable. Each listed substring must
+  // appear in the result's summary_markdown.
+  for (const needle of expect.summary_includes ?? []) {
+    check(result.summary_markdown.includes(needle), `summary_markdown does not contain ${JSON.stringify(needle)}`);
+  }
   if (expect.profile_verified !== undefined) check(plan.profile.verified === expect.profile_verified, `profile.verified ${plan.profile.verified} !== ${expect.profile_verified}`);
   if (expect.base) check(plan.profile.base === expect.base, `base ${plan.profile.base} !== ${expect.base}`);
   // The ORDERED field list of `plan.profile` (Issue #196). The optional fields
@@ -824,6 +834,13 @@ function runCase(caseId) {
       deepEqual(plan.profile.integration_baseline, expect.profile_integration_baseline),
       `plan.profile.integration_baseline ${JSON.stringify(plan.profile.integration_baseline)} !== ${JSON.stringify(expect.profile_integration_baseline)}`,
     );
+  }
+
+  // The same channel a third time (CommandMate#3005): merge --create-prs reads
+  // `plan.profile.pr_title_template` and never opens the profile.
+  if (expect.profile_pr_title_template !== undefined) {
+    check(plan.profile.pr_title_template === expect.profile_pr_title_template,
+      `plan.profile.pr_title_template ${JSON.stringify(plan.profile.pr_title_template)} !== ${JSON.stringify(expect.profile_pr_title_template)}`);
   }
 
   // max_parallel is honored: no wave is wider than the bound.
@@ -1059,6 +1076,17 @@ function checkContracts(spec, expect, planPath, scenarioObject, caseDir, outDir,
     }
     for (const needle of (expect.contract_absent ?? {})[number] ?? []) {
       check(!text.includes(needle), `${label}: unexpectedly contains ${JSON.stringify(needle)}`);
+    }
+    // The GOAL alone (CommandMate #3004). `contract_absent` reads the whole
+    // contract, and a derived test path is SUPPOSED to be in `scope.allow` while
+    // absent from the goal's file list — so the two halves need two readers.
+    const goalMatch = /\ngoal: \|\n((?: {2}.*\n|\n)*)/.exec(text);
+    const goal = goalMatch ? goalMatch[1] : '';
+    for (const needle of (expect.contract_goal_includes ?? {})[number] ?? []) {
+      check(goal.includes(needle), `${label}: the goal does not contain ${JSON.stringify(needle)}`);
+    }
+    for (const needle of (expect.contract_goal_absent ?? {})[number] ?? []) {
+      check(!goal.includes(needle), `${label}: the goal unexpectedly contains ${JSON.stringify(needle)}`);
     }
 
     // Section ORDER, not just presence. Where a section sits is load-bearing:
@@ -2567,6 +2595,16 @@ function runMergeCase(caseId) {
   }
   // CI gate: a non-green CI must never reach gh pr merge.
   if (expect.no_merge) check(mergeCalls === 0, `pr merge was called ${mergeCalls} time(s) when CI was not green`);
+  // The title `gh pr create` actually received (CommandMate#3005), read from the
+  // fake's argv rather than from the report's note: the note is the runner's own
+  // account, and the argv is what the repository's title check would see.
+  for (const [num, title] of Object.entries(expect.pr_create_titles ?? {})) {
+    const call = cliLog.find((entry) => entry.sub === 'pr' && entry.args[0] === 'create'
+      && entry.args[entry.args.indexOf('--head') + 1]?.includes(`issue-${num}`));
+    if (!check(call !== undefined, `#${num}: no gh pr create call was logged`)) continue;
+    const actual = call.args[call.args.indexOf('--title') + 1];
+    check(actual === title, `#${num}: gh pr create --title ${JSON.stringify(actual)} !== ${JSON.stringify(title)}`);
+  }
 
   if (expect.redaction_token) {
     check(!stdout.includes(expect.redaction_token), 'a raw token survived into the merge report');
@@ -2943,6 +2981,14 @@ function runUatCase(caseId) {
 
   if (expect.worktree_add_calls !== undefined) check(worktreeAddCalls === expect.worktree_add_calls, `worktree add called ${worktreeAddCalls} time(s) !== ${expect.worktree_add_calls}`);
   if (expect.send_calls !== undefined) check(sendCalls === expect.send_calls, `send called ${sendCalls} time(s) !== ${expect.send_calls}`);
+  // What a fix record's note says about how its worker was reached
+  // (CommandMate#3006: a not-ready first send that was re-sent). Every fix of
+  // every attempt for the issue is searched; one of them has to carry ALL needles.
+  for (const [num, needles] of Object.entries(expect.fix_notes_include ?? {})) {
+    const notes = (report.attempts ?? []).flatMap((a) => a.fixes ?? []).filter((f) => f.issue === Number(num)).map((f) => String(f.note ?? ''));
+    check(notes.some((note) => needles.every((needle) => note.includes(needle))),
+      `no fix note for #${num} contains ${JSON.stringify(needles)}; notes: ${JSON.stringify(notes)}`);
+  }
   if (expect.merge_calls !== undefined) check(mergeCalls === expect.merge_calls, `git merge called ${mergeCalls} time(s) !== ${expect.merge_calls}`);
   if (expect.uat_calls_min !== undefined) check(uatCalls >= expect.uat_calls_min, `uat called ${uatCalls} time(s) < ${expect.uat_calls_min}`);
   if (expect.uat_calls_max !== undefined) check(uatCalls <= expect.uat_calls_max, `uat called ${uatCalls} time(s) > ${expect.uat_calls_max}`);
@@ -3285,7 +3331,7 @@ function runStatusCase(caseId) {
 // is itself a subset of the live `--help`. The fake CLI additionally rejects any
 // off-contract flag at call time, so every fixture case is a parity check too.
 
-const COMMANDMATE_SUBS = ['ls', 'send', 'wait', 'capture', 'respond', 'verify', 'sync'];
+const COMMANDMATE_SUBS = ['ls', 'send', 'wait', 'capture', 'respond', 'verify', 'sync', 'interrupt'];
 
 function resolveRealCli() {
   const bin = process.env.CMATE_REAL_CLI || 'commandmate';
@@ -3363,13 +3409,14 @@ function parityTest() {
   const subs = contract.subcommands ?? {};
   check(COMMANDMATE_SUBS.every((s) => subs[s]), 'the CLI contract is missing a commandmate subcommand the runners use');
 
-  // (B) Runner ⊆ contract. Three runs are needed to reach the whole surface:
+  // (B) Runner ⊆ contract. Four runs are needed to reach the whole surface:
   //   1. a legacy --auto-yes prompt run: ls -> send -> wait (prompt) -> capture
   //      -> respond -> wait;
   //   2. a contract run whose verdict is 20: send --help / wait --help (the
   //      version gate) -> send --contract -> wait --verify -> verify --json;
   //   3. a run whose worktree is registered only after a re-scan: ls -> sync ->
-  //      ls (Issue #91).
+  //      ls (Issue #91);
+  //   4. a stale question interrupted before the first send (below).
   // The logs are unioned, so a flag that only one path uses is still
   // parity-checked (Issue #1588).
   const runsDir = mkdtempSync(join(tmpdir(), 'cmate-parity-plan-'));
@@ -3417,7 +3464,22 @@ function parityTest() {
     },
   }, syncWork, join(syncWork, 'dispatch'), [], syncLog);
 
-  const calls = [...readCliLog(logPath), ...readCliLog(contractLog), ...readCliLog(syncLog)].filter((entry) => COMMANDMATE_SUBS.includes(entry.sub));
+  // 4. a session an earlier turn left on a question, dispatched with
+  //    --interrupt-stale-prompt: capture -> interrupt -> capture -> send
+  //    (CommandMate#3007).
+  const staleWork = mkdtempSync(join(tmpdir(), 'cmate-parity-stale-'));
+  const staleLog = join(staleWork, 'cli.log');
+  runDispatchRunner(planPath, {
+    cli_available: true,
+    git: { branch: 'feature/integration', dirty: false },
+    gh: { repo_access: true },
+    workers: {
+      201: { state: 'completed', verify: 'pass', stale_screen: 'askuserquestion.json' },
+      200: { state: 'completed', verify: 'pass' },
+    },
+  }, staleWork, join(staleWork, 'dispatch'), ['--interrupt-stale-prompt'], staleLog);
+
+  const calls = [...readCliLog(logPath), ...readCliLog(contractLog), ...readCliLog(syncLog), ...readCliLog(staleLog)].filter((entry) => COMMANDMATE_SUBS.includes(entry.sub));
   const used = new Set(calls.map((entry) => entry.sub));
   for (const sub of COMMANDMATE_SUBS) {
     check(used.has(sub), `the runner never exercised commandmate ${sub}, so its parity is untested`);

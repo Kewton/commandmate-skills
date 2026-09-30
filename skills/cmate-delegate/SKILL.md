@@ -157,6 +157,7 @@ bash .agents/skills/cmate-delegate/scripts/ask.sh <worktree-id> <instance-id> "<
 |---|---|---|---|
 | `0` | `SUCCESS` | 相手が 1 ターンを終えてコンポーザーへ戻った | `capture` して第7節へ |
 | `10` | `PROMPT_DETECTED` | 相手が確認を待っている | **第5節。答えない** |
+| `11` | `UPSTREAM_FAULT` | ターンが走っていない。`id=context-limit`（stderr / `--json`）なら相手の文脈が上限で、依頼は何もされていない | 既定は送り直す。`id=context-limit` は**再送しても直らない**。`commandmate instances <worktree-id> kill <instance-id>` で新しいセッションにして送り直す |
 | `21` | `NOT_STARTED` | 宛先のセッションが起動していない | `send` を実際に打ったか確認する。打っていて 21 なら相手が落ちている |
 | `99` | `UNEXPECTED_ERROR` | **worktree-id / instance-id が解決できない**（実測）ほか | 第2節へ戻り、候補を人に見せる |
 | `124` | `TIMEOUT` | 時間内に返らなかった | `capture` して「まだ動いている / 止まっている」を人に見せる。**再送しない** |

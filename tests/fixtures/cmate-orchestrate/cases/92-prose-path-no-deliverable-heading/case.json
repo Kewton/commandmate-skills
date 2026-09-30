@@ -1,0 +1,78 @@
+{
+  "description": "CommandMate #3002, the negative half: the SAME prose as 91-prose-path-ignored in a body with NO deliverable heading is read exactly as before — there the prose is the only statement of what changes, so its paths reach `suspected_files` and no `prose_path_ignored` is raised. The short sample spelling `src/loader.ts` still raises `ambiguous_file_candidate` here, as it did before #3002.",
+  "args": [
+    "920",
+    "--profile",
+    "node-commandmate"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "ambiguous_file_candidate"
+    ],
+    "suspected_files": {
+      "920": [
+        "packages/appspec/src/loader.ts",
+        "packages/appspec/src/schema.ts",
+        "packages/appspec/package.json",
+        "packages/appspec/src/legacy.ts",
+        ".github/workflows/ci.yml",
+        "app.spec.yaml",
+        "src/loader.ts",
+        "packages/appspec/package-lock.json",
+        "packages/appspec/pnpm-lock.yaml",
+        "packages/appspec/yarn.lock",
+        "packages/appspec/src/loader.test.ts",
+        "packages/appspec/src/loader.spec.ts",
+        "packages/appspec/src/__tests__/loader.ts",
+        "packages/appspec/src/__tests__/loader.test.ts",
+        "packages/appspec/src/schema.test.ts",
+        "packages/appspec/src/schema.spec.ts",
+        "packages/appspec/src/__tests__/schema.ts",
+        "packages/appspec/src/__tests__/schema.test.ts",
+        "packages/appspec/src/legacy.test.ts",
+        "packages/appspec/src/legacy.spec.ts",
+        "packages/appspec/src/__tests__/legacy.ts",
+        "packages/appspec/src/__tests__/legacy.test.ts",
+        "src/loader.test.ts",
+        "src/loader.spec.ts",
+        "src/__tests__/loader.ts",
+        "src/__tests__/loader.test.ts"
+      ]
+    },
+    "scope_defaults": {
+      "920": [
+        "packages/appspec/package-lock.json",
+        "packages/appspec/pnpm-lock.yaml",
+        "packages/appspec/yarn.lock",
+        "packages/appspec/src/loader.test.ts",
+        "packages/appspec/src/loader.spec.ts",
+        "packages/appspec/src/__tests__/loader.ts",
+        "packages/appspec/src/__tests__/loader.test.ts",
+        "packages/appspec/src/schema.test.ts",
+        "packages/appspec/src/schema.spec.ts",
+        "packages/appspec/src/__tests__/schema.ts",
+        "packages/appspec/src/__tests__/schema.test.ts",
+        "packages/appspec/src/legacy.test.ts",
+        "packages/appspec/src/legacy.spec.ts",
+        "packages/appspec/src/__tests__/legacy.ts",
+        "packages/appspec/src/__tests__/legacy.test.ts",
+        "src/loader.test.ts",
+        "src/loader.spec.ts",
+        "src/__tests__/loader.ts",
+        "src/__tests__/loader.test.ts"
+      ]
+    },
+    "reference_files": {
+      "920": [
+        "docs/user/appspec.md",
+        ".claude/skills/cmate-verify/scripts/verify-run.sh"
+      ]
+    },
+    "questions_count": {
+      "920": 1
+    },
+    "risk_level": "moderate"
+  }
+}

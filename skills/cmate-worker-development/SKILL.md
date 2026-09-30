@@ -78,6 +78,16 @@ B（調査）と E（検証）は、**既存 skill を呼ぶ**。本 skill は�
 install 先は登録済み worktree の `.claude/skills/<skill-id>/` と `.agents/skills/<skill-id>/` で、
 中身は byte-identical である。どちらを読んでも同じものが走る。
 
+**install 済みかは、`<worktree>/.agents/skills/<skill-id>/SKILL.md`（Claude のワーカーなら
+`<worktree>/.claude/skills/<skill-id>/SKILL.md` も）が在るかで判定する。無いときは、確かめた path を
+成果物（PR 本文・報告）に書く。** `<worktree>` は `git rev-parse --show-toplevel` の出力である。
+Claude・Codex・Command Code のどのワーカーでも判定は同じで、model の推測（一覧に見えない・path はこうだろう）で
+「未 install」と書かない。`cmate-verify` の runner は `<worktree>/.agents/skills/cmate-verify/scripts/verify-run.sh`
+——**`scripts/` の下**である。file が在れば、Agent の Skill 一覧に出なくても path で使う。
+Agent 側の一覧は補助である（Command Code は `cmd --no-auto-update skills list -d` で model を呼ばずに見られる。
+`.claude/skills` は読まない）。委譲できなかったと書くときは、確かめた path と結果・Agent 側の証跡・理由を名指しで添える。
+確かめ方と書き方の正本は [references/delegate-discovery-contract.md](./references/delegate-discovery-contract.md)。
+
 **手順を再実装しない。** 走査上限・除外規則・secret 分類は `cmate-repository-analysis` の
 `references/` が正本であり、verify.yaml の受理範囲と exit code の意味は `cmate-verify` が正本である。
 写せば必ずずれ、ずれたとき読まれるのは写しのほうになる。
@@ -181,6 +191,10 @@ README / CI 定義）と、目的に関係する**既存実装**と、**壊れ�
 - **破壊的・曖昧・ブロックのときは止まって訊く**（規律 5）。
 - 契約が commit の作り方を定めているなら、それに従う。定めが無ければ**単一 commit** にする。
   commit されていない作業は、検証を通っていても下流へ流れない。
+- Issue を読み替えた・Issue が決めていないことを判断したなら、**commit メッセージ本文に**
+  `読み替え:` / `判断:` / `本文に無い指摘:` で始まる行として書く。merge runner がそれを PR 本文の
+  「ワーカーの申告」節へ転記する。形の正本は
+  [references/evidence-vocabulary.md](./references/evidence-vocabulary.md)「コミットメッセージの申告行」。
 
 ### E. 検証 — `cmate-verify` へ委譲する
 
@@ -242,6 +256,8 @@ README / CI 定義）と、目的に関係する**既存実装**と、**壊れ�
 **「作らない」は「出せない」ではない。** PR に必要な素材は F 段が残す。
 単独利用者は人間がそれを貼って PR を作る。オーケストレーション配下では、
 merge runner が自分の測定で PR 本文を作り、ワーカーの証拠は**突き合わせ材料**になる。
+読み替え・判断の申告は commit メッセージ本文に書けば（D 段）、merge runner が PR 本文へ転記する ——
+**PR を自分で作らなくても、申告は PR を読む人に届く。**
 
 ## 5. 完了条件
 
@@ -267,6 +283,10 @@ merge runner が自分の測定で PR 本文を作り、ワーカーの証拠は
   作業規律 8 項目の正本。各項目に**破ると何が起きるか**と実測根拠がある
 - [references/evidence-vocabulary.md](./references/evidence-vocabulary.md) —
   F 段の語彙と節構成の正本。Issue #97 / #100 のミラーであることの説明を含む
+- [references/delegate-discovery-contract.md](./references/delegate-discovery-contract.md) —
+  委譲先の在否の確かめ方と、「未 install」の書き方の正本
+- [references/release-notes.md](./references/release-notes.md) —
+  「何が起きたか → だからこう変えた」の経緯（正本ではない）
 - `cmate-repository-analysis` — B 段の委譲先
 - `cmate-verify` — E 段の委譲先
 - [ADR: ワーカー側の開発スキル](https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/references/adr-worker-development-skill.md) —

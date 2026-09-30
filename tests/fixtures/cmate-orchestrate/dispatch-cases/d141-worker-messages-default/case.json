@@ -1,0 +1,47 @@
+{
+  "description": "CommandMate#3009: 宣言も flag も無い run には既定文だけが届き、既定文には「指示どおりに書けないと分かったら、進めずに止めて報告してください。」が入っている。limitation は出ない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [
+      true,
+      true
+    ],
+    "sent": [
+      201,
+      200
+    ],
+    "send_counts": {
+      "201": 3,
+      "200": 1
+    },
+    "sent_message_includes": {
+      "201": [
+        "続けて作業を進め",
+        "指示どおりに書けないと分かったら、進めずに止めて報告してください。",
+        "まだ変更が commit されていません。"
+      ]
+    },
+    "absent_limitation_codes": [
+      "worker_messages_applied"
+    ]
+  }
+}

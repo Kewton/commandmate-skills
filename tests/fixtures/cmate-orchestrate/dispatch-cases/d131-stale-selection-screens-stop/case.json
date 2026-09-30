@@ -1,0 +1,56 @@
+{
+  "description": "[CommandMate#3007] 上流の送信ガード（#1708）が**意図的に素通りさせる**2つの画面 —— 読めない質問 UI（multi-select のチェックボックス）と Command Code の plan レビュー —— が残っているセッション。どちらも capture は `isPromptWaiting: false` / `isSelectionListActive: true` を返す（stale-screens/unreadable-question.json・plan-review.json）。送ってしまえば上流は composer 待ちの時間切れ（exit 99 prompt not ready）になるだけで理由が残らないので、runner は `isSelectionListActive` でも送らずに止める。`isPromptWaiting` だけを見る実装はこの case で落ちる。2 Issue とも send 0 回・interrupt 0 回・respond 0 回で、`stale_prompt_on_session` がそれぞれの画面の抜粋を運ぶ。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "100",
+      "101",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "human_required",
+    "human_required": true,
+    "waves_count": 1,
+    "no_respond": true,
+    "never_sent": [
+      100,
+      101
+    ],
+    "worker_states": {
+      "100": "prompt",
+      "101": "prompt"
+    },
+    "cli_subcommand_counts": {
+      "interrupt": 0,
+      "respond": 0
+    },
+    "blocking_codes": [
+      "stale_prompt_on_session"
+    ],
+    "blocking_details_include": [
+      [
+        "#100: before the first send",
+        "isSelectionListActive",
+        "4. [ ] integration"
+      ],
+      [
+        "#101: before the first send",
+        "isSelectionListActive",
+        "Cancel esc"
+      ]
+    ]
+  }
+}

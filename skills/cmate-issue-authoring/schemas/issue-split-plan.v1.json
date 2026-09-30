@@ -141,7 +141,7 @@
         "target_files": {
           "type": "array",
           "minItems": 1,
-          "description": "Files this Issue is expected to change. At least one must be a non-documentation path, or the planner cannot suspect a file and raises a blocking question.",
+          "description": "Files this Issue is expected to change. At least one must be a non-documentation path, or the planner cannot suspect a file and raises a blocking question. An Issue labelled human-only is exempt: a person does it, and it is never passed to the planner.",
           "items": { "$ref": "#/$defs/repo_path" }
         },
         "reference_files": {

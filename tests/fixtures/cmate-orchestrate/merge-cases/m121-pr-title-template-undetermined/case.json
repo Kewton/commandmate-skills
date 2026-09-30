@@ -1,0 +1,86 @@
+{
+  "description": "CommandMate#3005: template が要る型の要素がコミットから決まらないとき、その PR は **作らずに止める**。#201 は件名が揃っているので PR が立ち、#200 は件名 `WIP session store` が Conventional Commits の形でないので type も scope も決まらない。推測したタイトルは、リポジトリのタイトル検査に落とされる（push の後で）か、違う type のまま通るかのどちらかなので、push もしない。止まった理由は blocking_reasons の `pr_title_undetermined` に件名ごと残る。",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "plan_patch": {
+    "profile": {
+      "pr_title_template": "{{type}}({{scope}}): {{title}} (#{{number}})"
+    }
+  },
+  "merge_args": [
+    "--approve"
+  ],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": {
+      "repo_access": true
+    },
+    "git": {
+      "base_resolvable": true
+    },
+    "prs": {
+      "200": {
+        "create": "ok"
+      },
+      "201": {
+        "create": "ok"
+      }
+    },
+    "log": {
+      "201": {
+        "commits": [
+          {
+            "subject": "feat(config): add the loader",
+            "body": ""
+          }
+        ]
+      },
+      "200": {
+        "commits": [
+          {
+            "subject": "WIP session store",
+            "body": ""
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "pr_create_failed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [
+      201,
+      200
+    ],
+    "targets_outcome": {
+      "201": "pr_created",
+      "200": "pr_failed"
+    },
+    "push_calls": 1,
+    "pr_create_calls": 1,
+    "pr_create_titles": {
+      "201": "feat(config): feat: add base configuration loader (#201)"
+    },
+    "blocking_codes": [
+      "pr_title_undetermined"
+    ],
+    "summary_contains": [
+      "pr_title_undetermined"
+    ]
+  }
+}

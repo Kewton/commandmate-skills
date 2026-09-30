@@ -1,0 +1,48 @@
+{
+  "description": "[CommandMate#3007] 陰性。前の回の画面が残っていないセッションへ `--interrupt-stale-prompt` 付きで dispatch する。送る前の capture は flag を立てないので、runner は interrupt を**呼ばずに**そのまま送り、従来どおり完走する。`stale_prompt_on_session` も `stale_prompt_interrupted` も出ない。オプションがあるだけで毎回 interrupt する実装（生成中のターンを切りうる）を落とす。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "100",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--interrupt-stale-prompt"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      100
+    ],
+    "send_counts": {
+      "100": 1
+    },
+    "worker_states": {
+      "100": "completed"
+    },
+    "cli_subcommand_counts": {
+      "interrupt": 0,
+      "respond": 0
+    },
+    "absent_blocking_codes": [
+      "stale_prompt_on_session"
+    ],
+    "absent_limitation_codes": [
+      "stale_prompt_interrupted"
+    ]
+  }
+}

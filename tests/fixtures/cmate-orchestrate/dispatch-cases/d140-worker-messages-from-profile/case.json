@@ -1,0 +1,58 @@
+{
+  "description": "CommandMate#3009: profile の worker_messages.nudge が、commit しない worker に届く。既定文の後ろに追記され（既定文の commit 行も同じ message に残る）、report に由来が残る。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "plan_patch": {
+    "profile": {
+      "worker_messages": {
+        "nudge": "PROFILE-NOTE: この repo では docs/x.md を必ず更新すること。"
+      }
+    }
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [
+      true,
+      true
+    ],
+    "sent": [
+      201,
+      200
+    ],
+    "send_counts": {
+      "201": 3,
+      "200": 1
+    },
+    "sent_message_includes": {
+      "201": [
+        "続けて作業を進め",
+        "指示どおりに書けないと分かったら、進めずに止めて報告してください。",
+        "まだ変更が commit されていません。",
+        "PROFILE-NOTE: この repo では docs/x.md を必ず更新すること。"
+      ]
+    },
+    "limitation_codes": [
+      "worker_messages_applied"
+    ],
+    "limitation_details_include": [
+      "nudge=45 chars (from profile"
+    ]
+  }
+}

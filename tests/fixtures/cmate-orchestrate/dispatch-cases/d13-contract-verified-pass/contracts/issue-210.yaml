@@ -22,18 +22,9 @@ goal: |
   - src/store/write.ts
   - src/store/index.ts
   - src/store/read.ts
-  - src/store/write.test.ts
-  - src/store/write.spec.ts
-  - src/store/__tests__/write.ts
-  - src/store/__tests__/write.test.ts
-  - src/store/index.test.ts
-  - src/store/index.spec.ts
-  - src/store/__tests__/index.ts
-  - src/store/__tests__/index.test.ts
-  - src/store/read.test.ts
-  - src/store/read.spec.ts
-  - src/store/__tests__/read.ts
-  - src/store/__tests__/read.test.ts
+  Also allowed, not listed: 12 path(s) the planner derived from the files above (lockfiles
+  beside a dependency manifest, conventional test paths beside a source file). They are permissions,
+  not work items: write one only if the task needs it.
 
   ## Rules
   - A prohibition this contract does not state is NOT a permission — it is text the

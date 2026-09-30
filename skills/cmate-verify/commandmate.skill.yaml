@@ -96,8 +96,8 @@ risk_rationale: >-
   verify.yaml に限られる。credential は読まない。
 files:
   - path: SKILL.md
-    sha256: 319dee715830e5371ed1cce87c8f8cade0620c579b49f8515f2019b838ef29de
-    size: 22530
+    sha256: 7a576aee2678354b4e244a4ca01443e0c4dd582610231c69174b5702e036b076
+    size: 22806
     kind: skill_md
     executable: false
     script: false

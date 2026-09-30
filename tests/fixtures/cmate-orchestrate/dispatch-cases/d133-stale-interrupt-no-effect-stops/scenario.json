@@ -1,0 +1,21 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "100": {
+      "state": "completed",
+      "verify_exits": [
+        0
+      ],
+      "stale_screen": "askuserquestion.json",
+      "interrupt": "no_effect"
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "description": "CommandMate #3004: the plan states how many scope entries the issue DECLARED and how many the planner DERIVED, apart. Both numbers were already in the JSON (`scope_defaults` is the derived subset of `suspected_files`), but nothing a human reads showed them separately, so \"can this be dispatched\" was judged on the inflated total (Kewton/Musunest: 55 / 61 / 60 listed for 20 / 22 / 22 real files). The declared test `src/cart/__tests__/total.test.ts` counts as declared and is not re-derived; `.test` / `.spec` / `__tests__/total.ts` are the 3 derived. `scope.allow` itself is unchanged — L1 still derives all of them (ADR §15.2).",
+  "args": [
+    "960",
+    "--profile",
+    "node-commandmate"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "suspected_files": {
+      "960": [
+        "src/cart/total.ts",
+        "src/cart/__tests__/total.test.ts",
+        "src/cart/total.test.ts",
+        "src/cart/total.spec.ts",
+        "src/cart/__tests__/total.ts"
+      ]
+    },
+    "scope_defaults": {
+      "960": [
+        "src/cart/total.test.ts",
+        "src/cart/total.spec.ts",
+        "src/cart/__tests__/total.ts"
+      ]
+    },
+    "risk_level": "low",
+    "summary_includes": [
+      "## scope の本数（宣言 + 導出）",
+      "- #960: 宣言 2 本 + 導出 3 本"
+    ]
+  }
+}

@@ -493,7 +493,77 @@ plan は展開しない（ADR 不変条件3）ので、可視にできるのは�
 
 ---
 
+### CommandMate #3002（+ #273） — 「変えるな」と書いたファイルほど scope に入っていた
+
+planner は Issue 本文の**全体**から path を拾い、`## 対象ファイル` を持つ Issue でも地の文の
+path を `scope.allow` に入れていた。実測（Kewton/Musunest）:
+
+- 完了条件に「（依存の宣言の）ファイルの差分が 0 であること」と書いたら、そのファイルに
+  **書き換えの許可が付いた**（#181）。「`ci.yml` に手を入れる必要が出たら止めて返す」でも
+  `ci.yml` が scope に入った（#183）
+- `/` の無い `app.spec.yaml` も拾われ、宣言外の path として dispatch できなかった（#211）
+- 追記の説明文に書いた見本の短い綴りが `ambiguous_file_candidate` を立て、2 日止まった（#180）
+
+利用側は「地の文に path を書かない」運用で補っていた。**禁じた path ほど権限になる**ので、
+指示で禁じるより危ない。
+
+→ 成果物見出しを持つ Issue では、**その範囲の外の path を `suspected_files` に入れず**
+`reference_files` に回し、Issue ごとに1件の `prose_path_ignored`（notice）で名指す。
+**既定で有効にした**（利用者と Issue 上で確認済み。成果物見出しを持つ Issue はすべて挙動が変わる）。
+見出しの無い Issue は変えない —— そこでは散文が唯一の記述である。#219 が pattern に引いた線
+（明示の宣言が言及に優る）を path 全般へ延ばした。
+
+同じ変更に2つを含めた。どちらが欠けても、この変更が新しい穴を開ける:
+
+- **#273: 成果物見出しの範囲を下位の `###` で切らない。** 以前は `### 新規ファイル` で範囲が
+  切れ、その下の path は「地の文」として（偶然）scope に入っていた。地の文を外すだけだと、
+  小見出しで整理した Issue の path がすべて scope から消える（文書 path は以前から
+  `reference_files` に落ちていた。Kewton/CommandAgent #500）。
+- **否定で終わる見出しを成果物見出しから除く。** `DELIVERABLE_HEADING_RE` は語が含まれていれば
+  一致するので、`## 変更対象外` / `## 対象ファイル外` が成果物見出しだった。地の文を外した後では、
+  「変えるな」を見出しで書くことが**権限を配る最後の書き方**になる。
+
+受け入れた副作用: 完了条件にしか書いていないテスト path は scope に入らず、受入条件がテストを
+求めていれば question で止まる（fixture 93）。短い綴りの `ambiguous_file_candidate` は
+立たなくなる（fixture 57 の期待値をこの向きに改めた。question そのものは見出しの無い fixture 19 が
+固定し続ける）。起票側（cmate-issue-authoring の `validate-plan.mjs`）の写しも同じ commit で揃えた。
+
+### CommandMate #3003（+ #272） — `## 対象ファイル` に書いた `.ebnf` / `Cargo.lock` が scope に入らなかった
+
+`## 対象ファイル` に `packages/appspec-schema/contract/expression.ebnf` を宣言したが、`FILE_EXT` に
+`.ebnf` が無いので scope に入らず、利用側はファイルを `expression-grammar.md` に**改名して**回避した
+（Kewton/Musunest#212）。同じ形で `Cargo.lock`・`requirements/ci.txt` も入らず、依存更新の Issue を
+worker に出せなかった（#272、Kewton/CommandAgent#520）。`Cargo.lock` は `/` が無いので
+`unrecognized_file_extension` すら出なかった。#43・#56 に続く同じ形の3度目である。
+
+→ **成果物見出しの下では、backtick の file 名を拡張子によらず拾う**（案 B。拡張子の無い `Makefile`・
+`.gitignore` と `/` の無い名前も含む）。backtick 無しと見出しの外は従来どおり。
+
+**案 A（profile の欄 `planner.extra_extensions`）を採らなかった理由**: cmate-issue-authoring の
+`validate-plan.mjs` は profile を読まないので、欄で足した拡張子は**起票時の検査と planner の判定を
+食い違わせる**。案 B は本文だけで決まり、写しにそのまま載る。拡張子を足し続ける運用（#43・#56・#272）も
+要らなくなる。`FILE_EXT` が閉じている理由（散文の token を権限にしない）は、見出しの下では
+成り立たない —— #219 が glob について下したのと同じ判断である。利用者と Issue 上で確定した。
+
 ## dispatch（`scripts/dispatch.mjs`）
+
+### CommandMate #3004 — 導出したテスト候補が goal に並び、見かけの本数で判断を誤った
+
+planner は宣言した各ソースについて慣習的なテスト path（`.test` / `.spec` / `__tests__/…`）を
+`scope_defaults` に導出し、dispatch はそれを契約 goal の `## Files you may change` にも全件並べていた。
+`X.test.ts` を隣に置く規約の利用側では、その半分以上が実在しない。実測（Kewton/Musunest）で
+列挙 55 / 実在 20（#180）、61 / 22（#182）、60 / 22（#181）。「概ね 30 本超は dispatch できない」の
+判断が見かけの本数で膨らみ、利用側は「実在するファイルの数で判定する」と毎回依頼文に書いていた。
+goal は 8000 文字で切られるので、実在しない候補が本文の枠も食っていた。
+
+→ **goal には宣言した file だけを並べ**、導出分は本数を1行で述べる。plan は **宣言の本数と導出の本数を
+分けて**出す（`summary_markdown` と `issue-analysis.md`）。`scope.allow` の導出（L1）は変えない。
+
+Issue の当初案は profile の欄（`tests.layout: colocated | __tests__ | both`）で導出する形を絞るもの
+だったが、それは [ADR](./adr-scope-derivation.md) 第15.2節が却下した「profile が組み込みの L1 を上書きする」
+にあたる（設定ゼロで効く L1 の保証が profile 次第になる）。困っていたのは (1) 見かけの本数と (2) goal に
+並ぶ実在しない候補の2つだけであり、どちらも許可を削らずに解けるので、**ADR を変えずに軽い手で解いた**
+（Issue 上で利用者と確定）。使われない許可のコストはゼロ、という設計はそのままである。
 
 ### CommandMate #3008 — plan の一部だけを dispatch する方法が無く、組み直していた
 
@@ -1448,7 +1518,98 @@ transcript は `cliToolId` が `claude` のときだけ読み、**候補が2つ�
 **どちらも実作業が在る**（判定されて落ちた変更／未 commit の変更）ので、「なぜ何も無いのか」という
 問い自体が立たない。
 
+### CommandMate #3006 — 新しいセッションへの最初の送信が、起動待ちに負けて落ちていた
+
+Kewton/Musunest #201・#213・#217・#233 で、dispatch が新しく起動したワーカーへの**最初の送信**が
+`Command Code prompt not ready: timed out waiting for the composer before sending` で毎回落ちた
+（worktree は無傷）。同時に動いていたワーカーは 1〜2 本で、並列度のせいではない。上流は送信の前に
+composer を待ち、見つからなければ**打鍵する前に**止める —— つまり何も届いていない。管理が
+`--resume` で送り直すと通っていた。
+
+→ 起動中（503 `SESSION_STARTING`。上流側で Command Code もこの code を返すように直る）と
+prompt not ready の2つだけを「未送信・送り直してよい」と読み、定数の間を置いて**1回だけ**送り直す。
+判定は exit 99 と文言の両方で行う —— 409 も exit 99 で出てくるので、exit code だけで送り直すと
+別の拒否まで繰り返す。exit 2（PROMPT_WAITING）も送り直さない。再送の事実は
+`send_retried_not_ready` として report に残す（黙って送り直すと、`--resume` を要した run と
+区別がつかない）。待ち時間は flag にしない（起動の競合を吸収するためのもので、run ごとに
+調整するものではない）。fixture は `CMATE_ORCHESTRATE_SEND_PAUSE_MS=0` で実時間を待たない。
+UAT の fix worktree もその run が作るので最初の送信は必ず起動を伴い、同じ判定を共有する
+（`scripts/lib.mjs`）。正本: [dispatch-contract.md](./dispatch-contract.md) 第2.13節。
+
+### CommandMate #3007 — 前の回の質問画面が composer を塞いで、送信が理由なく落ちていた
+
+Kewton/Musunest #201・#204 で、前の回に質問を返して止まったワーカーのセッションへ新しい契約を
+送ると、残った質問画面が composer を塞いで送信が通らなかった。#201 の送信は #3006 と同じ
+`prompt not ready`（exit 99）で落ちており、report からは「起動が遅かった」と区別がつかなかった。
+上流の送信ガード（#1708）は読める質問なら 409 で止めるが、読めない質問 UI と plan レビューは
+意図的に素通りさせる（Codex の pager や `/model` まで止めないため）ので、上流だけでは直らない。
+管理は質問に答えずに `commandmate interrupt` で古いターンを畳んでから送り直していた。
+
+→ dispatch が最初の send の**前に** `capture --json` を読み、`isPromptWaiting` か
+`isSelectionListActive` が立っていれば送らずに `stale_prompt_on_session` で止める（画面の抜粋と
+`commandmate interrupt` の案内つき）。サーバ側のガードは変えない（上流 Issue での決定）。
+`--interrupt-stale-prompt`（既定 off）は管理の手順を runner がやるもので、interrupt の後に
+**capture を読み直して composer に戻ったことを確かめてから**送る —— Command Code の
+AskUserQuestion / plan レビューに Esc を送ったときにキャンセルになるのかは実測されていないので、
+interrupt の exit code だけを信じない。戻らなければ同じ code で止める。どの経路でも質問には
+答えない。fixture は CommandMate 側の Command Code 検出 fixture（AskUserQuestion・読めない
+質問 UI・plan レビュー）を capture の JSON として渡す（`tests/fixtures/cmate-orchestrate/stale-screens/`）。
+
+各 worker の最初の send の前に capture が1回増えるので、capture の回数を数えていた既存の
+fixture（d76〜d78）は回数だけを直した。最初の capture が読めない場合は送信を止めない（上流の
+ガードと同じく fail-open）ので、capture が読めない世界の既存 case の結論は変わらない。
+正本: [dispatch-contract.md](./dispatch-contract.md) 第2.14節。
+
+### CommandMate #3009 — 監督の nudge が固定文で、ワーカーに「進めてよい許可」と読まれた
+
+dispatch の nudge（「完遂してください」）は固定文だった。指示どおりに書けない状況のワーカーが
+これを許可と読み、指示を読み替えて完遂した（Musunest #159）。利用側は「書けないと分かったら
+止めて報告する」を必ず添えると決めたが、runner の文面が固定なので添える手段が無かった。
+
+→ 既定文に「指示どおりに書けないと分かったら、進めずに止めて報告してください。」を足し、
+profile の `worker_messages.nudge` と `--nudge-message` で**追記**できるようにした（優先順位は
+flag → profile）。差し替えにしなかったのは、既定文の「単一 commit が完了の合図」の行を消せると、
+commit を待つ監督ループの前提が profile 1 行で崩れるため。`dispatch_defaults` に置かなかったのは、
+あちらが真偽値と整数だけで未知 key を拒否する object だから。止まったワーカーを max-turns まで
+nudge して最後に failed にする扱いは変えていない。commit 依頼と `cmate-uat` の fix nudge も対象外。
+
+---
+
 ## merge（`scripts/merge.mjs`）
+
+### CommandMate#3005 — `--create-prs` の PR が、利用側の運用では merge できなかった
+
+利用側（Kewton/Musunest）は「検証が緑になったらワーカーが push して PR を作り、管理が merge する」で
+回しており、**毎回あとから追加のメッセージで push を指示していた**。1件はワーカーが「skill 第4節と
+実行契約が禁じている」として断った（Kewton/Musunest#210）。起票時の提案は「実行契約でワーカーに
+push と PR を許可する」だったが、問答で確かめると、**PR を作る経路はすでに `merge.mjs --create-prs`
+にあった**（run `plan-01ba9bc589cb` の #248 に preview で実行。push・PR 準備までそのまま使え、本文の
+検証証跡はワーカーに書かせていたものより充実していた）。使われていなかった理由は2つだった。
+
+1. **PR タイトルが Issue タイトルそのものだった。** 利用側は PR タイトルを Conventional Commits で
+   CI 検査しており（semantic-pull-request）、squash の件名＝PR タイトルなので、日本語の Issue
+   タイトルのままでは merge できない。
+2. **ワーカーの「読み替え・判断」の申告が PR 本文に載らなかった。** 本文は dispatch report から作られ、
+   申告はワーカーの最後の報告にしか無い。利用側は「読み替えの申告があれば merge せず窓口へ返す」を
+   決まりにしていて（先に merge された Kewton/Musunest#233 から）、申告は merge を止める合図である。
+
+→ **ワーカーは push も PR も作らない既定のまま**にした（二重 PR を防ぐ `cmate-worker-development`
+第4節と実行契約の文面は変えていない）。代わりに `--create-prs` を利用側の運用で使えるようにした。
+
+- profile に `pr_title_template` を足した（[profile-contract.md](./profile-contract.md) 第13節、
+  [merge-contract.md](./merge-contract.md) 第5.7節）。`{{type}}` / `{{scope}}` は**ブランチ自身の
+  コミット件名**から取る。Issue の label から取る案は採らなかった —— label の語彙（`enhancement` /
+  `bug`）は type の語彙ではなく、対応表はこの runner が発明する第二の規約になる。コミット件名は
+  ワーカーが既にリポジトリの規約で書いているもので、squash ではそれが PR タイトルに置き換わる
+  （タイトルは件名の後継である）。**決まらなければ推測せず、その PR を作らずに止める**
+  （`pr_title_undetermined`）。推測した type は、タイトル検査に push の後で落とされるか、違う type の
+  まま通るかのどちらかである。欄が無ければタイトルは従来どおり（既存 golden は byte 一致）。
+- ワーカーのコミットメッセージ本文の申告行（`読み替え:` / `判断:` / `本文に無い指摘:`）を PR 本文の
+  「ワーカーの申告」節へ原文転記し、report に `worker_declarations_transcribed` を出す（第5.8節）。
+  置き場所をコミットメッセージにしたのは、ワーカーが既にそこへ書いていて、ブランチと一緒に運ばれ、
+  他の誰も書き込まないからである。利用側では `.commandmate/` は人だけが書く場所なので、
+  ファイルは置かせない。申告が無い run の本文は変わらない。読めなかったときは「読めなかった」と書き
+  （`worker_declarations_unread`）、「申告なし」と見分けがつくようにした。
 
 ### #142 — 無人運転の段階 C（`merge --merge-prs`）
 

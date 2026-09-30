@@ -1,0 +1,42 @@
+{
+  "description": "CommandMate #3002, the side effect the owner confirmed as intended: a test path written ONLY in `## 完了条件` of an issue that has `## 対象ファイル` no longer reaches the scope, so the acceptance criterion that demands it raises `acceptance_requires_tests_but_scope_has_none` — the run stops on a question instead of dispatching a worker with a permission nobody declared. `.rs` derives no L1 test companion, so nothing else puts a test path in scope. The fix the question names is one line: list the test under `## 対象ファイル`.",
+  "args": [
+    "930",
+    "--profile",
+    "node-commandmate"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "prose_path_ignored",
+      "acceptance_requires_tests_but_scope_has_none"
+    ],
+    "suspected_files": {
+      "930": [
+        "src/parser.rs"
+      ]
+    },
+    "scope_defaults": {
+      "930": []
+    },
+    "reference_files": {
+      "930": [
+        "tests/parser_roundtrip.rs"
+      ]
+    },
+    "questions_count": {
+      "930": 1
+    },
+    "risk_level": "moderate",
+    "warning_severities": [
+      "notice",
+      null
+    ],
+    "questions_include": {
+      "930": [
+        "`tests/parser_roundtrip.rs`"
+      ]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "worker-messages-invalid-unknown-key",
+  "repository": "Kewton/CommandMate",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": [
+    "bundle exec rspec"
+  ],
+  "verified": true,
+  "worker_messages": {
+    "nudge": "x",
+    "commit_request": "y"
+  }
+}

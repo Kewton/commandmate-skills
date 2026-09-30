@@ -1,0 +1,64 @@
+{
+  "description": "CommandMate #3004: the contract goal's `## Files you may change` lists the files the ISSUE declared — here `src/cart/total.ts` and the test it named, `src/cart/__tests__/total.test.ts` — and NOT the paths the planner derived from them (`scope_defaults`: `total.test.ts` / `total.spec.ts` / `__tests__/total.ts`). The derived ones are still in the contract's `scope.allow` (a permission is unchanged; ADR §15.2 stands), and the goal says how many there are in one line. Measured on Kewton/Musunest: 55 / 61 / 60 listed paths for 20 / 22 / 22 real files (#180 / #182 / #181), which spent the 8000-character goal on files that do not exist and made the issue look three times its size. A test path the issue itself declared is a declared file and stays.",
+  "plan": {
+    "issues_fixture": "dispatch-cases/d96-contract-goal-declared-files-only/issues.json",
+    "orchestrate_args": [
+      "960",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      960
+    ],
+    "worker_states": {
+      "960": "completed"
+    },
+    "verification_outcomes": {
+      "960": "pass"
+    },
+    "contract_issues": [
+      960
+    ],
+    "contract_goal_includes": {
+      "960": [
+        "  - src/cart/total.ts\n",
+        "  - src/cart/__tests__/total.test.ts\n",
+        "Also allowed, not listed: 3 path(s)"
+      ]
+    },
+    "contract_goal_absent": {
+      "960": [
+        "src/cart/total.spec.ts",
+        "  - src/cart/total.test.ts\n",
+        "  - src/cart/__tests__/total.ts\n"
+      ]
+    },
+    "contract_contains": {
+      "960": [
+        "- \"src/cart/total.spec.ts\"",
+        "- \"src/cart/total.test.ts\"",
+        "- \"src/cart/__tests__/total.ts\""
+      ]
+    }
+  }
+}

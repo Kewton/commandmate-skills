@@ -1,0 +1,12 @@
+{
+  "issues": [
+    {
+      "number": 920,
+      "title": "feat: loader を schema に寄せる",
+      "body": "依存の宣言を更新し、配布の設定を直す。\n\n## 現状\n\n- `packages/appspec/src/loader.ts`\n- `docs/user/appspec.md`\n\n- `packages/appspec/src/schema.ts`\n\n## 補足\n\n- `packages/appspec/package.json`\n\n## やること\n\n`packages/appspec/src/legacy.ts` の読み込みを loader に寄せる。\n\n## 完了条件\n\n- [ ] `packages/appspec/package.json` の差分が 0 であること\n- [ ] `.github/workflows/ci.yml` に手を入れる必要が出たら止めて返す\n- [ ] `app.spec.yaml` を読み込める\n- [ ] `bash .claude/skills/cmate-verify/scripts/verify-run.sh --cwd .` が passed を返す\n\n## 追記 1\n\n見本の短い綴り `src/loader.ts` は例であって対象ではない。",
+      "labels": [
+        "feature"
+      ]
+    }
+  ]
+}
