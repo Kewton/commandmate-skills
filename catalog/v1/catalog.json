@@ -482,7 +482,7 @@
         "schema",
         "dry-run"
       ],
-      "latest": "0.10.0",
+      "latest": "0.10.1",
       "versions": [
         {
           "version": "0.1.0",
@@ -943,6 +943,55 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.10.0/cmate-issue-authoring-0.10.0.tar.gz",
             "sha256": "f3fa93ebe668bf35bb4c246d7f92d75fd0bbe3fe1958f7c070390ae901cd7ecf",
             "size": 68716,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.10.1",
+          "changelog": "cmate-issue-authoring 0.10.1 — human-only の説明を cmate-orchestrate 0.35.0 に合わせた（commandmate-skills#286）。\n\ncmate-orchestrate 0.35.0 の planner が human-only ラベルの Issue を plan に残したまま wave から外し、dispatch が worker を送らなくなった。validator の NOTE dispatch_excluded の文言と文書（plan-contract.md・issue-body-contract.md）をそれに合わせ、HUMAN_ONLY_LABEL を mirror-conformance の byte 比較に加えた。rule と schema は変えていない。",
+          "published_at": "2026-09-30T09:35:25Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-authoring-v0.10.1",
+            "commit": "f3a2a085a661b74a1765e360057302fb0eef3f86"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-authoring-0.10.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.10.1/cmate-issue-authoring-0.10.1.tar.gz",
+            "sha256": "d77d7e88aa1020586b8e7680b30cc80ef1670fe7dc48954cd24263e84243b454",
+            "size": 69336,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
