@@ -16,7 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 export const SKILL_ID = 'cmate-worktree-cleanup';
-export const SKILL_VERSION = '0.2.0';
+export const SKILL_VERSION = '0.2.1';
 
 // Condition 4 of merged_equivalent (CommandMate#3010). When true, a `+` line in
 // `git cherry` does not veto the proof by itself: the net diff from the merge

@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-uat
 name: cmate-uat
-version: 0.1.0
+version: 0.1.1
 summary: Issue の受入条件を実機環境で検証する。環境の起動・隔離の実測・TC の実行・証跡・判定・停止を 1 本で行い、acceptance-result.v1 を返す。実装も修正もしない。
 description: |-
   サーバや DB を立てないと確かめられない受入条件を、実機環境を起動してから検証する手順である。環境の起動・隔離できていることの実測・テストケースの実行・証跡の収集・受入判定・環境の停止までを 1 つの手順で行う。

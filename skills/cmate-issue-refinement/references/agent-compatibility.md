@@ -27,7 +27,7 @@ degradation, not a failure.
 | `claude` | native | Claude Code 2.1.220, measured 2026-07-26: discovers `SKILL.md` from `.claude/skills` — not `.agents/skills` — and matches in the slash palette. The procedure uses no Claude-specific tool name. |
 | `codex` | native | Codex CLI 0.145.0, measured 2026-07-26: reads `SKILL.md` from `.agents/skills` (model self-report, not a mechanical trace). That version exposes no skill as a slash command, so invoke it by name. |
 | `gemini` | unknown | Not measured. |
-| `opencode` | unknown | Not measured. |
+| `opencode` | native | opencode 1.18.22, measured 2026-08-25 (CommandMate#2037), re-checked 2026-09-04 on 1.18.27: `GET /skill` lists `SKILL.md` from `.agents/skills` and `.claude/skills`; submitting `/<name>` loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette. This package was not separately measured. |
 | `opencode-v2` | native | opencode2 2.0.18, measured 2026-09-29 (CommandMate#2975): `GET /api/skill` lists `SKILL.md` from `.agents/skills` and `.claude/skills`; sending `/<name>` makes the model call the `skill` tool. No restart needed. Not in v2's `/` palette (`@` and `/skills` picker only). This package was not separately measured. |
 
 `support` records the **discovery path**, which the installer decides: since

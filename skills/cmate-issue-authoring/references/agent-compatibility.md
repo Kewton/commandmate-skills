@@ -30,7 +30,7 @@ Node だけは代替が無い。validator は Node の標準ライブラリの�
 | `claude` | native | Claude Code 2.1.220 / 2026-07-26 実測: `.claude/skills` から `SKILL.md` を発見し、slash palette に一致する（`.agents/skills` は読まない）。経路は package 非依存であり、**本 package を個別に測ってはいない** |
 | `codex` | native | Codex CLI 0.145.0 / 2026-07-26 実測: `.agents/skills` から `SKILL.md` を読む（model の自己申告であり機械的証跡ではない）。当該 version は skill を slash command として露出しないので名前で呼ぶ。**本 package は個別に測っていない** |
 | `gemini` | unknown | 未計測 |
-| `opencode` | unknown | 未計測 |
+| `opencode` | native | opencode 1.18.22（2026-08-25、CommandMate#2037）と 1.18.27（2026-09-04 再確認）で `GET /skill` が `.agents/skills` と `.claude/skills` の `SKILL.md` を列挙し、`/<name>` の送信で読まれることを実測。起動時に走査するので install 後は再起動が要る。opencode 自身の `/` 補完には出ない。本 package は個別に測っていない |
 | `opencode-v2` | native | opencode2 2.0.18（2026-09-29、[CommandMate#2975](https://github.com/Kewton/CommandMate/issues/2975)）で `GET /api/skill` が `.agents/skills` と `.claude/skills` の `SKILL.md` を列挙し、`/<name>` の送信で model が `skill` tool を呼んで読まれることを実測。再起動は不要。v2 の `/` 補完には出ない（`@` と `/skills` picker のみ）。本 package は個別に測っていない |
 
 `support` は **discovery 経路**の記録である。CommandMate 0.15.0 以降、package は

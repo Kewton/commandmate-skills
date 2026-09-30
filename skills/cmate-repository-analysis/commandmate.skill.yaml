@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-repository-analysis
 name: cmate-repository-analysis
-version: 0.2.1
+version: 0.2.2
 summary: リポジトリをread-onlyで走査し、構造・既存実装・再利用候補・変更risk・推奨verificationをfile/line evidence付きで返す。
 description: >-
   変更に着手する前の現状把握を、再現可能な標準手順にしたものである。対象リポジトリを

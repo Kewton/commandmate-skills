@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-issue-refinement
 name: cmate-issue-refinement
-version: 0.4.1
+version: 0.4.2
 summary: Refines a vague GitHub Issue into an implementable specification, read-only, with evidence, ranked findings, open questions and a versioned result.
 description: >-
   Takes an Issue that is a title, a paragraph, or a set of unchecked assumptions,
@@ -104,8 +104,8 @@ files:
     executable: false
     script: false
   - path: references/agent-compatibility.md
-    sha256: e70a51fd4fe076de4aea5a5d33f7b84c7f7bc106311e287826499540fbfad017
-    size: 3995
+    sha256: cebbc66d66ee1db43e7005e5000fa00f43e27b950d2cd289f29e8484e4ab6d15
+    size: 4303
     kind: instruction
     executable: false
     script: false
