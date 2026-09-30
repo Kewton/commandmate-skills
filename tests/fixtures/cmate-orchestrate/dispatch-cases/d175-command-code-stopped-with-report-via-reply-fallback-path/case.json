@@ -1,0 +1,66 @@
+{
+  "description": "[#296] **契約非対応の CLI 経路でも同じ（Command Code）。** worker は commit しない。`reply` が nudge への返答を返すので、runner は 2 回目の nudge を送らず `worker_report`（`source: commandmate_reply`）を残す。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "232",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      232
+    ],
+    "worker_states": {
+      "232": "failed"
+    },
+    "send_counts": {
+      "232": 2
+    },
+    "worker_report": {
+      "232": {
+        "code": "worker_stopped_with_report",
+        "turn": 2,
+        "source": "commandmate_reply",
+        "text_includes": [
+          "止めて報告します。"
+        ]
+      }
+    },
+    "worker_notes_include": {
+      "232": [
+        "with no new commit"
+      ]
+    },
+    "blocking_codes": [
+      "worker_stopped_with_report",
+      "worker_failed"
+    ],
+    "cli_args_include": {
+      "reply": [
+        "--since",
+        "--json"
+      ]
+    },
+    "cli_args_absent": {
+      "reply": [
+        "--instance",
+        "--agent"
+      ]
+    }
+  }
+}

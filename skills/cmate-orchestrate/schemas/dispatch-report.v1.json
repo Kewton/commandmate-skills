@@ -329,7 +329,7 @@
         },
         "worker_report": {
           "type": "object",
-          "description": "OPTIONAL. What a worker said when it STOPPED AND REPORTED instead of pressing on (Issue #287). The supervision nudge asks a worker that finds it cannot write what it was told to stop and report (CommandMate#3009); before this field such a worker was nudged on to the `--max-turns` cap and recorded exactly like one that said nothing. Written only when a turn opened by that nudge ended without progress (contract path: `wait --verify` exit 21; fallback path: no new commit) and the worker's Claude Code transcript records that nudge as its last human message followed by a final text reply. When written, supervision stopped nudging this worker at that turn. The adjudication is untouched: `worker_state` stays `failed`, blocking `worker_failed` still says why the run stopped, and a blocking `worker_stopped_with_report` beside it carries the same text. ABSENT means no report was read (no nudge was sent, the reply could not be attributed to the turn, or the capture / transcript could not be read) and must NOT be read as 'the worker said nothing'. Added optionally, so reports written before this field keep validating and dispatch_schema_version stays 1.",
+          "description": "OPTIONAL. What a worker said when it STOPPED AND REPORTED instead of pressing on (Issue #287). The supervision nudge asks a worker that finds it cannot write what it was told to stop and report (CommandMate#3009); before this field such a worker was nudged on to the `--max-turns` cap and recorded exactly like one that said nothing. Written only when a turn opened by that nudge ended without progress (contract path: `wait --verify` exit 21; fallback path: no new commit) and the worker's reply to that nudge could be read (`commandmate reply`, or for a CLI without it the Claude Code transcript, which records that nudge as its last human message followed by a final text reply). When written, supervision stopped nudging this worker at that turn. The adjudication is untouched: `worker_state` stays `failed`, blocking `worker_failed` still says why the run stopped, and a blocking `worker_stopped_with_report` beside it carries the same text. ABSENT means no report was read (no nudge was sent, the reply could not be attributed to the turn, or the capture / transcript could not be read) and must NOT be read as 'the worker said nothing'. Added optionally, so reports written before this field keep validating and dispatch_schema_version stays 1.",
           "additionalProperties": false,
           "required": ["code", "turn", "source", "text", "truncated"],
           "properties": {
@@ -340,8 +340,8 @@
               "description": "The turn whose reply this is. Always a turn opened by the nudge, so never the first."
             },
             "source": {
-              "enum": ["claude_transcript"],
-              "description": "Where the text was read from. The worker's Claude Code transcript is the only source: the pane (`realtimeSnippet`) holds the nudge's own echo beside the reply and cannot say which lines belong to which turn."
+              "enum": ["claude_transcript", "commandmate_reply"],
+              "description": "Where the text was read from: `commandmate_reply` (`commandmate reply --since <the nudge's send time> --json`, CommandMate 0.43.0+, any agent with a transcript reader; Issue #296) or `claude_transcript` (the worker's Claude Code transcript, read when the CLI has no `reply`). Never the pane: the pane (`realtimeSnippet`) holds the nudge's own echo beside the reply and cannot say which lines belong to which turn."
             },
             "text": {
               "type": "string",

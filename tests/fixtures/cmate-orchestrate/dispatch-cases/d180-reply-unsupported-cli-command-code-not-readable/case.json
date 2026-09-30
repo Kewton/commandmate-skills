@@ -1,0 +1,54 @@
+{
+  "description": "[#296] **`reply` を持たない古い CLI（0.43.0 未満。`reply --help` が `unknown command`）で Command Code の worker。** 転写読みは Claude 専用なので読めず、#287 以前と同じく cap まで nudge する。dispatch は失敗しない（`reply` は 1 回も呼ばれない）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "235",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      235
+    ],
+    "worker_states": {
+      "235": "failed"
+    },
+    "send_counts": {
+      "235": 3
+    },
+    "verification_outcomes": {
+      "235": "fail"
+    },
+    "worker_report": {
+      "235": null
+    },
+    "blocking_codes": [
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_stopped_with_report"
+    ],
+    "cli_args_absent": {
+      "reply": [
+        "--json"
+      ]
+    }
+  }
+}

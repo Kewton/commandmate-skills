@@ -1,0 +1,49 @@
+{
+  "description": "[#296] **`reply` が exit 0 以外で終わるときも報告なし。** dispatch は失敗せず、従来どおり cap まで nudge する。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "235",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      235
+    ],
+    "worker_states": {
+      "235": "failed"
+    },
+    "send_counts": {
+      "235": 3
+    },
+    "verification_outcomes": {
+      "235": "fail"
+    },
+    "worker_report": {
+      "235": null
+    },
+    "blocking_codes": [
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_stopped_with_report"
+    ]
+  }
+}

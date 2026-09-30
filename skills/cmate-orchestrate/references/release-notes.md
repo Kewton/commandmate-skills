@@ -1670,6 +1670,32 @@ nudge して最後に failed にする扱いは変えていない。commit 依�
 
 ## merge（`scripts/merge.mjs`）
 
+### #296 — Command Code など Claude 以外のワーカーの返答が読めず、止めて報告しても上限まで nudge されていた
+
+#287 は返答を Claude Code の転写（`capture --json` の `cliToolId` が `claude`、`*.jsonl` がちょうど1つ）から読んでいた。
+Command Code など他のエージェントは「読めなかった」扱いで、止めて報告しても cap まで nudge され、`failed` の
+まま返答は report に残らなかった。上流 CommandMate 0.43.0 の `commandmate reply` は、転写リーダーが台帳に書いた
+行だけを返答とみなして返す（claude / codex / antigravity / command-code / opencode）。
+
+→ `reply` を持つ CLI では、返答の読み取りを `commandmate reply <worktree-id> --since <その nudge を送る直前の時刻> --json`
+に置き換え、出どころを `worker_report.source: commandmate_reply` として残す。返答の文への規則（上流エラー署名なら
+報告なし・末尾を残す 600 字・`truncated`）は #287 のまま。正本は [dispatch-contract.md](./dispatch-contract.md) 第2.12.1節。
+
+判断したこと:
+
+- **`reply` の有無は `reply --help` の成否を 1 回だけ probe して決めた。** 起動時の `send --help` / `wait --help` と同じ流儀で、
+  `commandmate --version` の比較は採らなかった（版番号ではなく、その CLI が実際に答えるかを見る）。
+- **`reply` が無い CLI（0.43.0 未満）では、従来の Claude 専用の転写読みに戻す（フォールバック）。** 「読めない」扱いにすると
+  0.35.0 で読めていた Claude のワーカーが後退するため。どちらでも dispatch は失敗させない。
+- **`reply` が exit 0 以外・JSON が読めない・`reply: null` のときは報告なし**として従来の無進捗の扱いに落とす。`reply` は pane に
+  フォールバックしないので、返答の無いターンを報告と読むことは無い。
+- **`--since` は nudge を送る前に取った時刻にした。** 送信後に取ると、速いワーカーの返答がそれより前になり得る。
+- **`--instance` は渡していない。** dispatch は `send` / `wait` にも instance を渡しておらず、3 つとも worktree の
+  primary instance を指す。`--instance` を足すなら send / wait と同時に足す。
+- `worker_report.source` の enum に `commandmate_reply` を足しただけで、`worker_report` は required のまま増えていない。
+  blocking `worker_stopped_with_report` の detail は、出どころに応じて「`commandmate reply` で読んだ」または
+  「Claude Code の転写から写した」と言う。
+
 ### CommandMate#3005 — `--create-prs` の PR が、利用側の運用では merge できなかった
 
 利用側（Kewton/Musunest）は「検証が緑になったらワーカーが push して PR を作り、管理が merge する」で
@@ -2427,8 +2453,8 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
   `not_dispatched` として残す。human-only の Issue への依存は待たず、plan の blocking と report の limitation
   `human_only_dependency` で名指す。全 Issue が human-only の plan は `plan_invalid`。
 - **#287** —— nudge で開いたターンが進捗なしで終わり、ワーカーの返答があるとき、nudge を止めて返答を
-  `worker_report` に残し、blocking `worker_stopped_with_report` を出す。**現状は Claude のワーカーだけ**
-  （返答を転写から読むため）。Command Code などへの拡張は上流 CommandMate#3039（CLI からターンの返答を読む）待ち。
+  `worker_report` に残し、blocking `worker_stopped_with_report` を出す。**この版では Claude のワーカーだけ**
+  （返答を転写から読むため）。Command Code などへの拡張は #296 で入れた（上流 CommandMate#3039、`commandmate reply`）。
 - **#288** —— uat の修正ループの nudge にも「止めて報告」の 1 文を足し、profile の `worker_messages.fix_nudge` と
   `uat --fix-nudge-message` で追記できるようにした。planner と dispatch も `fix_nudge` を受理する。
 

@@ -802,8 +802,18 @@ no work evidence after 12 turn(s); gave up at the --max-turns 12 cap
 1. そのターンを開いた send が**監督 nudge**である（最初の send・commit 依頼・gate 再指示のターンは対象外）
 2. そのターンが**進捗なしで終わった**: 契約経路は `wait --verify` exit 21（commit も未 commit の変更も無い）、
    fallback 経路は新しい commit が無い
-3. worker の transcript（第2.12節と同じ読み方: `capture --json` の `cliToolId` が `claude`、
-   その worktree の `*.jsonl` がちょうど1つ）で、**最後の human message がその nudge**
+3. worker の返答が読め、それがその nudge へのものだと言える。読み方は2つで、runner は起動後に
+   `commandmate reply --help` の成否を **1回だけ** probe して選ぶ（`--version` の比較はしない。#296）:
+   - **`reply` を持つ CLI（CommandMate 0.43.0+）**: `commandmate reply <worktree-id> --since <その nudge を送る直前の時刻> --json`
+     の `reply`。転写リーダーが台帳に書いた行だけが返答で、pane にはフォールバックしない。エージェントは問わない
+     （claude / codex / antigravity / command-code / opencode）。出どころは `source: commandmate_reply`。
+     exit 0 以外・JSON が読めない・`reply: null` は「報告なし」。`--instance` は渡さない（dispatch は `send` / `wait` にも
+     渡さず、3つとも primary instance を指す）
+   - **`reply` を持たない CLI**: 下の Claude 専用の転写読み（従来どおり。出どころは `source: claude_transcript`）。
+     dispatch はどちらでも失敗しない
+
+   転写読みの規則（第2.12節と同じ読み方: `capture --json` の `cliToolId` が `claude`、
+   その worktree の `*.jsonl` がちょうど1つ）: **最後の human message がその nudge**
    （既定 nudge の1行目を含む。`--nudge-message` / `worker_messages.nudge` の追記はその後ろに付くので影響しない）であり、
    その後の worker の**最後の発話が文**（最後の tool 呼び出しより後の text。上流エラー署名に一致するものは除く）である
 
@@ -816,14 +826,14 @@ no work evidence after 12 turn(s); gave up at the --max-turns 12 cap
 
 - **その時点で nudge を止める**（cap より先に判定する。cap のターンの報告も報告として残る）。
   同じ問いに既に答えた worker へ同じ nudge を送り続けても、ターンを cap まで使って報告を埋もれさせるだけである。
-- worker 記録に **`worker_report`**（`code: worker_stopped_with_report` / `turn` / `source: claude_transcript` /
+- worker 記録に **`worker_report`**（`code: worker_stopped_with_report` / `turn` / `source: claude_transcript` または `commandmate_reply` /
   `text` / `truncated`）を書く。`text` は既存の抜粋規則（redaction・空白の畳み込み・**末尾を残す**）で上限 600 字。
 - blocking に **`worker_stopped_with_report`**（Issue ごとに1件、`workers` 順）を `worker_failed` の**隣に**足す。
   detail は報告の文と、次の一手（報告を読んで Issue を直して re-plan するか、障害が解消済みなら `--resume`）を言う。
 - **裁定は動かさない**: `verification.outcome` はそのターンの `wait --verify` の結果のまま、`worker_state` は `failed`、
   `stop_reason` は `worker_failed`（enum に値を足していない）。`worker_turn_evidence` は cap に到達していないので付かない。
 
-**報告を読めなかったとき**（`capture` が失敗・JSON でない・Claude 以外・transcript が無い / 2つ以上）と、
+**報告を読めなかったとき**（`reply` がある CLI: exit 0 以外・JSON でない・`reply: null`。無い CLI: `capture` が失敗・JSON でない・Claude 以外・transcript が無い / 2つ以上）と、
 **報告の無い無進捗**（最後が tool 呼び出し・nudge が記録されていない）は、どちらも「報告なし」として
 **従来どおり** `--max-turns` まで nudge し、cap で第2.12節の `worker_turn_evidence` を記録する。
 「読めなかった」は報告ではなく、止める理由でもない。`worker_report` が**無い**ことは「worker が何も言わなかった」ではない。

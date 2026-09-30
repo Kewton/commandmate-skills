@@ -167,7 +167,7 @@ function measureScript(values) {
 }
 
 // commandmate subcommands this fake emulates. Only these are contract-checked.
-const COMMANDMATE_SUBS = new Set(['ls', 'send', 'wait', 'capture', 'respond', 'verify', 'sync', 'interrupt']);
+const COMMANDMATE_SUBS = new Set(['ls', 'send', 'wait', 'capture', 'respond', 'verify', 'sync', 'interrupt', 'reply']);
 
 // The flags a pre-0.17.0 commandmate does not have. A scenario without
 // `cli_contract: true` refuses them and hides them from --help, so the runner's
@@ -186,6 +186,7 @@ const HELP_FLAGS = {
   verify: ['--instance', '--gates', '--json', '--timeout', '--token'],
   sync: ['--json', '--token'],
   interrupt: ['--json', '--instance', '--token'],
+  reply: ['--instance', '--agent', '--since', '--json', '--token'],
 };
 
 // wait exit codes (mirror the real CLI's WaitExitCode).
@@ -1055,6 +1056,9 @@ function main() {
     }
     if (sub === 'sync' && spec.cli_sync === false) {
       fail(`error: unknown command 'sync'`, 1);
+    }
+    if (sub === 'reply' && spec.cli_reply !== true) {
+      fail(`error: unknown command 'reply'`, 1);
     }
     process.stdout.write(`${helpFor(sub, spec)}\n`);
     process.exit(0);
@@ -1926,6 +1930,49 @@ function main() {
       cliToolId: 'claude',
       ...extra,
     });
+  }
+  if (sub === 'reply') {
+    // `commandmate reply <worktree-id> [--since <iso8601>] --json` (CommandMate
+    // 0.43.0+, Issue #296). Opt-in with `cli_reply: true`: a scenario without it
+    // is a CLI that predates the command (`unknown command 'reply'`), which is the
+    // world every #287 case was written in. `workers.<n>.reply` tunes the answer:
+    //   { text, after_sends? }  the reply, once `after_sends` sends (default 2:
+    //                           the first send plus one nudge) have been made;
+    //                           earlier it is "no reply yet"
+    //   null / absent           "no reply yet": exit 0, `reply: null`
+    //   "fail"                  exit 1 (the server could not be read)
+    //   "unparseable"           exit 0 with stdout that is not JSON
+    // A real reply is stamped with the current time, so it is at-or-after any
+    // `--since` the runner took before its nudge.
+    if (spec.cli_reply !== true) fail(`error: unknown command 'reply'`, 1);
+    const since = optionValue('--since');
+    if (since !== null && (!/^\d{4}-\d{2}-\d{2}/.test(since) || !Number.isFinite(Date.parse(since)))) {
+      fail('Error: --since must be an ISO 8601 date-time (e.g. 2026-09-30T12:00:00Z).', 2);
+    }
+    const worktreeId = argv[1];
+    const issue = issueFromId(worktreeId);
+    const worker = workerSpec(spec, issue);
+    const reply = worker.reply;
+    if (reply === 'fail') fail('Error: Server error: could not read the chat ledger', 1);
+    if (reply === 'unparseable') {
+      process.stdout.write('No reply yet.\n');
+      process.exit(0);
+    }
+    const ready = reply !== null && typeof reply === 'object'
+      && readSends(issue) >= (Number.isInteger(reply.after_sends) ? reply.after_sends : 2);
+    if (!argv.includes('--json')) {
+      if (ready) process.stdout.write(`${reply.text}\n`);
+      process.exit(0);
+    }
+    process.stdout.write(`${JSON.stringify({
+      worktreeId,
+      instanceId: optionValue('--instance'),
+      cliToolId: optionValue('--agent') ?? worker.capture_extra?.cliToolId ?? 'claude',
+      reply: ready ? reply.text : null,
+      requestId: ready ? `command-code-turn:${issue}` : null,
+      at: ready ? new Date().toISOString() : null,
+    }, null, 2)}\n`);
+    process.exit(0);
   }
   if (sub === 'interrupt') {
     // `commandmate interrupt <worktree-id>` (CommandMate 0.28.0+): the GUI's

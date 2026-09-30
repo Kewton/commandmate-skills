@@ -1,0 +1,23 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "235": {
+      "state": "completed",
+      "verify_exits": [
+        21
+      ],
+      "capture_extra": {
+        "cliToolId": "command-code"
+      }
+    }
+  },
+  "cli_reply": true
+}

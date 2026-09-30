@@ -4877,6 +4877,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
   // Whether the send that opened the CURRENT turn was the supervision nudge —
   // the only turn a stop-and-report is read from (Issue #287).
   let nudgedThisTurn = false;
+  let nudgeSinceIso = null; // when the nudge that opened this turn was sent (Issue #296)
   const scopeCutClause = () => (scopeViolationCut === null
     ? ''
     : `; a scope re-instruction was bounded: ${scopeViolationCut.shown.length} of ${scopeViolationCut.total} violating line(s) were transcribed `
@@ -5009,7 +5010,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
       // is not nudged again — read BEFORE the cap, so a report given on the last
       // turn is recorded as one rather than as the cap's "why there is nothing".
       if (nudgedThisTurn) {
-        const workerReport = await readWorkerStopReport(inputs, worktreeId, worktreePath, turns);
+        const workerReport = await readWorkerStopReport(inputs, worktreeId, worktreePath, turns, nudgeSinceIso);
         if (workerReport !== null) {
           return {
             ...done('failed', workerReportNoteClause(workerReport, inputs, 'no work evidence (no commit, no uncommitted change)')),
@@ -5039,6 +5040,9 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
         };
       }
       previousScopeViolations = null; // this turn was not a scope-gate failure
+      // Taken BEFORE the send: `commandmate reply --since` keeps a reply written
+      // at or after it, and a stamp taken after could postdate a fast worker's answer.
+      nudgeSinceIso = new Date().toISOString();
       const nudged = await sendAndConfirm(inputs, worktreeId, nudgeMessage(inputs));
       if (!nudged.sent) return budgetCutoff() ?? done('failed', `nudge failed: ${nudged.note}`);
       closeTurn();
@@ -5156,6 +5160,7 @@ async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMes
   // As on the contract path (Issue #287): every later turn here is opened by
   // the nudge, and only those turns are read for a stop-and-report.
   let nudgedThisTurn = false;
+  let nudgeSinceIso = null; // when the nudge that opened this turn was sent (Issue #296)
   const budgetCutoff = () => (wallClockExhausted()
     ? {
       state: 'timeout', promptExcerpt: null, nudges: turns - 1, autoResponded,
@@ -5220,7 +5225,7 @@ async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMes
       return { state: 'completed', promptExcerpt: null, nudges: turns - 1, autoResponded, note };
     }
     if (nudgedThisTurn) {
-      const workerReport = await readWorkerStopReport(inputs, worktreeId, worktreePath, turns);
+      const workerReport = await readWorkerStopReport(inputs, worktreeId, worktreePath, turns, nudgeSinceIso);
       if (workerReport !== null) {
         return {
           state: 'failed', promptExcerpt: null, nudges: turns - 1, autoResponded, workerReport,
@@ -5237,6 +5242,7 @@ async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMes
         note: `no new commit after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap`,
       };
     }
+    nudgeSinceIso = new Date().toISOString(); // before the send; see the contract path
     const nudged = await sendAndConfirm(inputs, worktreeId, nudgeMessage(inputs));
     if (!nudged.sent) {
       const cutShort = budgetCutoff();
@@ -5850,10 +5856,57 @@ function humanEntryText(entry) {
   return texts.length > 0 ? texts.join('\n') : null;
 }
 
+// `commandmate reply` (CommandMate 0.43.0+, Issue #296) reads the reply the
+// server's transcript readers wrote to the ledger — for Claude, Codex,
+// Antigravity, Command Code and OpenCode alike — so it is the reader when the
+// CLI has it. Whether it has it is asked ONCE per process, the same way
+// `probeContractSupport` asks about `send` / `wait` (`--help` succeeding is the
+// answer; a version number is never compared). A CLI without it keeps the
+// Claude-only transcript reader below, so nothing 0.35.0 read is lost.
+let replySupported = null;
+function probeReplySupport(inputs) {
+  if (replySupported === null) replySupported = runCm(inputs, ['reply', '--help']).ok;
+  return replySupported;
+}
+
+// The reply of the turn the nudge opened, or null: exit != 0, unparseable JSON
+// and `reply: null` (no transcript row since the nudge) are all "no report".
+// `--instance` is not passed: dispatch names none on `send` / `wait` either, so
+// all three address the worktree's primary instance.
+async function readReplyViaCli(inputs, worktreeId, turns, sinceIso) {
+  const args = ['reply', worktreeId, ...(sinceIso === null ? [] : ['--since', sinceIso]), '--json'];
+  const result = await runCmAsync(inputs, args);
+  if (!result.ok) return null;
+  const payload = parseCliJson(result);
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  if (typeof payload.reply !== 'string') return null;
+  return workerReportFromText(payload.reply.trim(), turns, 'commandmate_reply');
+}
+
+// The shared tail of both readers: the upstream-fault rule, the excerpt rule.
+function workerReportFromText(text, turns, source) {
+  if (text.length === 0) return null;
+  if (matchUpstreamFault(text) !== null) return null;
+  const clipped = excerpt(text, WORKER_REPORT_EXCERPT_LIMIT);
+  if (clipped === null) return null;
+  return {
+    code: WORKER_STOPPED_WITH_REPORT,
+    turn: turns,
+    source,
+    text: clipped,
+    truncated: clipped.startsWith('…'),
+  };
+}
+
+async function readWorkerStopReport(inputs, worktreeId, worktreePath, turns, sinceIso = null) {
+  if (probeReplySupport(inputs)) return readReplyViaCli(inputs, worktreeId, turns, sinceIso);
+  return readClaudeTranscriptReport(inputs, worktreeId, worktreePath, turns);
+}
+
 // ONE `capture` (for `cliToolId`, which names the transcript layout — the #220
 // rule), then the transcript. Returns the `worker_report` object, or null for
 // every world that is not a readable stop-and-report.
-async function readWorkerStopReport(inputs, worktreeId, worktreePath, turns) {
+async function readClaudeTranscriptReport(inputs, worktreeId, worktreePath, turns) {
   const capture = await runCmAsync(inputs, ['capture', worktreeId, '--json']);
   if (!capture.ok) return null;
   const payload = parseCliJson(capture);
@@ -5880,17 +5933,7 @@ async function readWorkerStopReport(inputs, worktreeId, worktreePath, turns) {
     if (text.length > 0) finalTexts.unshift(text);
   }
   if (finalTexts.length === 0) return null;
-  const text = finalTexts.join('\n');
-  if (matchUpstreamFault(text) !== null) return null;
-  const clipped = excerpt(text, WORKER_REPORT_EXCERPT_LIMIT);
-  if (clipped === null) return null;
-  return {
-    code: WORKER_STOPPED_WITH_REPORT,
-    turn: turns,
-    source: 'claude_transcript',
-    text: clipped,
-    truncated: clipped.startsWith('…'),
-  };
+  return workerReportFromText(finalTexts.join('\n'), turns, 'claude_transcript');
 }
 
 // The one-sentence version for the worker `note`, rendered FROM the record
@@ -5903,7 +5946,7 @@ function workerReportNoteClause(report, inputs, progress) {
 function workerReportBlockingDetail(issue, report) {
   return `#${issue}: after the supervision nudge that opened turn ${report.turn} — which tells a worker that cannot write what it was told to stop and report — `
     + 'the worker ended that turn without progress and with a reply, so supervision stopped nudging it rather than spending the rest of --max-turns on a worker that had already answered. '
-    + `Its report, transcribed from its Claude Code transcript${report.truncated ? ` (the tail, cut to ${WORKER_REPORT_EXCERPT_LIMIT} characters)` : ''}: "${report.text}". `
+    + `Its report, ${report.source === 'commandmate_reply' ? 'read with `commandmate reply` (the transcript reader\'s ledger row)' : 'transcribed from its Claude Code transcript'}${report.truncated ? ` (the tail, cut to ${WORKER_REPORT_EXCERPT_LIMIT} characters)` : ''}: "${report.text}". `
     + 'Read it, then either fix the Issue (or its 対象ファイル / 受入条件) and re-plan, or — when the report says the obstacle is gone — re-dispatch the same plan with '
     + '`dispatch.mjs --plan <plan.json> --resume <this run\'s dispatch directory>`. '
     + 'The adjudication is unchanged: `worker_state` stays `failed` and blocking `worker_failed` still says why the run stopped; this entry is what the worker said';

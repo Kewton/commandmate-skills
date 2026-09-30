@@ -1,0 +1,88 @@
+{
+  "description": "[#296] **`reply` を持たない古い CLI で Claude の worker は、従来の転写読みで報告が残る（0.35.0 からの後退が無い）。** `reply --help` が `unknown command` で終わるので `reply` 本体は呼ばれず、`source` は `claude_transcript` のまま。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "235",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      235
+    ],
+    "worker_states": {
+      "235": "failed"
+    },
+    "send_counts": {
+      "235": 2
+    },
+    "verification_outcomes": {
+      "235": "fail"
+    },
+    "worker_report": {
+      "235": {
+        "code": "worker_stopped_with_report",
+        "turn": 2,
+        "source": "claude_transcript",
+        "truncated": false,
+        "text_includes": [
+          "止めて報告します。",
+          "`src/storage.ts` が対象ファイルに無いため"
+        ]
+      }
+    },
+    "worker_turn_evidence": {
+      "235": null
+    },
+    "worker_notes_include": {
+      "235": [
+        "the worker stopped and reported on turn 2",
+        "no further nudge was sent (the --max-turns cap is 8)"
+      ]
+    },
+    "blocking_codes": [
+      "worker_stopped_with_report",
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_produced_nothing",
+      "worker_upstream_unavailable",
+      "worker_output_unreadable"
+    ],
+    "blocking_details_include": [
+      [
+        "#235:",
+        "止めて報告します。",
+        "--resume"
+      ]
+    ],
+    "blocking_order": [
+      "worker_stopped_with_report:#235",
+      "worker_failed:#235"
+    ],
+    "summary_includes": [
+      "`worker_stopped_with_report`",
+      "報告を読んでから決める"
+    ],
+    "cli_args_absent": {
+      "reply": [
+        "--json"
+      ]
+    }
+  }
+}
