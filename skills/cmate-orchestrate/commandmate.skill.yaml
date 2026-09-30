@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-orchestrate
 name: cmate-orchestrate
-version: 0.36.0
+version: 0.37.0
 summary: 複数 Issue の並列実行を dry-run で計画し、承認後に実行契約付きで dispatch して検証 exit code で裁定し、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT と回数上限つき修正ループを回す。UAT の意味ゲートには cmate-acceptance-test の別途 install が要る。
 description: >-
   複数 Issue を並列で進めるための、計画（dry-run）・その承認後の監督付き実行・verification pass 後の
@@ -203,8 +203,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 9d26f289abef3c3c74c9cc560e396d88c5747d3439fdb6b91bbb5d692bdc1d43
-    size: 269071
+    sha256: df668adfeb252874ca55e782289f19733129fc60eca52487b4274661122f8c55
+    size: 269813
     kind: instruction
     executable: false
     script: false
@@ -275,7 +275,7 @@ files:
     executable: true
     script: true
   - path: scripts/lib.mjs
-    sha256: 47896a7730063fa93a1e94f9a8b575d8be916a21e4e7a92de6c6285e687e8251
+    sha256: d7cabc5f3a6c77e87ec380b98dc0722bae664893c6da16c863f0983e3f9920fb
     size: 77707
     kind: script
     executable: false
