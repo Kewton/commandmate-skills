@@ -2305,6 +2305,43 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 
 ## パッケージ
 
+### 0.34.0 — 利用側の並列開発で「運用で補っていた」箇所を runner に入れた（CommandMate #3002〜#3009、#272 / #273）
+
+**この版の 9 件は、すべて利用側（Kewton/Musunest の M1.4〜M1.6）の実測から来ている。** 利用側は手順書に
+「地の文にパスを書かない」「nudge に一文添える」「`--resume` で送り直す」などの運用を積み上げていた。
+その運用を runner の側へ移した。各件の経緯は本文の runner 別の節（planner / dispatch / merge）に在る。
+
+**planner**
+
+- **#3002（+ #273）** —— 成果物見出しを持つ Issue では、見出しの外（散文・`## 完了条件`・`## やること`・
+  `## 追記`）にだけ書いたパスを scope に入れず `reference_files` へ回し、Issue ごとに 1 件の notice
+  `prose_path_ignored` で名指す。**「変えるな」と書いたファイルほど scope に入っていた**のを止める。
+  成果物見出しの範囲は下位の `###` で切らない（#273）。「外」「以外」「しない」で終わる見出しは成果物見出しにしない。
+- **#3003（+ #272）** —— 成果物見出しの下では、backtick で囲んだファイル名を拡張子によらず拾う
+  （`expression.ebnf`・`Cargo.lock`・`Makefile`）。profile の欄にはしなかった（起票時の検査と食い違うため）。
+- **#3004** —— 契約 goal の `## Files you may change` には宣言したファイルだけを並べ、導出したテスト候補は
+  本数で述べる。plan は宣言と導出の本数を分けて出す。`scope.allow` と L1 の導出は変えていない（ADR §15.2 は不変）。
+
+**dispatch**
+
+- **#3006** —— 起動中（503 `SESSION_STARTING`）または `prompt not ready` で断られた最初の send を、
+  間を置いて 1 回だけ送り直す（limitation `send_retried_not_ready`）。exit 2 と 409 は送り直さない。
+- **#3007** —— 最初の send の前に capture を読み、前の回の質問画面が残っていれば送らずに止める
+  （blocking `stale_prompt_on_session`）。`--interrupt-stale-prompt` で畳んでから送れる（既定 off、質問には答えない）。
+- **#3008** —— `--only <issues>` で plan の一部だけを dispatch する。選外の Issue に依存する Issue は
+  `--out` を作る前に `invalid_input` で断る。`--resume` は選んだ集合を引き継ぐ。
+- **#3009** —— 監督 nudge の既定文に「指示どおりに書けないと分かったら、進めずに止めて報告してください。」を足し、
+  profile の `worker_messages.nudge` と `--nudge-message` で後ろに追記できるようにした。
+
+**merge**
+
+- **#3005** —— `--create-prs` に profile の `pr_title_template` を足した（type / scope はブランチのコミット件名から。
+  決まらなければその PR を作らない）。ワーカーのコミット本文の申告行を PR 本文の「## ワーカーの申告」へ写す。
+  ワーカーは push も PR も作らない既定のまま。
+
+**破壊的変更は無い。** schema の版はすべて据え置きで、足したのは optional な field・enum 値・code だけである。
+成果物見出しを持つ Issue の scope が狭くなるのは #3002 の狙いどおりの挙動変更で、見出しの無い Issue の plan は不変。
+
 ### 0.32.0 — 一本道の前と後ろに、測るだけの段が付いた（#217 / #218 / #219 / #220 / #221 / #222 / #223 / #224）
 
 **この版が足したのは plan → dispatch → merge → uat の「外側」である。** 0.31.0 までの runner は、

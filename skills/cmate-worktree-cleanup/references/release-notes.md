@@ -1,8 +1,8 @@
 # release notes
 
-版の見出しはリリース時に付ける。ここには「何が起きたか → だからこう変えた」を残す。
+ここには「何が起きたか → だからこう変えた」を残す。
 
-## BEHIND を経た squash merge と、判定を実行する runner（CommandMate#3010）
+## 0.2.0 — BEHIND を経た squash merge と、判定を実行する runner（CommandMate#3010）
 
 **何が起きたか。** 保護された `main` では 2 本目以降の PR が BEHIND になり、ワーカーが
 `git merge origin/main` してから squash merge される。この形の branch は、正味の差分が squash の

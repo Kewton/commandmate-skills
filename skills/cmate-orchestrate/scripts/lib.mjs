@@ -77,7 +77,7 @@ export function workerMessageProblem(value) {
 // package when it does not — 0.15.0 through 0.17.0 shipped with this constant
 // left at 0.13.0, and the reports named a version nobody had installed
 // (Issue #92, observed in Kewton/CommandMate#1741).
-export const SKILL_VERSION = '0.33.0';
+export const SKILL_VERSION = '0.34.0';
 
 // The dispatch report version merge.mjs and uat.mjs consume. It is the dispatch
 // report's contract as a CONSUMER sees it, which is why it is stated here rather

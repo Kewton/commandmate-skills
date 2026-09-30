@@ -1,6 +1,6 @@
 # release notes
 
-## 文脈の上限で止まった依頼を、完了ではなく失敗として返す（CommandMate#3011）
+## 0.2.0 — 文脈の上限で止まった依頼を、完了ではなく失敗として返す（CommandMate#3011）
 
 **何が起きたか。** 管理（Command Code）のセッションを長く使い続けたら、依頼が
 `400 This model's maximum context length is 1048576 tokens. However, you requested 1070861 tokens`
