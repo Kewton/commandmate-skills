@@ -4,6 +4,9 @@
 **その worktree の branch の作業が base に完全に取り込まれていることの証明** である。
 SKILL.md の Step 4 から参照される。
 
+同梱の runner（`scripts/cleanup.mjs` / `scripts/lib.mjs`）は、この文書をそのまま実装している。
+呼び方と exit code は [runner-contract.md](./runner-contract.md) が正本である。
+
 証明の型は3つだけである。
 
 | proof.type | 意味 | 削除方式 |
@@ -110,7 +113,7 @@ git merge-base --is-ancestor <merge_commit_oid> <base>   # base から到達可�
 いずれも `unverifiable`。GitHub の PR state と、手元の base が実際に指すものとを、
 ここで突き合わせる。
 
-### 条件4 — tree equality
+### 条件4 — tree equality（正味の差分のバイト一致）
 
 branch が merge base に対して加える **正味の tree 変更** が、merge commit が base に
 持ち込んだ変更と **同一** であること。「PR が merged」でも中身がずれていれば削除しない、
@@ -118,30 +121,42 @@ branch が merge base に対して加える **正味の tree 変更** が、merg
 
 ```
 mb=$(git merge-base <base> <tip>)
-# branch が加える正味の変更（merge-base から tip まで）
-git diff --quiet $mb <tip>            # 差分が空でないのが通常。tree ではなく patch を比較する
-# merge commit が持ち込んだ変更（第1親との差分）
-# 次の2つの diff が同一であることを確認する:
-git diff $mb <tip>
-git diff <merge_commit_oid>^ <merge_commit_oid>
+# 両側を同じ固定の形で出し、出力をバイト単位で比べる
+git diff --no-ext-diff --no-textconv --no-color --binary --full-index --no-renames $mb <tip>
+git diff --no-ext-diff --no-textconv --no-color --binary --full-index --no-renames <merge_commit_oid>^ <merge_commit_oid>
 ```
 
-補助として patch 等価も確認する（branch の全 patch が base に取り込まれているか）。
+各 flag は、同じ変更が設定しだいで違うバイトに描かれる要因（外部 diff・textconv・色・
+短縮 blob id・rename の対応付け）を消すためのものである。rename は削除と追加として比べる。
+`--full-index` により、触れた path ごとの変更前後の blob id がバイト列に入るので、squash の
+親が `mb` と違い、その間に同じ path が変わっていれば、比較はここで一致しない。
+
+- 2つの diff がバイト一致しない、または比較できない → `tree_mismatch`（`unverifiable`）。
+  **`tree_mismatch` は diff の不一致だけを表す。**
+
+補助として patch 等価も確認し、**evidence として記録する**。
 
 ```
 git cherry <base> <tip>
 ```
 
-- `git cherry` の出力に `+` 始まりの行が1つでもある → base に無い patch が残っている。`tree_mismatch`。
-- 上記2つの diff が同一でない、または比較できない → `tree_mismatch`。
+- `+` 始まりの行の数を `proof.cherry_unmatched` に記録する。
+- **`+` の行があることを、単独の否決理由にしない**（CommandMate#3010）。保護された base では
+  2 本目以降の PR が BEHIND になり、`git merge origin/main` を挟んでから squash される。この形の
+  branch は、正味の差分が squash の差分と一致していても、merge 前の個々の commit が squash の
+  patch と一致しないため、必ず `+` が出る。
+- どちらの経路で条件4が成り立ったかを `proof.equivalence_path` に残す。
+  - `patch_equivalent` — `git cherry` に `+` が無く、diff もバイト一致した（従来からの経路）。
+  - `net_diff_equal` — `git cherry` に `+` があるが、正味の diff がバイト一致した（BEHIND の往復を経た squash）。
 
-いずれも `unverifiable`。**tree 一致だけを単独の証明にしない**（条件1〜3と併せて初めて有効）。
-逆に、条件1〜3が揃っても tree が食い違えば削除しない。
+いずれも `unverifiable` にならないのは条件1〜3が揃っているときだけである。
+**tree 一致だけを単独の証明にしない**（条件1〜3と併せて初めて有効）。
+逆に、条件1〜3が揃っても diff が食い違えば削除しない。
 
 ### 4条件の結論
 
 条件1〜4がすべて true のときだけ `proof.type = merged_equivalent` とし、
-`pr_number` / `merge_commit_oid` を記録する。1つでも欠ければ `unverifiable` である。
+`pr_number` / `merge_commit_oid`（と evidence の `cherry_unmatched` / `equivalence_path`）を記録する。1つでも欠ければ `unverifiable` である。
 
 ## 4. unverifiable は常に安全側
 
@@ -152,7 +167,7 @@ git cherry <base> <tip>
 - merged PR が無い / 複数（`no_merged_pr` / `multiple_prs`）
 - tip drift（`head_oid_drift`）
 - merge commit が到達不能（`merge_commit_unreachable`）
-- tree 不一致（`tree_mismatch`）
+- 正味の diff の不一致（`tree_mismatch`）
 - 上記判定に使う command 自体の失敗（`command_failed`）
 
 `unverifiable` の worktree は、`git worktree list` に残す。証明できないことは

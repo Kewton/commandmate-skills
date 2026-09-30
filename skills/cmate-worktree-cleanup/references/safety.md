@@ -28,6 +28,11 @@ force remove や `branch -D` を使わない）を採用する。CommandMate 版
 - `requirements.commands` に宣言していない command の実行（宣言は `git` / `gh` /
   `commandmate` の3つで、実行してよい subcommand は SKILL.md の allowlist に限る）。
 
+同梱の runner（`scripts/cleanup.mjs`）もこの一覧に従う: `--force` と `-D` を呼ぶ経路を持たず、
+`gh` は `pr list` の読み取りだけ、server 等は観測も停止もしない。除外（第2節）・dirty/detached/
+locked の zero-delete・drift 再検査（第3.3節）も runner が実装している
+（[runner-contract.md](./runner-contract.md)）。
+
 これらは CommandMate 版 `worktree-cleanup` に含まれるが、本 Skill の scope 外である。
 該当するものは診断（第6節）と `next_actions` に回す。
 
