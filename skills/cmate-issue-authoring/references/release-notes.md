@@ -44,6 +44,43 @@ install 先で走らせるよう案内している箇所は無い。
   `no_suspected_files` を立てるのと同じ判定である。書き方は
   [issue-body-contract.md](./issue-body-contract.md) 第 2.3 節に足した。
 
+### CommandMate#3013 — 計画を `.commandmate/` の外に置けず、人がやる文書の Issue を計画に入れられなかった
+
+版の見出しはリリース時に付ける。
+
+- **起きたこと 1**: 計画の置き場所が `.commandmate/issue-authoring/<plan_id>/` に固定されていた
+  （文書上の固定。validator は場所を見ていなかった）。利用側（Kewton/Musunest）では
+  `.commandmate/` は人だけが直す場所（worker が自分を裁くものを書き換えられないように）なので、
+  計画を置けなかった。
+  **だからこう変えた**: validator に `--plan-dir <path>` を 1 つ足した。既定は今のまま
+  （`.commandmate/issue-authoring`）。**設定 file ではなく CLI フラグにした**のは、
+  cmate-orchestrate の `--runs-dir` と揃えるためと、置き場所の設定を `.commandmate/` の中の
+  file に書くと「`.commandmate/` の外に置きたい」という要求そのものと食い違うためである
+  （Issue のコメントでの利用者との問答で確定）。path は repository root からの相対だけを受け、
+  絶対 path・`..`・symlink で repository の外に出る directory は exit 2 で拒否する。
+  渡したときは計画が `<plan_dir>/<plan_id>/plan.json` にあることを rule `plan_location` で
+  確かめる —— **receipt も同じ directory に書く**ので、二重登録ガードはそこで効く。
+  渡さなければ従来どおり場所は検査しない（既存の出力は byte 単位で変わらない）。
+- **起きたこと 2**: `planner_ready` が「非 documentation path が 1 本以上」を全 Issue に求めたので、
+  人がやる文書だけの Issue（Musunest では `human-only` ラベル）を計画に入れられず、計画の外で
+  別に作っていた（Musunest の M1.5・M1.6）。計画の外で作った Issue は重複検査も receipt も通らない。
+  **だからこう変えた**: `issues[].labels` に `human-only`（名前は固定）がある Issue は、
+  `planner_ready` の**パスの条件だけ**を外す。受入条件の条件は残す。印を本文の marker ではなく
+  label にしたのは、label は Phase 2 で `--label` としてそのまま GitHub に付き、dispatch から
+  外す側（利用側の手順書）が読むものと同じだからである。その Issue が dispatch の対象でないことは、
+  validator の出力の `NOTE dispatch_excluded <key> …` 行（`--json` では `dispatch_excluded`）で
+  読み取れる。`human-only` の Issue が無い計画の出力は従来と同じである。
+  dispatch が `human-only` を自動で外すことは別 Issue とし、ここではしない。
+- **起きたこと 3**: 本文の例と登録の説明が依存を `depends on #N` で書いており、利用側の規約
+  （`## 依存` には素の `#N` だけ。注記を書くと番号が依存として読まれる）と違った。
+  **だからこう変えた**: 設定は足さず、例を `## 依存` の下の `- {{issue:<key>}}`（登録後は素の `#N`）に
+  直し、`depends on` の文言は必須ではないと書いた（[issue-body-contract.md](./issue-body-contract.md)
+  第 1 節・第 2.4 節、[register-contract.md](./register-contract.md) 第 3 節）。validator が見るのは
+  もともと placeholder だけなので rule は変わらない。cmate-orchestrate の planner は `## 依存` 節の中の
+  素の `#N` を節の既定（この Issue が後）で依存として読む（`extractExplicitRefs`）。これは
+  fixture `cases/101-valid-bare-dependency.json` を実物の planner に通し、宣言どおりの依存だけが
+  読まれることで毎回確かめている。orchestrate 側は変えていない。
+
 ### 0.9.0 — 対象ファイル節に glob / ディレクトリを書け、閾値は散文でなくゲートで書く（planner Issue #219 / #218）
 
 - **planner の抽出に4つ目の source（`CANDIDATE_PATTERN`）が入ったので、mirror も同時に更新した。**
@@ -289,7 +326,8 @@ install 先で走らせるよう案内している箇所は無い。
 - **documentation 専用の Issue は、この planner の前では blocking question ゼロに
   できない。** planner は `docs/` 配下と `.md` / `.rst` / `.txt` を reference に分類し、
   suspected file には入れないためである（`issue-body-contract.md` 第 2.3 節）。計画に
-  含めるなら `warnings` に `docs_only_issue` を積んで人間に判断を返す。
+  含めるなら `warnings` に `docs_only_issue` を積んで人間に判断を返す。人がやる文書の Issue なら
+  `human-only` ラベルを付ける（validator はパスの条件を外すが、planner に渡さないのは人の仕事である）。
 - `planner_ready` rule は planner の抽出の**写し**である。planner の抽出が変われば、
   この package も同時に変える必要がある（冒頭の同期規約）。写しである以上、
   install 済みの package 単体では正しさを確認できない。確認はリポジトリの CI が行う。

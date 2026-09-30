@@ -59,6 +59,7 @@ acceptance_criterion）を **Feature 入力としてそのまま受け取れる*
 | `feature` | はい | 記述文・checkout 内の path・`#<epic 番号>` のいずれか | 無ければ聞く |
 | `checkout` | いいえ | 実査に使う checkout の path | カレントリポジトリ |
 | `labels` | いいえ | 全 Issue に付ける既定ラベル | 無し |
+| `plan_dir` | いいえ | 計画と receipt を置く directory（repository root からの相対） | `.commandmate/issue-authoring` |
 | `register` | いいえ | `false` / `true` | `false`（Phase 1 のみ） |
 
 `repository` と `feature` が揃わないときは、推測せずに停止する。
@@ -108,6 +109,11 @@ checkout の file に当てて確認し、確認した file と行を evidence �
 割った結果 1 件で足りるなら 1 件にする。「2〜4 件が普通」は経験則であって目標ではない。
 1 件が大きすぎて受入条件を 1 つに書けないときは、その受入条件が分割線である。
 
+**人がやる Issue**（スマホでのデモ、手で書く文書など）も計画に入れる。その Issue の
+`labels` に `human-only` を入れる。validator は非 documentation path の条件をその Issue に
+求めず（受入条件は求める）、dispatch の対象でないことを出力で名指しする
+（[plan-contract](./references/plan-contract.md) 第 5.3 節）。
+
 各 Issue に付ける `size` と `parallel_safe` の値域・帯の意味・`cmate-issue-refinement`
 との対応は [plan-contract](./references/plan-contract.md) 第 3 節・第 7 節と schema の
 `description` が正本である。**`xl` の slice を出した時点でこの Step は終わっていない**（同 第 7 節）。
@@ -116,8 +122,9 @@ checkout の file に当てて確認し、確認した file と行を evidence �
 
 各 Issue の本文は [issue-body-contract](./references/issue-body-contract.md) の型に従って書く。
 この型は好みではなく、cmate-orchestrate の planner が実際に何を読むかを実測して決めたもので
-ある。型を外すと planner が blocking question を立てる。依存は `{{issue:<key>}}` の
-placeholder で書く（まだ番号が無いため。Phase 2 が登録時に `#<番号>` へ置換する）。
+ある。型を外すと planner が blocking question を立てる。依存は `## 依存` の下に
+`- {{issue:<key>}}` の placeholder で書く（まだ番号が無いため。Phase 2 が登録時に素の `#<番号>` へ
+置換する）。`depends on` の文言は要らない。
 
 受入条件のうち**機械で測れると確信できるもの**があり、それを測るゲートが対象リポジトリの
 `.commandmate/verify.yaml` に**実在することを読んで確かめた**ときに限り、`acceptance-gates`
@@ -148,12 +155,16 @@ Issue はブロックを持たない）。規律・32 件を超えたときの�
 
 ### Step 6 — 計画を書き出して機械検証する
 
-`.commandmate/issue-authoring/<plan_id>/plan.json` に
+`<plan_dir>/<plan_id>/plan.json` に
 [schema](./schemas/issue-split-plan.v1.json) 準拠の計画を書き、同梱の validator に通す。
-`plan_id` は自分で決めた値ではなく導出値である。
+`plan_dir` の既定は `.commandmate/issue-authoring` である。`.commandmate/` を人だけが直す
+場所にしているリポジトリでは、repository 内の別の directory を `plan_dir` にし、validator に
+`--plan-dir` で渡す（repository の外・`..` を含む path は拒否される。receipt も同じ場所に
+書くので、同じリポジトリでは同じ値を使い続ける。[plan-contract](./references/plan-contract.md)
+第 2.1 節）。`plan_id` は自分で決めた値ではなく導出値である。
 
 ```bash
-node scripts/validate-plan.mjs .commandmate/issue-authoring/<plan_id>/plan.json --checkout <checkout>
+node scripts/validate-plan.mjs <plan_dir>/<plan_id>/plan.json --checkout <checkout> --plan-dir <plan_dir>
 node scripts/validate-plan.mjs <plan.json> --derive-id
 ```
 

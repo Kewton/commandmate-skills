@@ -294,6 +294,24 @@ invocation: `/probe-agents-root` → NDJSON に
 第 3.2 / 3.3 節が Claude と Codex に対してやったのと同じ形の対照であり、
 「両方に置いたら両方から見えた」で止めていない。
 
+#### Command Code 1.66.0 の再確認（2026-09-30、git worktree の中）
+
+[CommandMate#3012](https://github.com/Kewton/CommandMate/issues/3012) で、git worktree の中の
+発見を再確認した（`--no-auto-update`、一時 directory の中だけで測定）。
+
+| 項目 | 結果 |
+|---|---|
+| `.agents/skills` と `.claude/skills` の両方に commit した repository から `git worktree add` し、worktree の root と下位 directory で `cmd skills list -d` | **YES** —— `Project (2)` に `cmate-verify` / `cmate-repository-analysis` |
+| worktree で `cmd -p "/cmate-verify" --output-format json --max-turns 1` | NDJSON に `skill_loaded` が 1 件 |
+| 陰性対照: `.claude/skills` 側だけを残す | `Project` から消え、**`Skipped` にも出ない**（読まない root なので記録も残らない） |
+| 陰性対照: SKILL.md の frontmatter を外す | `Skipped (1)` / `Missing fields (1)` / `name: Skill name is required` |
+
+1.66.0 の `skills list -d` は、読んだ root を列挙する行（「Looking in:」）を出さない。
+読み飛ばしの理由は `Skipped` 節に出るが、**読まない root に置いた Skill は何の痕跡も残さない。**
+root の構成（`.agents/skills`・`.commandcode/skills`、`.claude/skills` は読まない）は 1.47.0 から
+変わっていない。ワーカー側で「未 install」と書く前の確かめ方は
+`skills/cmate-worker-development/references/delegate-discovery-contract.md` が正本である。
+
 #### evidence の性質
 
 | Agent | 発見の証跡 | 呼出の証跡 |
