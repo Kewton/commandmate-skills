@@ -1,0 +1,85 @@
+{
+  "description": "[#287] 止めて報告した worker の次の一手の片方（障害が解消済みなら `--resume`）。attempt 1 では #235 の worker が 1 回目の nudge の後に止めて報告し、runner は 2 回目の nudge を送らずに `worker_report` と blocking `worker_stopped_with_report` を残して partial 停止する。報告を読んだ人間が障害を取り除いた後、同じ --out を --resume で渡した attempt 2 は #235 を再 dispatch し、1 ターンで commit して success で終わる。attempt 2 の report に `worker_stopped_with_report` は出ない（報告は attempt 1 の artifact に残っている）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "235",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "attempts": [
+    {
+      "scenario": "attempt-1.json",
+      "dispatch_args": [
+        "--expect-branch",
+        "feature/integration"
+      ],
+      "expect": {
+        "exit": 7,
+        "status": "partial",
+        "stop_reason": "worker_failed",
+        "waves_count": 1,
+        "sent": [
+          235
+        ],
+        "worker_states": {
+          "235": "failed"
+        },
+        "verification_outcomes": {
+          "235": "fail"
+        },
+        "worker_notes_include": {
+          "235": [
+            "the worker stopped and reported on turn 2"
+          ]
+        },
+        "blocking_codes": [
+          "worker_stopped_with_report",
+          "worker_failed"
+        ],
+        "blocking_details_include": [
+          "Its report, transcribed from its Claude Code transcript: \"止めて報告します。"
+        ],
+        "summary_includes": [
+          "--resume <この run の dispatch ディレクトリ>"
+        ],
+        "report_file": "dispatch-report.json",
+        "history_length": 1
+      }
+    },
+    {
+      "scenario": "attempt-2.json",
+      "resume": true,
+      "dispatch_args": [
+        "--expect-branch",
+        "feature/integration"
+      ],
+      "expect": {
+        "exit": 0,
+        "status": "success",
+        "stop_reason": "completed",
+        "waves_count": 1,
+        "sent": [
+          235
+        ],
+        "worker_states": {
+          "235": "completed"
+        },
+        "verification_outcomes": {
+          "235": "pass"
+        },
+        "limitation_codes": [
+          "resume_attempt"
+        ],
+        "summary_excludes": [
+          "worker_stopped_with_report"
+        ],
+        "report_file": "resume-attempt-2/dispatch-report.json",
+        "history_length": 2
+      }
+    }
+  ]
+}

@@ -1573,6 +1573,37 @@ commit を待つ監督ループの前提が profile 1 行で崩れるため。`d
 あちらが真偽値と整数だけで未知 key を拒否する object だから。止まったワーカーを max-turns まで
 nudge して最後に failed にする扱いは変えていない。commit 依頼と `cmate-uat` の fix nudge も対象外。
 
+### #287 — nudge に従って止めて報告したワーカーの報告が、report のどこにも残らなかった
+
+上の #3009 で nudge に「止めて報告」を足した結果、ワーカーはそれに従って止まるようになった。しかし runner は
+止まったワーカーへ `--max-turns`（既定 8）まで nudge を送り続け、最後は「no commit / no work evidence」の
+`failed` にしていた。**ワーカーが書いた報告の文は report に残らず**、報告の無い無進捗と同じ行に並んだ。
+利用側（Kewton/Musunest）は止まって返すことを良い停止として扱っており、報告の文が残ることを求めていた。
+
+→ nudge のターンが進捗なしで終わり、ワーカーの transcript がその nudge への返答の文で終わっていたら、
+それを「止めて報告した」と読み、**その時点で nudge を止めて** worker 記録の `worker_report` と blocking
+`worker_stopped_with_report`（`worker_failed` の隣）に報告の文を写すようにした。正本は
+[dispatch-contract.md](./dispatch-contract.md) 第2.12.1節。
+
+判断したこと:
+
+- **見分けるのは nudge のターンだけにした。** 最初のターンで「まず読みます」と返して止まるワーカーは珍しくなく、
+  それを報告と読めば従来 nudge で前に進んでいた run を止めてしまう。「止めて報告」を頼んでいるのは nudge なので、
+  nudge への返答だけを報告として読む。
+- **返答の出どころは transcript にし、画面は使わなかった。** `capture --json` の `realtimeSnippet` には nudge 自身の
+  エコーが返答と並んでおり、どの行がどのターンのものかを画面は言えない。transcript なら「最後の human message が
+  この nudge で、その後の最後の発話が文」と言えて、それが「この返答はこのターンのものだ」の根拠になる。
+  読み方（`cliToolId` と `*.jsonl` がちょうど1つ）は #220 と共有し、2つの読み手が別の file を選ぶことが無いようにした。
+- **見分けたら nudge を止めることにした。** 同じ問いに既に答えたワーカーに同じ nudge を送っても、ターンを cap まで
+  使って報告を埋もれさせるだけである。次の一手（報告を読んで Issue を直すか `--resume`）は人が決める。
+- **裁定と停止理由は動かしていない。** `worker_state` は `failed`、`stop_reason` は `worker_failed`（enum は閉じた集合）、
+  `verification.outcome` はそのターンの `wait --verify` のまま。区別は新しい blocking code と `worker_report` が担う。
+  `worker_report` は schema で required にしていないので、既存 report は検証を通る。
+- **報告を読めなかったとき（`capture` 失敗・Claude 以外・transcript が無い / 2つ以上）は、止めない。**
+  「読めなかった」を報告と読めば、読めないだけの run が早く止まる。従来どおり cap まで nudge し、cap で #220 の
+  `worker_turn_evidence` を記録する。報告の無い無進捗（最後が tool 呼び出し・nudge が記録されていない）も同じ扱いで、
+  従来の挙動を変えていない。
+
 ---
 
 ## merge（`scripts/merge.mjs`）

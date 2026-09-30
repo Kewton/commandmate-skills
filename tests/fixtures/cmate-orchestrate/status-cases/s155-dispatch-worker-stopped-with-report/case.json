@@ -1,0 +1,60 @@
+{
+  "description": "[#287] dispatch が partial で、#201 の worker は nudge の後に**止めて報告した**（`worker_report` と blocking `worker_stopped_with_report` が `worker_failed` の隣にある）。status は新しい code を Issue 行に出し、hint は「`worker_report.text` をまず読む」「報告の無い無進捗と同じ扱いにしない」を示す。`worker_failed` の hint も `worker_report` に触れる。",
+  "expect": {
+    "exit": 0,
+    "latest_phase": "dispatch",
+    "phase_states": {
+      "plan": "ok",
+      "dispatch": "ok",
+      "merge": "not_run",
+      "uat": "not_run"
+    },
+    "unreadable_paths": [],
+    "issues": [
+      200,
+      201
+    ],
+    "issue_states": {
+      "200": {
+        "plan": "ok",
+        "dispatch": "no_record",
+        "merge": "not_run",
+        "uat": "not_run"
+      },
+      "201": {
+        "plan": "ok",
+        "dispatch": "ok",
+        "merge": "not_run",
+        "uat": "not_run"
+      }
+    },
+    "dispatch": {
+      "201": {
+        "worker_state": "failed",
+        "verification_outcome": "fail",
+        "wave_index": 0
+      }
+    },
+    "run_next": [
+      "dispatch/stop_reason/worker_failed",
+      "merge/not_run/not_run"
+    ],
+    "issue_next": {
+      "200": [],
+      "201": [
+        "dispatch/blocking/worker_stopped_with_report",
+        "dispatch/blocking/worker_failed"
+      ]
+    },
+    "hints_include": {
+      "worker_stopped_with_report": "`worker_report.text`（blocking の detail にも同じ文）を**まず読む**",
+      "worker_failed": "`worker_report` があれば worker が止めて報告している",
+      "not_run": "dispatch が完走していないので"
+    },
+    "text_includes": [
+      "status=partial / stop=worker_failed",
+      "| #201  | W0          | failed/fail",
+      "worker_stopped_with_report"
+    ]
+  }
+}
