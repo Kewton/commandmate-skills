@@ -482,7 +482,7 @@
         "schema",
         "dry-run"
       ],
-      "latest": "0.9.1",
+      "latest": "0.10.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -894,6 +894,55 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.9.1/cmate-issue-authoring-0.9.1.tar.gz",
             "sha256": "943eb32de6ddbebf8310aff91f796bc956ce22a348ca2bc46833a396cd10ca6c",
             "size": 61306,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; the bundled validator needs only Node stdlib, but discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.10.0",
+          "changelog": "cmate-issue-authoring 0.10.0 — 計画を .commandmate/ の外に置け、人がやる文書の Issue を計画に入れられるようにした（CommandMate#3013）。planner の抽出規則の変更（#3002 / #3003）に写しを揃えた。\n\n- --plan-dir <path>: 計画の置き場所を repository root からの相対パスで変えられる（cmate-orchestrate の --runs-dir に揃えた）。既定は従来どおり .commandmate/issue-authoring。絶対パス・\"..\"・symlink で外に出る directory は exit 2。渡したときは rule plan_location で <plan_dir>/<plan_id>/plan.json にあることを確かめる。receipt も同じ directory に書く。\n- human-only: issues[].labels に human-only がある Issue は、planner_ready の「ドキュメント以外のパスが 1 本以上」の条件だけを外す（受入条件は残す）。dispatch の対象外であることを NOTE dispatch_excluded / --json の dispatch_excluded で名指しする。\n- 依存の書き方: 設定は足さず、本文の例を ## 依存 の下の - {{issue:<key>}}（登録後は素の #N）に直した。depends on は必須ではない。\n- planner の写し: 成果物見出しの外のパスを scope に入れない（#3002 / #273）、見出しの下は backtick のファイル名を拡張子によらず拾う（#3003 / #272）を、mirror-conformance で一致を固定したまま取り込んだ。",
+          "published_at": "2026-09-30T03:45:11Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-authoring-v0.10.0",
+            "commit": "73873b381673ed49b07e79ebae59be40b1a870b4"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-authoring-0.10.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-authoring-v0.10.0/cmate-issue-authoring-0.10.0.tar.gz",
+            "sha256": "f3fa93ebe668bf35bb4c246d7f92d75fd0bbe3fe1958f7c070390ae901cd7ecf",
+            "size": 68716,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
