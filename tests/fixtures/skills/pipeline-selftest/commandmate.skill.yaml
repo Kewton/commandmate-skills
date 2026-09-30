@@ -34,6 +34,9 @@ compatibility:
     - agent: gemini
       support: unknown
       evidence: Not verified for this fixture
+    - agent: opencode-v2
+      support: native
+      evidence: 'Measured 2026-09-29 on opencode2 2.0.18 (CommandMate#2975): GET /api/skill lists SKILL.md from .agents/skills and .claude/skills; /<name> makes the model call the skill tool. No restart needed. Not in v2''s / palette (@ and /skills only). This package was NOT separately measured.'
 requirements:
   commands: []
   network_hosts: []

@@ -45,6 +45,7 @@ manifest の `compatibility.agents` には **実測した Agent と CLI version 
 | `gemini` | `unknown` | **未計測。** どの package でも測っていない |
 | `copilot` | `unknown` | **未計測。** どの package でも測っていない |
 | `antigravity` | `unknown` | **未計測。** どの package でも測っていない |
+| `opencode-v2` | `native` | opencode2 2.0.18（2026-09-29、[CommandMate#2975](https://github.com/Kewton/CommandMate/issues/2975)）で `GET /api/skill` が `.agents/skills` と `.claude/skills` の `SKILL.md` を列挙し、`/<name>` の送信で model が `skill` tool を呼んで読まれることを実測。再起動は不要。v2 の `/` 補完には出ない（`@` と `/skills` picker のみ）。本 package は個別に測っていない |
 
 測定条件と限界は [docs/agent-support-matrix.md](https://github.com/Kewton/commandmate-skills/blob/main/docs/agent-support-matrix.md)
 第 3 節にある。

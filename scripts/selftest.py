@@ -455,6 +455,12 @@ class ManifestSchema(unittest.TestCase):
             self._codes(lambda doc: doc["compatibility"]["agents"][0].__setitem__("agent", "notatool")),
         )
 
+    def test_opencode_v2_agent_is_accepted(self) -> None:
+        self.assertNotIn(
+            "SKILL_INVALID_ENUM",
+            self._codes(lambda doc: doc["compatibility"]["agents"][0].__setitem__("agent", "opencode-v2")),
+        )
+
     def test_range_with_or_is_refused(self) -> None:
         self.assertIn(
             "SKILL_VERSION_RANGE_INVALID",

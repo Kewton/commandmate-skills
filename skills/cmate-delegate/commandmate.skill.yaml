@@ -75,6 +75,9 @@ compatibility:
     - agent: antigravity
       support: unknown
       evidence: Not measured, for this package or any other. No discovery, invocation or reload behaviour has been observed, so no support level is claimed.
+    - agent: opencode-v2
+      support: native
+      evidence: 'Measured 2026-09-29 on opencode2 2.0.18 (CommandMate#2975): GET /api/skill lists SKILL.md from .agents/skills and .claude/skills; /<name> makes the model call the skill tool. No restart needed. Not in v2''s / palette (@ and /skills only). This package was NOT separately measured.'
 requirements:
   commands:
     - name: commandmate
@@ -101,8 +104,8 @@ files:
     executable: false
     script: false
   - path: references/agent-compatibility.md
-    sha256: a1e1b48e3d58efc54190ff5fd1170bdd4a054b9de549c4e07c09acbf0dad587b
-    size: 8864
+    sha256: fdc58d3c57aecfd56557d6f0f0fd91c603d4f00c6c6a742267b95d7acee349e4
+    size: 9316
     kind: instruction
     executable: false
     script: false
