@@ -2435,6 +2435,13 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 
 ## パッケージ
 
+### 0.37.0 — 止めて報告した返答を、Claude 以外のワーカーからも読めるようにした（#296）
+
+- **#296** —— 0.35.0（#287）の「止めて報告」の返答は Claude Code の転写からしか読めず、Command Code などのワーカーは
+  報告しても `--max-turns` まで nudge されていた。CLI が `commandmate reply`（CommandMate 0.43.0+）を持つときは、
+  nudge を送った時刻を `--since` にしてそれで読む（`worker_report.source` は `commandmate_reply`）。有無は `reply --help` を
+  1 回だけ確かめ、無い CLI では従来の Claude 専用の転写読みに戻る。`reply: null`・exit 非 0・JSON 不正は報告無しとして従来どおり扱う。
+
 ### 0.36.0 — `--reverify` の検証を直列にでき、OpenCode V2 を互換に載せた（#274 / #275）
 
 - **#274** —— `--reverify` に `--verify-concurrency <n>` を足した。重いゲートを並べると負荷で実行時間依存のテストが落ち、
