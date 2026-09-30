@@ -2494,7 +2494,7 @@
         "guard",
         "bash"
       ],
-      "latest": "0.9.0",
+      "latest": "0.10.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -2828,6 +2828,55 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-monitor-v0.9.0/cmate-orchestrate-monitor-0.9.0.tar.gz",
             "sha256": "6830edc25df148e5bdc88ef9af276f33ff6b26511610bd500d59056a5ea29001",
             "size": 85018,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0. An installed skill was discovered from .claude/skills and matched in the slash palette; the installer writes .agents/skills and .claude/skills byte-identically.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0. It reads SKILL.md from .agents/skills (model self-report of the absolute path, not a mechanical trace). This version does not expose skills as slash commands; invoke by name or run the scripts.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. Readable as a procedure; discovery unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.15.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.10.0",
+          "changelog": "cmate-orchestrate-monitor 0.10.0 — 介入先の tmux セッション名を capture の sessionName から取る（#268）。\n\nこれまでは cliToolId と worktree id からセッション名を組み立てていた。CommandMate がセッション名に名前空間（mcbd-<ns>-<tool>-<worktree>）を付けるようになったため、組み立てた名前のペインが存在せず、権限プロンプトの承認や Enter の確定が NOT delivered になっていた。capture が返す sessionName を正とし、無い古いサーバでだけ従来の組み立てに戻る（--session-prefix を渡したときは従来どおりそちらを優先）。名前空間つきの fixture（Claude・Codex のレート制限画面）を足した。",
+          "published_at": "2026-09-30T03:40:58Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-monitor-v0.10.0",
+            "commit": "68aefc46fa9669739a29fb1d56f289aa8a6e48f9"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-monitor-0.10.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-monitor-v0.10.0/cmate-orchestrate-monitor-0.10.0.tar.gz",
+            "sha256": "be343ee3d4bdb3bd6a22dc3dd1dd457c613aa3c6dac35c9d7c361c1974037fae",
+            "size": 85644,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
