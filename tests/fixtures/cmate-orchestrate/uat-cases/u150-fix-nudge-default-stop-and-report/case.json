@@ -1,0 +1,67 @@
+{
+  "description": "#288: uat の fix nudge の既定文にも「止めて報告」の 1 文が入る（dispatch の既定 nudge と同じ文）。既存の行（続けて修正を進め…／未 commit の commit 行）は消えず、fix_nudge を宣言しなければ追記も limitation も無い。",
+  "phase": "fix_uat",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "uat_args": [
+    "--approve",
+    "--max-attempts",
+    "2"
+  ],
+  "uat_scenario": {
+    "uat": {
+      "200": {
+        "fix_on": 1
+      },
+      "201": "pass"
+    },
+    "workers": {
+      "200": {
+        "state": "completed",
+        "commit_on": 2
+      },
+      "201": {
+        "state": "completed"
+      }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "attempts_used": 1,
+    "eligible": [
+      201,
+      200
+    ],
+    "unresolved": [],
+    "attempts_count": 2,
+    "worktree_add_calls": 1,
+    "send_calls": 2,
+    "merge_calls": 1,
+    "completion_passed": true,
+    "sent_message_includes": {
+      "200": [
+        "続けて修正を進め",
+        "指示どおりに書けないと分かったら、進めずに止めて報告してください。",
+        "まだ変更が commit されていません。"
+      ]
+    },
+    "absent_limitation_codes": [
+      "worker_messages_applied"
+    ]
+  }
+}

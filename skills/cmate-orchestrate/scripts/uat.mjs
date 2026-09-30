@@ -91,6 +91,7 @@ import {
   safeBranch,
   safeWorktreeTarget,
   validateDispatch,
+  workerMessageProblem,
 } from './lib.mjs';
 
 const UAT_SCHEMA_VERSION = 1;
@@ -273,6 +274,11 @@ Options:
   --wait-timeout <sec>   --timeout for the fix worker's commandmate wait (default ${DEFAULT_WAIT_TIMEOUT_SECONDS}).
   --max-turns <n>        Max turns to drive a fix worker (initial send + nudges)
                          before giving up with no commit (default ${DEFAULT_MAX_TURNS}).
+  --fix-nudge-message <text>
+                         Appended after the default fix-worker nudge (which always
+                         keeps its commit line). Falls back to the profile's
+                         worker_messages.fix_nudge; the flag always wins. Non-blank,
+                         at most 2000 characters.
   --poll-limit <n>       Retained for compatibility; wait now blocks (default ${DEFAULT_POLL_LIMIT}).
   --help                 Show this help.
 
@@ -302,6 +308,7 @@ function parseCli(argv) {
         gh: { type: 'string' },
         'wait-timeout': { type: 'string' },
         'max-turns': { type: 'string' },
+        'fix-nudge-message': { type: 'string' },
         'poll-limit': { type: 'string' },
         help: { type: 'boolean' },
       },
@@ -382,6 +389,11 @@ function resolveInputs(parsed) {
     }
   }
 
+  if (values['fix-nudge-message'] !== undefined) {
+    const problem = workerMessageProblem(values['fix-nudge-message']);
+    if (problem !== null) throw new SkillError('invalid_input', `--fix-nudge-message ${problem}`, 3);
+  }
+
   // Resolved exactly as dispatch.mjs resolves it — one launcher convention for
   // the whole toolchain, and never a program name with a space in it (Issue #37).
   const cliArgv = resolveLauncher(values.cli);
@@ -404,6 +416,8 @@ function resolveInputs(parsed) {
     waitTimeout: positiveInt(values['wait-timeout'], 'wait-timeout', DEFAULT_WAIT_TIMEOUT_SECONDS),
     maxTurns: positiveInt(values['max-turns'], 'max-turns', DEFAULT_MAX_TURNS),
     pollLimit: positiveInt(values['poll-limit'], 'poll-limit', DEFAULT_POLL_LIMIT),
+    fixNudgeExtra: values['fix-nudge-message'] ?? null,
+    fixNudgeExtraSource: values['fix-nudge-message'] === undefined ? null : '--fix-nudge-message',
   };
 }
 
@@ -433,6 +447,13 @@ function validatePlan(plan) {
   }
   if (!Array.isArray(plan.issues)) {
     throw new SkillError('plan_invalid', 'plan.issues is missing', 3);
+  }
+  // Only fix_nudge is this runner's; the other worker_messages keys are dispatch's
+  // and are neither read nor refused here.
+  const fixNudge = profile.worker_messages?.fix_nudge;
+  if (fixNudge !== undefined) {
+    const problem = workerMessageProblem(fixNudge);
+    if (problem !== null) throw new SkillError('plan_invalid', `plan.profile.worker_messages.fix_nudge ${problem}`, 3);
   }
   return plan;
 }
@@ -1089,8 +1110,33 @@ function sendAndConfirm(inputs, worktreeId, message, retries = []) {
 // The message that nudges an idle-but-uncommitted fix worker to keep going.
 const FIX_NUDGE_MESSAGE = [
   '続けて修正を進め、この Issue の受入不合格を解消してください。',
+  '指示どおりに書けないと分かったら、進めずに止めて報告してください。',
   'まだ変更が commit されていません。完了したらこのブランチに単一 commit を作成してください（それが完了の合図です）。',
 ].join('\n');
+
+// The default fix nudge, plus the flag's / profile's text appended AFTER it —
+// never instead of it, so the commit line cannot be dropped.
+function fixNudgeMessage(inputs) {
+  return inputs.fixNudgeExtra === null ? FIX_NUDGE_MESSAGE : `${FIX_NUDGE_MESSAGE}\n${inputs.fixNudgeExtra}`;
+}
+
+// Precedence is flag → profile → nothing. Only the length is recorded, never the text.
+function fixNudgeLimitation(inputs, plan) {
+  const declared = plan.profile?.worker_messages?.fix_nudge;
+  if (inputs.fixNudgeExtra === null) {
+    if (declared === undefined) return null;
+    inputs.fixNudgeExtra = declared;
+    inputs.fixNudgeExtraSource = 'profile';
+  }
+  const profileId = String(plan.profile?.id ?? 'unknown');
+  const from = inputs.fixNudgeExtraSource === '--fix-nudge-message'
+    ? `--fix-nudge-message${declared === undefined ? '' : ` overrode profile ${profileId}'s worker_messages.fix_nudge`}`
+    : `from profile ${profileId}`;
+  return {
+    code: 'worker_messages_applied',
+    detail: `fix_nudge=${inputs.fixNudgeExtra.length} chars (${from}), appended after the default fix nudge; the default's commit line is always sent`,
+  };
+}
 
 // Supervise a fix worker to a real completion, the same way dispatch does: a fix
 // worker idles after every turn, so drive it turn by turn — dispatch, wait; on
@@ -1132,7 +1178,7 @@ function superviseFixLoop(inputs, worktreeId, worktreeDir, message, retries) {
     if (turns >= inputs.maxTurns) {
       return { state: 'failed', dispatched: true, note: `fix worker made no new commit after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap` };
     }
-    const nudged = sendAndConfirm(inputs, worktreeId, FIX_NUDGE_MESSAGE, retries);
+    const nudged = sendAndConfirm(inputs, worktreeId, fixNudgeMessage(inputs), retries);
     if (!nudged.sent) {
       return { state: 'failed', dispatched: true, note: `fix nudge failed: ${nudged.note}` };
     }
@@ -1639,6 +1685,10 @@ function runUatPhase(inputs, plan, dispatch, outDir) {
   // Recorded before anything else so it survives every early return below: a run
   // that stopped in the pre-flight still says what it had declared.
   if (inputs.unattended) report.limitations.push(unattendedModeLimitation(inputs));
+  if (inputs.phase === 'fix_uat') {
+    const applied = fixNudgeLimitation(inputs, plan);
+    if (applied !== null) report.limitations.push(applied);
+  }
 
   // Read-only preflight before any mutation.
   report.preflight = preflight(inputs, plan);

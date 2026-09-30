@@ -85,6 +85,7 @@ import {
   readVerifyConfigGates,
   VERIFY_CONFIG_RELATIVE,
   workerMessageProblem,
+  WORKER_MESSAGE_KEYS,
 } from './lib.mjs';
 
 const DISPATCH_SCHEMA_VERSION = 1;
@@ -1259,17 +1260,18 @@ function applyWorkerMessages(inputs, plan) {
   if (raw !== undefined) {
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
       throw new SkillError('plan_invalid',
-        `plan.profile.worker_messages must be a JSON object of nudge, got ${JSON.stringify(raw)}`, 3);
+        `plan.profile.worker_messages must be a JSON object of ${WORKER_MESSAGE_KEYS.join(' / ')}, got ${JSON.stringify(raw)}`, 3);
     }
     for (const key of Object.keys(raw)) {
-      if (key !== 'nudge') {
+      if (!WORKER_MESSAGE_KEYS.includes(key)) {
         throw new SkillError('plan_invalid',
-          `plan.profile.worker_messages has an unknown key "${key}"; this runner understands nudge`, 3);
+          `plan.profile.worker_messages has an unknown key "${key}"; this runner understands ${WORKER_MESSAGE_KEYS.join(', ')} (fix_nudge is the uat runner's and is not used here)`, 3);
       }
     }
-    if ('nudge' in raw) {
-      const problem = workerMessageProblem(raw.nudge);
-      if (problem !== null) throw new SkillError('plan_invalid', `plan.profile.worker_messages.nudge ${problem}`, 3);
+    for (const key of WORKER_MESSAGE_KEYS) {
+      if (!(key in raw)) continue;
+      const problem = workerMessageProblem(raw[key]);
+      if (problem !== null) throw new SkillError('plan_invalid', `plan.profile.worker_messages.${key} ${problem}`, 3);
     }
   }
   const declared = raw?.nudge;

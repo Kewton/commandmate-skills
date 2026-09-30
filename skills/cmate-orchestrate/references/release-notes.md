@@ -1953,6 +1953,17 @@ PR 本文の対比表は in-scope の変更を「宣言外」として数えて�
 
 ## uat（`scripts/uat.mjs`）
 
+### #288 — uat の fix nudge だけが固定文で、dispatch と同じ読み替えが起きえた
+
+何が起きたか: dispatch の監督 nudge には「指示どおりに書けないと分かったら、進めずに止めて報告してください。」が入り、
+`worker_messages.nudge` で追記もできた（CommandMate#3009）。uat の修正ループの nudge（`FIX_NUDGE_MESSAGE`）は固定文のままで、
+fix worker が指示どおりに書けないとき、止めずに別の読み替えで進めうる。
+だからこう変えた: 既定文に同じ 1 文を足し（既存の行は消さない）、`worker_messages.fix_nudge` と `--fix-nudge-message` を設けた
+（flag → profile → 既定文の順。追記であって差し替えではない）。設計判断: (1) flag を足したのは dispatch の `--nudge-message` と
+同じ操作で 1 run だけ文面を変えられるようにするため。(2) planner と dispatch は `fix_nudge` を受理する（dispatch は使わない）。
+拒否すると uat 用の欄を書いた profile が dispatch で止まるため。検証規則は `lib.mjs` の `workerMessageProblem` を共有する。
+(3) uat report の schema は増やさず、採用結果は limitations の `worker_messages_applied` に文字数だけ残した。
+
 ### #259 — 意味ゲートの producer が 1 つに固定されていて、実機 UAT の判定を入れられなかった
 
 `skill.id` の検査が `cmate-acceptance-test` の 1 値決め打ちだったので、**同じ

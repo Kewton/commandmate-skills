@@ -860,6 +860,12 @@ function runCase(caseId) {
       `plan.profile.pr_title_template ${JSON.stringify(plan.profile.pr_title_template)} !== ${JSON.stringify(expect.profile_pr_title_template)}`);
   }
 
+  // worker_messages (#288): the declaration is echoed rebuilt, keys the runner uses and all.
+  if (expect.profile_worker_messages !== undefined) {
+    check(deepEqual(plan.profile.worker_messages, expect.profile_worker_messages),
+      `plan.profile.worker_messages ${JSON.stringify(plan.profile.worker_messages)} !== ${JSON.stringify(expect.profile_worker_messages)}`);
+  }
+
   // max_parallel is honored: no wave is wider than the bound.
   check(plan.waves.every((w) => w.length <= plan.max_parallel), `a wave exceeds max_parallel ${plan.max_parallel}`);
 
@@ -2890,6 +2896,9 @@ function runUatCase(caseId) {
   const dispatchPath = generateDispatchReport(planPath, spec.dispatch_scenario ?? DEFAULT_DISPATCH_SCENARIO, workDispatch);
   if (!check(existsSync(dispatchPath), `dispatch-report.json was not generated at ${dispatchPath}`)) return;
 
+  // After the dispatch report, so a patched plan changes only what uat reads.
+  if (spec.plan_patch) patchPlan(planPath, spec.plan_patch);
+
   const workUat = mkdtempSync(join(tmpdir(), 'cmate-uat-'));
   const uatScenario = spec.uat_scenario ?? {};
   const integration = setupWorktrees(plan, workUat, (n) => uatSpecPasses(uatScenario, n));
@@ -2985,6 +2994,12 @@ function runUatCase(caseId) {
   for (const code of expect.blocking_codes ?? []) {
     check(report.blocking_reasons.some((entry) => entry.code === code), `blocking reason "${code}" was expected but not recorded`);
   }
+  for (const needle of expect.blocking_details_include ?? []) {
+    check(report.blocking_reasons.some((entry) => entry.detail.includes(needle)), `no blocking detail contains "${needle}"`);
+  }
+  for (const needle of expect.limitation_details_include ?? []) {
+    check(report.limitations.some((entry) => entry.detail.includes(needle)), `no limitation detail contains "${needle}"; details: ${JSON.stringify(report.limitations.map((entry) => entry.detail))}`);
+  }
   if (expect.acceptance_summary) {
     for (const [key, count] of Object.entries(expect.acceptance_summary)) {
       check(report.acceptance.verdicts[key] === count, `acceptance verdict count ${key}=${report.acceptance.verdicts[key]} !== ${count}`);
@@ -3015,6 +3030,21 @@ function runUatCase(caseId) {
 
   // The gate proofs come from the fake's invocation log.
   const cliLog = readCliLog(logPath);
+  // The fix worker's messages (#288): one sent message must hold ALL the needles,
+  // and `sent_message_excludes` must appear in none.
+  for (const [num, needles] of Object.entries(expect.sent_message_includes ?? {})) {
+    const messages = cliLog
+      .filter((entry) => entry.sub === 'send' && /issue-(\d+)/.exec(entry.args[0] ?? '')?.[1] === String(num))
+      .map((entry) => String(entry.args[1] ?? ''));
+    check(messages.some((message) => needles.every((needle) => message.includes(needle))),
+      `#${num}: no sent message contains all of ${JSON.stringify(needles)}; sent: ${JSON.stringify(messages.map((m) => m.slice(0, 300)))}`);
+  }
+  for (const [num, needles] of Object.entries(expect.sent_message_excludes ?? {})) {
+    const messages = cliLog
+      .filter((entry) => entry.sub === 'send' && /issue-(\d+)/.exec(entry.args[0] ?? '')?.[1] === String(num))
+      .map((entry) => String(entry.args[1] ?? ''));
+    for (const needle of needles) check(!messages.some((message) => message.includes(needle)), `#${num}: a sent message contains ${JSON.stringify(needle)}`);
+  }
   const worktreeAddCalls = countCalls(cliLog, 'worktree', 'add');
   const sendCalls = countCalls(cliLog, 'send');
   const mergeCalls = countCalls(cliLog, 'merge');

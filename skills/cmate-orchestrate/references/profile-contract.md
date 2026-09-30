@@ -878,6 +878,7 @@ runner 側の正本は [dispatch-contract.md](./dispatch-contract.md) 第1.1節�
 | key | 型 | 消費するのは |
 |---|---|---|
 | `nudge` | 空白のみでない文字列（2000 文字以下） | dispatch の監督 nudge（`--nudge-message` が同じ位置を上書きする） |
+| `fix_nudge` | 空白のみでない文字列（2000 文字以下） | uat の修正ループ（fix worker）の nudge（`uat --fix-nudge-message` が同じ位置を上書きする）。既定文の後ろに追記する |
 
 - **差し替えではなく追記**である。dispatch の既定 nudge の**後ろ**に足す。既定文の
   「単一 commit が完了の合図」の行は runner が必ず付けるので、profile からは消せない。
@@ -888,5 +889,5 @@ runner 側の正本は [dispatch-contract.md](./dispatch-contract.md) 第1.1節�
   plan 経由なら `plan_invalid` / exit 3（dispatch）で拒否する。
 - 宣言は plan の `profile.worker_messages` に写る（宣言が無ければ写らず、plan は従来と byte 一致）。
   profile ごと run_id の hash に入るので、直して取り直すと別の run_id になる。
-- 対象は dispatch の監督 nudge だけである。commit 依頼（`COMMIT_REQUEST_MESSAGE`）と
-  `cmate-uat` の fix nudge は変えない。
+- 対象は dispatch の監督 nudge（`nudge`）と uat の fix nudge（`fix_nudge`）である。commit 依頼（`COMMIT_REQUEST_MESSAGE`）は変えない。
+- planner と dispatch はどちらも `nudge` / `fix_nudge` の両方を受理する（自分が使わない key でも拒否しない。dispatch は `fix_nudge` を使わず、uat が読む）。検証は同じ規則（空白のみでない・2000 文字以下）を共有する。

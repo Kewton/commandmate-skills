@@ -531,11 +531,16 @@
           "maxLength": 200
         },
         "worker_messages": {
-          "description": "Optional text the runners append to the messages they send workers (CommandMate#3009). `nudge` is appended AFTER dispatch's default supervision nudge, never in place of it. Echoed only when the profile declared it, and last among the optional fields.",
+          "description": "Optional text the runners append to the messages they send workers (CommandMate#3009). `nudge` is appended AFTER dispatch's default supervision nudge and `fix_nudge` AFTER uat's default fix nudge (#288), never in place of them. Echoed only when the profile declared it, and last among the optional fields.",
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "nudge": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "fix_nudge": {
               "type": "string",
               "minLength": 1,
               "maxLength": 2000
