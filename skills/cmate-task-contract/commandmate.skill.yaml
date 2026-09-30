@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-task-contract
 name: cmate-task-contract
-version: 0.2.3
+version: 0.2.4
 summary: GitHub Issue から実行契約 .commandmate/tasks/<name>.yaml v1 を起案し、goal・変更可能 scope・検証ゲートを作業前に宣言して send --contract で送れる状態にする。
 description: >-
   作業を始める前に「何を達成するのか」「どのパスを変更してよいのか」「何が満たされたら

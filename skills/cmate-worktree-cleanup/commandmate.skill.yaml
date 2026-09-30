@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-worktree-cleanup
 name: cmate-worktree-cleanup
-version: 0.2.0
+version: 0.2.1
 summary: merge 済み・不要な git worktree を、削除可能性と証跡を dry-run で提示したうえで、clean かつ merge 証跡が十分な対象だけ guarded な方式で安全に削除する。dirty・unmerged・検証不能は削除しない。
 description: >-
   対象 issue または eligible な worktree を検査し、削除可能性と proof を dry-run で
@@ -164,7 +164,7 @@ files:
     executable: false
     script: true
   - path: scripts/lib.mjs
-    sha256: 877068c8a5779394329e8f91b4a04d0af418110d35ccdd35e2c5dc1c615a026e
+    sha256: 888ea3facc5afe928dd8f90cca65f0d1e8e31bf93a79378405b8e91951b0f440
     size: 32689
     kind: script
     executable: false

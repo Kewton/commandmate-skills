@@ -2409,6 +2409,14 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 
 ## パッケージ
 
+### 0.36.0 — `--reverify` の検証を直列にでき、OpenCode V2 を互換に載せた（#274 / #275）
+
+- **#274** —— `--reverify` に `--verify-concurrency <n>` を足した。重いゲートを並べると負荷で実行時間依存のテストが落ち、
+  1 件ずつなら通る Issue が `verification_failed` になっていた。run の引数であって plan の値ではないので、run id の hash にも
+  `--reverify` の突き合わせにも入れない。フラグ無しは従来どおり全件同時で、report は byte 一致。
+- **#275** —— `compatibility.agents` に `opencode-v2: native`（CommandMate#2975 の実測: opencode2 2.0.18 の `GET /api/skill` での発見と
+  `/<name>` での呼び出し）を足した。この package 単体では測っていない。同じ理由で全 package の版を patch で上げている。
+
 ### 0.35.0 — 人がやる Issue と、止まって返したワーカーを runner が扱えるようにした（#286 / #287 / #288）
 
 0.34.0 で利用側の要望に応えた nudge（「書けないと分かったら止めて報告」）と、cmate-issue-authoring 0.10.0 の
