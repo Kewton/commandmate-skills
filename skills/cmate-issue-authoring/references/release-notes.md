@@ -19,6 +19,12 @@ install 先で走らせるよう案内している箇所は無い。
 
 ## Changelog
 
+### 0.10.1 — `human-only` の説明を cmate-orchestrate 0.35.0 に合わせた（commandmate-skills#286）
+
+- cmate-orchestrate 0.35.0 の planner が `human-only` ラベルの Issue を plan に残したまま wave から外し、dispatch が
+  worker を送らなくなった。validator の `NOTE dispatch_excluded` の文言と文書（`plan-contract.md`・`issue-body-contract.md`）を
+  それに合わせ、`HUMAN_ONLY_LABEL` を mirror-conformance の byte 比較に加えた。rule と schema は変えていない。
+
 ### 0.10.0 — 計画を `.commandmate/` の外に置け、人がやる文書の Issue を計画に入れられる（CommandMate #3013 / #3002 / #3003）
 
 - `--plan-dir <path>`・`human-only` ラベル・依存の例の書き直し（CommandMate #3013）

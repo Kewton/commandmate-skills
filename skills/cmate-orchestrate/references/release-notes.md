@@ -2400,6 +2400,24 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 
 ## パッケージ
 
+### 0.35.0 — 人がやる Issue と、止まって返したワーカーを runner が扱えるようにした（#286 / #287 / #288）
+
+0.34.0 で利用側の要望に応えた nudge（「書けないと分かったら止めて報告」）と、cmate-issue-authoring 0.10.0 の
+`human-only` ラベルを、runner の側で受け止める版である。各件の経緯は本文の planner / dispatch / uat の節に在る。
+
+- **#286** —— `labels` に `human-only` を持つ Issue を、planner は plan に残したまま wave / merge_order から外し
+  （`dispatch_excluded: "human_only"`、notice `human_only_excluded`）、dispatch は worker を送らずに report へ
+  `not_dispatched` として残す。human-only の Issue への依存は待たず、plan の blocking と report の limitation
+  `human_only_dependency` で名指す。全 Issue が human-only の plan は `plan_invalid`。
+- **#287** —— nudge で開いたターンが進捗なしで終わり、ワーカーの返答があるとき、nudge を止めて返答を
+  `worker_report` に残し、blocking `worker_stopped_with_report` を出す。**現状は Claude のワーカーだけ**
+  （返答を転写から読むため）。Command Code などへの拡張は上流 CommandMate#3039（CLI からターンの返答を読む）待ち。
+- **#288** —— uat の修正ループの nudge にも「止めて報告」の 1 文を足し、profile の `worker_messages.fix_nudge` と
+  `uat --fix-nudge-message` で追記できるようにした。planner と dispatch も `fix_nudge` を受理する。
+
+**破壊的変更は無い。** schema の版は据え置きで、足したのは optional な field・code だけである。`human-only`
+ラベルも `fix_nudge` も持たない plan / report は byte 一致。
+
 ### 0.34.0 — 利用側の並列開発で「運用で補っていた」箇所を runner に入れた（CommandMate #3002〜#3009、#272 / #273）
 
 **この版の 9 件は、すべて利用側（Kewton/Musunest の M1.4〜M1.6）の実測から来ている。** 利用側は手順書に
