@@ -1,0 +1,61 @@
+{
+  "plan_schema_version": 1,
+  "skill_id": "cmate-issue-authoring",
+  "skill_version": "0.9.1",
+  "plan_id": "split-56fd19acc1c0",
+  "generated_mode": "dry-run",
+  "repository": "Kewton/Musunest",
+  "source": {
+    "kind": "text",
+    "ref": "caller input: export の追加",
+    "digest": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "issues": [
+    {
+      "key": "csv-writer",
+      "title": "feat(export): add a CSV writer for the order list",
+      "objective": "注文一覧を CSV 文字列に変換する writer を追加する。",
+      "acceptance_criteria": ["`npm test -- src/export/csv` が exit 0 で終わる"],
+      "target_files": ["src/export/csv.ts", "tests/export/csv.test.ts"],
+      "reference_files": [],
+      "test_expectations": ["npm test -- src/export/csv"],
+      "depends_on": [],
+      "labels": [],
+      "size": "s",
+      "parallel_safe": "unknown",
+      "evidence": [
+        {"claim": "注文一覧を CSV で書き出したい", "kind": "input", "ref": "caller input: export の追加"}
+      ],
+      "body": "注文一覧を CSV 文字列に変換する writer を追加する。\n\n## 対象ファイル\n\n- `src/export/csv.ts`\n- `tests/export/csv.test.ts`\n\n## 受入条件\n\n- [ ] `npm test -- src/export/csv` が exit 0 で終わる\n"
+    },
+    {
+      "key": "download-button",
+      "title": "feat(ui): add a download button that saves the order list as CSV",
+      "objective": "注文一覧画面に CSV を保存するボタンを置く。",
+      "acceptance_criteria": ["`npm test -- src/ui/orders` が exit 0 で終わる"],
+      "target_files": ["src/ui/orders/download-button.tsx", "tests/ui/orders/download-button.test.tsx"],
+      "reference_files": [],
+      "test_expectations": ["npm test -- src/ui/orders"],
+      "depends_on": ["csv-writer"],
+      "labels": [],
+      "size": "s",
+      "parallel_safe": "no",
+      "evidence": [
+        {"claim": "ボタンは CSV writer を呼ぶ", "kind": "input", "ref": "caller input: export の追加"}
+      ],
+      "body": "注文一覧画面に CSV を保存するボタンを置く。\n\n## 対象ファイル\n\n- `src/ui/orders/download-button.tsx`\n- `tests/ui/orders/download-button.test.tsx`\n\n## 受入条件\n\n- [ ] `npm test -- src/ui/orders` が exit 0 で終わる\n\n## 依存\n\n- {{issue:csv-writer}}\n"
+    }
+  ],
+  "duplicate_suspicions": [],
+  "open_questions": [],
+  "commands": [
+    {
+      "purpose": "既存 Issue との重複を検査する",
+      "command": "gh issue list --repo Kewton/Musunest --state all --search \"csv export in:title,body\" --limit 30",
+      "mutating": false,
+      "executed": true
+    }
+  ],
+  "warnings": [],
+  "notes": []
+}

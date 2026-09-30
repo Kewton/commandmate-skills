@@ -357,6 +357,15 @@ Wave 生成の規則は次の3つ。
 既定で許可し、足した分を `scope_defaults` に列挙する。裁定の記録は
 [adr-scope-derivation.md](./adr-scope-derivation.md)（第2節「認可境界は宣言の閉包である」）にある。
 
+**宣言の本数と導出の本数は分けて読む**（CommandMate #3004）。`scope_defaults` は `suspected_files` の
+部分集合なので、plan JSON には両方の本数が既に在る（宣言 = `suspected_files` の件数 − `scope_defaults` の件数）。
+人間が読む側 —— result の `summary_markdown` の `## scope の本数（宣言 + 導出）` 節と、`issue-analysis.md` の
+`Scope: N declared by the issue + M derived by the planner` 行 —— が、それを Issue ごとに分けて出す。
+導出分は**使われなくても害の無い許可**であり、その大半は実在しない。合計だけを見て
+「dispatch できる大きさか」を判断しないこと。dispatch の契約 goal も宣言分だけを列挙する
+（[dispatch-contract.md](./dispatch-contract.md) 第2.4節）。plan JSON に本数の field は足していない ——
+同じ事実を2か所に持つと食い違いうるうえ、全 plan の byte が動くからである。
+
 導出元は4つある。**列挙の順序もこのとおり**で、同じ path を2つの由来が出したら1件だけ出る。
 
 | 由来 | 規則 | 例 |
@@ -632,7 +641,7 @@ Kewton/BorderFreeKidsMap#63）: 「未決の問い」3件を本文に残した�
 | 項目 | 規範 |
 |---|---|
 | **既定** | `blocking`。`severity` を持たない entry は blocking である |
-| **notice 集合** | `harness_path_in_scope`（#199）、`profile_repository_override`（#210）、`scope_pattern_declared` と `scope_pattern_dropped`（[#219](https://github.com/Kewton/commandmate-skills/issues/219)。第5.7節）の **4件** |
+| **notice 集合** | `harness_path_in_scope`（#199）、`profile_repository_override`（#210）、`scope_pattern_declared` と `scope_pattern_dropped`（[#219](https://github.com/Kewton/commandmate-skills/issues/219)。第5.7節）、`prose_path_ignored`（CommandMate #3002。第5.8節）の **5件** |
 | **emit 規則** | planner は **notice の entry にだけ** `severity` を書く。blocking は暗黙のまま |
 | **required か** | **いいえ。** `note_entry` の `required` には入れない |
 | **envelope** | `orchestrate-result.v1` の `warnings` は code と detail だけを運ぶ（`severity` は載せない） |
@@ -645,8 +654,8 @@ Kewton/BorderFreeKidsMap#63）: 「未決の問い」3件を本文に残した�
 
 分けるのは「宣言されたか」ではなく「**何が**宣言されたか」である。`open_question_declared` は
 著者自身の宣言だが、宣言している内容が「まだ決めていない」なので blocking である。
-notice 集合の4件は、3件が**著者**の宣言（成果物見出しに書いたハーネス path、および
-成果物見出しの内／外に書いた scope pattern）の報告、1件が **operator** の宣言
+notice 集合の5件は、4件が**著者**の宣言（成果物見出しに書いたハーネス path、
+成果物見出しの内／外に書いた scope pattern、および成果物見出しの外に書いた path）の報告、1件が **operator** の宣言
 （`--repo` と `--allow-unverified` の2 flag）の報告であり、同じ原理の同じ側にある。
 `scope_pattern_dropped` も同じ側である —— 報告しているのは「planner が読めなかった」ではなく
 「**宣言として読まなかった**」、つまり著者が書いた位置についての事実だからである。
@@ -738,6 +747,86 @@ token を pattern として受けると Markdown の強調（`**bold**`）が sc
 repository 直下も含めて全 Markdown を指すなら `**/*.md` と書く（`**` は 0 段も跨ぐ）。
 また、日本語の散文に隙間なく続けて書いた pattern（`data/geo/stations/配下`）は抽出されない ——
 backtick で囲めば拾われる。
+
+## 5.8 成果物見出しの外の path（`prose_path_ignored`）
+
+**規範。** Issue 本文が**成果物見出し**（`DELIVERABLE_HEADING_RE`。`## 対象ファイル` /
+`## 成果物` / `## Deliverables` …）を1つでも持つとき、**その見出しの範囲の外**にしか書かれて
+いない path は `suspected_files` に入らない（CommandMate #3002）。範囲の外とは、見出しの
+範囲以外のすべて —— 散文、`## やること`、`## 完了条件`、`## 追記 N`、`## 注記`、title —— で
+あり、`/` の有無を問わない（`app.spec.yaml` も同じ）。
+
+| path を書いた場所 | 行き先 | 報告 |
+|---|---|---|
+| 成果物見出しの範囲（下位の `###` を含む） | `suspected_files` | —— |
+| 成果物見出しのある Issue の、範囲の外（文脈見出しの配下・文書 path・ハーネス path を除く） | `reference_files`（読む。`scope.allow` には入らない） | `prose_path_ignored`（notice。**Issue ごとに1件**、件数と先頭5件を名指す） |
+| 成果物見出しの無い Issue の、どこか | **従来どおり**（第5.3節・#50・#54 の規則のまま） | —— |
+
+- **見出しの範囲は下位の見出しで切れない**（[#273](https://github.com/Kewton/commandmate-skills/issues/273)）。
+  `## 対象ファイル` の範囲は、**同じかより上位の**見出しまで続く。`### 既存ファイル` /
+  `### 新規ファイル` の下の path は成果物である（文書 path も `reference_files` に落ちない）。
+  文脈見出し（`## 根拠` 等）の範囲は従来どおり次の見出しで切れる。
+- **否定で終わる見出しは成果物見出しではない**（`NEGATED_HEADING_RE`）。`## 変更対象外` /
+  `## 対象ファイル外` / `## 対象ファイル以外` / `## 変更しない` のように、見出しが「外」「以外」
+  「しない」で終わる（末尾の空白・コロンは無視）とき、語彙を含んでいても成果物見出しとして
+  扱わない。**「変えるな」を見出しで書いた path が scope に入る穴**を塞ぐためである。
+- 同じ path を見出しの範囲とその外の両方に書いたら、**成果物**である（強い方の言明が勝つ。#54 と同じ）。
+- **ハーネス path は warning に名指さない。** 見出しの外のハーネス path は #177 により元々
+  黙って拒否される（第5.3節）ので、ここで名指せば #177 が避けた騒音を戻すことになる。
+- 文脈見出しの配下の path と、見出しの外の文書 path（`docs/` / `.md` / `.rst` / `.txt`）は、
+  この規則の前から `reference_files` だったので**名指さない**。warning が名指すのは、この規則が
+  無ければ `scope.allow` に入っていた path だけである。
+
+**なぜ既定で有効か。** 実測（Kewton/Musunest）で、「（依存宣言の）ファイルの差分が 0 であること」
+（#181）、「`ci.yml` に手を入れる必要が出たら止めて返す」（#183）と完了条件に書いた path に
+**書き込み権限が付いた**。**「変えるな」と書いたファイルほど scope に入る**。成果物見出しを持つ
+Issue は scope を既に宣言している —— それ以外の言及を権限に変える理由が無い。#219 が pattern に
+引いた線（明示の宣言が言及に優る。第5.7節）を path 全般へ延ばしたものである。
+**見出しの無い Issue は変えない**: そこでは散文が「何を変えるか」の唯一の記述である。
+
+**意図した副作用**（Issue 上で利用者が確認済み）:
+
+- `## 完了条件` にだけ書いたテスト path は scope に入らない。受入条件がテストを求めていれば
+  `acceptance_requires_tests_but_scope_has_none`（第5.2節）で**止まる**。直し方は
+  テスト path を `## 対象ファイル` に書くこと。
+- 見出しの外の短い綴りによる `ambiguous_file_candidate`（第5.4節）は立たない。
+  その綴りは scope に入らないからである。
+
+**なぜ notice か。** 第5.6節の原理に従う。報告しているのは「planner が読めなかった」ではなく、
+「著者が成果物見出しで scope を宣言したので、それ以外を**宣言として読まなかった**」という
+著者が書いた位置についての事実である（`scope_pattern_dropped` と同じ側）。
+
+## 5.9 成果物見出しの下は拡張子によらず拾う（CommandMate #3003）
+
+**規範。** 成果物見出しの範囲（第5.8節。下位の `###` を含む）で **backtick に囲まれた file 名**は、
+拡張子によらず `suspected_files` に入る。`FILE_EXT` に無い拡張子（`expression.ebnf`・`Cargo.lock`・
+`requirements/ci.txt`）も、拡張子の無い名前（`Makefile`・`Dockerfile`・`.gitignore`・`LICENSE`）も、
+`/` の無い名前も同じである（[#272](https://github.com/Kewton/commandmate-skills/issues/272) をここに統合した）。
+
+| 書き方 | 成果物見出しの範囲 | 範囲の外 |
+|---|---|---|
+| backtick の file 名（拡張子不問） | `suspected_files` | 読まない（第5.8節の地の文。backtick の path なら `prose_path_ignored` に名指す） |
+| backtick 無しの path | 従来どおり（`FILE_EXT` と既知 root で判定） | 第5.8節 |
+
+file 名とみなす token（`CANDIDATE_DECLARED`）は、`/` か `.` を含み名前の文字で終わるもの、
+または `…file`（`Makefile` / `Justfile`）か全大文字（`LICENSE` / `CODEOWNERS`）の拡張子無し名である。
+camelCase の識別子（`parseFoo`）・flag（`--json`）・数字列（`0.33.0`）・`./x` / `../x` / `/x` は拾わない。
+`console.log` のような点つき識別子は拾う —— 成果物見出しの下にしか書けず、代価は誰も使わない
+許可1件である（使われない許可のコストはゼロ。[ADR](./adr-scope-derivation.md) 第2節）。
+
+**なぜ profile の欄（拡張子を足す）ではないか。** 起票時の検査（cmate-issue-authoring の
+`validate-plan.mjs`）は profile を読まないので、欄で足した拡張子は**起票時の判定と planner の判定を
+食い違わせる**。見出しの下の規則は本文だけで決まり、写しにそのまま載る（Issue 上で利用者と確定）。
+
+**なぜ見出しの下だけか、なぜ backtick だけか。** `FILE_EXT` が閉じているのは**散文の token を書き込み権限に
+しない**ためであり、成果物見出しの下は宣言であって散文ではない —— #219 が pattern について下した判断と
+同じである。backtick を要求するのは、見出しの下の箇条書きにも散文（「`src/a.ts` を直す（例: node.js 側）」）が
+混ざるからである。
+
+**`unrecognized_file_extension` の範囲が変わる。** 成果物見出しを持つ Issue では、見出しの下の backtick path は
+すべて拾われ、見出しの外の path は拡張子と無関係に scope の外なので、見出しの外の未知拡張子 path は
+`prose_path_ignored` と `reference_files` に回る（拡張子を直せと言うのは誤診になる）。見出しの無い Issue では
+従来どおり `unrecognized_file_extension`（blocking）が出る。
 
 ## 6. risk
 

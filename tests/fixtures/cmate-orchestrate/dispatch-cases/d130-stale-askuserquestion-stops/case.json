@@ -1,0 +1,65 @@
+{
+  "description": "[CommandMate#3007] 前の回のワーカーが AskUserQuestion を返して止まったままのセッションへ dispatch する世界（capture は CommandMate の Command Code fixture `question-flat-short` + promptData golden を写した stale-screens/askuserquestion.json。`isPromptWaiting: true`）。runner は最初の send の**前に** `capture --json` を読み、送らずに止める: 新しい blocking code `stale_prompt_on_session` に画面の抜粋（質問文）と `commandmate interrupt` の案内を付け、worker は `prompt`、run は human_required。空振り防止: (1) send は 0 回（見ずに送る実装を落とす）、(2) interrupt も respond も 0 回（既定で畳む実装・質問に答える実装を落とす）、(3) capture は 1 回。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "100",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "human_required",
+    "human_required": true,
+    "waves_count": 1,
+    "no_respond": true,
+    "never_sent": [
+      100
+    ],
+    "worker_states": {
+      "100": "prompt"
+    },
+    "prompt_detected": [
+      100
+    ],
+    "cli_subcommand_counts": {
+      "interrupt": 0,
+      "respond": 0,
+      "capture": 1
+    },
+    "blocking_codes": [
+      "stale_prompt_on_session",
+      "human_input_required"
+    ],
+    "blocking_details_include": [
+      [
+        "#100: before the first send",
+        "isPromptWaiting",
+        "Approve proceeding from the plan into worktree creation and dispatch?",
+        "Nothing was sent, and the question was NOT answered",
+        "commandmate interrupt <worktree-id>",
+        "--interrupt-stale-prompt"
+      ]
+    ],
+    "absent_limitation_codes": [
+      "stale_prompt_interrupted"
+    ],
+    "worker_notes_include": {
+      "100": [
+        "a question from an earlier turn is still on this session",
+        "not answered"
+      ]
+    }
+  }
+}

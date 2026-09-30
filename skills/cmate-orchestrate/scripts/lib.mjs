@@ -281,6 +281,74 @@ export function parseCliJson(result) {
 }
 
 // =============================================================================
+// `send` refused because the session was not ready yet (CommandMate#3006)
+// =============================================================================
+//
+// Written here FIRST, like resolveLauncher: dispatch and uat both open a brand-new
+// session with their first `send`, and a rule that only one of them knows is the
+// rule the other one fails on.
+//
+// MEASURED (Kewton/Musunest #201 / #213 / #217 / #233 — every one the FIRST send
+// into a session that very send had started): the server refuses a send it could
+// not deliver because the agent had not reached its composer yet, and it has typed
+// NOTHING when it does. Two spellings reach the CLI, both as exit 99
+// (ExitCode.UNEXPECTED_ERROR, `handleApiError`'s 5xx branch), and both are
+// transcribed in tests/fixtures/cmate-orchestrate/commandmate-cli-contract.json
+// (`send_failures`):
+//
+//   session_starting   HTTP 503 `SESSION_STARTING` (CommandMate #1637; Command
+//                      Code joins Claude there in CommandMate#3006): stderr
+//                      "Error: Server error: <tool> did not reach its input prompt
+//                      within <n>s (initialization timeout). … Retry the send in a
+//                      few seconds …"
+//   prompt_not_ready   the pre-send composer wait timing out (Command Code /
+//                      Codex / Antigravity): stderr "… prompt not ready: timed out
+//                      waiting for the composer before sending"
+//
+// So the refusal is recognised by BOTH halves, never by one: exit 99 alone is
+// every unexpected error the CLI has — a 409 surfaces as "Unexpected HTTP status:
+// 409" under the same 99, and a message that "did not arrive intact" is also 99
+// and may have been half-typed — and the sentence alone could sit inside some other
+// failure's text. PROMPT_WAITING is exit 2 and never matches. Only the pair means
+// "unsent, a retry is safe", and the answer does not depend on which agent it is.
+export const SEND_NOT_READY_EXIT = 99;
+export const SEND_NOT_READY_PATTERNS = [
+  { kind: 'session_starting', re: /\bSESSION_STARTING\b|did not reach its input prompt/i },
+  { kind: 'prompt_not_ready', re: /prompt not ready/i },
+];
+
+// Which not-ready refusal this `send` result is, or null when it is anything else.
+export function sendNotReadyKind(result) {
+  if (!result || result.ok || result.status !== SEND_NOT_READY_EXIT) return null;
+  const text = `${result.stderr ?? ''}\n${result.stdout ?? ''}`;
+  return SEND_NOT_READY_PATTERNS.find((entry) => entry.re.test(text))?.kind ?? null;
+}
+
+// How long to let a new session finish booting before the ONE retry. A constant,
+// not a flag: the retry absorbs a start-up race, it is not a knob to tune per run.
+// `CMATE_ORCHESTRATE_SEND_PAUSE_MS` overrides every send-side pause for the
+// fixture suite only (the same `CMATE_ORCHESTRATE_*` precedent as the unattended
+// lock root), so the tests exercise the retry without sleeping; anything that is
+// not a non-negative integer falls back to the constant rather than to "no wait".
+export const SEND_NOT_READY_RETRY_DELAY_MS = 15000;
+export const SEND_PAUSE_ENV = 'CMATE_ORCHESTRATE_SEND_PAUSE_MS';
+
+export function sendPauseMs(fallbackMs, env = process.env) {
+  const raw = env[SEND_PAUSE_ENV];
+  if (typeof raw === 'string' && /^\d+$/.test(raw.trim())) return Number(raw.trim());
+  return fallbackMs;
+}
+
+// A synchronous pause, for uat.mjs, which is synchronous end to end. dispatch.mjs
+// supervises a wave concurrently and must NOT use this: blocking its event loop
+// would stall every other worker's supervision for the delay, so it awaits a timer
+// instead.
+export function pauseMs(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// =============================================================================
 // Launcher resolution (Issue #37)
 // =============================================================================
 
@@ -1305,4 +1373,111 @@ export function normalizeObservations(raw) {
     out.push(normalized);
   }
   return out;
+}
+
+// =============================================================================
+// pr_title_template — the PR title the merge runner writes (CommandMate#3005)
+// =============================================================================
+//
+// MEASURED (Kewton/Musunest, run plan-01ba9bc589cb, #248). `merge.mjs --create-prs`
+// titled every PR with the issue title verbatim. That repository requires a
+// Conventional-Commits PR title in CI (semantic-pull-request), and a squash merge
+// makes the PR title the commit subject, so every PR this runner opened was one
+// the repository could not merge. The workers were therefore told to push and
+// open the PRs themselves — the double-PR path cmate-worker-development §4 exists
+// to close. The fix is to let the repository say what its titles look like.
+//
+// The placeholders are a CLOSED set, and an unknown one is refused rather than
+// left in the title: a PR titled `{{kind}}: …` is a title nobody meant.
+//   {{type}} / {{scope}}  from the branch's own commit subjects (merge.mjs
+//                         resolvePrTitle). Never guessed: when the commits do not
+//                         determine them, no PR is opened.
+//   {{title}}             the issue title (the pre-#3005 PR title).
+//   {{number}}            the issue number.
+//
+// Shared by the planner (load_error / exit 6, about the profile file) and the
+// merge runner (plan_invalid / exit 3, about the plan file), for the reason
+// profile-contract.md §10.2 gives for dispatch_defaults: the same rule, reported
+// against the file the reader has to open.
+export const PR_TITLE_PLACEHOLDERS = ['type', 'scope', 'title', 'number'];
+const PR_TITLE_TOKEN_RE = /\{\{\s*([^{}]*?)\s*\}\}/g;
+const MAX_PR_TITLE_TEMPLATE = 200;
+
+export function prTitlePlaceholders(template) {
+  return [...template.matchAll(PR_TITLE_TOKEN_RE)].map((match) => match[1]);
+}
+
+export function normalizePrTitleTemplate(raw, where, code, exitCode) {
+  if (raw === undefined) return null;
+  const fail = (why) => new SkillError(code, `${where} ${why}`, exitCode);
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    throw fail(`must be a non-empty string such as "{{type}}({{scope}}): {{title}} (#{{number}})", got ${JSON.stringify(raw)}. `
+      + 'Omit the key to keep the issue title as the PR title');
+  }
+  if (raw.length > MAX_PR_TITLE_TEMPLATE || /[\r\n]/.test(raw)) {
+    throw fail(`must be a single line of at most ${MAX_PR_TITLE_TEMPLATE} characters`);
+  }
+  for (const name of prTitlePlaceholders(raw)) {
+    if (!PR_TITLE_PLACEHOLDERS.includes(name)) {
+      throw fail(`uses the unknown placeholder "{{${name}}}"; this runner understands ${PR_TITLE_PLACEHOLDERS.map((p) => `{{${p}}}`).join(', ')}. `
+        + 'An unknown placeholder is refused rather than left in the title: a PR titled with a literal placeholder is a title nobody meant');
+    }
+  }
+  return raw;
+}
+
+// A Conventional-Commits subject: `type(scope)!: description`. The type is
+// lower-case, as the spec's own tooling (commitlint's type-case) and
+// semantic-pull-request's default type list expect. A subject that does not
+// match is NOT read as "type unknown, carry on": it is the commit that makes the
+// type undetermined.
+const CONVENTIONAL_SUBJECT_RE = /^([a-z][a-z0-9-]*)(?:\(([^()\s][^()]*)\))?!?: \S/;
+
+export function parseConventionalSubject(subject) {
+  const match = CONVENTIONAL_SUBJECT_RE.exec(String(subject));
+  if (match === null) return null;
+  return { type: match[1], scope: match[2] === undefined ? null : match[2].trim() };
+}
+
+// =============================================================================
+// Worker declarations (CommandMate#3005) — the convention both Skills share
+// =============================================================================
+//
+// A worker that reinterpreted the issue or made a call the issue did not make
+// says so in its COMMIT MESSAGE BODY, one declaration per line, each line opening
+// with one of the labels below and a colon (ASCII or full-width). Indented lines
+// directly under a declaration continue it. The commit message is the carrier
+// because it is the one place a worker already writes, that travels with the
+// branch, and that nobody else writes into (a file under `.commandmate/` is the
+// operator's, and a worker's final chat report never reaches a merge runner).
+// cmate-worker-development's references/evidence-vocabulary.md states the same
+// convention for the worker side.
+export const WORKER_DECLARATION_LABELS = ['読み替え', '判断', '本文に無い指摘'];
+const WORKER_DECLARATION_RE = new RegExp(`^(${WORKER_DECLARATION_LABELS.join('|')})\\s*[:：]\\s*(\\S.*)$`);
+
+export function extractWorkerDeclarations(body) {
+  const out = [];
+  let current = null;
+  for (const raw of String(body ?? '').split('\n')) {
+    const line = raw.replace(/\s+$/, '');
+    const match = WORKER_DECLARATION_RE.exec(line);
+    if (match !== null) {
+      current = { label: match[1], text: match[2].trim() };
+      out.push(current);
+      continue;
+    }
+    if (current !== null && /^\s+\S/.test(line)) {
+      current.text = `${current.text} ${line.trim()}`;
+      continue;
+    }
+    current = null;
+  }
+  return out;
+}
+
+// Fills a template normalizePrTitleTemplate accepted. `values` holds a string
+// for every placeholder the template uses; the caller decides what "cannot be
+// determined" means before it gets here.
+export function renderPrTitleTemplate(template, values) {
+  return template.replace(PR_TITLE_TOKEN_RE, (_, name) => String(values[name]));
 }

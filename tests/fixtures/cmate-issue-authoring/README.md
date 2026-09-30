@@ -206,6 +206,8 @@ node tests/fixtures/cmate-issue-authoring/open-questions-conformance.mjs
 | `cases/valid-minimal.json` | 最小の適合計画（Issue 1 件） |
 | `cases/valid-acceptance-gates.json` | 実在するゲートを `require:` した適合計画 |
 | `cases/valid-unmeasurable.json` | 測れない受入条件をブロックにしなかった適合計画 |
+| `cases/100-valid-human-only.json` | `human-only` ラベルの文書だけの Issue を含む適合計画（CommandMate#3013）。依存は `## 依存` の下の素の `- {{issue:<key>}}` |
+| `cases/101-valid-bare-dependency.json` | 依存を素の `- {{issue:<key>}}` だけで書いた適合計画。実物の planner が宣言どおりの依存を読むことを dogfood で確かめる（CommandMate#3013） |
 | `mutate.mjs` | JSON Pointer で 1 箇所だけ変異させる |
 | `to-issue-json.mjs` | 計画 → cmate-orchestrate の `--issue-json` fixture |
 | `assert-planner-clean.mjs` | execution plan に対する assertion |

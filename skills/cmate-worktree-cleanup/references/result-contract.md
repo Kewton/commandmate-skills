@@ -24,6 +24,12 @@ plan は必ず dry-run で作る。`mode` は `dry_run` 固定。deletion は含
 - `decision: delete` は `state: clean` かつ `proof.type ∈ {direct, merged_equivalent}` の
   ときだけ。それ以外は必ず `skip` で、`skip_reason` を埋める。
 
+- `proof.cherry_unmatched` / `proof.equivalence_path` — 任意の evidence（CommandMate#3010）。
+  `git cherry <base> <tip>` の `+` 行の数と、条件4がどちらの経路で成り立ったか
+  （`patch_equivalent` / `net_diff_equal`）。**required ではなく、`plan_schema_version` は 1 のまま**
+  である（既存の reader が知らない field は任意であり、既存の意味を変えないため）。
+  `cherry_unmatched` が正でも、それだけで否決しない（[proof-algorithm.md](./proof-algorithm.md) 条件4）。
+
 plan は「何を消し、何を残すか」を **証跡付きで** 見せるためのものである。
 removed と skipped を混ぜず、target ごとに理由を示す。
 
@@ -47,10 +53,14 @@ run の失敗ではない。sync の `unavailable` / `failed` も `failure` に�
 - `removed` は消した worktree のみ。dry-run では空。各要素に `proof_type`（`direct` /
   `merged_equivalent`）と `method`（`direct_branch_d` / `guarded_ref_delete`）、
   `evidence`（`base`、`verified_at`、direct なら `ancestor_verified`、
-  merged_equivalent なら `pr_number` / `merge_commit_oid` / `expected_old_oid`）を付ける。
+  merged_equivalent なら `pr_number` / `merge_commit_oid` / `expected_old_oid`、任意で
+  `cherry_unmatched` / `equivalence_path`）を付ける。summary は `equivalence_path` を見て
+  「patch 等価」か「正味の差分のバイト一致」かを書き分ける。
 - `skipped` は残した worktree のみ。dirty / detached / unmerged / unverifiable / excluded /
   plan_drift はすべてここ。`reason` と `proof_type`（`excluded` を含む）を付ける。
 - 同じ worktree が `removed` と `skipped` の両方に現れてはならない。
+- runner の apply で、deletable だが `--confirm` に無かった対象は `reason: not_in_scope`・
+  `detail` に「--confirm に無い」を付けて `skipped` に置く（消していないので removed には置けない）。
 
 ### 2.3 confirmation
 

@@ -37,10 +37,9 @@ goal: |
 
   ## Files you may change
   - src/telemetry/payload.ts
-  - src/telemetry/payload.test.ts
-  - src/telemetry/payload.spec.ts
-  - src/telemetry/__tests__/payload.ts
-  - src/telemetry/__tests__/payload.test.ts
+  Also allowed, not listed: 4 path(s) the planner derived from the files above (lockfiles
+  beside a dependency manifest, conventional test paths beside a source file). They are permissions,
+  not work items: write one only if the task needs it.
 
   ## Rules
   - A prohibition this contract does not state is NOT a permission — it is text the

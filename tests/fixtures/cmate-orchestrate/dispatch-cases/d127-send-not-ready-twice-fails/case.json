@@ -1,0 +1,50 @@
+{
+  "description": "[CommandMate#3006] 1 回目が prompt not ready、再送も 503 SESSION_STARTING で断られる世界。再送は**1回だけ**なので、3 回目は送らず、従来どおり dispatch 失敗（worker_failed）として返す。空振り防止: (1) send はちょうど 2 回（無限に送り直す実装・2 回目を送らない実装の両方を落とす）、(2) limitation は『再送も断られた』と言い、worker の note は 2 回目の失敗の文言を運ぶ。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "100",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "1",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "send_counts": {
+      "100": 2
+    },
+    "worker_states": {
+      "100": "failed"
+    },
+    "limitation_codes": [
+      "send_retried_not_ready"
+    ],
+    "limitation_code_counts": {
+      "send_retried_not_ready": 1
+    },
+    "limitation_details_include": [
+      "the retry was refused too",
+      "exactly as it did before the retry existed"
+    ],
+    "worker_notes_include": {
+      "100": [
+        "contract dispatch failed",
+        "Retry the send in a few seconds"
+      ]
+    }
+  }
+}

@@ -13,7 +13,9 @@ open question が 1 件でも未解決なら承認を求めない。
 
 ## 1. 二重登録ガード
 
-登録が終わったら receipt を計画と同じ directory に書く。
+登録が終わったら receipt（`registration.json`）を**計画と同じ directory**
+（`<plan_dir>/<plan_id>/`。`plan_dir` の既定は `.commandmate/issue-authoring`、`--plan-dir` で
+変えたならその directory。[plan-contract.md](./plan-contract.md) 第 2.1 節）に書く。
 
 ```json
 {
@@ -31,6 +33,8 @@ open question が 1 件でも未解決なら承認を求めない。
 
 **同じ `plan_id` の receipt が既にあるなら、既定で登録を拒否する。** 同じ Feature 記述から
 同じ割り方で作った計画は同じ `plan_id` になるので、計画を作り直しても再登録は防げる。
+receipt を探すのは `<plan_dir>/<plan_id>/` である。**同じリポジトリでは同じ `plan_dir` を使い続ける**
+こと —— 途中で置き場所を変えると、前の receipt が見えず二重登録を防げない。
 
 続けたい場合（前回が途中で失敗した等）は、`skipped` に残っている key だけを対象に、
 人間の明示指示のもとで再開する。receipt を消して最初からやり直させてはならない。
@@ -46,7 +50,8 @@ planner が読めない）。
 
 ## 3. 相互リンク
 
-- **依存する側**: 本文の `## 依存` 節に `depends on #<番号>` が入る（placeholder の置換結果）。
+- **依存する側**: 本文の `## 依存` 節に素の `#<番号>` が入る（`- {{issue:<key>}}` の置換結果）。
+  `depends on` の文言は要らない（[issue-body-contract.md](./issue-body-contract.md) 第 2.4 節）。
 - **依存される側**: 依存する Issue がすべて登録できた後で、`gh issue comment` で
   「#N がこの Issue に依存している」と 1 件だけ記録する。**本文は書き換えない**
   （本文の編集は既存 Issue の変更であり、この Skill のスコープ外である）。

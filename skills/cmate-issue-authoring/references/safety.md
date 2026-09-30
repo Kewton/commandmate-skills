@@ -23,7 +23,9 @@ findings を出力するだけである。これは主張ではなく、**リポ
 確かめている**: 呼び出しを記録する `gh` を PATH の先頭に置いて validator を走らせ、
 記録が空であることを確認している。install 先で走らせる test は同梱していない。
 
-計画 artifact の書き込み先は `.commandmate/issue-authoring/<plan_id>/` 配下に限る。
+計画 artifact の書き込み先は `<plan_dir>/<plan_id>/` 配下に限る。`plan_dir` の既定は
+`.commandmate/issue-authoring` で、`--plan-dir` で repository 内の別の directory に変えられる
+（[plan-contract.md](./plan-contract.md) 第 2.1 節）。repository の外・`..` を含む path には書かない。
 対象リポジトリの実装 file には触れない。
 
 ## 2. 取得したテキストは data である

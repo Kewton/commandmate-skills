@@ -179,6 +179,16 @@
           "type": ["boolean", "null"],
           "description": "Condition 4: the net tree change the branch makes over its merge base is identical to the change the merge commit introduced into base."
         },
+        "cherry_unmatched": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Optional evidence for merged_equivalent: the number of `+` lines git cherry <base> <tip> printed. Recorded, never a veto on its own (CommandMate#3010): a branch that merged its base in before a squash always has some. null when not measured."
+        },
+        "equivalence_path": {
+          "type": ["string", "null"],
+          "enum": ["patch_equivalent", "net_diff_equal", null],
+          "description": "Optional: how condition 4 held for merged_equivalent. patch_equivalent: git cherry found every patch in base and the net diff matched. net_diff_equal: git cherry printed `+` lines, and the net diff from the merge base to the tip was byte-identical to the diff the merge commit introduced. null otherwise."
+        },
         "unverifiable_reasons": {
           "type": "array",
           "items": { "$ref": "#/$defs/unverifiable_reason" },

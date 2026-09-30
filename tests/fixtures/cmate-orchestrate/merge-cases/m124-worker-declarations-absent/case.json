@@ -1,0 +1,81 @@
+{
+  "description": "CommandMate#3005: 申告が無ければ節も limitation も出ない —— ただし「申告が無い」と「読めなかった」は別の事実である。#200 のコミット本文は申告に似た行を持つが、どれも規約の形ではない（コロンが無い `判断は特になし`、行頭でない `なお 判断: …`）ので転記しない。#201 は `git log` が失敗する: 節は「読めなかった。申告が無い証拠ではない」と書き、limitation `worker_declarations_unread` が出る。template が無いので PR は立つ（読めないことは PR を止めない）。",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "merge_args": [
+    "--approve"
+  ],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": {
+      "repo_access": true
+    },
+    "git": {
+      "base_resolvable": true
+    },
+    "prs": {
+      "200": {
+        "create": "ok"
+      },
+      "201": {
+        "create": "ok"
+      }
+    },
+    "log": {
+      "201": "fail",
+      "200": {
+        "commits": [
+          {
+            "subject": "feat(store): add a session store",
+            "body": "判断は特になし\nなお 判断: これは行頭ではない\n"
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [
+      201,
+      200
+    ],
+    "targets_outcome": {
+      "201": "pr_created",
+      "200": "pr_created"
+    },
+    "limitation_codes": [
+      "worker_declarations_unread"
+    ],
+    "absent_limitation_codes": [
+      "worker_declarations_transcribed"
+    ],
+    "pr_bodies_contain": {
+      "201": [
+        "## ワーカーの申告",
+        "This is not evidence that it declared none."
+      ]
+    },
+    "pr_bodies_absent": {
+      "200": [
+        "ワーカーの申告",
+        "これは行頭ではない"
+      ]
+    }
+  }
+}

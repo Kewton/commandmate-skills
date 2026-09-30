@@ -1,5 +1,5 @@
 {
-  "description": "[#179] wait が timeout した時点で worker が**生きている**世界。`--wait-timeout` は `commandmate wait` の1回あたりの上限であって worker の1ターンの上限ではないので、ターンが窓より長いだけで runner は timeout を報告する（実測: Kewton/BorderFreeKidsMap #62、1ターン約40分に対して `--wait-timeout 1800`。worker はそのまま完走して commit を載せた）。runner は timeout の時点で `capture --json` を**1回だけ**叩き、その答え（isRunning / isGenerating / isPromptWaiting / sessionStatus と経過秒）を #102 の `worker_liveness` に転記し、blocking を `wait_window_exhausted` として名指しする。次アクションは「待って `--reverify`」であり、**再 dispatch ではない**（完走しかけの作業の上に2人目を重ねることになる）。空振り防止に3点: (1) timeout していない #101 には `worker_liveness` が**無い**（常に付ける実装なら「測った」が無意味になる）、(2) `worker_stalled` / `worker_liveness_unreadable` は出ない（code を1つに固定した実装を落とす）、(3) `capture` は 3 回（#101 の送信確定1・#102 の送信確定1・#102 の生死1）—— timeout ごとに1回であって、ポーリングではない。",
+  "description": "[#179] wait が timeout した時点で worker が**生きている**世界。`--wait-timeout` は `commandmate wait` の1回あたりの上限であって worker の1ターンの上限ではないので、ターンが窓より長いだけで runner は timeout を報告する（実測: Kewton/BorderFreeKidsMap #62、1ターン約40分に対して `--wait-timeout 1800`。worker はそのまま完走して commit を載せた）。runner は timeout の時点で `capture --json` を**1回だけ**叩き、その答え（isRunning / isGenerating / isPromptWaiting / sessionStatus と経過秒）を #102 の `worker_liveness` に転記し、blocking を `wait_window_exhausted` として名指しする。次アクションは「待って `--reverify`」であり、**再 dispatch ではない**（完走しかけの作業の上に2人目を重ねることになる）。空振り防止に3点: (1) timeout していない #101 には `worker_liveness` が**無い**（常に付ける実装なら「測った」が無意味になる）、(2) `worker_stalled` / `worker_liveness_unreadable` は出ない（code を1つに固定した実装を落とす）、(3) `capture` は 5 回（#101・#102 の送る前の確認各1〔CommandMate#3007〕・#101 の送信確定1・#102 の送信確定1・#102 の生死1）—— timeout ごとに1回であって、ポーリングではない。",
   "plan": {
     "issues_fixture": "cases/01-independent/issues.json",
     "orchestrate_args": [
@@ -37,7 +37,7 @@
       "102": 1
     },
     "cli_subcommand_counts": {
-      "capture": 3
+      "capture": 5
     },
     "worker_states": {
       "101": "completed",

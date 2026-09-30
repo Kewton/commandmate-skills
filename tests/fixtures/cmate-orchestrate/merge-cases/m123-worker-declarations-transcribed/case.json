@@ -1,0 +1,97 @@
+{
+  "description": "CommandMate#3005: ワーカーがコミットメッセージ本文に書いた「読み替え: / 判断: / 本文に無い指摘:」の行を、PR 本文の「## ワーカーの申告」節へ原文転記し、merge report にも limitation `worker_declarations_transcribed` で出す。利用側は申告があれば merge せず窓口へ返すので、申告は merge を止める合図であり、ワーカーの最後の報告（この runner が読まない場所）にだけあってはならない。字下げした次の行は同じ申告の続き、ラベルで始まらない行（`Refs:`）は転記しない、全角コロンも受ける、token は転記の前に redact される。#201 は申告なしで節が出ない対照。",
+  "phase": "create-prs",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "merge_args": [
+    "--approve"
+  ],
+  "merge_scenario": {
+    "cli_available": true,
+    "gh": {
+      "repo_access": true
+    },
+    "git": {
+      "base_resolvable": true
+    },
+    "prs": {
+      "200": {
+        "create": "ok"
+      },
+      "201": {
+        "create": "ok"
+      }
+    },
+    "log": {
+      "201": {
+        "commits": [
+          {
+            "subject": "feat(config): add the loader",
+            "body": "Refs: #201\n"
+          }
+        ]
+      },
+      "200": {
+        "commits": [
+          {
+            "subject": "feat(store): add a session store",
+            "body": "判断: TTL は Issue に無いので 30 分にした\n  設定で変えられる\nRefs: #200\n"
+          },
+          {
+            "subject": "feat(store): cover expiry",
+            "body": "本文に無い指摘：既存の cache と名前が衝突する\n読み替え: token ghp_FAKEtokenNOTAREALSECRET00 を使う経路は対象外と読んだ\n"
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "approved": true,
+    "mutated": true,
+    "eligible": [
+      201,
+      200
+    ],
+    "targets_outcome": {
+      "201": "pr_created",
+      "200": "pr_created"
+    },
+    "limitation_codes": [
+      "worker_declarations_transcribed"
+    ],
+    "absent_limitation_codes": [
+      "worker_declarations_unread"
+    ],
+    "pr_bodies_contain": {
+      "200": [
+        "## ワーカーの申告",
+        "- 判断: TTL は Issue に無いので 30 分にした 設定で変えられる",
+        "- 本文に無い指摘: 既存の cache と名前が衝突する",
+        "- 読み替え: token [REDACTED-TOKEN] を使う経路は対象外と読んだ"
+      ]
+    },
+    "pr_bodies_absent": {
+      "200": [
+        "Refs: #200",
+        "ghp_FAKEtokenNOTAREALSECRET00"
+      ],
+      "201": [
+        "ワーカーの申告"
+      ]
+    }
+  }
+}

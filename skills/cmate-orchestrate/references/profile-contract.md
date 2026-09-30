@@ -35,6 +35,7 @@ worktree path、baseline 検証 — を **profile** から解決する。planner
 | `scope_companions` | 任意 | このリポジトリ固有の**伴走ファイル規約**。宣言済み path の関数を書く `derive` と、名前が固定された伴走を書く `require` の2 key。第9節。**未指定なら宣言が無いのと同じ**で、planner は組み込みの導出だけを行う |
 | `dispatch_defaults` | 任意 | このリポジトリ固有の**運転既定**（`no_infer` / `auto_yes` / `wait_timeout` / `max_turns`）。第10節。**未指定なら宣言が無いのと同じ**で、CLI flag の既定値がそのまま効く |
 | `integration_baseline` | 任意 | **合流後の統合ブランチ**に対する検証 command の配列（`merge.mjs --integration-verify` が実行する）。第11節。**未指定なら `baseline` にフォールバック**する（＝#195 以前と同じ挙動）。`[]` は「統合検証の定義は無い」という**宣言**であり、`baseline` には落ちない |
+| `pr_title_template` | 任意 | `merge.mjs --create-prs` が付ける **PR タイトルの型**（例 `{{type}}({{scope}}): {{title}} (#{{number}})`）。第13節。**未指定なら Issue タイトルそのまま**（＝CommandMate#3005 以前と同じ） |
 
 placeholder は次のとおり展開する。
 
@@ -812,7 +813,58 @@ profile に本 field を足すと run_id は変わる。**しかし merge 済み
 `observations_source: "profile_file"` と limitation `observations_from_profile_file` で名乗る
 （[observe-contract.md](./observe-contract.md) 第4.2節）。
 
-## 13. `worker_messages` — worker へ送る文面への追記（任意）
+## 13. `pr_title_template` — `--create-prs` の PR タイトルの型（任意）
+
+runner 側の正本は [merge-contract.md](./merge-contract.md) 第5.7節である（CommandMate#3005）。
+
+### 13.1 何を解く field か
+
+`merge.mjs --create-prs` は PR のタイトルを **Issue タイトルそのまま**にしていた。PR タイトルを
+Conventional Commits で CI 検査するリポジトリ（semantic-pull-request）では、squash merge の件名＝PR
+タイトルなので、Issue タイトルが日本語の文であるだけで**その PR は merge できない**。PR タイトルの
+形はリポジトリの規約であり、リポジトリ知識の入口は profile だけである（第5節）。
+
+### 13.2 形
+
+```json
+"pr_title_template": "{{type}}({{scope}}): {{title}} (#{{number}})"
+```
+
+| placeholder | 値 | 決まらないとき |
+|---|---|---|
+| `{{type}}` | ブランチ上のコミット件名（`<base>..<branch>`、merge commit を除く）の Conventional Commits の type | その PR を**作らずに止める**（`pr_title_undetermined`） |
+| `{{scope}}` | 同じコミット件名の scope | 同上 |
+| `{{title}}` | Issue タイトル（従来の PR タイトル） | —（無ければ `Resolve issue #<n>`） |
+| `{{number}}` | Issue 番号 | — |
+
+**「決まる」とは、全コミットの件名が `type(scope): description`（`!` 可）の形で、使われている要素が
+全コミットで1つの値に揃っていること**である。件名が1つでも形を外れる・コミットが無い・type（scope）が
+コミット間で食い違う・`{{scope}}` を使うのに scope の無い件名がある —— いずれも**推測しない**。
+
+拒否される宣言（planner は `load_error` / exit 6、merge は plan について `plan_invalid` / exit 3。
+検証は `lib.mjs` の `normalizePrTitleTemplate` 1つを両側が呼ぶ）:
+
+- 文字列でない・空・改行を含む・200 文字を超える
+- 上の4つ以外の placeholder（`{{kind}}` など）。**タイトルに文字のまま残すことはしない**
+
+### 13.3 `dispatch_defaults` に入れない理由
+
+`dispatch_defaults` は dispatch が読む運転既定で、真偽値と正の整数しか受けず、未知の key を拒否する
+（第10.2節）。PR タイトルは **merge が読む**文字列であり、読み手も型も違う。`integration_baseline`
+（第11節）と同じく、merge の読む欄として独立させた。
+
+### 13.4 planner 側と run_id
+
+planner は読むだけで使わない。検証して `plan.profile` の最後（optional field の末尾）へ echo する。
+**欄の無い profile の plan は byte 一致のまま**であり、欄を足した profile は別の run_id になる（第10.4節と同じ）。
+
+### 13.5 起案（`profile-init.mjs`）は `pr_title_template` を出さない
+
+タイトルの規約は CI の設定（semantic-pull-request の type 一覧など）から**推測はできる**が、
+推測した型と検出した型は出力上見分けがつかない（第10.5節と同じ理由）。人間が書き足す。
+
+
+## 14. `worker_messages` — worker へ送る文面への追記（任意）
 
 runner 側の正本は [dispatch-contract.md](./dispatch-contract.md) 第1.1節である
 （CommandMate#3009）。

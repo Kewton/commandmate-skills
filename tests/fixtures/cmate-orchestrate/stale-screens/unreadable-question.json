@@ -1,0 +1,11 @@
+{
+  "isRunning": true,
+  "isGenerating": false,
+  "thinking": false,
+  "cliToolId": "command-code",
+  "sessionStatus": "waiting",
+  "isPromptWaiting": false,
+  "isSelectionListActive": true,
+  "content": "❯ Draft a dispatch plan for the sample backlog.\n\n✻ Thought for 1 second [ctrl+o to expand]\n\n⠶ Here is the plan. I will wait for your decision before creating anything.\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\n● Dispatch | ◯ Review\n\nWhich gates should each worker run? (select all that apply)\n\n❯ 1. [ ] lint\n  2. [ ] unit\n  3. [x] build\n  4. [ ] integration",
+  "promptData": null
+}

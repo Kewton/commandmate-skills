@@ -22,7 +22,7 @@
 
 ## 依存
 
-- depends on {{issue:session-store-rotation}}（counter が数える事象を先に作る必要がある）
+- {{issue:session-store-rotation}}
 
 ## 根拠
 
@@ -34,7 +34,7 @@
 1. 最初の非空行が objective であること。
 2. 受入条件の見出しと、その下の箇条書き。
 3. 対象ファイルのうち **1 つ以上が非 documentation path** であること。
-4. 依存があるなら `{{issue:<key>}}` の placeholder。
+4. 依存があるなら、`## 依存` の下に `- {{issue:<key>}}` の placeholder（登録後は素の `#N`）。
 5. この Issue を blocking する open question があるなら、末尾に `open-questions` ブロック
    （[open-questions.md](./open-questions.md)）。無いなら置かない。
 
@@ -127,6 +127,20 @@ scope ゲートに落ちるという構造的な行き止まりだった）。
 その状態の Issue を計画に含めるなら、`warnings` に `docs_only_issue` を積んで人間に
 判断を返すこと（黙って通さない）。
 
+**人がやる文書だけの Issue は `human-only` ラベルで計画に入れる（CommandMate#3013）。**
+人がスマホでデモする・手で文書を書く、といった Issue は dispatch の対象ではないので、
+planner に渡されることもない。計画の Issue の `labels` に `human-only`（名前は固定）を
+入れると、validator の `planner_ready` は「非 documentation path が 1 つ以上」の条件を
+その Issue に求めない。**外れるのはこの条件だけ**で、受入条件の見出しと箇条書きは
+従来どおり要る（人にも「終わった」の判定が要る）。ラベルは Phase 2 で `--label` として
+そのまま GitHub に付くので、dispatch から外す側が読むものと validator が読むものは同じである。
+validator はその Issue を出力で `dispatch_excluded` として名指しする（[plan-contract.md](./plan-contract.md)
+第 5.3 節）。**その Issue の番号を orchestrate の planner に渡さない。** 渡すと planner は
+「Affected files are unclear」を立てる（dispatch が `human-only` を自動で外すのは別 Issue であり、
+この package はしない）。human-only の Issue に依存する Issue を dispatch するときは、
+planner がその依存を `external_dependency`（計画外の依存）として扱い待たないので、
+人の作業が終わってから渡すこと。
+
 絶対 path・`..`・drive letter・制御文字を含む候補、および `users` `home` `root` `tmp`
 `private` `var` `etc` `proc` で始まる候補は、安全のため捨てられる。
 
@@ -142,6 +156,12 @@ scope gate に弾かれて構造的に解決不能だった）。
 **完全な silent drop** になる。`jsonc` を集合に入れたのはこのためである（Issue #56。
 `wrangler.jsonc` / `deno.jsonc` は framework が決めた名前なので改名では回避できない）。
 `json5` / `jsonl` は入っていない。
+
+**成果物の見出しの下では、backtick で囲んだ file 名は拡張子によらず拾われる**（planner CommandMate #3003 /
+planner #272）。`` `expression.ebnf` `` も `` `Cargo.lock` `` も `` `requirements/ci.txt` `` も、拡張子の無い
+`` `Makefile` `` / `` `Dockerfile` `` / `` `.gitignore` `` も、`/` が無くても `suspected_files` に入る。
+上の既知拡張子の制約と `unrecognized_file_extension` は、**見出しの外**と **backtick 無し**の書き方にだけ残る。
+だから `FILE_EXT` に無い file を worker に書かせるときは、`## 対象ファイル` の下に backtick で書くこと。
 
 対象ファイルに依存 manifest（`package.json` / `Cargo.toml` / `go.mod` /
 `pyproject.toml` / `Gemfile`）を含めると、planner は同 directory の lockfile
@@ -174,10 +194,30 @@ path と同じように `suspected_files` に入り、実行契約の `scope.all
 日本語の散文に隙間なく続けて書いた pattern（`data/geo/stations/配下`）も拾われないので、
 その位置では backtick で囲むこと。
 
+**対象ファイルの見出しを書いたら、scope はその見出しの下だけで決まる（planner CommandMate #3002）。**
+成果物の見出し（`## 対象ファイル` など）を持つ本文では、見出しの範囲の**外** —— 散文・
+`## やること`・`## 完了条件`・`## 追記 N`・title —— にだけ書いた path は `suspected_files` に
+入らず、読むだけの `reference_files` に回る（plan の `warnings` に `prose_path_ignored` として
+Issue ごとに1件出る）。だから「`package.json` の差分が 0」「`ci.yml` に手を入れるなら止める」を
+完了条件に書いても、その file に書き込み権限は付かない。**worker に書かせる file は、テストも
+含めてすべて見出しの下に書く** —— 完了条件にだけ書いたテスト path は scope に入らず、受入条件が
+テストを求めていれば planner の question で止まる。
+
+- 見出しの範囲は**下位の見出しで切れない**（`### 既存ファイル` / `### 新規ファイル` の下も対象である）。
+- **「外」「以外」「しない」で終わる見出し**（`## 変更対象外` / `## 対象ファイル以外`）は成果物の
+  見出しではない。触らせたくない file はそこに書いてよい。
+- 成果物の見出しを1つも書かない本文は、従来どおり本文全体から path を拾う。
+
 ### 2.4 依存
 
 `depend` / `dependenc` / `prerequisite` / `requires` / `依存` / `前提` を含む見出しの
 節、または同じ語を含む行に現れた `#<数字>` が explicit な依存として拾われる。
+
+したがって **`depends on` の文言は必須ではない**（CommandMate#3013）。`## 依存` の下に
+`- {{issue:<key>}}` とだけ書けば、登録後の `- #N` は節の既定（この Issue が後）で依存として
+読まれる。第 1 節の例はこの書き方である。`- depends on {{issue:<key>}}` と書いても読まれる
+（validator が見るのは placeholder だけ）が、`## 依存` の中の注記は番号を含めば**それも
+依存として読まれる**ので、並列可否などの注記は別の節に書くこと。
 
 `{{issue:<key>}}` は Phase 2 が `#<番号>` に置換するので、置換後にこの条件を満たす。
 置換前の本文を planner に渡してはならない（番号が無いので依存が失われる）。

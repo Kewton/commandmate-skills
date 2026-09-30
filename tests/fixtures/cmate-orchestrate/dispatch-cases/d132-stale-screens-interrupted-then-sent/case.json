@@ -1,0 +1,60 @@
+{
+  "description": "[CommandMate#3007] `--interrupt-stale-prompt` 指定時。plan レビュー画面（#100）と読めない質問 UI（#101）が残るセッションを、runner は `commandmate interrupt` で畳み、**capture をもう一度読んで両方の flag が下りた（composer に戻った）ことを確かめてから**送る（fallback 経路）。質問には答えない: respond は 0 回。各 Issue で capture→interrupt→capture→send の順になり、interrupt は各 1 回、完走する。畳んだ事実は limitation `stale_prompt_interrupted`（画面の抜粋つき、Issue ごとに 1 件）に残り、blocking の `stale_prompt_on_session` は出ない。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "100",
+      "101",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--interrupt-stale-prompt"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      100,
+      101
+    ],
+    "send_counts": {
+      "100": 1,
+      "101": 1
+    },
+    "worker_states": {
+      "100": "completed",
+      "101": "completed"
+    },
+    "cli_subcommand_counts": {
+      "interrupt": 2,
+      "respond": 0
+    },
+    "limitation_codes": [
+      "stale_prompt_interrupted"
+    ],
+    "limitation_code_counts": {
+      "stale_prompt_interrupted": 2
+    },
+    "limitation_details_include": [
+      "#100: before the first send the session showed isSelectionListActive",
+      "WITHOUT being answered",
+      "#101: before the first send"
+    ],
+    "absent_blocking_codes": [
+      "stale_prompt_on_session"
+    ]
+  }
+}
