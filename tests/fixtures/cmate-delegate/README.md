@@ -52,3 +52,10 @@ package is not allowed to reach.
   text that teaches them — not the commands themselves. Whether a given CLI
   build has them is a runtime check, not a version comparison
   (`references/agent-compatibility.md` section 3).
+6. **A context-limit error in the reply is exit 11 (`id=context-limit`), not 0.**
+   The Command Code screen verbatim (`⚠ Error: 400 This model's maximum context
+   length ...`) on both the `ask` and the send/wait/capture path; prose that only
+   quotes the words stays 0; Claude's and OpenAI's phrasings are out of scope;
+   only an upstream 0 is rewritten; and a copy of `ask.sh` with the detector
+   disabled must stop giving 11
+   ([CommandMate#3011](https://github.com/Kewton/CommandMate/issues/3011)).
