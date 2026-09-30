@@ -1,0 +1,56 @@
+{
+  "description": "Issue #286: #1512 は human-only の #1510 に依存している（`Depends on #1510`）。依存の辺は plan の `dependencies` に残す（読み手から隠さない）が、wave は待たない —— dispatch は人の作業の完了を見る手段を持たないので、plan の外の依存（`external_dependency`）と同じ扱いにし、blocking の `human_only_dependency` で名指す（status は partial）。#1511 と #1512 は同じ wave に入る。",
+  "args": [
+    "1510",
+    "1511",
+    "1512",
+    "--profile",
+    "node-commandmate",
+    "--max-parallel",
+    "3",
+    "--run-id",
+    "fixture"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "waves": [
+      [
+        1511,
+        1512
+      ]
+    ],
+    "merge_order": [
+      1511,
+      1512
+    ],
+    "dispatch_excluded": [
+      1510
+    ],
+    "dependencies": [
+      {
+        "issue": 1512,
+        "depends_on": 1510,
+        "kind": "explicit"
+      }
+    ],
+    "classifications": {
+      "1510": "independent",
+      "1511": "independent",
+      "1512": "dependent"
+    },
+    "warning_codes": [
+      "human_only_excluded",
+      "human_only_dependency"
+    ],
+    "warning_severities": [
+      "notice",
+      null
+    ],
+    "warning_details_include": [
+      "#1512 depends on #1510, which is labelled human-only",
+      "confirm a person has finished #1510 before dispatching #1512"
+    ],
+    "risk_level": "low"
+  }
+}

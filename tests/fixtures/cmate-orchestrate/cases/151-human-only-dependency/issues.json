@@ -1,0 +1,28 @@
+{
+  "issues": [
+    {
+      "number": 1510,
+      "title": "docs: walk through the demo on a phone",
+      "body": "A person runs the demo on a phone and writes up what happened in `docs/demo-walkthrough.md`.\n\n## Acceptance criteria\n- [ ] `docs/demo-walkthrough.md` records every screen of the demo\n",
+      "labels": [
+        "human-only"
+      ]
+    },
+    {
+      "number": 1511,
+      "title": "feat: add the bravo module",
+      "body": "Add the bravo module in `src/bravo.ts`.\n\n## Acceptance criteria\n- [ ] `src/bravo.ts` exports the bravo function\n",
+      "labels": [
+        "feature"
+      ]
+    },
+    {
+      "number": 1512,
+      "title": "feat: add the charlie module",
+      "body": "Add the charlie module in `src/charlie.ts`.\n\n## Acceptance criteria\n- [ ] `src/charlie.ts` exports the charlie function\n\n## Dependencies\n- Depends on #1510\n",
+      "labels": [
+        "feature"
+      ]
+    }
+  ]
+}

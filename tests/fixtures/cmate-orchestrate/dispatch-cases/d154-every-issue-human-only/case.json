@@ -1,0 +1,36 @@
+{
+  "description": "Issue #286: 全 Issue が human-only の plan（cases/153）は wave が空なので、`plan_invalid`（exit 3）で断る。detail は「全 Issue が human-only で dispatch するものが無い」と理由を名指す。何も send しない。",
+  "plan": {
+    "issues_fixture": "cases/153-human-only-every-issue/issues.json",
+    "orchestrate_args": [
+      "1530",
+      "1531",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [],
+  "expect": {
+    "exit": 3,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "waves_count": 0,
+    "never_sent": [
+      1530,
+      1531
+    ],
+    "no_cli_calls": true,
+    "out_dir_created": false,
+    "blocking_codes": [
+      "plan_invalid"
+    ],
+    "blocking_details_include": [
+      "every issue of the plan is marked human-only"
+    ]
+  }
+}

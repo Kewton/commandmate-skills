@@ -1,0 +1,75 @@
+{
+  "description": "Issue #286: human-only の Issue を含む plan と、その plan の dispatch report（dispatch-cases d150 の出力）。status は #1500 を plan の wave に置かず（wave=null）、dispatch 列に `not_dispatched/not_run` と note（human-only）をそのまま出し、`human_only_excluded` に「停止でも失敗でもない」という対処を付ける。§5 対処表に無い code として扱わない。",
+  "expect": {
+    "exit": 0,
+    "latest_phase": "dispatch",
+    "phase_states": {
+      "plan": "ok",
+      "dispatch": "ok",
+      "merge": "not_run",
+      "uat": "not_run"
+    },
+    "unreadable_paths": [],
+    "issues": [
+      1500,
+      1501
+    ],
+    "issue_states": {
+      "1500": {
+        "plan": "ok",
+        "dispatch": "ok",
+        "merge": "not_run",
+        "uat": "not_run"
+      },
+      "1501": {
+        "plan": "ok",
+        "dispatch": "ok",
+        "merge": "not_run",
+        "uat": "not_run"
+      }
+    },
+    "plan": {
+      "1500": {
+        "wave": null,
+        "depends_on": []
+      },
+      "1501": {
+        "wave": 0,
+        "depends_on": []
+      }
+    },
+    "dispatch": {
+      "1500": {
+        "worker_state": "not_dispatched",
+        "verification_outcome": "not_run",
+        "wave_index": 1
+      },
+      "1501": {
+        "worker_state": "completed",
+        "verification_outcome": "pass",
+        "wave_index": 0
+      }
+    },
+    "run_next": [
+      "plan/warning/human_only_excluded",
+      "dispatch/limitation/contract_unsupported",
+      "merge/not_run/not_run"
+    ],
+    "issue_next": {
+      "1500": [
+        "dispatch/limitation/human_only_excluded"
+      ],
+      "1501": []
+    },
+    "hints_include": {
+      "human_only_excluded": "停止でも失敗でもない"
+    },
+    "text_includes": [
+      "not_dispatched/not_run",
+      "note: human-only: the plan marks this issue dispatch_excluded"
+    ],
+    "text_absent": [
+      "対処表に無い code"
+    ]
+  }
+}

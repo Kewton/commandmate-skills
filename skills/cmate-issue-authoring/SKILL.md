@@ -111,7 +111,8 @@ checkout の file に当てて確認し、確認した file と行を evidence �
 
 **人がやる Issue**（スマホでのデモ、手で書く文書など）も計画に入れる。その Issue の
 `labels` に `human-only` を入れる。validator は非 documentation path の条件をその Issue に
-求めず（受入条件は求める）、dispatch の対象でないことを出力で名指しする
+求めず（受入条件は求める）、dispatch の対象でないことを出力で名指しする。orchestrate の planner は
+その Issue を wave から外す
 （[plan-contract](./references/plan-contract.md) 第 5.3 節）。
 
 各 Issue に付ける `size` と `parallel_safe` の値域・帯の意味・`cmate-issue-refinement`

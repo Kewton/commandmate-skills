@@ -1,0 +1,76 @@
+{
+  "description": "Issue #286 × `--only`（CommandMate#3008）: `--only 1512` は human-only の #1510 に依存する #1512 を選ぶが、human-only の辺は --only の依存検査より先に plan から外れるので断らない。選外の #1511（excluded by --only）と human-only の #1510 は同じ最後の waves[] entry に Issue 番号順で並ぶ。plan_scope は dispatch できる Issue だけを plan 全体として持つ。",
+  "plan": {
+    "issues_fixture": "cases/151-human-only-dependency/issues.json",
+    "orchestrate_args": [
+      "1510",
+      "1511",
+      "1512",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--only",
+    "1512",
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "completion_check_passed": true,
+    "sent": [
+      1512
+    ],
+    "never_sent": [
+      1510,
+      1511
+    ],
+    "worker_states": {
+      "1510": "not_dispatched",
+      "1511": "not_dispatched",
+      "1512": "completed"
+    },
+    "verification_outcomes": {
+      "1512": "pass"
+    },
+    "plan_scope": {
+      "plan_issues": [
+        1511,
+        1512
+      ],
+      "selected": [
+        1512
+      ],
+      "deselected": [
+        1511
+      ],
+      "inherited": false
+    },
+    "limitation_codes": [
+      "only_subset",
+      "human_only_excluded",
+      "human_only_dependency"
+    ],
+    "limitation_details_include": [
+      "#1512 depends on human-only #1510"
+    ],
+    "worker_notes_include": {
+      "1510": [
+        "human-only"
+      ],
+      "1511": [
+        "excluded by --only"
+      ]
+    },
+    "blocking_codes": []
+  }
+}

@@ -1264,6 +1264,8 @@ function checkBodies(plan, keys, humanOnly, out) {
 // The mark is the label `human-only` in the issue's own `labels`, fixed by name:
 // the label is what reaches GitHub (Phase 2 passes it as `--label`), so the consumer
 // that keeps the Issue out of dispatch reads the same thing this validator does.
+// That consumer is the cmate-orchestrate planner (commandmate-skills#286), which
+// declares the same constant; the mirror-conformance test byte-compares the two.
 // What it exempts is exactly one half of `planner_ready` (see checkBodies).
 
 const HUMAN_ONLY_LABEL = 'human-only';
@@ -1800,7 +1802,7 @@ function main(argv) {
     .filter((issue) => humanOnly.has(issue.key))
     .map((issue) => ({
       key: issue.key,
-      reason: `labelled ${HUMAN_ONLY_LABEL}: a person does this Issue; do not pass its number to the planner`,
+      reason: `labelled ${HUMAN_ONLY_LABEL}: a person does this Issue; the cmate-orchestrate planner keeps it in the plan but out of every wave, and dispatch sends it no worker`,
     }));
 
   if (options.json) {

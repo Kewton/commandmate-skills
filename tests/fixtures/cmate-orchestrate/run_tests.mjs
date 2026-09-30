@@ -790,6 +790,23 @@ function runCase(caseId) {
       );
     }
   }
+  // The human-only mark (Issue #286), asserted for EVERY plan case: an issue
+  // carries `dispatch_excluded` exactly when its labels hold `human-only` (the
+  // fixed name — `human only` is not it), such an issue is in no wave and not in
+  // merge_order, and every other issue is in exactly one wave. A case that
+  // states `dispatch_excluded` pins the marked set as well.
+  for (const issue of plan.issues) {
+    const marked = issue.labels.includes('human-only');
+    check(marked ? issue.dispatch_excluded === 'human_only' : !('dispatch_excluded' in issue),
+      `#${issue.number} dispatch_excluded ${JSON.stringify(issue.dispatch_excluded)} disagrees with labels ${JSON.stringify(issue.labels)}`);
+    const inWaves = plan.waves.flat().filter((number) => number === issue.number).length;
+    check(inWaves === (marked ? 0 : 1), `#${issue.number} appears in ${inWaves} wave(s)`);
+    if (marked) check(issue.questions.length === 0, `human-only #${issue.number} carries questions ${JSON.stringify(issue.questions)}`);
+  }
+  if (expect.dispatch_excluded) {
+    const marked = plan.issues.filter((issue) => 'dispatch_excluded' in issue).map((issue) => issue.number);
+    check(deepEqual(marked, expect.dispatch_excluded), `dispatch_excluded issues ${JSON.stringify(marked)} !== ${JSON.stringify(expect.dispatch_excluded)}`);
+  }
   if (expect.risk_level) check(plan.risk.level === expect.risk_level, `risk ${plan.risk.level} !== ${expect.risk_level}`);
   // The human-readable half of a plan (CommandMate #3004): what a reviewer reads
   // before deciding whether an issue is dispatchable. Each listed substring must

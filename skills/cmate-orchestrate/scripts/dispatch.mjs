@@ -858,7 +858,86 @@ function resolveInputs(parsed) {
     // null otherwise, so emptyReport writes nothing for an ordinary run.
     onlyScope: null,
     onlyCarried: new Map(),
+    // Filled in by run() from the plan's `dispatch_excluded: 'human_only'` marks
+    // (Issue #286); empty on a plan without one, which writes nothing.
+    humanOnly: { issues: [], dependencies: [] },
   };
+}
+
+// =============================================================================
+// human-only issues: in the plan, never dispatched (Issue #286)
+// =============================================================================
+//
+// The planner marks an issue whose labels hold `human-only` with
+// `dispatch_excluded: 'human_only'`, keeps it (and its edges) in the plan so a
+// reader sees the human work, and leaves it out of every wave. This runner reads
+// the MARK, never the labels: the plan is the approved artifact, and a plan from
+// a planner that predates the mark is dispatched as it was written.
+//
+// It is done the way `--only` is done, and before it: the plan the runner works
+// on loses the marked issues and every edge touching one, once, so the barrier,
+// the dag scheduler, the pre-flight, the locks, `--only` and the report all see
+// the same smaller plan. The marked issues come back as `not_dispatched` records
+// in the trailing waves[] entry, and an edge from a dispatched issue to one of
+// them is NOT waited for — this runner cannot see a person finish, the same
+// reason an edge to an issue outside the plan waits for nothing — but it is
+// named in the `human_only_dependency` limitation, so the reader who merges the
+// dependent knows what to confirm first.
+
+function excludeHumanOnly(plan) {
+  const marked = new Set(plan.issues
+    .filter((issue) => issue?.dispatch_excluded === 'human_only')
+    .map((issue) => issue.number));
+  if (marked.size === 0) return { plan, issues: [], dependencies: [] };
+  const dependencies = (plan.dependencies ?? [])
+    .filter((edge) => !marked.has(edge.issue) && marked.has(edge.depends_on))
+    .map((edge) => ({ issue: edge.issue, depends_on: edge.depends_on }));
+  return {
+    plan: {
+      ...plan,
+      issues: plan.issues.filter((issue) => !marked.has(issue.number)),
+      dependencies: (plan.dependencies ?? []).filter((edge) => !marked.has(edge.issue) && !marked.has(edge.depends_on)),
+      waves: plan.waves.map((wave) => wave.filter((number) => !marked.has(number))).filter((wave) => wave.length > 0),
+    },
+    issues: [...marked].sort((a, b) => a - b),
+    dependencies,
+  };
+}
+
+function humanOnlyWorkers(inputs) {
+  return inputs.humanOnly.issues.map((number) => ({
+    issue: number,
+    task_id: null,
+    worker_state: 'not_dispatched',
+    verification: { ran: false, report_schema_version: null, outcome: 'not_run', gates: [], checks: [] },
+    prompt: { detected: false, excerpt: null },
+    note: 'human-only: the plan marks this issue dispatch_excluded (labelled human-only, a person does it), so no worker was sent and it was not judged (not a failure)',
+  }));
+}
+
+// The limitations a plan with human-only issues adds, or none. The dependency
+// line names only the dependents THIS run dispatches (an `--only` subset may
+// have left one out, and a line about an issue the run never touched is noise).
+function humanOnlyLimitations(inputs, plan) {
+  const { issues, dependencies } = inputs.humanOnly;
+  if (issues.length === 0) return [];
+  const list = (numbers) => numbers.map((n) => `#${n}`).join(', ');
+  const out = [{
+    code: 'human_only_excluded',
+    detail: `the plan marks ${list(issues)} human-only (dispatch_excluded): a person does ${issues.length === 1 ? 'it' : 'them'}, so this run sent no worker and judged nothing there. `
+      + 'They are recorded in a trailing waves[] entry as `not_dispatched` ("human-only"); it is not a failure and not a blocking reason',
+  }];
+  const inRun = new Set(plan.issues.map((issue) => issue.number));
+  const edges = dependencies.filter((edge) => inRun.has(edge.issue));
+  if (edges.length > 0) {
+    out.push({
+      code: 'human_only_dependency',
+      detail: `${edges.map((edge) => `#${edge.issue} depends on human-only #${edge.depends_on}`).join('; ')}. `
+        + 'This run did not wait for the human-only side (it cannot see a person finish, the same as a dependency outside the plan): '
+        + 'confirm that work is done before merging the dependent',
+    });
+  }
+  return out;
 }
 
 // =============================================================================
@@ -924,6 +1003,12 @@ function restrictToOnly(inputs, plan) {
   }
   if (selected === null) return { plan, scope: null, carried: new Map() };
 
+  const humanOnly = selected.filter((number) => inputs.humanOnly.issues.includes(number));
+  if (humanOnly.length > 0) {
+    throw new SkillError('invalid_input',
+      `--only names ${humanOnly.map((n) => `#${n}`).join(', ')}, which the plan marks human-only (dispatch_excluded): a person does `
+        + `${humanOnly.length === 1 ? 'it' : 'them'} and no run dispatches ${humanOnly.length === 1 ? 'it' : 'them'}. Nothing was dispatched: drop ${humanOnly.length === 1 ? 'it' : 'them'} from --only`, 3);
+  }
   const planIssues = plan.issues.map((issue) => issue.number).sort((a, b) => a - b);
   const known = new Set(planIssues);
   const unknown = selected.filter((number) => !known.has(number));
@@ -1261,7 +1346,12 @@ function validatePlan(plan) {
     throw new SkillError('plan_invalid', 'plan.max_parallel is out of the 1-3 range', 3);
   }
   if (!Array.isArray(plan.waves) || plan.waves.length === 0) {
-    throw new SkillError('plan_invalid', 'plan.waves is empty', 3);
+    // A plan whose every issue is human-only has no wave by construction (Issue #286).
+    const allHumanOnly = Array.isArray(plan.issues) && plan.issues.length > 0
+      && plan.issues.every((issue) => issue?.dispatch_excluded === 'human_only');
+    throw new SkillError('plan_invalid', allHumanOnly
+      ? 'plan.waves is empty: every issue of the plan is marked human-only (dispatch_excluded), so there is nothing to dispatch'
+      : 'plan.waves is empty', 3);
   }
   for (const wave of plan.waves) {
     if (!Array.isArray(wave) || wave.length === 0) {
@@ -6020,7 +6110,11 @@ function emptyReport(inputs, plan, outDir) {
     // decided there, and a reader who does not know which of them came from the
     // profile cannot reconstruct the run from the argv. Empty (and therefore
     // invisible) on a plan whose profile declares nothing.
-    limitations: [...inputs.dispatchDefaultNotes, ...(inputs.onlyScope === null ? [] : [onlyLimitation(inputs.onlyScope)])],
+    limitations: [
+      ...inputs.dispatchDefaultNotes,
+      ...(inputs.onlyScope === null ? [] : [onlyLimitation(inputs.onlyScope)]),
+      ...humanOnlyLimitations(inputs, plan),
+    ],
     redactions: [],
     completion_check: { passed: false, checks: [] },
     summary_markdown: '',
@@ -7461,11 +7555,16 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   // touch. After every wave, so it cannot be mistaken for a scheduling decision,
   // and it changes neither the status nor the completion check: a run whose
   // SELECTED issues all passed is a success.
-  if (inputs.onlyScope !== null && inputs.onlyScope.deselected.length > 0) {
+  // The human-only issues (Issue #286) join the same entry, in issue order.
+  const excludedWorkers = [
+    ...(inputs.onlyScope === null ? [] : onlyExcludedWorkers(inputs)),
+    ...humanOnlyWorkers(inputs),
+  ].sort((a, b) => a.issue - b.issue);
+  if (excludedWorkers.length > 0) {
     report.waves.push({
       index: report.waves.length,
       dispatched: [],
-      workers: onlyExcludedWorkers(inputs),
+      workers: excludedWorkers,
       barrier: { all_workers_completed: false, all_verifications_passed: false, advanced: false },
     });
   }
@@ -7957,8 +8056,12 @@ async function run(argv) {
   startWallClockBudget(inputs.wallClockBudget);
   const rawPlan = loadPlan(inputs.planPath);
   const validatedPlan = validatePlan(rawPlan);
+  // The human-only issues leave the plan first (Issue #286), so `--only` below
+  // and everything after it sees only what can be dispatched.
+  const humanOnly = excludeHumanOnly(validatedPlan);
+  inputs.humanOnly = { issues: humanOnly.issues, dependencies: humanOnly.dependencies };
   // `--only` narrows the plan ONCE, here, before anything reads it (CommandMate#3008).
-  const restricted = restrictToOnly(inputs, validatedPlan);
+  const restricted = restrictToOnly(inputs, humanOnly.plan);
   const plan = restricted.plan;
   inputs.onlyScope = restricted.scope;
   inputs.onlyCarried = restricted.carried;

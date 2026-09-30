@@ -302,6 +302,9 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   profile_repository_mismatch: '--profile / --profile-json / --repo のどれかを渡して、対象リポジトリの意図を明示する。',
   profile_repository_override: '--repo で profile の検証が対象を失っている。verified な profile を使うか、降格を承知で進める。',
   external_dependency: 'この plan に無い Issue への依存を宣言している。依存先を plan に加えるか、依存を本文から外す。',
+  // Issue #286: the same two codes are a plan warning and a dispatch limitation.
+  human_only_excluded: '人がやる Issue（`human-only` ラベル）なので dispatch しない。停止でも失敗でもない。人の作業として進め、終わったら Issue を閉じる。',
+  human_only_dependency: 'human-only の Issue に依存している。dispatch は人の作業を待たないので、その Issue が終わったことを人が確かめてから依存側を dispatch / merge する。',
   ambiguous_dependency_direction: 'dependency-plan.md の edge reason を読み、Issue 本文か --depends で依存の向きを一意にする。',
   unrecognized_file_extension: '既知拡張子外の path が抽出から落ちた。worker に書かせるなら `## 対象ファイル` の下に backtick で書いて re-plan する（見出しの下では拡張子によらず拾う）。',
   shadowed_file_candidate: '他候補の suffix だったため候補から落ちた。Issue 本文で path を完全形で書き直す。',

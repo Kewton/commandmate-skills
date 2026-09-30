@@ -545,7 +545,60 @@ worker に出せなかった（#272、Kewton/CommandAgent#520）。`Cargo.lock` 
 要らなくなる。`FILE_EXT` が閉じている理由（散文の token を権限にしない）は、見出しの下では
 成り立たない —— #219 が glob について下したのと同じ判断である。利用者と Issue 上で確定した。
 
+### #286 — `human-only` ラベルの Issue を、利用側が plan から手で外していた
+
+cmate-issue-authoring 0.10.0（CommandMate #3013）で、人がやる Issue（スマホでのデモ、手で書く文書）を
+`labels` の `human-only` で計画に入れられるようになった。validator は `NOTE dispatch_excluded` で
+「dispatch の対象ではない」と名指すが、planner はこの印を読まなかった。渡せば「Affected files are unclear」が
+立ち、dispatch されうる。利用側（Kewton/Musunest）は human-only の Issue の番号を plan から手で外していた。
+
+→ **plan から消さず、wave から外す。** `issues` と `dependencies` には残して印 `dispatch_excluded: "human_only"` を
+付け、wave・merge_order には入れず、question は立てず、notice `human_only_excluded` を出す。印の判定は
+`human-only` ちょうどの名前（validator と同じ定数。mirror-conformance が byte 一致を検査する）。
+
+判断したこと:
+
+- **plan に残す（消さない）。** 消すと、依存の辺と人がやる作業の見通しが plan の読み手から見えなくなる。
+  dispatch は plan の印を読んで外す（ラベルは読まない）。
+- **依存は待たない。** dispatch には人の作業の完了を待つ手段が無い。待つ形（依存側も止める）にすると、
+  依存側は「人が終わった」ことを誰も書き込めない場所で止まり続ける。だから plan の外の Issue への依存
+  （`external_dependency`）と同じ扱いにし、wave も dispatch も待たずに進め、plan では blocking の
+  `human_only_dependency`、report では同名の limitation で「#N depends on human-only #M」と名指す。
+  blocking にしたのは、「その人の作業は終わったか」が `external_dependency` と同じく**まだ誰も決めていない**
+  判断だからである。辺そのものは `dependencies` に残す。
+- **`human_only_excluded` は notice。** ラベルが既に下された判断で、warning はそれを守ったことの報告である。
+  blocking にすると、正しくラベルを付けた plan が毎回 `partial` になる（#199 が避けた形）。
+- **question を立てない。** question は worker が要るもの（対象 file・受入条件の読み取り）を訊く。worker は来ない。
+  立てなかった件数は notice に出す。
+- ラベルの無い plan は byte 一致（全 golden がそのまま通る）。
+
+正本: [plan-contract.md](./plan-contract.md) 第3.3節。
+
 ## dispatch（`scripts/dispatch.mjs`）
+
+### #286 — plan に入った human-only の Issue にも worker が割り当てられえた
+
+planner が human-only の Issue を wave から外しても（上の planner の節）、dispatch が plan の `issues` 全体を
+前提にしていれば、pre-flight（question・scope・worktree）で止まるか、report にその Issue の記録が無いまま
+終わる。
+
+→ **`--only` と同じ 1 か所の絞りを、`--only` より先に置いた。** 起動直後に、印 `dispatch_excluded: "human_only"` の
+Issue とそれに触れる辺を plan から外し、report の最後の waves[] entry に `not_dispatched`（note `human-only`）で
+戻す。limitation `human_only_excluded` が理由を、`human_only_dependency` が待たずに送った依存を名指す。
+blocking にはせず、status は動かさない。
+
+判断したこと:
+
+- **ラベルではなく plan の印を読む。** plan は承認された成果物であり、印の無い古い plan は書かれたとおりに
+  dispatch する（黙って挙動を変えない）。
+- **`--only` に human-only の Issue を書くと全体を断る**（`invalid_input`）。どの run も dispatch しない Issue を
+  「選んだ」run は argv と結果が食い違う。human-only への辺は `--only` の依存検査の前に外れるので、
+  human-only に依存する Issue だけを選ぶことはできる（dispatch はもともとその辺を待たない）。
+- **全 Issue が human-only の plan は `plan_invalid` で断る。** wave が空の plan を「何もしない success」に
+  すると、status が「dispatch した」ように読める。detail が理由を名指す。
+- `dispatch_schema_version` は 1 のまま。新しい enum 値も field も足していない（`not_dispatched` と limitation は既存の語彙）。
+
+正本: [dispatch-contract.md](./dispatch-contract.md) 第3.0.6節。
 
 ### CommandMate #3004 — 導出したテスト候補が goal に並び、見かけの本数で判断を誤った
 

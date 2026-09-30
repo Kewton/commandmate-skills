@@ -332,7 +332,9 @@ install 先で走らせるよう案内している箇所は無い。
   できない。** planner は `docs/` 配下と `.md` / `.rst` / `.txt` を reference に分類し、
   suspected file には入れないためである（`issue-body-contract.md` 第 2.3 節）。計画に
   含めるなら `warnings` に `docs_only_issue` を積んで人間に判断を返す。人がやる文書の Issue なら
-  `human-only` ラベルを付ける（validator はパスの条件を外すが、planner に渡さないのは人の仕事である）。
+  `human-only` ラベルを付ける（validator はパスの条件を外す。cmate-orchestrate の planner はその Issue を plan に
+  残したまま wave から外し、dispatch は worker を送らない —— commandmate-skills#286。それより前の planner に
+  渡すときは、番号を外すのが人の仕事である）。
 - `planner_ready` rule は planner の抽出の**写し**である。planner の抽出が変われば、
   この package も同時に変える必要がある（冒頭の同期規約）。写しである以上、
   install 済みの package 単体では正しさを確認できない。確認はリポジトリの CI が行う。

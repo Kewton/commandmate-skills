@@ -1,0 +1,20 @@
+{
+  "issues": [
+    {
+      "number": 1540,
+      "title": "docs: walk through the demo on a phone",
+      "body": "A person runs the demo on a phone and writes up what happened in `docs/demo-walkthrough.md`.\n\n## Acceptance criteria\n- [ ] `docs/demo-walkthrough.md` records every screen of the demo\n",
+      "labels": [
+        "human-only"
+      ]
+    },
+    {
+      "number": 1541,
+      "title": "feat: add the echo module",
+      "body": "Add the echo module in `src/echo.ts`.\n\n## Acceptance criteria\n- [ ] `src/echo.ts` exports the echo function\n",
+      "labels": [
+        "feature"
+      ]
+    }
+  ]
+}

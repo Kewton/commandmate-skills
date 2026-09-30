@@ -152,6 +152,11 @@ harness 自身の健全性も見る（`validator self-test`）: 壊れた plan �
 | `95-prose-file-any-extension-not-scoped` | **94 の陰性側。** 同じ名前を見出しの外に書くと入らない。未知拡張子の backtick path は `unrecognized_file_extension` ではなく `prose_path_ignored` と `reference_files` に回る |
 | `96-scope-counts-declared-and-derived` | **宣言の本数と導出の本数を分けて出す（CommandMate #3004）。** `summary_markdown` が `宣言 2 本 + 導出 3 本` と出す。Issue が書いたテスト path は宣言に数える |
 | `97-scope-counts-nothing-derived` | **96 の陰性側。** 何も導出しない Issue は `導出 0 本` |
+| `150-human-only-excluded` | **`human-only` ラベルの Issue は plan に残して wave から外す（[#286](https://github.com/Kewton/commandmate-skills/issues/286)）。** `dispatch_excluded: "human_only"` の印が付き、wave にも merge_order にも入らず、question（Affected files are unclear）は立てない。notice `human_only_excluded` だけなので success。全 plan case に「印 ⇔ ラベル」「印の無い Issue はちょうど 1 wave・印の有る Issue は 0 wave」の不変条件が掛かる。golden は印の key 位置（`classification` の後）を固定する |
+| `151-human-only-dependency` | human-only の Issue に依存する Issue。辺は `dependencies` に残り、wave は待たない（同じ wave に入る）。blocking の `human_only_dependency` が名指す（`external_dependency` と同じ扱い） |
+| `152-human-only-spelling-not-matched` | **陰性。** `human only` と `Human-Only` は印ではない。ふつうの Issue として wave に入り、従来どおり question が立つ |
+| `153-human-only-every-issue` | 全 Issue が human-only の plan は wave も merge_order も空（dispatch は d154 で断る） |
+| `154-human-only-override-and-order` | 既存の引数との組み合わせ。`--depends` で human-only への依存を足しても `override` の辺として残り待たない。`--order` は human-only を含む全 Issue の順列を求めたまま |
 | `54-lexical-edge-not-serialized` | 相互参照ゼロの3 Issue（実測 #104/#105/#106 の形）が、語彙一致だけで3 wave に直列化されず、1 wave のまま question になるか（#182） |
 | `55-inferred-edge-file-conflict` | 逆向き: 同じ file を書く生産者/消費者は inferred edge のまま残り、`basis: file_conflict` と共有 file を名乗るか（#182） |
 | `56-context-heading-issue-number` | `## 根拠` 配下で**否定するために**書いた `depends on #N` が phantom 依存にならず、かつ CONTEXT の外に書いた依存は残るか（#182） |
@@ -312,6 +317,11 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 | `d91-schedule-dag-max-parallel-bound` | **`--max-parallel` は同時実行数の上限のまま（#183 受入条件3）。** 依存ゼロ3件を `--max-parallel 2` の DAG で回すと、3件とも ready なのに round 0 は2件だけで、3件目は枠が空いてから入る（`waves_dispatched: [[400,401],[402]]`）。ready を全部投入する実装は `dispatched.length 3 > max_parallel 2` を書き、全 dispatch case にかかる上限 assert で落ちる |
 | `d92-schedule-dag-timeout-liveness` | **#183 × #179。** DAG では worker の終了順が投入順と一致しないので、timeout の生死の見分け（`wait_window_exhausted` / `worker_stalled`）が壊れていないことをここで測る。#402 は timeout しないので `worker_liveness` を**持たない**。生死の blocking reason を完了順に push した実装は run ごとに並びが変わるので、`blocking_order` が plan 順（#400 → #401）を固定している |
 | `d93-dispatch-defaults-real-profile` | **d81 の相方（#196）。宣言が profile から run まで通ることの端から端までの測定。** 世界も期待値も d81 と同一で、`plan_patch` を使わず**本物の profile を planner に渡して plan を作る**。したがって測っているのは planner の echo であり、`publicProfile()` が宣言を落とせば `wait` の argv は 300 に、`send` の窓は 1h に戻って赤くなる |
+| `d150-human-only-not-dispatched` | **plan が human-only と印を付けた Issue に worker を割り当てない（[#286](https://github.com/Kewton/commandmate-skills/issues/286)）。** 1 度も send せず、最後の waves[] entry に `not_dispatched`（note `human-only`）で記録し、blocking にしない。limitation `human_only_excluded` が理由を残す |
+| `d151-human-only-dependency-not-waited` | human-only の Issue に依存する Issue を待たずに送り、limitation `human_only_dependency` で「#1512 depends on human-only #1510」と名指す |
+| `d152-human-only-with-only` | `--only`（CommandMate#3008）との組み合わせ。human-only への辺は `--only` の依存検査より先に外れるので断らない。選外と human-only は同じ最後の entry に Issue 番号順で並ぶ |
+| `d153-only-names-human-only` | `--only` に human-only の Issue を書くと `invalid_input` で全体を断る（何も send せず `--out` も作らない） |
+| `d154-every-issue-human-only` | 全 Issue が human-only の plan を `plan_invalid` で断り、理由を名指す |
 
 ## merge case 一覧
 
@@ -442,6 +452,7 @@ checked-in artifact が古い形のまま緑になり続けることを防ぐた
 | `s10-unattended-budget` | wall-clock budget で打ち切った無人 run。**新しい `stop_reason` 値を足していない**ので既存の `timeout` の hint が引かれ、何が起きたかは blocking の `wall_clock_budget_exhausted` が名指しする。run 全体の宣言と Issue ごとの取り消し起点が、それぞれ run 行と Issue 行に分かれるか |
 | `s11-unattended-locked` | 排他 lock で拒否された無人 run（何も書いていないので `out_dir: null`・wave 0件）。hint が「先行 run の終了を待って同じコマンドを再実行する」になり、**`human_required` は false** であるか |
 | `s12-dispatch-flaky-gate` | **マトリクスは `FLAKY` を残す（[#224](https://github.com/Kewton/commandmate-skills/issues/224)）。** `unit=flaky` がそのまま出て、さらに `flaky_gates` として**独立に名指し**される（20 本並ぶ gate 行では、カンマ区切りの 1 トークンは読み飛ばされる）。`verification=pass` は runner の exit code であって、この行から再計算したものではない |
+| `s150-human-only-not-dispatched` | human-only の Issue（[#286](https://github.com/Kewton/commandmate-skills/issues/286)）は plan 列で wave を持たず、dispatch 列は `not_dispatched/not_run` と note をそのまま出す。`human_only_excluded` に対処の hint（停止でも失敗でもない）が付く |
 ## profile-init case 一覧
 
 `profile-init-cases/<id>/repo/` は、`profile-init.mjs` に読ませる**小さな本物のリポジトリ**である

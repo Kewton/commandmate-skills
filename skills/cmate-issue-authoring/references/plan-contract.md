@@ -155,13 +155,15 @@ schema が validator の実装していない keyword を使っていたら、�
 その Issue が dispatch の対象でないことは validator の出力に出る。
 
 ```
-NOTE dispatch_excluded <key> labelled human-only: a person does this Issue; do not pass its number to the planner
+NOTE dispatch_excluded <key> labelled human-only: a person does this Issue; the cmate-orchestrate planner keeps it in the plan but out of every wave, and dispatch sends it no worker
 VALID split-… (N issue(s))
 ```
 
 `--json` では `"dispatch_excluded": [{"key": …, "reason": …}]` が付く。`human-only` の Issue が
-無い計画の出力は従来と byte 単位で同じである（行も key も出ない）。dispatch が `human-only` を
-自動で外すことはこの package の範囲外であり、Issue 番号を planner に渡すときに人が外す。
+無い計画の出力は従来と byte 単位で同じである（行も key も出ない）。dispatch から外すのは
+cmate-orchestrate の側である: planner は同じ固定名のラベルを読んで Issue を wave から外し、dispatch は
+worker を送らない（commandmate-skills#286。ラベル名の定数は両 package で byte 一致であることを
+リポジトリの conformance テストが検査する）。それより前の planner に渡すときは、人が番号を外す。
 
 ## 6. version 運用
 

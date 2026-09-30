@@ -1,0 +1,41 @@
+{
+  "description": "Issue #286（陰性）: 印は `human-only` ちょうどの名前だけである。`human only`（#1520）と `Human-Only`（#1521）は当たらず、ふつうの Issue として wave に入り、文書だけの Issue なので従来どおり question（no_suspected_files）が立つ。`dispatch_excluded` は付かない。",
+  "args": [
+    "1520",
+    "1521",
+    "1522",
+    "--profile",
+    "node-commandmate",
+    "--max-parallel",
+    "3",
+    "--run-id",
+    "fixture"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "waves": [
+      [
+        1520,
+        1521,
+        1522
+      ]
+    ],
+    "merge_order": [
+      1520,
+      1521,
+      1522
+    ],
+    "dispatch_excluded": [],
+    "warning_codes": [
+      "no_suspected_files",
+      "no_suspected_files"
+    ],
+    "questions_count": {
+      "1520": 1,
+      "1521": 1,
+      "1522": 0
+    },
+    "risk_level": "moderate"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "description": "Issue #286: 全 Issue が human-only の plan は wave も merge_order も空になる（plan は出る）。dispatch はこの plan を `plan_invalid` で断る（dispatch-cases d154）。",
+  "args": [
+    "1530",
+    "1531",
+    "--profile",
+    "node-commandmate",
+    "--max-parallel",
+    "3",
+    "--run-id",
+    "fixture"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "waves": [],
+    "merge_order": [],
+    "dispatch_excluded": [
+      1530,
+      1531
+    ],
+    "warning_codes": [
+      "human_only_excluded",
+      "human_only_excluded"
+    ],
+    "warning_severities": [
+      "notice",
+      "notice"
+    ],
+    "risk_level": "low"
+  }
+}
