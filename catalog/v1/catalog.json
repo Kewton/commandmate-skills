@@ -1334,7 +1334,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.33.0",
+      "latest": "0.34.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -2543,6 +2543,55 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.33.0/cmate-orchestrate-0.33.0.tar.gz",
             "sha256": "5b29e2418d2645bb193f79a9dd06097721adb59dbf7fbfe09e2f9562977924e2",
             "size": 804848,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.34.0",
+          "changelog": "cmate-orchestrate 0.34.0 — 利用側（Kewton/Musunest）の並列開発で運用で補っていた箇所を runner に入れた（CommandMate #3002〜#3009、#272 / #273）。破壊的変更は無く、schema の版は据え置き。\n\nplanner\n- #3002（+ #273）: 成果物見出しを持つ Issue では、見出しの外（散文・完了条件・やること・追記）にだけ書いたパスを scope に入れず reference_files へ回し、Issue ごとに 1 件の notice prose_path_ignored で名指す。「変えるな」と書いたファイルほど scope に入っていたのを止める。見出しの範囲は下位の ### で切らない。「外」「以外」「しない」で終わる見出しは成果物見出しにしない。\n- #3003（+ #272）: 成果物見出しの下では、backtick で囲んだファイル名を拡張子によらず拾う（expression.ebnf・Cargo.lock・Makefile）。\n- #3004: 契約 goal には宣言したファイルだけを並べ、導出したテスト候補は本数で述べる。plan は宣言と導出の本数を分けて出す。scope.allow は不変。\n\ndispatch\n- #3006: 起動中（503 SESSION_STARTING）または prompt not ready で断られた最初の send を、間を置いて 1 回だけ送り直す。exit 2 と 409 は送り直さない。\n- #3007: 最初の send の前に capture を読み、前の回の質問画面が残っていれば送らずに止める（stale_prompt_on_session）。--interrupt-stale-prompt で畳んでから送れる（既定 off、質問には答えない）。\n- #3008: --only <issues> で plan の一部だけを dispatch する。選外の Issue に依存する Issue は invalid_input で断る。--resume は選んだ集合を引き継ぐ。\n- #3009: 監督 nudge の既定文に「指示どおりに書けないと分かったら、進めずに止めて報告してください。」を足し、profile の worker_messages.nudge と --nudge-message で後ろに追記できるようにした。\n\nmerge\n- #3005: --create-prs に profile の pr_title_template を足した（type / scope はブランチのコミット件名から。決まらなければその PR を作らない）。ワーカーのコミット本文の申告行を PR 本文の「## ワーカーの申告」へ写す。",
+          "published_at": "2026-09-30T03:46:15Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.34.0",
+            "commit": "097b75e69733aa259b79401d181a32de5d9aa661"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.34.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.34.0/cmate-orchestrate-0.34.0.tar.gz",
+            "sha256": "8259dbb254384463fbb5ce5d9731df805f5007a195c469f17a9be45f07ea26d9",
+            "size": 845451,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
