@@ -1,0 +1,23 @@
+{
+  "_comment": "Issue #274: 3 件とも timeout して裁定が凍る世界。attempt 2 の --reverify がこの 3 件を再判定する。",
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "100": {
+      "state": "timeout"
+    },
+    "101": {
+      "state": "timeout"
+    },
+    "102": {
+      "state": "timeout"
+    }
+  }
+}

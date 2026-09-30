@@ -1,0 +1,44 @@
+{
+  "_comment": "3 件とも commit が在り、呼べば pass する。verify は 1 件 1 秒かけて開始 / 終了を log に残す（verify_hold_ms）ので、何件が同時に開いたかを数えられる。",
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "100": {
+      "state": "completed",
+      "commits": 1,
+      "uncommitted": false,
+      "pass_gates": [
+        "lint",
+        "test"
+      ],
+      "verify_hold_ms": 1000
+    },
+    "101": {
+      "state": "completed",
+      "commits": 1,
+      "uncommitted": false,
+      "pass_gates": [
+        "lint",
+        "test"
+      ],
+      "verify_hold_ms": 1000
+    },
+    "102": {
+      "state": "completed",
+      "commits": 1,
+      "uncommitted": false,
+      "pass_gates": [
+        "lint",
+        "test"
+      ],
+      "verify_hold_ms": 1000
+    }
+  }
+}

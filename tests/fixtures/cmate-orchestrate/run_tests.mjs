@@ -2168,6 +2168,18 @@ function assertResumeAttempt(label, spec, exit, stdout, cliLog, outDir, planPath
     check(cliLog.length === expect.cli_calls_total,
       `${label}: ${cliLog.length} CLI call(s) were made !== ${expect.cli_calls_total}: ${JSON.stringify(cliLog.map((entry) => entry.sub))}`);
   }
+  // The most verifications that were open at once (Issue #274), read off the
+  // fake's verify-start / verify-end markers. Only a scenario that sets
+  // `verify_hold_ms` writes them.
+  if (expect.max_concurrent_verify !== undefined) {
+    let open = 0;
+    let peak = 0;
+    for (const entry of cliLog) {
+      if (entry.sub === 'verify-start') { open += 1; peak = Math.max(peak, open); }
+      if (entry.sub === 'verify-end') open -= 1;
+    }
+    check(peak === expect.max_concurrent_verify, `${label}: ${peak} verification(s) overlapped at most !== ${expect.max_concurrent_verify}`);
+  }
   // Per-subcommand counts, the same expectation the dispatch cases carry.
   if (expect.cli_subcommand_counts) {
     for (const [name, count] of Object.entries(expect.cli_subcommand_counts)) {
