@@ -3382,7 +3382,7 @@
         "timeout",
         "work-evidence"
       ],
-      "latest": "0.5.1",
+      "latest": "0.6.0",
       "versions": [
         {
           "version": "0.1.1",
@@ -3706,6 +3706,55 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.5.1/cmate-verify-0.5.1.tar.gz",
             "sha256": "7df6d59e1a0369e351059c7e154cc3e5f6d6b1f2813590863f4fe04ba3734f54",
             "size": 29682,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0 — an installed skill is found under .claude/skills and matches in the slash palette. The mechanism is package-independent; this package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 — SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was not separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured for this version. The runner needs only bash and git, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.6.0",
+          "changelog": "cmate-verify 0.6.0 — env-clean から外す $HOME 直下のエントリ（options.envCleanIgnoreHomeEntries）を受理し、実行例のパスを install 先に合わせた。\n\n- #270: 上流 CommandMate#2901 で verify-run.sh に入った options.envCleanIgnoreHomeEntries を移植した。未知の options キーを exit 2 にする awk パーサがこのキーを読めず、上流の CLI では動く verify.yaml がこのランナーでは落ちていた。ブロック形式・フロー形式の両方を受理し、空文字・\".\"・\"..\"・\"/\" を含む値を拒否、32 件まで。受理して OPT 行として出すだけで、判定には使わない。verify-run.sh は上流と byte 一致。\n- CommandMate#3012: 手順 2 の実行例が .claude/skills/cmate-verify/scripts/verify-run.sh に固定されていた。Codex と Command Code のワーカーは .agents/skills を読むので、例のパスどおりに探して「未 install」と申告していた。<skills-root>（.agents/skills と .claude/skills のうち在る方）で書き直した。",
+          "published_at": "2026-09-30T03:38:22Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-v0.6.0",
+            "commit": "cda6aa4c48530796372481997f4186dc9850340b"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-0.6.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-v0.6.0/cmate-verify-0.6.0.tar.gz",
+            "sha256": "7171961da60f56362058305d346c52385363934c43bcfa7142de8b3c11d68c6e",
+            "size": 30793,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
