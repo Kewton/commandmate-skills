@@ -22,7 +22,7 @@
 
 ## 依存
 
-- depends on {{issue:session-store-rotation}}（counter が数える事象を先に作る必要がある）
+- {{issue:session-store-rotation}}
 
 ## 根拠
 
@@ -34,7 +34,7 @@
 1. 最初の非空行が objective であること。
 2. 受入条件の見出しと、その下の箇条書き。
 3. 対象ファイルのうち **1 つ以上が非 documentation path** であること。
-4. 依存があるなら `{{issue:<key>}}` の placeholder。
+4. 依存があるなら、`## 依存` の下に `- {{issue:<key>}}` の placeholder（登録後は素の `#N`）。
 5. この Issue を blocking する open question があるなら、末尾に `open-questions` ブロック
    （[open-questions.md](./open-questions.md)）。無いなら置かない。
 
@@ -127,6 +127,20 @@ scope ゲートに落ちるという構造的な行き止まりだった）。
 その状態の Issue を計画に含めるなら、`warnings` に `docs_only_issue` を積んで人間に
 判断を返すこと（黙って通さない）。
 
+**人がやる文書だけの Issue は `human-only` ラベルで計画に入れる（CommandMate#3013）。**
+人がスマホでデモする・手で文書を書く、といった Issue は dispatch の対象ではないので、
+planner に渡されることもない。計画の Issue の `labels` に `human-only`（名前は固定）を
+入れると、validator の `planner_ready` は「非 documentation path が 1 つ以上」の条件を
+その Issue に求めない。**外れるのはこの条件だけ**で、受入条件の見出しと箇条書きは
+従来どおり要る（人にも「終わった」の判定が要る）。ラベルは Phase 2 で `--label` として
+そのまま GitHub に付くので、dispatch から外す側が読むものと validator が読むものは同じである。
+validator はその Issue を出力で `dispatch_excluded` として名指しする（[plan-contract.md](./plan-contract.md)
+第 5.3 節）。**その Issue の番号を orchestrate の planner に渡さない。** 渡すと planner は
+「Affected files are unclear」を立てる（dispatch が `human-only` を自動で外すのは別 Issue であり、
+この package はしない）。human-only の Issue に依存する Issue を dispatch するときは、
+planner がその依存を `external_dependency`（計画外の依存）として扱い待たないので、
+人の作業が終わってから渡すこと。
+
 絶対 path・`..`・drive letter・制御文字を含む候補、および `users` `home` `root` `tmp`
 `private` `var` `etc` `proc` で始まる候補は、安全のため捨てられる。
 
@@ -178,6 +192,12 @@ path と同じように `suspected_files` に入り、実行契約の `scope.all
 
 `depend` / `dependenc` / `prerequisite` / `requires` / `依存` / `前提` を含む見出しの
 節、または同じ語を含む行に現れた `#<数字>` が explicit な依存として拾われる。
+
+したがって **`depends on` の文言は必須ではない**（CommandMate#3013）。`## 依存` の下に
+`- {{issue:<key>}}` とだけ書けば、登録後の `- #N` は節の既定（この Issue が後）で依存として
+読まれる。第 1 節の例はこの書き方である。`- depends on {{issue:<key>}}` と書いても読まれる
+（validator が見るのは placeholder だけ）が、`## 依存` の中の注記は番号を含めば**それも
+依存として読まれる**ので、並列可否などの注記は別の節に書くこと。
 
 `{{issue:<key>}}` は Phase 2 が `#<番号>` に置換するので、置換後にこの条件を満たす。
 置換前の本文を planner に渡してはならない（番号が無いので依存が失われる）。

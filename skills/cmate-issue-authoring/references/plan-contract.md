@@ -29,6 +29,25 @@ plan_id = "split-" + sha256(`${repository}\n${source.digest}\n${key1,key2,...}\n
 
 導出値は `node scripts/validate-plan.mjs <plan.json> --derive-id` で得られる。
 
+### 2.1 計画の置き場所（`plan_dir`）
+
+計画は `<plan_dir>/<plan_id>/plan.json` に書き、Phase 2 の receipt も同じ directory に書く
+（[register-contract.md](./register-contract.md) 第 1 節）。
+
+- `plan_dir` の既定は `.commandmate/issue-authoring` である。
+- `.commandmate/` を人だけが直す場所にしているリポジトリ（worker が自分を裁くものを
+  書き換えられないようにするため）では、`--plan-dir <path>` で repository 内の別の
+  directory を指定する。path は **repository root からの相対**で書く。絶対 path・`..` を
+  含む path・`~` で始まる path・空・`.` の segment は拒否し（exit 2）、symlink を辿って
+  repository の外に出る directory も拒否する（exit 2）。
+- `--plan-dir` を渡すと、validator は計画 file が `<checkout>/<plan_dir>/<plan_id>/plan.json`
+  にあることを確かめる（rule `plan_location`。`--checkout` が無ければカレント directory を
+  root とする）。receipt は計画の隣に書かれるので、別の場所にある計画は次の run が
+  receipt を見つけられない計画である。
+- `--plan-dir` を渡さなければ、置き場所は検査しない（従来どおり）。
+- 設定 file は無い。cmate-orchestrate の `--runs-dir` と同じく、run ごとに CLI で渡す。
+  **同じリポジトリでは同じ `plan_dir` を使い続けること。**
+
 ## 3. Issue 1 件が持つもの
 
 | field | 規則 |
@@ -36,9 +55,10 @@ plan_id = "split-" + sha256(`${repository}\n${source.digest}\n${key1,key2,...}\n
 | `key` | 計画内で一意。Issue 番号の代わり |
 | `objective` | 1 文。`body` の最初の非空行と**一致**していること |
 | `acceptance_criteria` | 1 件以上。コマンドと判定条件で書く |
-| `target_files` | 1 件以上。**非 documentation path を 1 つ以上含むこと** |
+| `target_files` | 1 件以上。**非 documentation path を 1 つ以上含むこと**（`labels` に `human-only` がある Issue は除く。第 5.3 節） |
 | `reference_files` | 読む対象。documentation はここ |
 | `depends_on` | 計画内の key のみ。推論しない（推論は planner の領分） |
+| `labels` | 登録時に付けるラベル。`human-only` は「人がやる Issue で、dispatch の対象ではない」印（第 5.3 節） |
 | `size` | `xs` / `s` / `m` / `l` |
 | `parallel_safe` | `yes` / `no` / `unknown`。証拠が無いことは `unknown` |
 | `evidence` | 1 件以上。`kind` が `input` か `file`。`file` は repo 相対 path |
@@ -61,7 +81,7 @@ plan_id = "split-" + sha256(`${repository}\n${source.digest}\n${key1,key2,...}\n
 ## 5. validator
 
 ```bash
-node scripts/validate-plan.mjs <plan.json> [--schema <path>] [--checkout <path>] [--json]
+node scripts/validate-plan.mjs <plan.json> [--schema <path>] [--checkout <path>] [--plan-dir <path>] [--json]
 node scripts/validate-plan.mjs <plan.json> --derive-id
 node scripts/validate-plan.mjs <plan.json> --render-open-questions <issue-key>
 node scripts/validate-plan.mjs --render-acceptance-gates <id,id> --checkout <path>
@@ -104,7 +124,8 @@ schema が validator の実装していない keyword を使っていたら、�
 | `body_states_objective` | 本文の最初の非空行が `objective` と違う |
 | `body_lists_target_files` | `target_files` の path が本文に現れない |
 | `dependency_link_in_body` | `depends_on` に対応する placeholder が本文に無い／未知の key を指す |
-| `planner_ready` | 本文から受入条件か非 documentation path が読み取れない |
+| `planner_ready` | 本文から受入条件か非 documentation path が読み取れない（`human-only` の Issue は受入条件だけを見る） |
+| `plan_location` | `--plan-dir` を渡したのに、計画 file が `<plan_dir>/<plan_id>/plan.json` に無い |
 | `acceptance_gates_block_parses` | planner が読めない `acceptance-gates` ブロック |
 | `acceptance_gates_no_new_commands` | ブロックが `gates:`（新規コマンド）を宣言している |
 | `acceptance_gates_block_is_canonical` | 読めるが renderer の出力と byte 一致しない |
@@ -124,6 +145,23 @@ schema が validator の実装していない keyword を使っていたら、�
 
 `--checkout` を渡したのに `verify.yaml` が読めない・解釈できないときは exit 2 である。
 **「読めなかった」は「ブロックが無かった」ではない。**
+
+### 5.3 `human-only` の Issue
+
+`issues[].labels` に `human-only`（名前は固定）を持つ Issue は、人がやる Issue である
+（CommandMate#3013）。`planner_ready` はその Issue に「非 documentation path が 1 つ以上」を
+求めない。**外れるのはこの条件だけ**で、受入条件の条件は残る。
+
+その Issue が dispatch の対象でないことは validator の出力に出る。
+
+```
+NOTE dispatch_excluded <key> labelled human-only: a person does this Issue; do not pass its number to the planner
+VALID split-… (N issue(s))
+```
+
+`--json` では `"dispatch_excluded": [{"key": …, "reason": …}]` が付く。`human-only` の Issue が
+無い計画の出力は従来と byte 単位で同じである（行も key も出ない）。dispatch が `human-only` を
+自動で外すことはこの package の範囲外であり、Issue 番号を planner に渡すときに人が外す。
 
 ## 6. version 運用
 
@@ -175,7 +213,7 @@ schema が validator の実装していない keyword を使っていたら、�
 | 2 | 既存 Issue と merged PR の両方を検索した（できなかったなら warning に積んだ） | [duplicate-guard.md](./duplicate-guard.md) 第 1・3 節 |
 | 3 | `duplicate` 判定はすべて open question で blocking されている | [duplicate-guard.md](./duplicate-guard.md) 第 2 節、本書 第 4 節、rule `duplicate_needs_open_question` |
 | 4 | 計画が validator を exit 0 で通った | 本書 第 5 節 |
-| 5 | 各 Issue が受入条件を 1 つ以上持ち、非 documentation の対象 file を 1 つ以上持つ | 本書 第 3 節、schema の `acceptance_criteria` / `target_files` |
+| 5 | 各 Issue が受入条件を 1 つ以上持ち、非 documentation の対象 file を 1 つ以上持つ（`human-only` の Issue は受入条件だけ） | 本書 第 3 節・第 5.3 節、schema の `acceptance_criteria` / `target_files` |
 | 6 | 依存が DAG であり、本文の placeholder と `depends_on` が一致している | rule `acyclic_dependencies` / `dependency_link_in_body`（本書 第 5.2 節） |
 | 7 | Phase 1 で GitHub への mutation を 1 件も実行していない | [safety.md](./safety.md) 第 1 節 |
 | 8 | 次の行動と、それを取るのが誰かを述べた | Phase 1 は要約の末尾、登録後は [register-contract.md](./register-contract.md) 第 6 節 |

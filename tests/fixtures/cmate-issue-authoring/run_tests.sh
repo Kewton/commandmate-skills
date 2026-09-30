@@ -53,6 +53,8 @@ FULL="$CASES/valid-full.json"
 MINIMAL="$CASES/valid-minimal.json"
 GATES="$CASES/valid-acceptance-gates.json"
 UNMEASURABLE="$CASES/valid-unmeasurable.json"
+HUMAN_ONLY="$CASES/100-valid-human-only.json"
+BARE_DEPENDENCY="$CASES/101-valid-bare-dependency.json"
 
 WORK=$(mktemp -d -t cmate-issue-authoring-tests.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT INT TERM
@@ -231,6 +233,91 @@ mutant planner_ready "$MINIMAL" set /issues/0/body '"profile lookup の read 経
 # dispatchable with a scope at all.
 expect_no_rule 'a document named under 成果物 is planner-ready' planner_ready "$MINIMAL" \
   set /issues/0/body '"profile cache の設計判断を ADR として残す。\n\n## 成果物\n\n- `docs/adr/0002-profile-cache.md`\n\n## 受入条件\n\n- [ ] ADR が採用案と却下案を述べている\n"'
+
+# human-only (CommandMate#3013). A document only a person writes names no
+# non-documentation path, and it is not a dispatch target, so the "affected files"
+# half of planner_ready does not apply to it. Only that half: the label is the
+# whole mark, removing it brings the finding back, and the acceptance half stays.
+printf '\n== human-only: a person-only document belongs in the plan ==\n'
+expect_valid 'a plan with a human-only document Issue is accepted' "$HUMAN_ONLY"
+mutant planner_ready "$HUMAN_ONLY" set /issues/1/labels '[]'
+mutant planner_ready "$HUMAN_ONLY" set /issues/1/labels '["human only"]'
+mutant planner_ready "$HUMAN_ONLY" set /issues/1/body \
+  '"M1.5 の流れを人がスマホで通しで操作し、結果を手順書に記録する。\n\n## 手順書\n\n- `docs/demo/m1-5-walkthrough.md`\n\n## やること\n\n- 通しで操作する\n\n## 依存\n\n- {{issue:demo-seed-data}}\n"'
+
+out=$(node "$VALIDATOR" "$HUMAN_ONLY" 2>&1)
+case "$out" in
+  *"NOTE dispatch_excluded phone-demo-walkthrough "*"VALID "*)
+    pass 'the output names the human-only Issue as not a dispatch target' ;;
+  *) fail 'the output names the human-only Issue as not a dispatch target' "$out" ;;
+esac
+if node "$VALIDATOR" "$HUMAN_ONLY" --json | node -e '
+let raw = ""; process.stdin.on("data", (c) => { raw += c; }).on("end", () => {
+  const result = JSON.parse(raw);
+  const keys = (result.dispatch_excluded ?? []).map((entry) => entry.key);
+  process.exit(result.valid && keys.length === 1 && keys[0] === "phone-demo-walkthrough" ? 0 : 1);
+});'; then
+  pass 'the JSON output lists exactly the human-only Issue under dispatch_excluded'
+else
+  fail 'the JSON output lists exactly the human-only Issue under dispatch_excluded' "$(node "$VALIDATOR" "$HUMAN_ONLY" --json)"
+fi
+# ... and a plan with no human-only Issue prints what it always printed.
+if node "$VALIDATOR" "$FULL" --json | grep -q '"dispatch_excluded"'; then
+  fail 'a plan without a human-only Issue carries no dispatch_excluded' 'the key appeared'
+else
+  pass 'a plan without a human-only Issue carries no dispatch_excluded'
+fi
+case "$(node "$VALIDATOR" "$FULL" 2>&1)" in
+  "VALID split-ae26c30119f1 (3 issue(s))") pass 'a plan without a human-only Issue prints one VALID line' ;;
+  *) fail 'a plan without a human-only Issue prints one VALID line' "$(node "$VALIDATOR" "$FULL" 2>&1)" ;;
+esac
+
+# The plan's location (CommandMate#3013). Unset, nothing is checked (every case
+# above runs from tests/fixtures). Set, the plan must sit at
+# <plan-dir>/<plan_id>/plan.json under the repository root, because Phase 2 writes
+# the receipt beside it and the duplicate-registration guard looks there.
+printf '\n== --plan-dir: the plan can live outside .commandmate/ ==\n'
+PD_ROOT="$WORK/plan-dir-repo"
+PD_ID=$(node "$VALIDATOR" "$MINIMAL" --derive-id)
+mkdir -p "$PD_ROOT/plans/issue-authoring/$PD_ID" "$PD_ROOT/.commandmate/issue-authoring/$PD_ID" "$PD_ROOT/elsewhere"
+cp "$MINIMAL" "$PD_ROOT/plans/issue-authoring/$PD_ID/plan.json"
+cp "$MINIMAL" "$PD_ROOT/.commandmate/issue-authoring/$PD_ID/plan.json"
+cp "$MINIMAL" "$PD_ROOT/elsewhere/plan.json"
+expect_exit 'a plan under a --plan-dir outside .commandmate/ is accepted' 0 \
+  "$PD_ROOT/plans/issue-authoring/$PD_ID/plan.json" --plan-dir plans/issue-authoring --checkout "$PD_ROOT"
+expect_exit 'a trailing slash on --plan-dir is the same directory' 0 \
+  "$PD_ROOT/plans/issue-authoring/$PD_ID/plan.json" --plan-dir plans/issue-authoring/ --checkout "$PD_ROOT"
+expect_exit 'the default directory, named explicitly, is accepted' 0 \
+  "$PD_ROOT/.commandmate/issue-authoring/$PD_ID/plan.json" --plan-dir .commandmate/issue-authoring --checkout "$PD_ROOT"
+expect_exit 'without --plan-dir the location is not checked' 0 "$PD_ROOT/elsewhere/plan.json"
+out=$(node "$VALIDATOR" "$PD_ROOT/elsewhere/plan.json" --plan-dir plans/issue-authoring --checkout "$PD_ROOT" 2>&1)
+status=$?
+case "$status:$out" in
+  1:*"FAIL plan_location "*) pass 'a plan outside the configured --plan-dir is refused' ;;
+  *) fail 'a plan outside the configured --plan-dir is refused' "exit $status: $out" ;;
+esac
+out=$(node "$VALIDATOR" "$PD_ROOT/.commandmate/issue-authoring/$PD_ID/plan.json" --plan-dir plans/issue-authoring --checkout "$PD_ROOT" 2>&1)
+status=$?
+case "$status:$out" in
+  1:*"FAIL plan_location "*) pass 'a plan left in the default directory is refused once --plan-dir says otherwise' ;;
+  *) fail 'a plan left in the default directory is refused once --plan-dir says otherwise' "exit $status: $out" ;;
+esac
+expect_exit '--plan-dir refuses an absolute path' 2 \
+  "$PD_ROOT/plans/issue-authoring/$PD_ID/plan.json" --plan-dir "$PD_ROOT/plans/issue-authoring" --checkout "$PD_ROOT"
+expect_exit '--plan-dir refuses a path containing ..' 2 \
+  "$PD_ROOT/plans/issue-authoring/$PD_ID/plan.json" --plan-dir plans/../../outside --checkout "$PD_ROOT"
+expect_exit '--plan-dir refuses a path starting with ..' 2 \
+  "$PD_ROOT/plans/issue-authoring/$PD_ID/plan.json" --plan-dir ../outside --checkout "$PD_ROOT"
+expect_exit '--plan-dir refuses an empty path' 2 \
+  "$PD_ROOT/plans/issue-authoring/$PD_ID/plan.json" --plan-dir '' --checkout "$PD_ROOT"
+expect_exit '--plan-dir needs a value' 2 "$PD_ROOT/plans/issue-authoring/$PD_ID/plan.json" --plan-dir
+mkdir -p "$WORK/outside-repo/$PD_ID"
+cp "$MINIMAL" "$WORK/outside-repo/$PD_ID/plan.json"
+ln -s "$WORK/outside-repo" "$PD_ROOT/escape"
+expect_exit '--plan-dir refuses a directory that resolves outside the repository' 2 \
+  "$PD_ROOT/escape/$PD_ID/plan.json" --plan-dir escape --checkout "$PD_ROOT"
+expect_exit '--plan-dir is not a renderer option' 2 \
+  --render-acceptance-gates validate --checkout "$REPO_ROOT" --plan-dir plans
 
 # The acceptance-gates notation (Issue #124). The producing side may only write a
 # gate id it has SEEN, so every case here runs against a real .commandmate/verify.yaml
@@ -475,6 +562,42 @@ if node "$ORCHESTRATOR" --issues 9000,9001,9002 \
   fi
 else
   fail 'the planner produced a plan with zero blocking questions' "the planner failed: $(cat "$WORK/orchestrate.out")"
+fi
+
+# The dependency style (CommandMate#3013): `- {{issue:<key>}}` alone under
+# `## 依存`, i.e. a bare `#N` once registered, with no "depends on" wording. The
+# planner has to read it as exactly the declared edge — that, not the validator,
+# is what makes the style usable — so it goes through the real planner too.
+node "$SUITE_DIR/to-issue-json.mjs" "$BARE_DEPENDENCY" > "$WORK/bare-issues.json"
+if node "$ORCHESTRATOR" --issues 9000,9001 \
+      --issue-json "$WORK/bare-issues.json" \
+      --runs-dir "$WORK/runs" --run-id bare-dependency > "$WORK/bare.out" 2>&1; then
+  if node "$SUITE_DIR/assert-planner-clean.mjs" "$BARE_DEPENDENCY" "$WORK/runs/bare-dependency/plan.json" > "$WORK/bare.txt" 2>&1; then
+    sed 's/^/     /' "$WORK/bare.txt"
+    pass 'the planner reads a bare #N under ## 依存 as exactly the declared dependency'
+  else
+    sed 's/^/     /' "$WORK/bare.txt"
+    fail 'the planner reads a bare #N under ## 依存 as exactly the declared dependency' 'see the assertions above'
+  fi
+else
+  fail 'the planner reads a bare #N under ## 依存 as exactly the declared dependency' \
+    "the planner failed: $(cat "$WORK/bare.out")"
+fi
+
+# The human-only plan minus its human-only Issue — which is how it is dispatched —
+# is clean in front of the planner.
+node "$SUITE_DIR/to-issue-json.mjs" "$HUMAN_ONLY" > "$WORK/human-only-issues.json"
+if node "$ORCHESTRATOR" --issues 9000 \
+      --issue-json "$WORK/human-only-issues.json" \
+      --runs-dir "$WORK/runs" --run-id human-only > "$WORK/human-only.out" 2>&1 &&
+   node -e '
+const plan = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+process.exit(plan.issues.length === 1 && plan.issues[0].questions.length === 0 ? 0 : 1);
+' "$WORK/runs/human-only/plan.json"; then
+  pass 'the dispatchable part of a plan with a human-only Issue raises no question'
+else
+  fail 'the dispatchable part of a plan with a human-only Issue raises no question' \
+    "$(cat "$WORK/human-only.out")"
 fi
 
 # The open_questions risk factor is asserted inside assert-planner-clean.mjs,

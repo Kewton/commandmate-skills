@@ -2,6 +2,7 @@
 //
 //   node scripts/validate-plan.mjs <plan.json> [--schema <path>] [--json]
 //   node scripts/validate-plan.mjs <plan.json> --checkout <path>
+//   node scripts/validate-plan.mjs <plan.json> --plan-dir <path>
 //   node scripts/validate-plan.mjs <plan.json> --derive-id
 //   node scripts/validate-plan.mjs <plan.json> --render-open-questions <issue-key>
 //   node scripts/validate-plan.mjs --render-acceptance-gates <id,id> --checkout <path>
@@ -25,8 +26,8 @@
 // plan is wrong" from "I could not look" is a validator whose green means nothing.
 
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { readFileSync, realpathSync } from 'node:fs';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -46,6 +47,13 @@ const USAGE = `cmate-issue-authoring split-plan validator
                       body may declare an \`acceptance-gates\` block: the gate ids
                       are resolved against <path>/.commandmate/verify.yaml, which
                       is the file dispatch resolves them against.
+  --plan-dir <path>   Directory the plan (and, after Phase 2, its receipt) lives
+                      under, relative to the repository root (--checkout, else
+                      the current directory). The plan must then be
+                      <path>/<plan_id>/plan.json. Absolute paths, "..", and a
+                      directory that resolves outside the repository are
+                      refused. Without it the location is not checked; the
+                      documented default is .commandmate/issue-authoring.
   --render-acceptance-gates <id,id>
                       Print the canonical block for those gate ids and exit. Needs
                       --checkout, and every id must exist there.
@@ -1118,7 +1126,7 @@ function checkEvidence(plan, out) {
 //: always has a number to put there.
 const DEPENDENCY_PLACEHOLDER_RE = /\{\{issue:([a-z0-9-]+)\}\}/g;
 
-function checkBodies(plan, keys, out) {
+function checkBodies(plan, keys, humanOnly, out) {
   plan.issues.forEach((issue, index) => {
     // Every check below reads the body the PLANNER reads, which is the body with
     // BOTH machine-readable blocks removed, in the planner's own order
@@ -1153,8 +1161,12 @@ function checkBodies(plan, keys, out) {
       );
     }
 
+    // A `human-only` Issue is exempt from this half and only this half
+    // (CommandMate#3013): it is a document a person writes, never a dispatch
+    // target, so the scope question is one nobody will ask. It still needs its
+    // acceptance criteria — a person has to know when they are done too.
     const suspected = plannerSuspectedFiles(`${issue.title}\n\n${body}`);
-    if (suspected.length === 0) {
+    if (suspected.length === 0 && !humanOnly.has(issue.key)) {
       out.add(
         'planner_ready',
         `${pointer}/body`,
@@ -1198,6 +1210,86 @@ function checkBodies(plan, keys, out) {
       }
     });
   });
+}
+
+// =============================================================================
+// human-only Issues (CommandMate#3013)
+// =============================================================================
+//
+// Some Issues are work only a person does — a demo on a phone, a document
+// written by hand. They belong in the plan (other Issues depend on them, and
+// leaving them out meant creating them outside the plan, where the duplicate
+// guard and the receipt never saw them), but they are not dispatch targets, and
+// the planner would ask "Affected files are unclear" about every one of them.
+//
+// The mark is the label `human-only` in the issue's own `labels`, fixed by name:
+// the label is what reaches GitHub (Phase 2 passes it as `--label`), so the consumer
+// that keeps the Issue out of dispatch reads the same thing this validator does.
+// What it exempts is exactly one half of `planner_ready` (see checkBodies).
+
+const HUMAN_ONLY_LABEL = 'human-only';
+
+function humanOnlyKeys(plan) {
+  return new Set(
+    plan.issues.filter((issue) => (issue.labels ?? []).includes(HUMAN_ONLY_LABEL)).map((issue) => issue.key),
+  );
+}
+
+// =============================================================================
+// Where the plan lives (CommandMate#3013)
+// =============================================================================
+//
+// The default is `.commandmate/issue-authoring/<plan_id>/`. A repository that
+// keeps `.commandmate/` for files only people edit (so a worker cannot rewrite
+// what judges it) needs the plan elsewhere, so `--plan-dir` names the directory,
+// relative to the repository root. The receipt that guards against a second
+// registration is written next to the plan, so the location is checked rather
+// than merely accepted: a plan outside the configured directory is a plan whose
+// receipt the next run would not find.
+
+function planDirProblem(dir) {
+  if (dir === '') return 'is empty';
+  if (/[\u0000-\u001f\u007f]/.test(dir)) return 'contains a control character';
+  if (dir.includes('\\')) return 'contains a backslash; write a POSIX path';
+  if (dir.startsWith('/') || /^[A-Za-z]:/.test(dir)) return 'is absolute; write it relative to the repository root';
+  if (dir.startsWith('~')) return 'starts with "~"; write it relative to the repository root';
+  const segments = dir.replace(/\/+$/, '').split('/');
+  if (segments.some((segment) => segment === '..')) return 'contains "..", which leaves the repository';
+  if (segments.some((segment) => segment === '' || segment === '.')) return 'contains an empty or "." segment';
+  return null;
+}
+
+function realpathOrNull(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+}
+
+function checkPlanLocation(plan, options, out) {
+  if (options.planDir === null) return;
+  const root = realpathOrNull(resolve(options.checkout ?? '.'));
+  if (root === null) {
+    throw new RunError(`the repository root ${options.checkout ?? '.'} is not readable, so --plan-dir cannot be resolved`);
+  }
+  const dir = resolve(root, options.planDir);
+  const realDir = realpathOrNull(dir);
+  if (realDir !== null && realDir !== root && !realDir.startsWith(`${root}${sep}`)) {
+    throw new RunError(`--plan-dir ${options.planDir} resolves to ${realDir}, which is outside the repository`);
+  }
+  const expected = join(dir, plan.plan_id, 'plan.json');
+  const actual = realpathOrNull(resolve(options.plan));
+  if (actual === null || actual !== (realpathOrNull(expected) ?? expected)) {
+    const shown = actual === null ? options.plan : relative(root, actual);
+    out.add(
+      'plan_location',
+      '/plan_id',
+      `the plan file is ${shown}, but --plan-dir ${options.planDir} puts it at ` +
+        `${relative(root, expected)}; the receipt is written next to the plan, so a plan anywhere else ` +
+        'is one whose receipt the next run would not find',
+    );
+  }
 }
 
 // =============================================================================
@@ -1482,6 +1574,7 @@ function parseArgs(argv) {
     plan: null,
     schema: DEFAULT_SCHEMA,
     checkout: null,
+    planDir: null,
     render: null,
     renderQuestions: null,
     json: false,
@@ -1504,6 +1597,12 @@ function parseArgs(argv) {
       index += 1;
       if (index >= argv.length) throw new Error('--checkout needs a path');
       options.checkout = argv[index];
+    } else if (arg === '--plan-dir') {
+      index += 1;
+      if (index >= argv.length) throw new Error('--plan-dir needs a path');
+      const problem = planDirProblem(argv[index]);
+      if (problem !== null) throw new Error(`--plan-dir ${JSON.stringify(argv[index])} ${problem}`);
+      options.planDir = argv[index];
     } else if (arg === '--render-acceptance-gates') {
       index += 1;
       if (index >= argv.length) throw new Error('--render-acceptance-gates needs a gate id list');
@@ -1522,6 +1621,9 @@ function parseArgs(argv) {
   }
   if (options.render !== null && options.renderQuestions !== null) {
     throw new Error('the two renderers print two different blocks; ask for one of them');
+  }
+  if (options.render !== null && options.planDir !== null) {
+    throw new Error('--render-acceptance-gates prints a block; --plan-dir checks a plan');
   }
   if (options.render !== null && options.plan !== null) {
     throw new Error('--render-acceptance-gates prints a block; it does not validate a plan');
@@ -1620,6 +1722,7 @@ function main(argv) {
   }
 
   const findings = new Findings();
+  let humanOnly = new Set();
   try {
     validateAgainstSchema(plan, schema, schema, '', findings);
   } catch (error) {
@@ -1637,9 +1740,11 @@ function main(argv) {
     checkDryRunIsReadOnly(plan, findings);
     checkDuplicateGuard(plan, keys, findings);
     checkEvidence(plan, findings);
-    checkBodies(plan, keys, findings);
+    humanOnly = humanOnlyKeys(plan);
+    checkBodies(plan, keys, humanOnly, findings);
     checkOpenQuestions(plan, findings);
     try {
+      checkPlanLocation(plan, options, findings);
       checkAcceptanceGates(plan, options, findings);
     } catch (error) {
       if (!(error instanceof RunError)) throw error;
@@ -1648,13 +1753,30 @@ function main(argv) {
     }
   }
 
+  // Which Issues are not dispatch targets, stated in the output so the reviewer
+  // who approves the plan reads it there (CommandMate#3013). Printed only when
+  // there is one, so the output for a plan without a human-only Issue is what it
+  // always was.
+  const excluded = (Array.isArray(plan.issues) ? plan.issues : [])
+    .filter((issue) => humanOnly.has(issue.key))
+    .map((issue) => ({
+      key: issue.key,
+      reason: `labelled ${HUMAN_ONLY_LABEL}: a person does this Issue; do not pass its number to the planner`,
+    }));
+
   if (options.json) {
     process.stdout.write(`${JSON.stringify({
       valid: findings.length === 0,
       plan_id: typeof plan.plan_id === 'string' ? plan.plan_id : null,
+      ...(excluded.length > 0 ? { dispatch_excluded: excluded } : {}),
       findings: findings.items,
     }, null, 2)}\n`);
-  } else if (findings.length === 0) {
+    return findings.length === 0 ? EXIT_VALID : EXIT_INVALID;
+  }
+  for (const entry of excluded) {
+    process.stdout.write(`NOTE dispatch_excluded ${entry.key} ${entry.reason}\n`);
+  }
+  if (findings.length === 0) {
     process.stdout.write(`VALID ${plan.plan_id} (${plan.issues.length} issue(s))\n`);
   } else {
     for (const finding of findings.items) {

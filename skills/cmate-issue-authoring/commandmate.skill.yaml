@@ -101,8 +101,8 @@ risk_rationale: >-
   既存 Issue の本文編集・クローズ・ラベル張り替えは手順として禁止している。
 files:
   - path: SKILL.md
-    sha256: be48233a161ce2e843f795de9912a738f635230aaaf2fdf762893f32b8fe286f
-    size: 14704
+    sha256: 142ba1405e3913309b850fd40dfe7fd003427ae0f3f28e7d47303fa7f6a39452
+    size: 15764
     kind: skill_md
     executable: false
     script: false
@@ -125,8 +125,8 @@ files:
     executable: false
     script: false
   - path: references/issue-body-contract.md
-    sha256: de23cce9c47247c42f04757e7266702a28ef57123cdb4561e56ae60b24abbf91
-    size: 15251
+    sha256: e96ce3fd3e6039544fa7e236f1fd94cb43acacaeb154e123e8e25bf30ceffd5a
+    size: 17231
     kind: instruction
     executable: false
     script: false
@@ -137,38 +137,38 @@ files:
     executable: false
     script: false
   - path: references/plan-contract.md
-    sha256: 624e4d57936f6c7a398b545811e2a75d3ea3f609f07cecb171210631225b689e
-    size: 13258
+    sha256: 5b032037e21f13fcadd2402afeb52b2ad9f4db9c929e8903439cc67be4b69fae
+    size: 16128
     kind: instruction
     executable: false
     script: false
   - path: references/register-contract.md
-    sha256: 470d05adcd2f91b67225ccc477490cc57a61e54da9398720480bff7c70b411f3
-    size: 4078
+    sha256: c8b29878fadbcafd1d3bd770c0c29d71d10cfb44dced060274c7ec6f84ebb30d
+    size: 4649
     kind: instruction
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: e8693858b32eeb3cc667603c2c2061ef1d8c51447266de19a3b60ff72c79ade9
-    size: 24455
+    sha256: 6ded7b5894de527edb4785c7d0ed2cb3e9d1a7a0cd84c49c35cf7106b92aeef8
+    size: 28462
     kind: instruction
     executable: false
     script: false
   - path: references/safety.md
-    sha256: 6a35d96d4263777c658c1e716682c9890fae0f45014e81c3822702c55eca31d0
-    size: 3509
+    sha256: 3972fbc0cc3169a46ecc7e05f0a966f6e58d2f8b3f336df8fad1f5a7a9ff083b
+    size: 3742
     kind: instruction
     executable: false
     script: false
   - path: schemas/issue-split-plan.v1.json
-    sha256: 2bc0dd438e7af1868bb480d13a3d74445ccb6ebc0f32d520e0ee1eff0b543a84
-    size: 10898
+    sha256: 1e39377f75d1c377e6d591c7186d599bea411cf36ca6157a1b61fdbf308f4599
+    size: 10995
     kind: asset
     executable: false
     script: false
   - path: scripts/validate-plan.mjs
-    sha256: cd7ec9671c6bd950fe9df3a0058b2c36e56a61b687cb63b93f2143b3aa6e585d
-    size: 77223
+    sha256: 1d84ea3bb7ec0e4ffbf4fc895b506862b17322e6a13cb26c301eef02df1f8137
+    size: 83483
     kind: script
     executable: false
     script: true
