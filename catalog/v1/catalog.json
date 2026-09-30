@@ -279,7 +279,7 @@
         "commandmate-cli",
         "bash"
       ],
-      "latest": "0.1.2",
+      "latest": "0.2.0",
       "versions": [
         {
           "version": "0.1.1",
@@ -354,6 +354,65 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-delegate-v0.1.2/cmate-delegate-0.1.2.tar.gz",
             "sha256": "61d5f289f8b78625317ab18afd57c35d0bcf031094ead6589c673af59bc8af49",
             "size": 21483,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0, re-checked 2026-07-31 as a two-way control - an installed skill is found under .claude/skills and matches in the slash palette. Package-independent; this package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-26 on Codex CLI 0.145.0 and re-checked 2026-08-02 with a mechanical trace (the /skills picker lists it). That version exposes no slash command, so invoke by name. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured, for this package or any other. The wrapper needs only bash and the commandmate CLI, so the procedure is usable by hand; discovery and reload are unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "copilot",
+                "evidence": "Not measured, for this package or any other. No discovery, invocation or reload behaviour has been observed, so no support level is claimed.",
+                "support": "unknown"
+              },
+              {
+                "agent": "antigravity",
+                "evidence": "Not measured, for this package or any other. No discovery, invocation or reload behaviour has been observed, so no support level is claimed.",
+                "support": "unknown"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.2.0",
+          "changelog": "cmate-delegate 0.2.0 — 文脈の上限で止まった依頼を、完了ではなく失敗として返す（CommandMate#3011）。\n\n利用側（Kewton/Musunest）で、長く使い続けた管理のセッションへの依頼が「400 This model's maximum context length is ...」で何もされずに終わったが、ask は通常の完了（exit 0）と区別できなかった。\n\n- 上流 CLI の ask は、文脈の上限を既存の exit 11（UPSTREAM_FAULT）で返し、--json と stderr に id=context-limit を出す（CommandMate 側で対応）。exit-codes.md と SKILL.md の分岐表に 11 を載せた。id=context-limit の 11 は「待っても送り直しても直らない。commandmate instances <wt> kill <instance> で新しいセッションにして送り直す」。ask.sh は 11 を素通しにする。\n- CLI が未対応の版向けの保険: 上流が 0 を返したときに限り、返答の末尾 20 行の行頭に Command Code の実際のエラー行（⚠ Error: 400 This model's maximum context length ...）があれば 11 を返し、stderr に id=context-limit と kill の案内を出す。引用されているだけの語には当たらない。0 以外の code は書き換えない。\n- Claude・Codex の文脈上限の表示と、送る前に文脈の量を測る提案は別 Issue（sessionContext は opencode でしか取れない）。",
+          "published_at": "2026-09-30T03:42:00Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-delegate-v0.2.0",
+            "commit": "b195a0ff1714d437e5bc3a9916afad199169d1da"
+          },
+          "artifact": {
+            "asset_name": "cmate-delegate-0.2.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-delegate-v0.2.0/cmate-delegate-0.2.0.tar.gz",
+            "sha256": "aa5fb0b3d7813945709899316ed4504dffd206c38f13901e630985a0b9114548",
+            "size": 24177,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
