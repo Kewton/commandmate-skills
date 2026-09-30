@@ -1,0 +1,49 @@
+{
+  "description": "[#287] **nudge に追記がある run。** `--nudge-message` の文は既定 nudge の**後に**足されるので、transcript の human message は既定 nudge の 1 行目で始まる。runner は 1 行目で自分の nudge を見分けるので、追記があっても報告を読める。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "235",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--nudge-message",
+    "作業ログは docs/ に残してください。"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      235
+    ],
+    "worker_states": {
+      "235": "failed"
+    },
+    "send_counts": {
+      "235": 2
+    },
+    "worker_report": {
+      "235": {
+        "turn": 2,
+        "text_includes": [
+          "止めて報告します。"
+        ]
+      }
+    },
+    "blocking_codes": [
+      "worker_stopped_with_report",
+      "worker_failed"
+    ]
+  }
+}

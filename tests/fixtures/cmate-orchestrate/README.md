@@ -283,6 +283,12 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 | `d114-max-turns-transcript-ambiguous` | **「読めなかった」の 2 つ目の形: 候補が絞れない。** pane は空白だけ・hooks 無し・transcript の directory に session が 2 つ。1 つ選べば推測を測定に見せかけることになるので、runner は選ばずに `read: false` と件数を名乗る。**空白だけの pane は肯定的証拠ではない**（d111 では同じ空白の pane が `worker_upstream_unavailable` になっており、判定していたのが pane でないことがそこで分かる） |
 | `d115-max-turns-hooks-stop-returned` | **hooks だけで「ターンは成立した」を測る側。** pane も transcript も何も言わない世界で、`structuredEvents.lastStopEventAt` が最後の send より**新しい**ので `worker_produced_nothing`。`isRunning` は tmux セッションが healthy の意味なので使えず、`stop` だけが「ターンが終わった」を言う |
 | `d116-max-turns-hooks-no-stop` | **d115 の双子（変数は timestamp の前後だけ）。** `lastStopEventAt` が最後の send より**古い** —— 投げたターンが終わっていないので `worker_upstream_unavailable`。2 点にしてあるのは、`stop` の比較を反転する変異が**両方を赤にする**ようにするためである（片側だけなら定数を裏返して緑を保てる） |
+| `d155-worker-stopped-with-report` | **[#287] nudge に従って止めて報告した worker。** 1 回目の nudge のターンが exit 21 で終わり、transcript の最後の human message がその nudge、その後の最後の発話が報告の文。runner は**2 回目の nudge を送らず**（既定 `--max-turns 8` のまま send 2 回）、`worker_report.text` と blocking `worker_stopped_with_report`（`worker_failed` の隣、plan 順）に報告の文を写す。裁定は動かず、cap に達していないので `worker_turn_evidence` は付かない。新しい expect `worker_report`（`null` は field が無いこと、`text_includes` は写された文）で固定する |
+| `d156-worker-no-report-unchanged` | **報告の無い無進捗は従来どおり。** transcript は nudge を記録しているが、worker の最後の発話が tool 呼び出しで文が無い。`--max-turns 3` まで nudge し（send 3 回）、cap で `worker_produced_nothing`。`worker_report` は付かない |
+| `d157-worker-report-capture-unreadable` | **報告を読めなかったとき。** transcript には d155 と同じ報告があるが `capture` が失敗するので `cliToolId` が分からず読めない。**読めなかったことは報告でも止める理由でもない** —— 従来どおり cap まで回して `worker_output_unreadable` |
+| `d158-worker-report-on-cap-turn` | **cap のターンの報告。** `--max-turns 2` で唯一の nudge のターンが cap のターンでもある。報告は cap より先に読まれるので `worker_report` が付き、`worker_turn_evidence` は付かない |
+| `d159-worker-stopped-with-report-fallback` | **フォールバック経路（契約非対応 CLI）でも同じ。** commit しない worker が nudge の後に報告して止まり、`worker_report` が付いて send は 2 回で止まる |
+| `d160-worker-report-with-nudge-extra` | **`--nudge-message` の追記がある run。** 追記は既定 nudge の後ろに付くので、transcript の human message は既定 nudge の 1 行目を含み、runner は報告を読める |
 | `d49-unattended-two-waves-parity` | **無人運転の二点測定（#122）。** 同じ世界を `--unattended` 有り／無しで2回 dispatch し、`status` / `stop_reason` / `waves[]` / `drift_checks` / `blocking_reasons` / `completion_check` / `redactions` が**一致**し、差分は limitation の `unattended_mode` / `unattended_baseline` **だけ**であることを assert する（「緩めない」の機械的証明。self-report の boolean より強い） |
 | `d50-unattended-prompt-halts` | 無人でも prompt（exit 10）で止まり、`respond` を送らず `human_required: true` のままか。**無人だから human_required を false にする、はしない** |
 | `d51-unattended-not-judged` | 無人でも exit 99 を pass に丸めず、20 の再指示ループにも流さないか。フラグ無しの run との二点測定つき |
@@ -442,6 +448,7 @@ checked-in artifact が古い形のまま緑になり続けることを防ぐた
 | `s10-unattended-budget` | wall-clock budget で打ち切った無人 run。**新しい `stop_reason` 値を足していない**ので既存の `timeout` の hint が引かれ、何が起きたかは blocking の `wall_clock_budget_exhausted` が名指しする。run 全体の宣言と Issue ごとの取り消し起点が、それぞれ run 行と Issue 行に分かれるか |
 | `s11-unattended-locked` | 排他 lock で拒否された無人 run（何も書いていないので `out_dir: null`・wave 0件）。hint が「先行 run の終了を待って同じコマンドを再実行する」になり、**`human_required` は false** であるか |
 | `s12-dispatch-flaky-gate` | **マトリクスは `FLAKY` を残す（[#224](https://github.com/Kewton/commandmate-skills/issues/224)）。** `unit=flaky` がそのまま出て、さらに `flaky_gates` として**独立に名指し**される（20 本並ぶ gate 行では、カンマ区切りの 1 トークンは読み飛ばされる）。`verification=pass` は runner の exit code であって、この行から再計算したものではない |
+| `s155-dispatch-worker-stopped-with-report` | **[#287] 止めて報告した worker の run。** blocking `worker_stopped_with_report` が `worker_failed` と並んで Issue 行に出て、hint が「`worker_report.text` をまず読む」「報告の無い無進捗と同じ扱いにしない」を示す。`worker_failed` の hint も `worker_report` に触れる |
 ## profile-init case 一覧
 
 `profile-init-cases/<id>/repo/` は、`profile-init.mjs` に読ませる**小さな本物のリポジトリ**である

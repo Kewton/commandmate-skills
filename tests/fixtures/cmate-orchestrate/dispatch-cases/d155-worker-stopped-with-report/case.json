@@ -1,0 +1,83 @@
+{
+  "description": "[#287] **止めて報告した worker。** 1 回目の nudge（「指示どおりに書けないと分かったら、進めずに止めて報告してください。」を含む）の後のターンが exit 21（作業証跡なし）で終わり、worker の transcript は最後の human message としてその nudge を記録し、その後の最後の発話が報告の文である。runner はこれを「止めて報告」と読み、**2 回目の nudge を送らない**（`--max-turns` は既定の 8 のまま、send は 2 回で止まる）。報告の文は worker 記録の `worker_report.text` と blocking `worker_stopped_with_report` の detail に写され、`worker_failed` はその隣に従来どおり出る（裁定は動かない）。cap に到達していないので `worker_turn_evidence` は付かない。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "235",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      235
+    ],
+    "worker_states": {
+      "235": "failed"
+    },
+    "send_counts": {
+      "235": 2
+    },
+    "verification_outcomes": {
+      "235": "fail"
+    },
+    "worker_report": {
+      "235": {
+        "code": "worker_stopped_with_report",
+        "turn": 2,
+        "source": "claude_transcript",
+        "truncated": false,
+        "text_includes": [
+          "止めて報告します。",
+          "`src/storage.ts` が対象ファイルに無いため"
+        ]
+      }
+    },
+    "worker_turn_evidence": {
+      "235": null
+    },
+    "worker_notes_include": {
+      "235": [
+        "the worker stopped and reported on turn 2",
+        "no further nudge was sent (the --max-turns cap is 8)"
+      ]
+    },
+    "blocking_codes": [
+      "worker_stopped_with_report",
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_produced_nothing",
+      "worker_upstream_unavailable",
+      "worker_output_unreadable"
+    ],
+    "blocking_details_include": [
+      [
+        "#235:",
+        "止めて報告します。",
+        "--resume"
+      ]
+    ],
+    "blocking_order": [
+      "worker_stopped_with_report:#235",
+      "worker_failed:#235"
+    ],
+    "summary_includes": [
+      "`worker_stopped_with_report`",
+      "報告を読んでから決める"
+    ]
+  }
+}

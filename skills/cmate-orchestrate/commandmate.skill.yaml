@@ -158,14 +158,14 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: 3cafc8c339ebe972aff6c1d2ef9647a9ca55138c46e93e7b9b93339d7b970ff3
-    size: 105969
+    sha256: 28a0741f60c33e31fde26bc5eb2a021339d29bd6d092e5f456290dee077c1008
+    size: 107417
     kind: instruction
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: c9101ada798899b23db85c2bd055009fe6fe65d584e8c799f6e4ebd510871698
-    size: 163146
+    sha256: 49758be916badeb7081701295c59db27957fbfeef40081475824c8966455ad31
+    size: 167593
     kind: instruction
     executable: false
     script: false
@@ -200,8 +200,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: e4f92260620db54b2496e793825baacedd61b429a8e5c7d52cdf47066d5d7257
-    size: 253527
+    sha256: d03983107cde2c953aa16c9465652a8d36328d7509d52f78cdca69ea95ff945c
+    size: 256869
     kind: instruction
     executable: false
     script: false
@@ -218,8 +218,8 @@ files:
     executable: false
     script: false
   - path: schemas/dispatch-report.v1.json
-    sha256: e6ea1bd31451771cd8575cf9e78dcbfa7f203faa03f7ccc305d51536db2e4332
-    size: 30074
+    sha256: 73b99068eb00645b0f1a2674f0b3248a64d4d4e7834417715c5af5093890ca45
+    size: 32553
     kind: asset
     executable: false
     script: false
@@ -260,8 +260,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: c785256bf666b5bae19922b812ab89386b2de8b08b3b0eebd9e691a61b3290b9
-    size: 479722
+    sha256: 078eff64968a60a15cf23a1ee2302ab798a6f79f0d91e736183e5216bcf474fa
+    size: 490438
     kind: script
     executable: true
     script: true
@@ -302,8 +302,8 @@ files:
     executable: true
     script: true
   - path: scripts/status.mjs
-    sha256: 74e4f523d1692f42735bf2a2735b23de85b2db4de77da5f382bd828beccd9cd2
-    size: 73866
+    sha256: 907584d8a18bb79f9fdf44824c217ae2c83e796d91e10f697f13981d834e1b4f
+    size: 74548
     kind: script
     executable: true
     script: true

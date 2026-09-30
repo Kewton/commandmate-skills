@@ -1,0 +1,54 @@
+{
+  "description": "[#287] **フォールバック経路（契約非対応の CLI）でも同じ。** worker は commit しない（`commit_on` が cap より上）。1 回目の nudge の後のターンが新しい commit 無しで終わり、transcript はその nudge の後の報告の文で終わる。runner は 2 回目の nudge を送らず、`worker_report` と `worker_stopped_with_report` を記録する。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "232",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      232
+    ],
+    "worker_states": {
+      "232": "failed"
+    },
+    "send_counts": {
+      "232": 2
+    },
+    "worker_report": {
+      "232": {
+        "code": "worker_stopped_with_report",
+        "turn": 2,
+        "source": "claude_transcript",
+        "text_includes": [
+          "止めて報告します。"
+        ]
+      }
+    },
+    "worker_notes_include": {
+      "232": [
+        "with no new commit"
+      ]
+    },
+    "blocking_codes": [
+      "worker_stopped_with_report",
+      "worker_failed"
+    ]
+  }
+}

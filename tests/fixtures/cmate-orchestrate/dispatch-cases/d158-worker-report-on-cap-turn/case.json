@@ -1,0 +1,59 @@
+{
+  "description": "[#287] **cap のターンで止めて報告した。** `--max-turns 2` なので nudge は 1 回だけで、その nudge のターンが cap のターンでもある。報告は cap より先に読まれるので、この worker は「なぜ何も無いか」（`worker_turn_evidence`）ではなく `worker_report` を持つ。send は 2 回。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "231",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "2"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      231
+    ],
+    "worker_states": {
+      "231": "failed"
+    },
+    "send_counts": {
+      "231": 2
+    },
+    "verification_outcomes": {
+      "231": "fail"
+    },
+    "worker_report": {
+      "231": {
+        "turn": 2,
+        "text_includes": [
+          "止めて報告します。"
+        ]
+      }
+    },
+    "worker_turn_evidence": {
+      "231": null
+    },
+    "blocking_codes": [
+      "worker_stopped_with_report",
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_produced_nothing",
+      "worker_output_unreadable"
+    ]
+  }
+}
