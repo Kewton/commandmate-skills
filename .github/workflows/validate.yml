@@ -221,3 +221,19 @@ jobs:
 
       - name: Run the cmate-uat suite
         run: bash tests/fixtures/cmate-uat/run_tests.sh
+
+      # cmate-worktree-cleanup ships its runner (scripts/cleanup.mjs) together
+      # with this suite (CommandMate#3010). Before it, the deletion decision
+      # lived only in prose, and a consumer's hand-written inspection script
+      # left out the git cherry check and deleted a worktree against the rules.
+      # The suite builds a real git repository under mktemp -d, replaces only
+      # gh, and checks dry-run and apply for direct, squash, BEHIND -> merge ->
+      # squash, diff mismatch, dirty and tip-advanced-after-squash, plus the
+      # mutation that drops the new sufficient condition. Wired here and in
+      # .commandmate/verify.yaml in the same change that adds the suite; the
+      # defect class of #57/#69, #70, #241 is a suite named nowhere.
+      #
+      # bash, git and node (set up above); no network: origin is a local bare
+      # repository.
+      - name: Run the cmate-worktree-cleanup suite
+        run: bash tests/fixtures/cmate-worktree-cleanup/run_tests.sh

@@ -84,14 +84,26 @@ risk_rationale: >-
   scope 外の file 削除は手順として禁止している。したがって computed_risk と同じ moderate を申告する。
 files:
   - path: SKILL.md
-    sha256: 7d21ed2238c2541424b9625d3562739413dd420656499b83db806d6f92e84f36
-    size: 22332
+    sha256: fdd1d154411c85ca6f92e213c329f243504f4e3eecda63012c52ca16bc1bf373
+    size: 23839
     kind: skill_md
     executable: false
     script: false
+  - path: references/delegate-discovery-contract.md
+    sha256: e5e37ae0781a0ee266817d4b95cc57cd35d28041bf90fa9b7ffc39d91f3131b3
+    size: 9274
+    kind: instruction
+    executable: false
+    script: false
   - path: references/evidence-vocabulary.md
-    sha256: 34290dbca9f698c18d98ce96658cb16a7a4caec183d1f9b74249ab7ef3962062
-    size: 10673
+    sha256: e81e81055115e8862ea6fc5cb16cc5148c2a1c2a3d6b64892d3ea690a83525ed
+    size: 10982
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/release-notes.md
+    sha256: c2454909f0fd9becaea1d60b0379f57f9486c89c475376160f31881148d60097
+    size: 4852
     kind: instruction
     executable: false
     script: false

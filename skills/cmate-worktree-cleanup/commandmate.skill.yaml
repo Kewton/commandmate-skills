@@ -27,6 +27,7 @@ capabilities:
   - server/process/tmux/DB/log は診断表示のみとし、削除は利用者の手動 next action に回す
   - 削除可能性と証跡を dry-run で preview し、明示確認と plan 後 drift 再検査を経てから apply する
   - removed/skipped/proof/evidence を versioned result へ残し、token/secret/絶対path/raw GitHub response を含めない
+  - 判定と削除を実行する runner（scripts/cleanup.mjs）を同梱し、dry-run を既定、削除を --apply --confirm のときだけに限る
 expected_outcomes:
   - clean かつ merge 済みの worktree だけが、証跡付きで安全に片付く
   - dirty・unmerged・検証不能な worktree が保持され、手動 next action が分かる
@@ -73,6 +74,8 @@ requirements:
     - name: gh
       version_range: '>=2.20.0 <3.0.0'
     - name: commandmate
+    - name: node
+      version_range: '>=18.0.0'
   network_hosts:
     - api.github.com
     - github.com
@@ -87,12 +90,13 @@ risk_rationale: >-
   branch を削除し、git fetch と gh で merge 証跡を取得する。削除するのは clean かつ direct
   ancestry または4条件完備の merged-equivalent 証跡がある対象だけで、dirty・detached・
   unmerged・検証不能は削除しない。git worktree remove --force・git branch -D・process
-  kill・DB/log 削除・remote branch 削除は手順として禁止している。script も実行可能 file も
-  含まず、install 時に実行されるものは無い。
+  kill・DB/log 削除・remote branch 削除は手順として禁止している。script は runner の
+  cleanup.mjs と lib.mjs（node、実行 bit 無し）で、dry-run が既定、削除は --apply --confirm
+  のときだけ。install 時に実行されるものは無い。
 files:
   - path: SKILL.md
-    sha256: bbd6aab5a3ce99224eccf0a3875f345ccfda18ba459bfc2d36687e146e24e3cc
-    size: 14293
+    sha256: d88f4f656fa74b0cf6a855e52552c853d0142ff5d3a5f9f8902cb59965b1b68f
+    size: 15440
     kind: skill_md
     executable: false
     script: false
@@ -102,33 +106,63 @@ files:
     kind: instruction
     executable: false
     script: false
+  - path: references/codes-and-recovery.md
+    sha256: 42ffd3e5ac0d2c98eb8631a7497d2d21f3bf9317e3286d34202831b661a37985
+    size: 2462
+    kind: instruction
+    executable: false
+    script: false
   - path: references/proof-algorithm.md
-    sha256: 379bbc74c0faa224bdd6f78c97763ac7c0253464834a7822314245dc85502842
-    size: 8719
+    sha256: d716ad434efd506ebf1274b08e4126fa529839c89a0cea35665c6924a3a8dd85
+    size: 10281
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/release-notes.md
+    sha256: 51d791283832157ec207a4e6baf6b2a3d7b3cb4c378929ff43fa0f1a0fb768de
+    size: 2766
     kind: instruction
     executable: false
     script: false
   - path: references/result-contract.md
-    sha256: 4747e780ad9c65e7ca8c81be6febc6b059404293d7232ea4c7c722dcb9a24b24
-    size: 6379
+    sha256: c63e7a7b66af268dfb4ee798e36fe52ed4fa20e3fa8daf7b3f69ee650f550787
+    size: 7358
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/runner-contract.md
+    sha256: 0fef8f2abfb00aa72480fd12b61f944f15da5ca9356c170a8719ce5cc92681e5
+    size: 5707
     kind: instruction
     executable: false
     script: false
   - path: references/safety.md
-    sha256: 327a70cb94a6ae78b94e19b0cdbdff614ada054b827c9d5d931eabaa57c2e59e
-    size: 8420
+    sha256: de890b71697d2c8c5931c2da0e213eb90a8d3e97621e731ffb51529b6e655880
+    size: 8804
     kind: instruction
     executable: false
     script: false
   - path: schemas/cleanup-plan.v1.json
-    sha256: bb342b295156bde2836873ada372092d83c53e2a5c8fdf825da7556f4d96d5d4
-    size: 12731
+    sha256: 9ac93bfc093e6ee823883317f28937589f3ba71fe7bd65dd9a32457c4dc631d3
+    size: 13579
     kind: asset
     executable: false
     script: false
   - path: schemas/cleanup-result.v1.json
-    sha256: 6ba64b504221c0b293dc5a6bf9f3a7a82adc02f8c4704c68c8abd6655ec8ab1f
-    size: 12084
+    sha256: fc58ac1748c5aae34b4b98f85989657960d75060b9919a3b9c6c49ec6765e700
+    size: 12932
     kind: asset
     executable: false
     script: false
+  - path: scripts/cleanup.mjs
+    sha256: 33a2924127d7a60c02c6e53c839e387aa5c715358a11f5654ae53a228ddc6b4e
+    size: 5875
+    kind: script
+    executable: false
+    script: true
+  - path: scripts/lib.mjs
+    sha256: a7e1de04d38792e9f0623434941e60ff1789213fc18a8f02482a66ed6cdfd0c0
+    size: 32689
+    kind: script
+    executable: false
+    script: true

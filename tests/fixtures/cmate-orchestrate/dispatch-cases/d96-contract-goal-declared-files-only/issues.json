@@ -1,0 +1,13 @@
+{
+  "_comment": "CommandMate #3004: one issue that declares a source file AND the test file it wants, so the goal must keep the declared test and drop only the derived companions.",
+  "issues": [
+    {
+      "number": 960,
+      "title": "feat: cart の合計に割引を反映する",
+      "body": "cart の合計に割引を反映する。\n\n## 対象ファイル\n- `src/cart/total.ts`\n- `src/cart/__tests__/total.test.ts`\n\n## 受入条件\n- [ ] 割引後の合計を返す\n",
+      "labels": [
+        "feature"
+      ]
+    }
+  ]
+}

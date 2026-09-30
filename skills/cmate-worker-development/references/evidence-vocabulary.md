@@ -138,7 +138,9 @@ dispatch runner はワーカーの出力 file を読まないし、merge runner 
 ## 読めなかったこと・委譲できなかったこと
 
 （読めなかった file、実行できなかったコマンド、install されていなかった委譲先と、
- その結果どの段が劣化したか。**該当なしなら「該当なし」と書く**）
+ その結果どの段が劣化したか。**該当なしなら「該当なし」と書く**。
+ 委譲先が無いと書くときは、確かめた path と結果・Agent 側の証跡・理由を添える——
+ delegate-discovery-contract.md の「書き方」）
 ```
 
 ## コミットメッセージの申告行 — 読み替え・判断を PR 本文へ届ける
@@ -175,5 +177,6 @@ feat(store): add a session store
 ## 参照
 
 - [work-discipline.md](./work-discipline.md) — 8 項目の作業規律と、破ったときに何が起きるか
+- [delegate-discovery-contract.md](./delegate-discovery-contract.md) — 委譲先の在否の確かめ方と「未 install」の書き方
 - [../SKILL.md](../SKILL.md) — A〜F の6段と不変条件
 - [ADR: ワーカー側の開発スキル](https://github.com/Kewton/commandmate-skills/blob/main/skills/cmate-orchestrate/references/adr-worker-development-skill.md) — 第7節が本文書の裁定の記録

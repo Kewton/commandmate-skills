@@ -1,0 +1,47 @@
+{
+  "description": "[CommandMate#3006] 契約なし（fallback）経路で、最初の send が **prompt not ready（exit 99、stderr `Server error: Command Code prompt not ready: timed out waiting for the composer before sending`）** で断られる世界。composer 待ちが時間切れになった送信は文字を打つ前に止まっているので、runner は1回だけ送り直し、通れば完走する。`sendAndConfirm`（fallback / nudge / 再指示が通る経路）にも同じ判定が効くことを固定する: send は 2 回、limitation `send_retried_not_ready` が 1 件、respond は呼ばれない。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "100",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "1",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      100
+    ],
+    "send_counts": {
+      "100": 2
+    },
+    "worker_states": {
+      "100": "completed"
+    },
+    "limitation_codes": [
+      "send_retried_not_ready"
+    ],
+    "limitation_code_counts": {
+      "send_retried_not_ready": 1
+    },
+    "limitation_details_include": [
+      "because the agent's composer was not ready (prompt not ready)",
+      "the retry went through"
+    ]
+  }
+}

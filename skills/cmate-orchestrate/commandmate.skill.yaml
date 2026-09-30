@@ -158,14 +158,14 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: 08ae6c092cb63dfb353d3d17873d1ca8e02ff741454a71c311d0f336a34e0dca
-    size: 99186
+    sha256: ccf300f810068b509935227bf594c4b8292d895295d14272977855e6cbdc6b8e
+    size: 104178
     kind: instruction
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: 6a4d8042d0f8d9418bcdaf50523ab91bbfca86604e60d5dc7134aada657f8c30
-    size: 151436
+    sha256: a2d48568a14ca0f81a171d0ef7750be4d2f320ab48620bace6b1e65fab1cee5f
+    size: 158467
     kind: instruction
     executable: false
     script: false
@@ -188,8 +188,8 @@ files:
     executable: false
     script: false
   - path: references/plan-contract.md
-    sha256: dd9073b06e10d07cc1ffc37498afc6a020d6b31eea730505743020de18e9aa1f
-    size: 67631
+    sha256: f5704fc64f3c7b8e0f8465d70501ae5f3aca29214183ab30b3ac76594dee2901
+    size: 76162
     kind: instruction
     executable: false
     script: false
@@ -200,8 +200,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 2a7ddb7764a5fe95889857b72dc7f9abb59e4b606ab2fd756612e6dea47a7b0f
-    size: 235427
+    sha256: 424a5acaba03f7887b38a400f1b8b2ca298e255f2d325562a78d23804fc3fedd
+    size: 245853
     kind: instruction
     executable: false
     script: false
@@ -212,8 +212,8 @@ files:
     executable: false
     script: false
   - path: references/uat-contract.md
-    sha256: 01c1dde27edc680aa1df6e4c6604daba214cac342cee4ddc682e9408642c3e9f
-    size: 30682
+    sha256: 7b71510e23351295aebefe988da5ce16e2bf677c18bcbd86841c350c3c243263
+    size: 31089
     kind: instruction
     executable: false
     script: false
@@ -230,8 +230,8 @@ files:
     executable: false
     script: false
   - path: schemas/execution-plan.v2.json
-    sha256: 0754ba47bc65750f9c8ed2ff2d29f9f877f7a8b60836604aa798d8ccf88eacfb
-    size: 33419
+    sha256: 3117d36dade22037f4cf62e5bf22398cd08328ece3f080e66979262e49520d94
+    size: 33683
     kind: asset
     executable: false
     script: false
@@ -260,8 +260,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: 8f19d3f4854e4f50368f410984097244a3532acd58a78dfd039b60452a2656ae
-    size: 453035
+    sha256: 40b9c305ca8663d8b4d010ef650790dd607d2533585179496b25ec5d1e364558
+    size: 466961
     kind: script
     executable: true
     script: true
@@ -272,8 +272,8 @@ files:
     executable: true
     script: true
   - path: scripts/lib.mjs
-    sha256: c95ba7caf81f1afa8eb08c0409281ea77cafa1825727cc70e7110548ab9a847f
-    size: 72802
+    sha256: a17af914d9456f815d9878872fbc77cfb47b82fd2c8bc758d228aae965ebc7ea
+    size: 76660
     kind: script
     executable: false
     script: true
@@ -290,8 +290,8 @@ files:
     executable: true
     script: true
   - path: scripts/orchestrate.mjs
-    sha256: 1f9fd83499353f2ed4f2ca780fe942c50b12a9e7ef6b96fb2ed6aa375d849b21
-    size: 202675
+    sha256: 218736e972ba3194418145c9ed4f3dea89282408f317c9e2138422efe085036c
+    size: 213627
     kind: script
     executable: true
     script: true
@@ -302,14 +302,14 @@ files:
     executable: true
     script: true
   - path: scripts/status.mjs
-    sha256: 582497ec72e3e86e978ca3cad8453ad57635cc6d35977166019bf504cc6778e5
-    size: 73498
+    sha256: 74e4f523d1692f42735bf2a2735b23de85b2db4de77da5f382bd828beccd9cd2
+    size: 73866
     kind: script
     executable: true
     script: true
   - path: scripts/uat.mjs
-    sha256: 828c3a6dee940c69d2d90de962ffb6bac7e87b1c1fffa474b77b8efe6958ba22
-    size: 88382
+    sha256: 33b524fe8016eb86143b43bc140470e1e04f6925ec375a0f0ff276550e989fe9
+    size: 89878
     kind: script
     executable: true
     script: true

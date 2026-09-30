@@ -20,6 +20,7 @@ commandmate docs --section agent-operations   # 末尾の "All Exit Codes"
 | `1` | `DEPENDENCY_ERROR` | サーバが起動していない | `commandmate status` の出力を人に見せる。委任は始まってすらいない |
 | `2` | `CONFIG_ERROR` | 引数が不正（未知の agent、duration の書式など） | コマンドを直す。**宛先が居ないことではない** |
 | `10` | `PROMPT_DETECTED` | 相手が確認を待っている | **答えない。** prompt 本文と選択肢を人へ写して止まる（SKILL.md 第5節） |
+| `11` | `UPSTREAM_FAULT` | ターンが走っていない。**`id=context-limit`（`--json` と stderr）のときは、相手の文脈が上限で、依頼は何もされていない** | 既定は「ターンは走っていない、送り直す」。`id=context-limit` のときは**待っても送り直しても直らない**。`commandmate instances <worktree-id> kill <instance-id>` で新しいセッションにしてから送る（第2.1節） |
 | `20` | `VERIFY_FAILED` | 検証ゲートが落ちた | **`--verify` を付けたときにだけ出る。** この Skill は付けない（`cmate-orchestrate` の領分） |
 | `21` | `NOT_STARTED` | 宛先のセッションが起動していない／作業証跡ゼロ | `send` を実際に打ったか確認する。打っていて 21 なら相手が落ちている |
 | `30` | `NO_ACTIVE_SESSIONS` | `interrupt` の対象が居ない | この Skill は `interrupt` を使わないので出ない |
@@ -30,6 +31,27 @@ commandmate docs --section agent-operations   # 末尾の "All Exit Codes"
 > どちらも `Error: Resource not found. Check the worktree ID.` と **exit 99** になる。
 > Issue #241 の起案時点では宛先解決の失敗を `2` と想定していたが、
 > **0.31.3 の実測値は `99` である。** `2` は引数の書式エラーであって、宛先の不在ではない。
+
+### 2.1 `11` と `id=context-limit`（文脈の上限）
+
+Command Code の管理セッションを長く使い回すと、依頼が
+`⚠ Error: 400 This model's maximum context length is 1048576 tokens. However, you requested ...`
+で**何もされずに**終わる。ターン自体は終わるので、古い `wait` / `ask` は `0` を返し、
+通常の完了と区別できなかった（CommandMate#3011）。
+
+- 対応した CLI の `ask` は、これを既存の `11`（`UPSTREAM_FAULT`）で返し、`--json` と stderr に
+  `id=context-limit` を出す。`ask.sh` は `11` を素通しにする。
+- **`id=context-limit` の `11` は、他の `11` と対処が違う。** 他の `11` は「ターンが走っていない、
+  送り直せ」だが、文脈の上限は待っても送り直しても直らない。
+  `commandmate instances <worktree-id> kill <instance-id>` で新しいセッションにしてから送る。
+
+対応していない版の CLI 向けの保険として、`ask.sh` は上流が `0` を返したときに限り、
+返答の**末尾 20 行（空行を除く）**を見て、`This model's maximum context length is N tokens` が
+**行頭から**（インデントと `⚠` `⎿` `●` などの飾り、`API Error:` / `Error:`、HTTP status だけを許す）
+始まる行として出ていれば `11` に読み替え、stderr に `id=context-limit` と kill コマンドの案内を出す。
+返答の中で**引用されているだけ**の語は当たらない。読み替えるのは `0` だけで、`10` / `124` はそのまま返る。
+返答本文は stdout にそのまま出す。Claude の `Prompt is too long` や OpenAI 系の
+`context_length_exceeded` は別 Issue で、この検出には含めない。
 
 複数の worktree-id を 1 回の `wait` に渡した場合、返るのは**最も優先度の高い 1 つ**である
 （`10` > `20` > `21` > `124`）。この Skill は**常に 1 宛先**なので、この合成は起きない。
@@ -94,6 +116,8 @@ commandmate wait      <real-wt> --instance codex --timeout 5  ; echo $?   # 21
 同梱の [`../scripts/ask.sh`](../scripts/ask.sh) は **`wait` の exit code をそのまま返す**。
 `capture` が失敗しても、`echo` が成功しても、返る値は `wait` のものである。
 `ask` が在る環境では `ask` の exit code をそのまま返す。
+
+例外は、`0` を `11`（`id=context-limit`）に読み替える保険の検出だけである（第2.1節）。それ以外の code は書き換えない。
 
 これはテストで固定してある（`tests/fixtures/cmate-delegate/run_tests.sh`）。
 **stdout に出るのは `capture` の squeeze 済みテキストだけ**で、

@@ -1,0 +1,26 @@
+{
+  "description": "CommandMate #3004, the other side: an issue whose files derive nothing (Rust has no L1 test shape; the test is declared) reads `導出 0 本`, so the count line is a statement about the plan rather than a constant.",
+  "args": [
+    "970",
+    "--profile",
+    "node-commandmate"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "suspected_files": {
+      "970": [
+        "src/parser.rs",
+        "tests/parser_roundtrip.rs"
+      ]
+    },
+    "scope_defaults": {
+      "970": []
+    },
+    "risk_level": "low",
+    "summary_includes": [
+      "- #970: 宣言 2 本 + 導出 0 本"
+    ]
+  }
+}

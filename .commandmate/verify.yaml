@@ -51,6 +51,16 @@
 # respond / auto-yes / a relay, and check_run.py grading the two fixture
 # run-dirs with one injected mutation per rule.
 #
+# worktree-cleanup-fixtures (CommandMate#3010) ships with the runner it tests,
+# in the same change, wired here and in validate.yml. cmate-worktree-cleanup
+# had no script before: the decision "may this worktree be deleted" lived only
+# in prose, a consumer wrote its own inspection script, forgot the git cherry
+# check and deleted a worktree against the rules. The suite builds a real git
+# repository under mktemp -d (a bare origin, worktrees, a clone that plays the
+# squash-merge button), replaces only gh, and injects the mutation that drops
+# the net-diff sufficient condition — the BEHIND -> merge -> squash case must
+# fail without it. bash, git and node; no network.
+#
 # Timeouts are the measured wall clock on the development machine (warm cache)
 # with generous headroom for a cold CI runner:
 #   validate                       0.25s   (2026-08-01)
@@ -68,6 +78,7 @@
 #   workspace-research-fixtures    2s      (2026-09-11)
 #   uat-fixtures                  25s     (2026-09-16; it waits on real loopback
 #                                          sockets and on TERM grace periods)
+#   worktree-cleanup-fixtures      7s     (2026-09-30)
 #
 # The runner reads a YAML subset: 2-space indent, single-line scalars, no inline
 # comments. Keep it that way — a file it cannot parse is exit 2, not a partial run.
@@ -112,6 +123,9 @@ gates:
   - id: uat-fixtures
     command: "bash tests/fixtures/cmate-uat/run_tests.sh"
     timeoutSec: 600
+  - id: worktree-cleanup-fixtures
+    command: "bash tests/fixtures/cmate-worktree-cleanup/run_tests.sh"
+    timeoutSec: 300
 options:
   baseRef: origin/main
   skipInPrimaryCheckout: false
