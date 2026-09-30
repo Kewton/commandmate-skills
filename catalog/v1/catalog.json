@@ -4582,7 +4582,7 @@
         "safety",
         "github"
       ],
-      "latest": "0.1.6",
+      "latest": "0.2.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -4774,6 +4774,55 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worktree-cleanup-v0.1.6/cmate-worktree-cleanup-0.1.6.tar.gz",
             "sha256": "70f43c90141bb25dd8faa9ab00c0ae9c3c1a391980d16d8348cda059cba7b795",
             "size": 22179,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.2.0",
+          "changelog": "cmate-worktree-cleanup 0.2.0 — BEHIND を経て squash merge されたブランチを merged_equivalent と判定し、判定を実行する runner を同梱した（CommandMate#3010）。\n\n保護された main では 2 本目以降の PR が BEHIND になり、git merge origin/main してから squash merge される。この形のブランチは差分が squash のコミットと一致していても git cherry に + が出て tree_mismatch（消せない）になっていた。runner が無かったので利用側が点検スクリプトを書き、cherry の判定を入れ忘れて 1 本を規則に反して消した。\n\n- 条件 4: mb..tip と <merge>^..<merge> を git diff --no-ext-diff --no-textconv --no-color --binary --full-index --no-renames で出し、バイト単位で比べる。git cherry の + は単独の否決理由にせず evidence（cherry_unmatched）として記録する。tree_mismatch は diff の不一致だけ。どちらの経路で証明したかを equivalence_path に残す。schema は v1 のまま（任意 field）。\n- runner scripts/cleanup.mjs: dry-run が既定で cleanup-plan.v1 を出し、何も消さない。削除は --apply --confirm <branch,...> のときだけで、削除直前に drift を再検査して cleanup-result.v1 を出す。exit code は 0 = 成功 / 1 = 一部 skip / 2 = 入力不正。requirements に node を足した。\n- 本物の git リポジトリで direct / squash / BEHIND → merge → squash / 差分不一致 / dirty / squash 後に tip が進んだ形を確かめる suite を新設し、verify.yaml と CI の両方に配線した。",
+          "published_at": "2026-09-30T03:43:07Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-worktree-cleanup-v0.2.0",
+            "commit": "f79e5facc6229c653b2226e845de1b5339ea8675"
+          },
+          "artifact": {
+            "asset_name": "cmate-worktree-cleanup-0.2.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worktree-cleanup-v0.2.0/cmate-worktree-cleanup-0.2.0.tar.gz",
+            "sha256": "b3062edb1ab9f954a30cdf6d1ecbc25db9b213ab04f867102f1052b64b5c9206",
+            "size": 38841,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
