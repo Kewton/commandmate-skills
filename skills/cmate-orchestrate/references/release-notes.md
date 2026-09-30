@@ -547,6 +547,24 @@ worker に出せなかった（#272、Kewton/CommandAgent#520）。`Cargo.lock` 
 
 ## dispatch（`scripts/dispatch.mjs`）
 
+### CommandMate #3004 — 導出したテスト候補が goal に並び、見かけの本数で判断を誤った
+
+planner は宣言した各ソースについて慣習的なテスト path（`.test` / `.spec` / `__tests__/…`）を
+`scope_defaults` に導出し、dispatch はそれを契約 goal の `## Files you may change` にも全件並べていた。
+`X.test.ts` を隣に置く規約の利用側では、その半分以上が実在しない。実測（Kewton/Musunest）で
+列挙 55 / 実在 20（#180）、61 / 22（#182）、60 / 22（#181）。「概ね 30 本超は dispatch できない」の
+判断が見かけの本数で膨らみ、利用側は「実在するファイルの数で判定する」と毎回依頼文に書いていた。
+goal は 8000 文字で切られるので、実在しない候補が本文の枠も食っていた。
+
+→ **goal には宣言した file だけを並べ**、導出分は本数を1行で述べる。plan は **宣言の本数と導出の本数を
+分けて**出す（`summary_markdown` と `issue-analysis.md`）。`scope.allow` の導出（L1）は変えない。
+
+Issue の当初案は profile の欄（`tests.layout: colocated | __tests__ | both`）で導出する形を絞るもの
+だったが、それは [ADR](./adr-scope-derivation.md) 第15.2節が却下した「profile が組み込みの L1 を上書きする」
+にあたる（設定ゼロで効く L1 の保証が profile 次第になる）。困っていたのは (1) 見かけの本数と (2) goal に
+並ぶ実在しない候補の2つだけであり、どちらも許可を削らずに解けるので、**ADR を変えずに軽い手で解いた**
+（Issue 上で利用者と確定）。使われない許可のコストはゼロ、という設計はそのままである。
+
 ### CommandMate #1447 — 公式経路は public `commandmate` である（ADR）
 
 `commandmatedev` は使わない。explicit phase flag 設計（1 invocation で mutating phase を

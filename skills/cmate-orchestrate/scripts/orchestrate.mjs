@@ -3772,10 +3772,17 @@ function renderIssueAnalysis(plan) {
       'Acceptance criteria:',
       ...listItems(issue.acceptance_criteria),
       '',
+      // The two counts, apart (CommandMate #3004). The derived half is a
+      // permission, most of whose paths never exist, and a reviewer who reads
+      // only the length of the list below judges "can this be dispatched" on
+      // an inflated number.
+      `Scope: ${scopeCounts(issue).declared} declared by the issue + ${scopeCounts(issue).derived} derived by the planner = ` +
+        `${issue.suspected_files.length} in scope.allow`,
+      '',
       'Suspected files:',
       ...listItems(issue.suspected_files),
       '',
-      'Scope defaults (planner-added lockfiles, included above):',
+      'Scope defaults (planner-derived lockfiles and test paths, included above):',
       ...listItems(issue.scope_defaults),
       '',
       // The paths the planner read and deliberately kept OUT of scope.allow. It
@@ -3832,6 +3839,17 @@ function renderDependencyPlan(plan) {
   return lines.join('\n');
 }
 
+// How many of an issue's scope entries it DECLARED and how many the planner
+// DERIVED from them (CommandMate #3004). `scope_defaults` is the derived list and
+// a subset of `suspected_files`, so the plan JSON already carries both numbers;
+// what was missing is a place a human reads them apart. Measured on
+// Kewton/Musunest: 55 / 61 / 60 listed against 20 / 22 / 22 real files, and the
+// operator had to write "judge by the files that exist" into every request.
+function scopeCounts(issue) {
+  const derived = issue.scope_defaults.length;
+  return { declared: issue.suspected_files.length - derived, derived };
+}
+
 function renderSummary(plan) {
   const conflicts = plan.issues.filter((i) => i.classification === 'conflicting').length;
   return [
@@ -3851,6 +3869,14 @@ function renderSummary(plan) {
     '## risk と権限',
     `- risk: ${plan.risk.level}（${plan.risk.factors.map((f) => f.code).join(', ') || 'none'}）`,
     `- 要求権限: ${plan.permissions.join(', ')}`,
+    '',
+    // Declared and derived apart (CommandMate #3004): the derived half is a
+    // permission, not work, and most of its paths do not exist.
+    '## scope の本数（宣言 + 導出）',
+    ...plan.issues.map((issue) => {
+      const { declared, derived } = scopeCounts(issue);
+      return `- #${issue.number}: 宣言 ${declared} 本 + 導出 ${derived} 本（scope_defaults。使われなくても害の無い許可）`;
+    }),
     '',
     '## 次の一手',
     '- この plan を確認し、後続 phase（#1454-1456）で dispatch/PR/merge を実行する。',

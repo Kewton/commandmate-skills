@@ -357,6 +357,15 @@ Wave 生成の規則は次の3つ。
 既定で許可し、足した分を `scope_defaults` に列挙する。裁定の記録は
 [adr-scope-derivation.md](./adr-scope-derivation.md)（第2節「認可境界は宣言の閉包である」）にある。
 
+**宣言の本数と導出の本数は分けて読む**（CommandMate #3004）。`scope_defaults` は `suspected_files` の
+部分集合なので、plan JSON には両方の本数が既に在る（宣言 = `suspected_files` の件数 − `scope_defaults` の件数）。
+人間が読む側 —— result の `summary_markdown` の `## scope の本数（宣言 + 導出）` 節と、`issue-analysis.md` の
+`Scope: N declared by the issue + M derived by the planner` 行 —— が、それを Issue ごとに分けて出す。
+導出分は**使われなくても害の無い許可**であり、その大半は実在しない。合計だけを見て
+「dispatch できる大きさか」を判断しないこと。dispatch の契約 goal も宣言分だけを列挙する
+（[dispatch-contract.md](./dispatch-contract.md) 第2.4節）。plan JSON に本数の field は足していない ——
+同じ事実を2か所に持つと食い違いうるうえ、全 plan の byte が動くからである。
+
 導出元は4つある。**列挙の順序もこのとおり**で、同じ path を2つの由来が出したら1件だけ出る。
 
 | 由来 | 規則 | 例 |

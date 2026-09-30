@@ -1,0 +1,12 @@
+{
+  "issues": [
+    {
+      "number": 970,
+      "title": "fix: parser の往復",
+      "body": "parser の往復を直す。\n\n## 対象ファイル\n- `src/parser.rs`\n- `tests/parser_roundtrip.rs`\n\n## 受入条件\n- [ ] 往復して元に戻る",
+      "labels": [
+        "bug"
+      ]
+    }
+  ]
+}
