@@ -4176,7 +4176,7 @@
         "node",
         "ci"
       ],
-      "latest": "0.4.0",
+      "latest": "0.4.1",
       "versions": [
         {
           "version": "0.1.0",
@@ -4489,6 +4489,60 @@
               {
                 "agent": "command-code",
                 "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.17.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.4.1",
+          "changelog": "cmate-verify-advisor 0.4.1 — compatibility.agents に opencode-v2 の行を足した（commandmate-skills#275）。挙動の変更は無い。\n\nCommandMate に追加された OpenCode V2（opencode-v2、CommandMate Epic #2370）を、#2975 の実測（opencode2 2.0.18、2026-09-29: GET /api/skill が .agents/skills と .claude/skills の SKILL.md を列挙し、/<name> の送信で model が skill tool を呼ぶ。再起動不要。v2 の / 補完には出ない）を根拠に native として申告する。この package 単体では測っていない。公開済みの版は immutable なので、宣言だけの変更でも patch を上げている。",
+          "published_at": "2026-09-30T10:52:43Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-verify-advisor-v0.4.1",
+            "commit": "d3ab5d4a77dd628a55453598042d098cfd42fae4"
+          },
+          "artifact": {
+            "asset_name": "cmate-verify-advisor-0.4.1.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-verify-advisor-v0.4.1/cmate-verify-advisor-0.4.1.tar.gz",
+            "sha256": "19e78c4a1b0960f3e0713aba7c84369d39540e29dc700448b6fa22a32f916d51",
+            "size": 46748,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Discovery path measured 2026-07-31 on Claude Code 2.1.220 with CommandMate 0.16.0 for 9 packages under docs/agent-support-matrix.md 3.2. This package was added 2026-08-02 and was NOT separately measured; install layout is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Discovery path measured 2026-07-31 on Codex CLI 0.145.0 (model self-report, not a mechanical trace). That version exposes no slash command, so invoke by name. This package was NOT separately measured.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not measured. The analyser needs only node, so the procedure is usable by hand; discovery is unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              },
+              {
+                "agent": "opencode-v2",
+                "evidence": "Measured 2026-09-29 on opencode2 2.0.18 (CommandMate#2975): GET /api/skill lists SKILL.md from .agents/skills and .claude/skills; /<name> makes the model call the skill tool. No restart needed. Not in v2's / palette (@ and /skills only). This package was NOT separately measured.",
                 "support": "native"
               }
             ],
