@@ -1,0 +1,48 @@
+{
+  "description": "Issue #286: 既存の引数との組み合わせ。`--depends 1541:1540` で human-only の #1540 への依存を明示しても辺は `override` として plan に残り、wave は待たずに `human_only_dependency` で名指す。`--order` は従来どおり plan の全 Issue（human-only を含む）の順列であることを求め、wave には human-only を除いた順で効く。",
+  "args": [
+    "1540",
+    "1541",
+    "--depends",
+    "1541:1540",
+    "--order",
+    "1540,1541",
+    "--profile",
+    "node-commandmate",
+    "--max-parallel",
+    "3",
+    "--run-id",
+    "fixture"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "waves": [
+      [
+        1541
+      ]
+    ],
+    "merge_order": [
+      1541
+    ],
+    "dispatch_excluded": [
+      1540
+    ],
+    "dependencies": [
+      {
+        "issue": 1541,
+        "depends_on": 1540,
+        "kind": "override"
+      }
+    ],
+    "warning_codes": [
+      "human_only_excluded",
+      "human_only_dependency"
+    ],
+    "warning_severities": [
+      "notice",
+      null
+    ],
+    "risk_level": "low"
+  }
+}

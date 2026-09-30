@@ -1,0 +1,56 @@
+{
+  "description": "[#287] **報告の無い無進捗は従来どおり。** transcript は nudge を最後の human message として記録しているが、その後の worker の最後の発話は tool 呼び出しであり、報告の文で終わっていない。runner はこれを報告と読まず、従来どおり `--max-turns 3` まで nudge を送り（send 3 回）、cap で `failed` と `worker_turn_evidence`（ターンは成立しているので `worker_produced_nothing`）を記録する。`worker_report` は付かず、`worker_stopped_with_report` も出ない。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "233",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      233
+    ],
+    "worker_states": {
+      "233": "failed"
+    },
+    "send_counts": {
+      "233": 3
+    },
+    "verification_outcomes": {
+      "233": "fail"
+    },
+    "worker_report": {
+      "233": null
+    },
+    "worker_turn_evidence": {
+      "233": {
+        "code": "worker_produced_nothing",
+        "turns": 3
+      }
+    },
+    "blocking_codes": [
+      "worker_produced_nothing",
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_stopped_with_report"
+    ]
+  }
+}

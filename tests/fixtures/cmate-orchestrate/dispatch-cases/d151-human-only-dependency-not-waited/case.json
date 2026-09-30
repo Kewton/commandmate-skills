@@ -1,0 +1,59 @@
+{
+  "description": "Issue #286: #1512 は human-only の #1510 に依存している。dispatch は人の作業の完了を見る手段を持たないので待たずに #1512 を送り（#1511 と同じ wave）、limitation `human_only_dependency` で「#1512 depends on human-only #1510」と名指す。#1510 は not_dispatched。",
+  "plan": {
+    "issues_fixture": "cases/151-human-only-dependency/issues.json",
+    "orchestrate_args": [
+      "1510",
+      "1511",
+      "1512",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "completion_check_passed": true,
+    "sent": [
+      1511,
+      1512
+    ],
+    "never_sent": [
+      1510
+    ],
+    "worker_states": {
+      "1510": "not_dispatched",
+      "1511": "completed",
+      "1512": "completed"
+    },
+    "verification_outcomes": {
+      "1511": "pass",
+      "1512": "pass"
+    },
+    "limitation_codes": [
+      "human_only_excluded",
+      "human_only_dependency"
+    ],
+    "limitation_details_include": [
+      "#1512 depends on human-only #1510",
+      "This run did not wait for the human-only side"
+    ],
+    "worker_notes_include": {
+      "1510": [
+        "human-only"
+      ]
+    },
+    "blocking_codes": []
+  }
+}

@@ -119,7 +119,7 @@
     },
     "waves": {
       "type": "array",
-      "description": "Ordered waves. Every issue appears in exactly one wave; a later wave runs after all earlier waves complete. That is what the DEFAULT dispatch scheduling does with them. Under `dispatch.mjs --schedule dag` (Issue #183) they become REFERENCE INFORMATION: the dispatcher gates each issue on its own effective dependencies (this plan's `dependencies`, minus the `basis: lexical` edges section 3.1 of plan-contract.md refuses to treat as edges) and admits it as soon as they are completed + verified, so a wave boundary is no longer a synchronisation point. Two things they still ARE in that mode, and neither is optional: `merge_order` is this array flattened, and the packing rule that keeps two file-overlapping issues out of one wave is the rule the dag scheduler re-enforces itself (it never runs two issues that name a file in common at the same time). The planner is unchanged either way — it always computes and emits the waves.",
+      "description": "Ordered waves. Every issue appears in exactly one wave, except an issue marked `dispatch_excluded` (Issue #286), which appears in none; a later wave runs after all earlier waves complete. That is what the DEFAULT dispatch scheduling does with them. Under `dispatch.mjs --schedule dag` (Issue #183) they become REFERENCE INFORMATION: the dispatcher gates each issue on its own effective dependencies (this plan's `dependencies`, minus the `basis: lexical` edges section 3.1 of plan-contract.md refuses to treat as edges) and admits it as soon as they are completed + verified, so a wave boundary is no longer a synchronisation point. Two things they still ARE in that mode, and neither is optional: `merge_order` is this array flattened, and the packing rule that keeps two file-overlapping issues out of one wave is the rule the dag scheduler re-enforces itself (it never runs two issues that name a file in common at the same time). The planner is unchanged either way — it always computes and emits the waves.",
       "items": {
         "type": "array",
         "items": {
@@ -710,6 +710,12 @@
             "dependent",
             "conflicting"
           ]
+        },
+        "dispatch_excluded": {
+          "enum": [
+            "human_only"
+          ],
+          "description": "Present ONLY on an issue that no dispatch sends a worker to (Issue #286). human_only: the issue's labels hold exactly `human-only` (the fixed name cmate-issue-authoring's validator reads) — a person does it. Such an issue stays in `issues` and in `dependencies` so the reader keeps its edges and the human work in view, but it is in no wave and not in merge_order, its questions are not raised (they ask what a worker would need), and dispatch.mjs records it as `not_dispatched` without treating it as a failure. An edge from a dispatched issue to it is not waited for, the same way an edge to an issue outside the plan is not (warning human_only_dependency). Absent means dispatchable, which is every issue a plan without the label holds, so such a plan is byte-identical to the one written before the field existed. See references/plan-contract.md section 3.3."
         }
       }
     },

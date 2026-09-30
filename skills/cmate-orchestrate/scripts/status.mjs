@@ -302,6 +302,9 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   profile_repository_mismatch: '--profile / --profile-json / --repo のどれかを渡して、対象リポジトリの意図を明示する。',
   profile_repository_override: '--repo で profile の検証が対象を失っている。verified な profile を使うか、降格を承知で進める。',
   external_dependency: 'この plan に無い Issue への依存を宣言している。依存先を plan に加えるか、依存を本文から外す。',
+  // Issue #286: the same two codes are a plan warning and a dispatch limitation.
+  human_only_excluded: '人がやる Issue（`human-only` ラベル）なので dispatch しない。停止でも失敗でもない。人の作業として進め、終わったら Issue を閉じる。',
+  human_only_dependency: 'human-only の Issue に依存している。dispatch は人の作業を待たないので、その Issue が終わったことを人が確かめてから依存側を dispatch / merge する。',
   ambiguous_dependency_direction: 'dependency-plan.md の edge reason を読み、Issue 本文か --depends で依存の向きを一意にする。',
   unrecognized_file_extension: '既知拡張子外の path が抽出から落ちた。worker に書かせるなら `## 対象ファイル` の下に backtick で書いて re-plan する（見出しの下では拡張子によらず拾う）。',
   shadowed_file_candidate: '他候補の suffix だったため候補から落ちた。Issue 本文で path を完全形で書き直す。',
@@ -318,7 +321,7 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   human_required: 'worker が人間の判断を求めている。capture の内容が report に出ているので自分で判断して答える（runner は自動応答しない）。',
   human_input_required: 'worker が人間の判断を求めている。capture の内容が report に出ているので自分で判断して答える（runner は自動応答しない）。',
   verification_not_judged: '誰も判定していない（exit 99）。再 dispatch では解けないので CommandMate 側のログを見る。判定していないものを worker に直させない。',
-  worker_failed: '**まず該当 worker の `worker_turn_evidence.code` を読む**（exit 21 で `--max-turns` cap に到達した run にだけ付く。#220）。`worker_upstream_unavailable` なら Issue を分割せず待って `--resume`、`worker_produced_nothing` なら worker ログを読んで Issue を分割か書き直して re-plan、`worker_output_unreadable` ならどちらとも決めつけず手で確かめる。field 自体が無いなら prompt / worker ログを読む。',
+  worker_failed: '**まず該当 worker の `worker_turn_evidence.code` を読む**（exit 21 で `--max-turns` cap に到達した run にだけ付く。#220）。`worker_upstream_unavailable` なら Issue を分割せず待って `--resume`、`worker_produced_nothing` なら worker ログを読んで Issue を分割か書き直して re-plan、`worker_output_unreadable` ならどちらとも決めつけず手で確かめる。`worker_report` があれば worker が止めて報告している（#287）のでその文を読む。field 自体が無いなら prompt / worker ログを読む。',
   timeout: 'worker が時間内に終わっていない。--wait-timeout / --max-turns と worker の詰まりを確認する。timeout は完了ではない。',
   worker_timeout: 'worker が時間内に終わっていない。--wait-timeout / --max-turns と worker の詰まりを確認する。timeout は完了ではない。',
   // The three readings of one `--max-turns` cap (#220). Separate entries because
@@ -327,6 +330,9 @@ const NEXT_ACTION_HINTS = new Map(Object.entries({
   worker_upstream_unavailable: '`--max-turns` に到達したが、**worker が1ターンも実行できていない肯定的証拠がある**（上流障害）。**Issue を分割しない・re-plan しない。** 上流の復旧を待って `--resume` で同じ plan を再開する。',
   worker_produced_nothing: 'worker は実際にターンを回したうえで commit も未 commit の変更も残していない。worker ログを読み、Issue の粒度か指示の曖昧さを直して re-plan する。`--resume` だけでは同じ所で止まる。',
   worker_output_unreadable: '`--max-turns` 到達の理由を**測れていない**。**「働いて何も出なかった」とも「上流が落ちていた」とも読み替えない。** `commandmate capture <worktree-id> --json` と worker の transcript 末尾を手で読んでから、上の2つのどちらかへ進む。',
+  // A worker that answered the supervision nudge by stopping and reporting
+  // (#287): a different stop from the three above — the worker SAID something.
+  worker_stopped_with_report: 'worker が nudge に従って**止めて報告した**。該当 worker の `worker_report.text`（blocking の detail にも同じ文）を**まず読む**。書けない理由が Issue 側にあるなら Issue を直して re-plan し、障害が解消済みなら `--resume` で再開する。報告の無い無進捗（`worker_produced_nothing` など）と同じ扱いにしない。',
   not_dispatched: 'dispatch されなかった Issue がある。worker の note（対象 file が空 / worktree 未解決）を読んで原因を潰す。',
   verification_failed: '判定して不合格である（exit 20 / 21）。落ちた gate を特定して worker へ再指示する。',
   wave_not_advanced: 'wave barrier が閉じている。同 wave の worker completion と verification の両方を確認する。',

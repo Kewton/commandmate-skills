@@ -3385,6 +3385,75 @@ function planWaves(analyses, edges, maxParallel, order) {
 }
 
 // =============================================================================
+// human-only issues (Issue #286)
+// =============================================================================
+//
+// cmate-issue-authoring 0.10.0 (CommandMate#3013) lets a plan hold an issue only
+// a person does — a demo on a phone, a document written by hand — marked by the
+// label `human-only`, and its validator names such an issue `dispatch_excluded`.
+// Nothing here read the mark, so the consumer (Kewton/Musunest) took those
+// numbers out of every plan by hand, and a human-only issue that did reach the
+// planner drew "Affected files are unclear" and a worker.
+//
+// The issue STAYS in `issues` and its edges stay in `dependencies`: the plan's
+// reader keeps seeing the human work and what waits on it. What changes is that
+// it is in no wave (so not in merge_order), it carries `dispatch_excluded:
+// 'human_only'`, and its questions are not raised — they ask what a WORKER would
+// need, and no worker takes it. An edge from a dispatched issue to it is not
+// waited for: the dispatcher has no way to see a person finish, so it is treated
+// like an edge to an issue outside the plan (`external_dependency`) and named as
+// a blocking `human_only_dependency`, whose owed decision is "has the person
+// finished #N?".
+//
+// The name is fixed and matched exactly, the same constant the validator uses
+// (the mirror-conformance test compares the two lines): `human only` or
+// `Human-Only` is not the mark. A plan with no such label is byte-identical to
+// the one written before this existed.
+const HUMAN_ONLY_LABEL = 'human-only';
+
+function humanOnlyNumbers(analyses) {
+  return new Set(analyses.filter((analysis) => analysis.labels.includes(HUMAN_ONLY_LABEL)).map((analysis) => analysis.number));
+}
+
+// Clears the questions of every human-only issue and returns how many each had,
+// for the notice below. Called after recordSuppressedInferences, so a lexical
+// question that landed on one is cleared too.
+function dropHumanOnlyQuestions(analyses, humanOnly) {
+  const dropped = new Map();
+  for (const analysis of analyses) {
+    if (!humanOnly.has(analysis.number)) continue;
+    dropped.set(analysis.number, analysis.questions.length);
+    analysis._openQuestions = [];
+    analysis.questions = [];
+  }
+  return dropped;
+}
+
+function humanOnlyWarnings(edges, humanOnly, dropped) {
+  const out = [];
+  for (const number of [...humanOnly].sort((a, b) => a - b)) {
+    const count = dropped.get(number) ?? 0;
+    out.push({
+      code: 'human_only_excluded',
+      detail:
+        `#${number} is labelled ${HUMAN_ONLY_LABEL}: a person does it, so it is in no wave and not in merge_order, ` +
+        'and the dispatch runner records it as not_dispatched without sending a worker' +
+        (count > 0 ? ` (its ${count} planner question(s) were not raised: they ask what a worker would need)` : ''),
+    });
+  }
+  for (const edge of edges) {
+    if (humanOnly.has(edge.issue) || !humanOnly.has(edge.depends_on)) continue;
+    out.push({
+      code: 'human_only_dependency',
+      detail:
+        `#${edge.issue} depends on #${edge.depends_on}, which is labelled ${HUMAN_ONLY_LABEL}: no wave waits for it and ` +
+        `the dispatch runner does not either — confirm a person has finished #${edge.depends_on} before dispatching #${edge.issue}`,
+    });
+  }
+  return out;
+}
+
+// =============================================================================
 // Risk / commands
 // =============================================================================
 
@@ -3595,8 +3664,8 @@ function classifyIssue(analysis, analyses, edges) {
   return 'independent';
 }
 
-function buildPlan({ runId, profile, inputs, analyses, edges, waves }) {
-  const risk = assessRisk(analyses, edges, profile);
+function buildPlan({ runId, profile, inputs, analyses, edges, waves, dispatchable, dispatchEdges, humanOnly }) {
+  const risk = assessRisk(dispatchable, dispatchEdges, profile);
   const commands = planCommands(analyses, profile);
   return {
     plan_schema_version: PLAN_SCHEMA_VERSION,
@@ -3615,7 +3684,10 @@ function buildPlan({ runId, profile, inputs, analyses, edges, waves }) {
       dependency_overrides: inputs.dependsRaw.map(String),
       order: inputs.order,
     },
-    issues: analyses.map((a) => issueForPlan(a, analyses, edges)),
+    issues: analyses.map((a) => ({
+      ...issueForPlan(a, analyses, edges),
+      ...(humanOnly.has(a.number) ? { dispatch_excluded: 'human_only' } : {}),
+    })),
     dependencies: edges,
     waves,
     merge_order: waves.flat(),
@@ -3729,10 +3801,16 @@ function completionChecks(plan, dependencyErrors, ranOverwriteGuard) {
 // it was not read as a declaration — a fact about where the author wrote it,
 // raised on correctly written issues too ("the diff of X is zero").
 //
+// Issue #286 added `human_only_excluded`: the `human-only` label IS the
+// decision (a person does this issue), made by whoever labelled it, and the
+// warning reports that the planner honoured it. Its sibling
+// `human_only_dependency` stays blocking — "has the person finished it?" is
+// still owed, exactly as it is for `external_dependency`.
+//
 // `harness_path_in_scope` is unchanged in every other respect: it still fires, it
 // still names the path, it still sits in `plan.warnings` and in the recovery
 // table. Only the colour moved.
-const NOTICE_WARNING_CODES = new Set(['harness_path_in_scope', 'profile_repository_override', 'scope_pattern_declared', 'scope_pattern_dropped', 'prose_path_ignored']);
+const NOTICE_WARNING_CODES = new Set(['harness_path_in_scope', 'profile_repository_override', 'scope_pattern_declared', 'scope_pattern_dropped', 'prose_path_ignored', 'human_only_excluded']);
 
 // `severity` is written on NOTICE entries only. `blocking` stays implicit, which
 // buys two things at once:
@@ -3781,6 +3859,13 @@ function listItems(items) {
   return items.length === 0 ? ['- none'] : items.map((item) => `- ${item}`);
 }
 
+// One line naming the human-only issues (Issue #286), or nothing, so a plan
+// without one renders exactly as before.
+function humanOnlyLine(plan, label) {
+  const numbers = plan.issues.filter((issue) => issue.dispatch_excluded === 'human_only').map((issue) => `#${issue.number}`);
+  return numbers.length === 0 ? [] : [`- ${label}: ${numbers.join(', ')}`];
+}
+
 function renderManifest(plan) {
   const lines = [
     '# cmate-orchestrate dry-run manifest',
@@ -3794,6 +3879,7 @@ function renderManifest(plan) {
     `- Max parallel: ${plan.max_parallel}`,
     `- Merge order: ${plan.merge_order.map((n) => `#${n}`).join(', ')}`,
     `- Risk: ${plan.risk.level}`,
+    ...humanOnlyLine(plan, 'Human-only (in no wave, not dispatched)'),
     '',
     '## Waves',
     '',
@@ -3802,7 +3888,8 @@ function renderManifest(plan) {
     lines.push(`- Wave ${index + 1}: ${wave.map((n) => `#${n}`).join(', ')}`);
   });
   lines.push('', '## Planned worktrees', '');
-  for (const issue of plan.issues) {
+  // A human-only issue gets no worktree from dispatch (Issue #286).
+  for (const issue of plan.issues.filter((candidate) => candidate.dispatch_excluded === undefined)) {
     lines.push(`- #${issue.number}: \`${issue.branch}\` at \`${issue.worktree}\``);
   }
   lines.push('', '## Safety', '', ...plan.notes.map((n) => `- ${n}`), '');
@@ -3820,6 +3907,7 @@ function renderIssueAnalysis(plan) {
       `- Branch: \`${issue.branch}\``,
       `- Worktree: \`${issue.worktree}\``,
       `- Labels: ${issue.labels.length ? issue.labels.join(', ') : 'none'}`,
+      ...(issue.dispatch_excluded === 'human_only' ? ['- Dispatch: excluded (human-only: a person does it; no worker is sent)'] : []),
       '',
       'Acceptance criteria:',
       ...listItems(issue.acceptance_criteria),
@@ -3913,6 +4001,7 @@ function renderSummary(plan) {
     '',
     '## Wave',
     ...plan.waves.map((wave, index) => `- Wave ${index + 1}: ${wave.map((n) => `#${n}`).join(', ')}`),
+    ...humanOnlyLine(plan, 'human-only（人がやる。どの wave にも入れず dispatch しない）'),
     '',
     '## 依存とconflict',
     `- 依存 edge: ${plan.dependencies.length} 件`,
@@ -3993,7 +4082,11 @@ function run(argv) {
   // Before the warnings are assembled: a suppressed inference becomes an open
   // question on its consumer, and openQuestionWarnings below is what carries
   // every question into `warnings` (Issue #52).
-  recordSuppressedInferences(analyses, suppressed);
+  const humanOnly = humanOnlyNumbers(analyses);
+  // A lexical pair with a human-only side is not a question: nothing is ever
+  // scheduled against that side (Issue #286).
+  recordSuppressedInferences(analyses, suppressed.filter((pair) => !humanOnly.has(pair.consumer) && !humanOnly.has(pair.producer)));
+  const droppedQuestions = dropHumanOnlyQuestions(analyses, humanOnly);
   // Profile warnings first: a plan built against the wrong repository is the
   // premise a reviewer has to settle before reading anything downstream of it.
   // Then per-issue extraction warnings — first the candidates that never reached
@@ -4008,14 +4101,21 @@ function run(argv) {
     ...scopePatternWarnings(analyses),
     ...openQuestionWarnings(analyses),
     ...dependencyWarnings,
+    ...humanOnlyWarnings(edges, humanOnly, droppedQuestions),
   ];
   if (depErrors.length > 0) {
     const first = depErrors[0];
     throw new SkillError(first.code, first.detail, 5);
   }
 
-  const waves = planWaves(analyses, edges, inputs.maxParallel, inputs.order);
-  const plan = buildPlan({ runId, profile, inputs, analyses, edges, waves });
+  // Waves and risk are about what dispatch runs, so a human-only issue and every
+  // edge touching one are left out of both (Issue #286). With no such issue these
+  // are the full lists, and the plan is the one written before.
+  const dispatchable = analyses.filter((analysis) => !humanOnly.has(analysis.number));
+  const dispatchEdges = edges.filter((edge) => !humanOnly.has(edge.issue) && !humanOnly.has(edge.depends_on));
+  const order = inputs.order ? inputs.order.filter((number) => !humanOnly.has(number)) : inputs.order;
+  const waves = planWaves(dispatchable, dispatchEdges, inputs.maxParallel, order);
+  const plan = buildPlan({ runId, profile, inputs, analyses, edges, waves, dispatchable, dispatchEdges, humanOnly });
   // The PLAN carries the severity annotation (execution-plan.v2's `note_entry`
   // grew an optional `severity` in #199); the result ENVELOPE below carries the
   // same code/detail pairs without it. orchestrate-result.v1 is a closed v1

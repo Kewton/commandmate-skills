@@ -545,7 +545,60 @@ worker に出せなかった（#272、Kewton/CommandAgent#520）。`Cargo.lock` 
 要らなくなる。`FILE_EXT` が閉じている理由（散文の token を権限にしない）は、見出しの下では
 成り立たない —— #219 が glob について下したのと同じ判断である。利用者と Issue 上で確定した。
 
+### #286 — `human-only` ラベルの Issue を、利用側が plan から手で外していた
+
+cmate-issue-authoring 0.10.0（CommandMate #3013）で、人がやる Issue（スマホでのデモ、手で書く文書）を
+`labels` の `human-only` で計画に入れられるようになった。validator は `NOTE dispatch_excluded` で
+「dispatch の対象ではない」と名指すが、planner はこの印を読まなかった。渡せば「Affected files are unclear」が
+立ち、dispatch されうる。利用側（Kewton/Musunest）は human-only の Issue の番号を plan から手で外していた。
+
+→ **plan から消さず、wave から外す。** `issues` と `dependencies` には残して印 `dispatch_excluded: "human_only"` を
+付け、wave・merge_order には入れず、question は立てず、notice `human_only_excluded` を出す。印の判定は
+`human-only` ちょうどの名前（validator と同じ定数。mirror-conformance が byte 一致を検査する）。
+
+判断したこと:
+
+- **plan に残す（消さない）。** 消すと、依存の辺と人がやる作業の見通しが plan の読み手から見えなくなる。
+  dispatch は plan の印を読んで外す（ラベルは読まない）。
+- **依存は待たない。** dispatch には人の作業の完了を待つ手段が無い。待つ形（依存側も止める）にすると、
+  依存側は「人が終わった」ことを誰も書き込めない場所で止まり続ける。だから plan の外の Issue への依存
+  （`external_dependency`）と同じ扱いにし、wave も dispatch も待たずに進め、plan では blocking の
+  `human_only_dependency`、report では同名の limitation で「#N depends on human-only #M」と名指す。
+  blocking にしたのは、「その人の作業は終わったか」が `external_dependency` と同じく**まだ誰も決めていない**
+  判断だからである。辺そのものは `dependencies` に残す。
+- **`human_only_excluded` は notice。** ラベルが既に下された判断で、warning はそれを守ったことの報告である。
+  blocking にすると、正しくラベルを付けた plan が毎回 `partial` になる（#199 が避けた形）。
+- **question を立てない。** question は worker が要るもの（対象 file・受入条件の読み取り）を訊く。worker は来ない。
+  立てなかった件数は notice に出す。
+- ラベルの無い plan は byte 一致（全 golden がそのまま通る）。
+
+正本: [plan-contract.md](./plan-contract.md) 第3.3節。
+
 ## dispatch（`scripts/dispatch.mjs`）
+
+### #286 — plan に入った human-only の Issue にも worker が割り当てられえた
+
+planner が human-only の Issue を wave から外しても（上の planner の節）、dispatch が plan の `issues` 全体を
+前提にしていれば、pre-flight（question・scope・worktree）で止まるか、report にその Issue の記録が無いまま
+終わる。
+
+→ **`--only` と同じ 1 か所の絞りを、`--only` より先に置いた。** 起動直後に、印 `dispatch_excluded: "human_only"` の
+Issue とそれに触れる辺を plan から外し、report の最後の waves[] entry に `not_dispatched`（note `human-only`）で
+戻す。limitation `human_only_excluded` が理由を、`human_only_dependency` が待たずに送った依存を名指す。
+blocking にはせず、status は動かさない。
+
+判断したこと:
+
+- **ラベルではなく plan の印を読む。** plan は承認された成果物であり、印の無い古い plan は書かれたとおりに
+  dispatch する（黙って挙動を変えない）。
+- **`--only` に human-only の Issue を書くと全体を断る**（`invalid_input`）。どの run も dispatch しない Issue を
+  「選んだ」run は argv と結果が食い違う。human-only への辺は `--only` の依存検査の前に外れるので、
+  human-only に依存する Issue だけを選ぶことはできる（dispatch はもともとその辺を待たない）。
+- **全 Issue が human-only の plan は `plan_invalid` で断る。** wave が空の plan を「何もしない success」に
+  すると、status が「dispatch した」ように読める。detail が理由を名指す。
+- `dispatch_schema_version` は 1 のまま。新しい enum 値も field も足していない（`not_dispatched` と limitation は既存の語彙）。
+
+正本: [dispatch-contract.md](./dispatch-contract.md) 第3.0.6節。
 
 ### CommandMate #3004 — 導出したテスト候補が goal に並び、見かけの本数で判断を誤った
 
@@ -1572,6 +1625,37 @@ flag → profile）。差し替えにしなかったのは、既定文の「単�
 commit を待つ監督ループの前提が profile 1 行で崩れるため。`dispatch_defaults` に置かなかったのは、
 あちらが真偽値と整数だけで未知 key を拒否する object だから。止まったワーカーを max-turns まで
 nudge して最後に failed にする扱いは変えていない。commit 依頼と `cmate-uat` の fix nudge も対象外。
+
+### #287 — nudge に従って止めて報告したワーカーの報告が、report のどこにも残らなかった
+
+上の #3009 で nudge に「止めて報告」を足した結果、ワーカーはそれに従って止まるようになった。しかし runner は
+止まったワーカーへ `--max-turns`（既定 8）まで nudge を送り続け、最後は「no commit / no work evidence」の
+`failed` にしていた。**ワーカーが書いた報告の文は report に残らず**、報告の無い無進捗と同じ行に並んだ。
+利用側（Kewton/Musunest）は止まって返すことを良い停止として扱っており、報告の文が残ることを求めていた。
+
+→ nudge のターンが進捗なしで終わり、ワーカーの transcript がその nudge への返答の文で終わっていたら、
+それを「止めて報告した」と読み、**その時点で nudge を止めて** worker 記録の `worker_report` と blocking
+`worker_stopped_with_report`（`worker_failed` の隣）に報告の文を写すようにした。正本は
+[dispatch-contract.md](./dispatch-contract.md) 第2.12.1節。
+
+判断したこと:
+
+- **見分けるのは nudge のターンだけにした。** 最初のターンで「まず読みます」と返して止まるワーカーは珍しくなく、
+  それを報告と読めば従来 nudge で前に進んでいた run を止めてしまう。「止めて報告」を頼んでいるのは nudge なので、
+  nudge への返答だけを報告として読む。
+- **返答の出どころは transcript にし、画面は使わなかった。** `capture --json` の `realtimeSnippet` には nudge 自身の
+  エコーが返答と並んでおり、どの行がどのターンのものかを画面は言えない。transcript なら「最後の human message が
+  この nudge で、その後の最後の発話が文」と言えて、それが「この返答はこのターンのものだ」の根拠になる。
+  読み方（`cliToolId` と `*.jsonl` がちょうど1つ）は #220 と共有し、2つの読み手が別の file を選ぶことが無いようにした。
+- **見分けたら nudge を止めることにした。** 同じ問いに既に答えたワーカーに同じ nudge を送っても、ターンを cap まで
+  使って報告を埋もれさせるだけである。次の一手（報告を読んで Issue を直すか `--resume`）は人が決める。
+- **裁定と停止理由は動かしていない。** `worker_state` は `failed`、`stop_reason` は `worker_failed`（enum は閉じた集合）、
+  `verification.outcome` はそのターンの `wait --verify` のまま。区別は新しい blocking code と `worker_report` が担う。
+  `worker_report` は schema で required にしていないので、既存 report は検証を通る。
+- **報告を読めなかったとき（`capture` 失敗・Claude 以外・transcript が無い / 2つ以上）は、止めない。**
+  「読めなかった」を報告と読めば、読めないだけの run が早く止まる。従来どおり cap まで nudge し、cap で #220 の
+  `worker_turn_evidence` を記録する。報告の無い無進捗（最後が tool 呼び出し・nudge が記録されていない）も同じ扱いで、
+  従来の挙動を変えていない。
 
 ---
 

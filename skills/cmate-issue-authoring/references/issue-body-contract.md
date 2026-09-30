@@ -135,11 +135,12 @@ planner に渡されることもない。計画の Issue の `labels` に `human
 従来どおり要る（人にも「終わった」の判定が要る）。ラベルは Phase 2 で `--label` として
 そのまま GitHub に付くので、dispatch から外す側が読むものと validator が読むものは同じである。
 validator はその Issue を出力で `dispatch_excluded` として名指しする（[plan-contract.md](./plan-contract.md)
-第 5.3 節）。**その Issue の番号を orchestrate の planner に渡さない。** 渡すと planner は
-「Affected files are unclear」を立てる（dispatch が `human-only` を自動で外すのは別 Issue であり、
-この package はしない）。human-only の Issue に依存する Issue を dispatch するときは、
-planner がその依存を `external_dependency`（計画外の依存）として扱い待たないので、
-人の作業が終わってから渡すこと。
+第 5.3 節）。その Issue の番号は orchestrate の planner に**渡してよい**: planner はラベルを読み、
+Issue を plan に残したまま wave から外し（`dispatch_excluded: "human_only"`）、dispatch は worker を
+送らない（commandmate-skills#286）。それより前の planner は印を読まず「Affected files are unclear」を
+立てるので、番号を外して渡す。human-only の Issue に依存する Issue は、planner も dispatch も
+その依存を待たない（`human_only_dependency` で名指す。計画外の依存 `external_dependency` と同じ扱い）ので、
+人の作業が終わったことを確かめてから dispatch / merge すること。
 
 絶対 path・`..`・drive letter・制御文字を含む候補、および `users` `home` `root` `tmp`
 `private` `var` `etc` `proc` で始まる候補は、安全のため捨てられる。

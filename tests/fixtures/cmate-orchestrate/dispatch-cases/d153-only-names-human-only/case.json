@@ -1,0 +1,40 @@
+{
+  "description": "Issue #286 × `--only`: human-only の Issue を `--only` に書くと `invalid_input`（exit 3）で全体を断る。人がやる Issue はどの run も dispatch しないと detail が言う。何も send せず、`--out` も作らない。",
+  "plan": {
+    "issues_fixture": "cases/150-human-only-excluded/issues.json",
+    "orchestrate_args": [
+      "1500",
+      "1501",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--only",
+    "1500,1501"
+  ],
+  "expect": {
+    "exit": 3,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "waves_count": 0,
+    "never_sent": [
+      1500,
+      1501
+    ],
+    "no_cli_calls": true,
+    "out_dir_created": false,
+    "blocking_codes": [
+      "invalid_input"
+    ],
+    "blocking_details_include": [
+      "--only names #1500, which the plan marks human-only",
+      "Nothing was dispatched"
+    ]
+  }
+}

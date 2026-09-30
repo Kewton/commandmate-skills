@@ -318,6 +318,38 @@ Issue 本文が **集合外**の Issue（例: 既に merge 済みの前提）を
 この場合 result の `status` は `partial` になる。warning の文面は**読み取った方向を
 そのまま述べる**（reverse なら「#A blocks #B, which is not in this plan」）。
 
+### 3.3 human-only の Issue（[#286](https://github.com/Kewton/commandmate-skills/issues/286)）
+
+`labels` に `human-only` が**ちょうど**入っている Issue は、人がやる Issue である（名前は
+cmate-issue-authoring 0.10.0 の validator と同じ固定名で、`HUMAN_ONLY_LABEL` として byte 一致を
+mirror-conformance テストが検査する。`human only` や `Human-Only` は当たらない）。planner はその Issue を
+次のように扱う。
+
+| 項目 | 扱い |
+|---|---|
+| `issues` | **残す**。任意 field `dispatch_excluded: "human_only"` を `classification` の後に付ける |
+| `waves` / `merge_order` | **入れない**（第4節の「全 Issue がちょうど1つの wave」の例外） |
+| `dependencies` | **残す**。その Issue に触れる辺も読み手に見えるように置く。ただし wave の計算には使わない |
+| `questions` | **立てない**（その Issue に向いた lexical 推論の question も含む）。question は worker が要るものを訊くもので、worker は来ない。立たなかった件数は下の notice に出る |
+| `risk` | dispatch する Issue と辺だけで評価する |
+| `warnings` | Issue ごとに notice `human_only_excluded`。dispatch する Issue が human-only の Issue に依存する辺ごとに **blocking** の `human_only_dependency`。いずれも依存の warning の後に置く |
+| `manifest.md` 等 | 人がやる Issue の番号を 1 行で出し、「Planned worktrees」からは外す |
+
+**依存。** human-only の Issue に依存する Issue は、その辺を**待たない**（同じ wave にも入りうる）。
+dispatch は人の作業の完了を見る手段を持たないので、plan の外の Issue への依存（`external_dependency`、
+第3.2節）と同じ扱いにした。`human_only_dependency` が blocking なのも同じ理由である ——「その人の作業は
+終わったか」は、まだ誰かが決めていない判断だからである。逆向き（human-only の Issue が dispatch する
+Issue に依存する）は何も起こさない。`--depends` で human-only への辺を足すこともでき、`override` の辺として
+残る。`--order` は従来どおり plan の全 Issue（human-only を含む）の順列を求め、wave には human-only を除いた
+順で効く。
+
+**`human_only_excluded` を notice にした理由**（第5.6節の原理）: ラベルが「人がやる」という**既に下された
+判断**であり、warning はその判断を planner が守ったことの報告だからである。
+
+**全 Issue が human-only** の plan は `waves: []` / `merge_order: []` で出る（dispatch はそれを断る）。
+**ラベルの無い Issue だけの plan は byte 一致のまま**（field も warning も行も出ない）。dispatch 側の扱いは
+[dispatch-contract.md](./dispatch-contract.md) 第3.0.6節。
+
 ## 4. Wave
 
 `waves` は Wave の順序付き配列で、各 Wave は Issue 番号の配列である。
@@ -329,6 +361,7 @@ Wave 生成の規則は次の3つ。
 3. **幅の上限** — 各 Wave の Issue 数は `max_parallel`（1〜3）以下。
 
 `merge_order` は Wave を先頭から平坦化したものである。
+`human-only` の Issue（第3.3節）はどの Wave にも入らず、したがって `merge_order` にも無い。
 
 規則2の「重なる」は**文字列の一致ではない**（[#219](https://github.com/Kewton/commandmate-skills/issues/219)）。
 `suspected_files` の entry は pattern でもディレクトリでもありうるので、判定は上流の scope ゲートと
@@ -641,7 +674,7 @@ Kewton/BorderFreeKidsMap#63）: 「未決の問い」3件を本文に残した�
 | 項目 | 規範 |
 |---|---|
 | **既定** | `blocking`。`severity` を持たない entry は blocking である |
-| **notice 集合** | `harness_path_in_scope`（#199）、`profile_repository_override`（#210）、`scope_pattern_declared` と `scope_pattern_dropped`（[#219](https://github.com/Kewton/commandmate-skills/issues/219)。第5.7節）、`prose_path_ignored`（CommandMate #3002。第5.8節）の **5件** |
+| **notice 集合** | `harness_path_in_scope`（#199）、`profile_repository_override`（#210）、`scope_pattern_declared` と `scope_pattern_dropped`（[#219](https://github.com/Kewton/commandmate-skills/issues/219)。第5.7節）、`prose_path_ignored`（CommandMate #3002。第5.8節）、`human_only_excluded`（[#286](https://github.com/Kewton/commandmate-skills/issues/286)。第3.3節）の **6件** |
 | **emit 規則** | planner は **notice の entry にだけ** `severity` を書く。blocking は暗黙のまま |
 | **required か** | **いいえ。** `note_entry` の `required` には入れない |
 | **envelope** | `orchestrate-result.v1` の `warnings` は code と detail だけを運ぶ（`severity` は載せない） |
@@ -654,9 +687,10 @@ Kewton/BorderFreeKidsMap#63）: 「未決の問い」3件を本文に残した�
 
 分けるのは「宣言されたか」ではなく「**何が**宣言されたか」である。`open_question_declared` は
 著者自身の宣言だが、宣言している内容が「まだ決めていない」なので blocking である。
-notice 集合の5件は、4件が**著者**の宣言（成果物見出しに書いたハーネス path、
+notice 集合の6件は、4件が**著者**の宣言（成果物見出しに書いたハーネス path、
 成果物見出しの内／外に書いた scope pattern、および成果物見出しの外に書いた path）の報告、1件が **operator** の宣言
-（`--repo` と `--allow-unverified` の2 flag）の報告であり、同じ原理の同じ側にある。
+（`--repo` と `--allow-unverified` の2 flag）の報告、1件が Issue に付けた `human-only` ラベル（「人がやる」という
+判断。第3.3節）の報告であり、同じ原理の同じ側にある。
 `scope_pattern_dropped` も同じ側である —— 報告しているのは「planner が読めなかった」ではなく
 「**宣言として読まなかった**」、つまり著者が書いた位置についての事実だからである。
 

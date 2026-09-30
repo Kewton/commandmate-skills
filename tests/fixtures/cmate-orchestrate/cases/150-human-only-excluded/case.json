@@ -1,0 +1,48 @@
+{
+  "description": "Issue #286（陽性）: `labels` に `human-only` がある #1500 は plan の `issues` に残り、`dispatch_excluded: \"human_only\"` の印が付き、どの wave にも merge_order にも入らない。人がやる文書なので planner の question（Affected files are unclear）は立てず、notice `human_only_excluded` だけを出す（status は success）。",
+  "args": [
+    "1500",
+    "1501",
+    "--profile",
+    "node-commandmate",
+    "--max-parallel",
+    "3",
+    "--run-id",
+    "fixture"
+  ],
+  "golden": "expected-plan.json",
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "waves": [
+      [
+        1501
+      ]
+    ],
+    "merge_order": [
+      1501
+    ],
+    "dispatch_excluded": [
+      1500
+    ],
+    "dependencies": [],
+    "warning_codes": [
+      "human_only_excluded"
+    ],
+    "warning_severities": [
+      "notice"
+    ],
+    "warning_details_include": [
+      "#1500 is labelled human-only",
+      "its 1 planner question(s) were not raised"
+    ],
+    "questions_count": {
+      "1500": 0,
+      "1501": 0
+    },
+    "risk_level": "low",
+    "summary_includes": [
+      "- human-only（人がやる。どの wave にも入れず dispatch しない）: #1500"
+    ]
+  }
+}

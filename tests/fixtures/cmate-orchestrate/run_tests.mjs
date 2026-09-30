@@ -790,6 +790,23 @@ function runCase(caseId) {
       );
     }
   }
+  // The human-only mark (Issue #286), asserted for EVERY plan case: an issue
+  // carries `dispatch_excluded` exactly when its labels hold `human-only` (the
+  // fixed name — `human only` is not it), such an issue is in no wave and not in
+  // merge_order, and every other issue is in exactly one wave. A case that
+  // states `dispatch_excluded` pins the marked set as well.
+  for (const issue of plan.issues) {
+    const marked = issue.labels.includes('human-only');
+    check(marked ? issue.dispatch_excluded === 'human_only' : !('dispatch_excluded' in issue),
+      `#${issue.number} dispatch_excluded ${JSON.stringify(issue.dispatch_excluded)} disagrees with labels ${JSON.stringify(issue.labels)}`);
+    const inWaves = plan.waves.flat().filter((number) => number === issue.number).length;
+    check(inWaves === (marked ? 0 : 1), `#${issue.number} appears in ${inWaves} wave(s)`);
+    if (marked) check(issue.questions.length === 0, `human-only #${issue.number} carries questions ${JSON.stringify(issue.questions)}`);
+  }
+  if (expect.dispatch_excluded) {
+    const marked = plan.issues.filter((issue) => 'dispatch_excluded' in issue).map((issue) => issue.number);
+    check(deepEqual(marked, expect.dispatch_excluded), `dispatch_excluded issues ${JSON.stringify(marked)} !== ${JSON.stringify(expect.dispatch_excluded)}`);
+  }
   if (expect.risk_level) check(plan.risk.level === expect.risk_level, `risk ${plan.risk.level} !== ${expect.risk_level}`);
   // The human-readable half of a plan (CommandMate #3004): what a reviewer reads
   // before deciding whether an issue is dispatchable. Each listed substring must
@@ -1538,6 +1555,32 @@ function runDispatchCase(caseId) {
       }
       check(typeof evidence.detail === 'string' && evidence.detail.length > 0,
         `#${num} worker_turn_evidence carries no detail`);
+    }
+  }
+  // What a worker said when it stopped and reported after a nudge (Issue #287).
+  // Same rules as the two objects above: `null` asserts the field is ABSENT (no
+  // report was read — a worker that said nothing, or one whose reply could not
+  // be read), an object pins its keys partially, and `text_includes` pins the
+  // transcribed words, which are the whole point of the field.
+  if (expect.worker_report) {
+    for (const [num, expected] of Object.entries(expect.worker_report)) {
+      const worker = allWorkers(report).find((w) => w.issue === Number(num));
+      if (!check(worker !== undefined, `#${num} has no worker record`)) continue;
+      if (expected === null) {
+        check(worker.worker_report === undefined,
+          `#${num} carries a worker_report ${JSON.stringify(worker.worker_report)} on a worker that did not stop and report`);
+        continue;
+      }
+      if (!check(worker.worker_report !== undefined, `#${num} has no worker_report after stopping and reporting`)) continue;
+      const { text_includes: needles = [], ...fields } = expected;
+      for (const [key, value] of Object.entries(fields)) {
+        check(matchesPartial(worker.worker_report[key], value),
+          `#${num} worker_report.${key} ${JSON.stringify(worker.worker_report[key])} does not match ${JSON.stringify(value)}`);
+      }
+      for (const needle of needles) {
+        check(String(worker.worker_report.text ?? '').includes(needle),
+          `#${num} worker_report.text does not include ${JSON.stringify(needle)}: ${JSON.stringify(worker.worker_report.text)}`);
+      }
     }
   }
   // The prose a human acts on. Pinned separately from the structured fields for

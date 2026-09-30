@@ -1,0 +1,28 @@
+{
+  "issues": [
+    {
+      "number": 1520,
+      "title": "docs: walk through the demo on a phone",
+      "body": "A person runs the demo on a phone and writes up what happened in `docs/demo-walkthrough.md`.\n\n## Acceptance criteria\n- [ ] `docs/demo-walkthrough.md` records every screen of the demo\n",
+      "labels": [
+        "human only"
+      ]
+    },
+    {
+      "number": 1521,
+      "title": "docs: walk through the demo on a phone",
+      "body": "A person runs the demo on a phone and writes up what happened in `docs/demo-walkthrough.md`.\n\n## Acceptance criteria\n- [ ] `docs/demo-walkthrough.md` records every screen of the demo\n",
+      "labels": [
+        "Human-Only"
+      ]
+    },
+    {
+      "number": 1522,
+      "title": "feat: add the delta module",
+      "body": "Add the delta module in `src/delta.ts`.\n\n## Acceptance criteria\n- [ ] `src/delta.ts` exports the delta function\n",
+      "labels": [
+        "feature"
+      ]
+    }
+  ]
+}

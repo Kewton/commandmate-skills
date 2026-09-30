@@ -1,0 +1,104 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "233": {
+      "state": "completed",
+      "verify_exits": [
+        21
+      ]
+    }
+  },
+  "claude_transcripts": {
+    "233": [
+      {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "上の実行契約に従って作業を開始してください。"
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "src/cluster.ts の現状を読みます。"
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "Read",
+              "input": {
+                "file_path": "src/cluster.ts"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "t1",
+              "content": "42 lines"
+            }
+          ]
+        }
+      },
+      {
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "続けて作業を進め、この Issue の実装を最後まで完遂してください。\n指示どおりに書けないと分かったら、進めずに止めて報告してください。\nまだ変更が commit されていません。完了したら work ブランチに単一 commit を作成してください（それが完了の合図です）。"
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "続けます。"
+            }
+          ]
+        }
+      },
+      {
+        "type": "assistant",
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "name": "Read",
+              "input": {
+                "file_path": "src/cluster.ts"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "description": "Issue #286（陽性）: plan が `dispatch_excluded: human_only` の印を付けた #1500 には worker を割り当てない。1 度も send せず、最後の waves[] entry に worker_state `not_dispatched`・note `human-only` で記録し、blocking にはしない。limitation `human_only_excluded` が理由を残す。#1501 は pass なので run は success。",
+  "plan": {
+    "issues_fixture": "cases/150-human-only-excluded/issues.json",
+    "orchestrate_args": [
+      "1500",
+      "1501",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "completion_check_passed": true,
+    "sent": [
+      1501
+    ],
+    "never_sent": [
+      1500
+    ],
+    "worker_states": {
+      "1500": "not_dispatched",
+      "1501": "completed"
+    },
+    "verification_outcomes": {
+      "1501": "pass"
+    },
+    "plan_scope": null,
+    "limitation_codes": [
+      "human_only_excluded"
+    ],
+    "absent_limitation_codes": [
+      "human_only_dependency",
+      "only_subset"
+    ],
+    "limitation_details_include": [
+      "the plan marks #1500 human-only (dispatch_excluded)",
+      "not a failure and not a blocking reason"
+    ],
+    "worker_notes_include": {
+      "1500": [
+        "human-only: the plan marks this issue dispatch_excluded"
+      ]
+    },
+    "absent_blocking_codes": [
+      "not_dispatched"
+    ],
+    "blocking_codes": []
+  }
+}
