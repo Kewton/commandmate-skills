@@ -576,6 +576,15 @@ cmate-issue-authoring 0.10.0（CommandMate #3013）で、人がやる Issue（�
 
 ## dispatch（`scripts/dispatch.mjs`）
 
+### #274 — `--reverify` が対象 Issue を必ず同時に検証し、重いゲートを直列にできなかった
+
+`--reverify` は再判定の対象を全件同時に走らせていたので、`cargo test --all-targets` のような重いゲートを
+2件並べると、実行時間に依存するテストが負荷で落ち、1件ずつなら通る Issue が `verification_failed` になった。
+直列にする正規の手段が無かった（`--schedule dag` は併用不可、`--max-parallel` は plan の値で変えると report と
+一致せず拒否される）。`--verify-concurrency <n>` を足し、`--reverify` の再判定を同時 n 件までにできる。
+run の引数であり run id にも突き合わせにも入らない。渡さない run は従来どおり全件同時で、report は byte 一致。
+指定した run は `verify_concurrency_limited` に値を残す。`--reverify` 無し・0・負数・非整数は `invalid_input`。
+
 ### #286 — plan に入った human-only の Issue にも worker が割り当てられえた
 
 planner が human-only の Issue を wave から外しても（上の planner の節）、dispatch が plan の `issues` 全体を

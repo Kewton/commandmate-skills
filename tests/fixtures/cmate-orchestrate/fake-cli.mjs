@@ -208,6 +208,17 @@ function scenario() {
   }
 }
 
+// A marker line in the same log, for cases that count overlap rather than calls.
+function logSpan(name, issue) {
+  const path = process.env.CMATE_FAKE_LOG;
+  if (!path) return;
+  try {
+    appendFileSync(path, `${JSON.stringify({ sub: name, args: [String(issue)] })}\n`);
+  } catch {
+    // Same rule as logInvocation: logging never changes the emulated behavior.
+  }
+}
+
 function logInvocation() {
   const path = process.env.CMATE_FAKE_LOG;
   if (!path) return;
@@ -1750,6 +1761,7 @@ function main() {
     const worktreeId = argv[1];
     const issue = issueFromId(worktreeId);
     const worker = workerSpec(spec, issue);
+    if (Number.isInteger(worker.verify_hold_ms)) logSpan('verify-start', issue);
     // A failed_gates entry is a gate id string, or an object {id, logTail, exit}
     // when a scenario needs to control the gate's log — e.g. a scope gate whose
     // logTail lists the out-of-scope paths (#1678 B-2). Under
@@ -1819,6 +1831,13 @@ function main() {
     // work-evidence gate finding nothing) and 99 (the run ending error/cancelled
     // with no verdict at all) — which `--reverify` must handle the same way the
     // ordinary path does (Issue #121).
+    // `verify_hold_ms` (Issue #274) keeps the run open for that long and logs its
+    // start and end, so a case can count how many verifications overlapped. The
+    // wait is synchronous on purpose: the fake is one process per call.
+    if (Number.isInteger(worker.verify_hold_ms)) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, worker.verify_hold_ms);
+      logSpan('verify-end', issue);
+    }
     process.exit(Number.isInteger(worker.verify_exit)
       ? worker.verify_exit
       : (failedGates.length > 0 ? VERIFY_FAILED : 0));
