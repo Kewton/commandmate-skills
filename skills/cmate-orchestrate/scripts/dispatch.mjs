@@ -540,6 +540,13 @@ Options:
                          The plan's profile may declare this instead
                          (worker_messages.nudge); the flag always wins. Non-blank,
                          at most 2000 characters.
+  --verify-concurrency <n>
+                         With --reverify only: re-judge at most <n> issues at a
+                         time (a positive integer; default: all at once). For
+                         gates heavy enough that two runs side by side fail on
+                         load, not on the change (1 = one at a time). Not a plan
+                         value and not part of the run id: the report's order and
+                         verdicts do not depend on it. Refused without --reverify.
   --poll-limit <n>       Retained for compatibility; wait now blocks (default ${DEFAULT_POLL_LIMIT}).
   --interrupt-stale-prompt
                          Before a worker's first send, dispatch reads the
@@ -589,6 +596,7 @@ function parseCli(argv) {
         'wait-timeout': { type: 'string' },
         'max-turns': { type: 'string' },
         'poll-limit': { type: 'string' },
+        'verify-concurrency': { type: 'string' },
         'interrupt-stale-prompt': { type: 'boolean' },
         'nudge-message': { type: 'string' },
         help: { type: 'boolean' },
@@ -606,6 +614,25 @@ function positiveInt(raw, name, fallback) {
     throw new SkillError('invalid_input', `${name} must be a positive integer`, 3);
   }
   return Number.parseInt(raw, 10);
+}
+
+// Runs `fn` over `items` with at most `limit` in flight, starting them in order.
+// A null limit is the unbounded form (every item starts at once), which is what a
+// caller that never stated a width gets.
+async function forEachLimited(items, limit, fn) {
+  if (limit === null) {
+    await Promise.all(items.map(fn));
+    return;
+  }
+  let next = 0;
+  const lane = async () => {
+    while (next < items.length) {
+      const item = items[next];
+      next += 1;
+      await fn(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
 }
 
 // `--contract-mode` is validated here rather than defaulted silently: a typo'd
@@ -805,6 +832,15 @@ function resolveInputs(parsed) {
         + 'ready gate ("every dependency completed AND verified") would refuse to re-judge exactly the issues downstream of the failure the '
         + 'reverify is being run to clear. Re-judge with --reverify alone, then dispatch what is left with --schedule dag', 3);
   }
+  // A run argument, never a plan value (Issue #274): it is not hashed into the
+  // run id and a --reverify does not match it against the prior report. Only a
+  // reverify judges in a fan-out that could be narrowed, so it is refused elsewhere
+  // rather than accepted and ignored.
+  const verifyConcurrency = positiveInt(values['verify-concurrency'], 'verify-concurrency', null);
+  if (verifyConcurrency !== null && values.reverify === undefined) {
+    throw new SkillError('invalid_input',
+      '--verify-concurrency is only meaningful with --reverify: it bounds how many re-judgements run at once, and no other mode re-judges', 3);
+  }
   const unattended = resolveUnattended(values);
   // The three-state reading of every flag a profile may also declare (Issue
   // #180). `stated` is the answer to "did the operator type this?", which is a
@@ -824,6 +860,7 @@ function resolveInputs(parsed) {
     outDir: values.out ?? null,
     resumeDir: values.resume ?? null,
     reverifyDir: values.reverify ?? null,
+    verifyConcurrency,
     only: resolveOnly(values.only),
     cliArgv,
     cli: cliArgv.join(' '),
@@ -6325,6 +6362,15 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   // carried, and what it re-dispatched. Every other line of the report is read
   // against that.
   if (resume !== null) report.limitations.push(resumeLimitation(plan, resume));
+  // The width a reverify was told to judge at (Issue #274). Pushed only when the
+  // flag was passed, so a reverify without it keeps the report it always had.
+  if (reverifying && inputs.verifyConcurrency !== null) {
+    report.limitations.push({
+      code: 'verify_concurrency_limited',
+      detail: `--verify-concurrency ${inputs.verifyConcurrency}: this reverify re-judged at most ${inputs.verifyConcurrency} issue(s) at a time. `
+        + 'It changes how many gate runs overlap, never which issues are judged or what a verdict says; it is a run argument, not part of the plan or the run id',
+    });
+  }
   // The run-wide method declaration (Issue #128 / ADR section 9), stated before
   // any wave: everything below — the `## Method` section in each contract, the
   // per-issue `worker_method_applied` entries — is read against it. Nothing is
@@ -7154,7 +7200,10 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
     //      Concurrent for the same reason the supervision loop is: a gate run is
     //      the slow part, the wave width is already <= max_parallel, and one
     //      issue's gates must not wait behind another's.
-    await Promise.all(reverifiable.map(async ({ worker, worktreeId, worktreePath, issueGateIds }) => {
+    //
+    //      `--verify-concurrency` (Issue #274) narrows that to n at a time, taken
+    //      in plan order; without it every issue starts at once, as before.
+    await forEachLimited(reverifiable, inputs.verifyConcurrency, async ({ worker, worktreeId, worktreePath, issueGateIds }) => {
       // A pending prompt is a worker still mid-turn, waiting for a human. The
       // tree under it is being changed by somebody who has not finished, so a
       // verdict about it would describe a state that is not a deliverable — and
@@ -7224,7 +7273,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
         return;
       }
       reverifyVerdicts.set(worker.issue, judged);
-    }));
+    });
 
     // 4. Wave barrier — every dispatched worker must have completed.
     const allCompleted = workers.length > 0 && workers.every((worker) => worker.worker_state === 'completed');

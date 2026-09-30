@@ -1,0 +1,37 @@
+{
+  "description": "Issue #274: 負数は引数解決で拒否する（invalid_input / exit 3）。CLI は 1 回も呼ばない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--verify-concurrency=-1"
+  ],
+  "expect": {
+    "exit": 3,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "waves_count": 0,
+    "out_dir_created": false,
+    "no_cli_calls": true,
+    "blocking_codes": [
+      "invalid_input"
+    ],
+    "blocking_details_include": [
+      [
+        "verify-concurrency must be a positive integer"
+      ]
+    ]
+  }
+}
