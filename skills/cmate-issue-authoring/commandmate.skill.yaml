@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-issue-authoring
 name: cmate-issue-authoring
-version: 0.9.1
+version: 0.10.0
 summary: Feature 記述から実装可能な Issue 群を起案する。read-only の分割計画を schema 準拠 artifact で出し、明示承認の下でだけ依存順に GitHub へ一括登録する 2 phase 手順。
 description: >-
   Feature 記述・仕様断片・epic Issue を入力に、着手できる Issue 群を起案する手順である。
@@ -95,7 +95,7 @@ risk_rationale: >-
   同梱する実行可能 file は無く、install 時に実行されるものも無い。script は
   validate-plan.mjs 1 本（実行 bit 無し）で、計画と schema、および --checkout を
   渡されたときだけ対象 repo の .commandmate/verify.yaml を読み、findings を出すだけであり
-  gh も git も呼ばない。書き込みは計画 artifact（.commandmate/issue-authoring/ 配下）に
+  gh も git も呼ばない。書き込みは計画 artifact（既定では .commandmate/issue-authoring/ 配下、--plan-dir で変更可）に
   限り、実装 file には触れない。GitHub への mutation は --register と明示承認が揃った
   Phase 2 の gh issue create だけで、Issue の追加であって削除・履歴書き換えではない。
   既存 Issue の本文編集・クローズ・ラベル張り替えは手順として禁止している。
@@ -149,8 +149,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 7e8be06a0bddf2bf1587e570d578c9001a27d2f77c68b204d72c27169a947e57
-    size: 30703
+    sha256: 6f4104551413075b9f52556003c378810e88926fe58c92e8322b1df3b10f41ba
+    size: 31066
     kind: instruction
     executable: false
     script: false

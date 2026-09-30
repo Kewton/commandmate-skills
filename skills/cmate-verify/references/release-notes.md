@@ -12,6 +12,15 @@ SKILL.md が正しい。
 
 ## Changelog
 
+### 0.6.0 — env-clean から外す `$HOME` 直下のエントリを受理し、実行例のパスを install 先に合わせた（#270 / CommandMate#3012）
+
+- **#270**: 上流 CommandMate#2901 で `verify-run.sh` に入った `options.envCleanIgnoreHomeEntries`（`$HOME` 直下の
+  エントリ名のリスト。env-clean の比較から除外する）を移植した。未知の options キーを exit 2 にする awk パーサが
+  このキーを読めず、上流の CLI では動く verify.yaml がこのランナーでは落ちていた。`verify-run.sh` は上流と byte 一致。
+- **CommandMate#3012**: 手順 2 の実行例が `.claude/skills/cmate-verify/scripts/verify-run.sh` に固定されていた。
+  Codex と Command Code のワーカーは `.agents/skills` を読むので、例のパスどおりに探して「未 install」と申告していた。
+  `<skills-root>`（`.agents/skills` と `.claude/skills` のうち在る方）で書き直した。
+
 ### 0.5.0 — 上流と同じ設定を受理し、run の途中で自分の作業 directory を消さなくなった（Issue #223 / #224 / #228）
 
 **「`commandmate verify` では動くのに、このランナーでは exit 2」が起きていた**（#223 / #224）。

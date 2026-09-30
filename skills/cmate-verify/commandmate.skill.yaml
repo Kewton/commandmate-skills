@@ -102,8 +102,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: f1c58cdb094cfc859d94a9ae217c227a949dcd1e580d0786643cddbff15d00b4
-    size: 8413
+    sha256: 4f12c5288b495bc74188742b977a0612e178d3d3804f63f44600d67827714171
+    size: 9392
     kind: instruction
     executable: false
     script: false

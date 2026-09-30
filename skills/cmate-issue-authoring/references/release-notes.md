@@ -19,7 +19,12 @@ install 先で走らせるよう案内している箇所は無い。
 
 ## Changelog
 
-### 成果物見出しの下は backtick の file 名を拡張子によらず拾う（planner CommandMate #3003 / #272）
+### 0.10.0 — 計画を `.commandmate/` の外に置け、人がやる文書の Issue を計画に入れられる（CommandMate #3013 / #3002 / #3003）
+
+- `--plan-dir <path>`・`human-only` ラベル・依存の例の書き直し（CommandMate #3013）
+- planner（cmate-orchestrate 0.34.0）の抽出規則の変更（#3002 / #3003）に写しを揃えた
+
+#### 成果物見出しの下は backtick の file 名を拡張子によらず拾う（planner CommandMate #3003 / #272）
 
 - **planner の抽出に5つ目の source（`CANDIDATE_DECLARED`）が入ったので、mirror も同じ commit で揃えた**
   （定数は byte 同一、`plannerFileCandidates` の `declaredOnly` 分岐も同じ）。
@@ -30,7 +35,7 @@ install 先で走らせるよう案内している箇所は無い。
   読まないので、欄で足した拡張子は起票時の判定と planner の判定を食い違わせる。
 - 書き方は [issue-body-contract.md](./issue-body-contract.md) 第 2.3 節に足した。
 
-### 成果物見出しの外の path は scope に入らない（planner CommandMate #3002 / #273）
+#### 成果物見出しの外の path は scope に入らない（planner CommandMate #3002 / #273）
 
 - **planner の抽出規則が変わったので、mirror も同じ commit で揃えた。** 成果物見出しを持つ本文では、
   見出しの範囲の外にだけ書いた path が `suspected_files` に入らない（`plannerFileCandidates` が
@@ -44,7 +49,7 @@ install 先で走らせるよう案内している箇所は無い。
   `no_suspected_files` を立てるのと同じ判定である。書き方は
   [issue-body-contract.md](./issue-body-contract.md) 第 2.3 節に足した。
 
-### CommandMate#3013 — 計画を `.commandmate/` の外に置けず、人がやる文書の Issue を計画に入れられなかった
+#### CommandMate#3013 — 計画を `.commandmate/` の外に置けず、人がやる文書の Issue を計画に入れられなかった
 
 版の見出しはリリース時に付ける。
 
