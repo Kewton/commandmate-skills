@@ -75,6 +75,9 @@ compatibility:
     - agent: antigravity
       support: unknown
       evidence: Not measured as the parent that loads this skill, for this package or any other. Its behaviour as a child session is recorded in SKILL.md section 11, which says nothing about discovery.
+    - agent: opencode-v2
+      support: native
+      evidence: 'Measured 2026-09-29 on opencode2 2.0.18 (CommandMate#2975): GET /api/skill lists SKILL.md from .agents/skills and .claude/skills; /<name> makes the model call the skill tool. No restart needed. Not in v2''s / palette (@ and /skills only). This package was NOT separately measured.'
 requirements:
   commands:
     - name: commandmate

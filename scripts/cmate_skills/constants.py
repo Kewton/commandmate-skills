@@ -159,6 +159,7 @@ SKILL_FILE_KINDS: tuple[str, ...] = ("skill_md", "instruction", "script", "asset
 # `command-code` is upstream's since Kewton/CommandMate#2250; while this tuple
 # lagged it, a manifest declaring the agent CommandMate accepts was rejected here
 # with INVALID_ENUM -- mirror drift that only this repository could see.
+# `opencode-v2` is upstream's since Kewton/CommandMate#2934 (Epic #2370).
 CLI_TOOL_IDS: tuple[str, ...] = (
     "claude",
     "codex",
@@ -168,6 +169,7 @@ CLI_TOOL_IDS: tuple[str, ...] = (
     "copilot",
     "antigravity",
     "command-code",
+    "opencode-v2",
 )
 
 # =============================================================================

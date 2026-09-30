@@ -31,6 +31,7 @@ Node だけは代替が無い。validator は Node の標準ライブラリの�
 | `codex` | native | Codex CLI 0.145.0 / 2026-07-26 実測: `.agents/skills` から `SKILL.md` を読む（model の自己申告であり機械的証跡ではない）。当該 version は skill を slash command として露出しないので名前で呼ぶ。**本 package は個別に測っていない** |
 | `gemini` | unknown | 未計測 |
 | `opencode` | unknown | 未計測 |
+| `opencode-v2` | native | opencode2 2.0.18（2026-09-29、[CommandMate#2975](https://github.com/Kewton/CommandMate/issues/2975)）で `GET /api/skill` が `.agents/skills` と `.claude/skills` の `SKILL.md` を列挙し、`/<name>` の送信で model が `skill` tool を呼んで読まれることを実測。再起動は不要。v2 の `/` 補完には出ない（`@` と `/skills` picker のみ）。本 package は個別に測っていない |
 
 `support` は **discovery 経路**の記録である。CommandMate 0.15.0 以降、package は
 `.agents/skills/<skill-id>/` と `.claude/skills/<skill-id>/` の両方へ byte-identical に

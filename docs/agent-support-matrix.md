@@ -403,25 +403,45 @@ codex の `$<name>` ではない（[CommandMate#1504](https://github.com/Kewton/
 回した rubric 評価は含まない。また **配置は手動**であり、Catalog install 経由では測っていない
 （install 先は package に依存しないが、経路そのものの追試は別に行う）。
 
+### 3.6 OpenCode V2 2.0.18（2026-09-29）
+
+CommandMate に追加された OpenCode V2（`opencode-v2`、Epic
+[CommandMate#2370](https://github.com/Kewton/CommandMate/issues/2370)）を、この repository の
+`CLI_TOOL_IDS` mirror に足し（[#275](https://github.com/Kewton/commandmate-skills/issues/275)）、
+全 package の `compatibility.agents` に `opencode-v2: native` を宣言した。
+**根拠は [CommandMate#2975](https://github.com/Kewton/CommandMate/issues/2975) の実測だけ**であり、
+正本は CommandMate の `docs/reference/skill-agent-compatibility.md`（v2 の行と §10）である。
+
+| 項目 | 値 |
+|---|---|
+| opencode2 | **2.0.18**（2026-09-29） |
+| 発見 | `GET /api/skill` が `.agents/skills` と `.claude/skills` の `SKILL.md` を絶対 path つきで列挙（機械的） |
+| 呼出 | `/<name>` を送ると model が `skill` tool を呼ぶ。`input.id` と Skill の directory が記録される（機械的。返ってきた token は判別子にしない） |
+| reload | 再起動もセッションの開き直しも不要（稼働中に足した Skill を数秒で拾う） |
+| palette | v2 の `/` 補完と `ctrl+p` には出ない。`@` 補完と `/skills` picker には出る |
+
+opencode（v1）とは値を共有しない（版・日付・呼出経路が違う）。**測ったのは discovery と呼出の経路だけ**で、
+各 package を v2 で最後まで回した評価は含まない。CommandMate 経由（`commandmate send`）の送信も測っていない。
+
 ## 4. package 別の宣言
 
-| Skill | 宣言 version | claude | codex | gemini | opencode | command-code | antigravity | claude / codex 実測 | opencode / command-code 実測 |
-|---|---|---|---|---|---|---|---|---|---|
-| `cmate-acceptance-test` | 0.2.0 | native | native | unknown | native | native | — | 0.1.1・2026-07-31 | 2026-09-04（経路） |
-| `cmate-delegate` | 0.1.2 | native | native | unknown | native | native | unknown | 未（経路からの敷衍） | 2026-09-04（経路） |
-| `cmate-issue-authoring` | 0.9.1 | native | native | unknown | native | native | — | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
-| `cmate-issue-refinement` | 0.4.1 | native | native | unknown | native | native | — | 0.1.1・2026-07-31 | 2026-09-04（経路） |
-| `cmate-orchestrate` | 0.33.0 | native | native | unknown | native | native | — | 0.9.0・**2026-08-02** | **2026-09-04（Command Code は 0.32.0 を実 package で実測）** |
-| `cmate-orchestrate-monitor` | 0.7.1 | native | native | unknown | native | native | — | 0.4.0・**2026-08-02** | 2026-09-04（経路） |
-| `cmate-repository-analysis` | 0.2.1 | native | native | unknown | native | native | — | 0.1.1・2026-07-31 | **2026-09-04（両者とも 0.2.0 を実 package で実測）** |
-| `cmate-task-contract` | 0.2.3 | native | native | unknown | native | native | — | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
-| `cmate-uat` | 0.1.0 | native | native | unknown | native | native | native | 未（経路からの敷衍） | 未（経路からの敷衍） |
-| `cmate-verify` | 0.5.1 | native | native | unknown | native | native | — | 0.1.1・**2026-08-02** | **2026-09-04（Command Code は 0.5.0 を実 package で実測）** |
-| `cmate-verify-advisor` | 0.3.1 | native | native | unknown | native | native | — | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
-| `cmate-worker-development` | 0.2.1 | native | native | unknown | native | native | — | 未（経路からの敷衍） | 2026-09-04（経路） |
-| `cmate-workspace-research` | 0.1.2 | native | native | unknown | native | native | unknown | 0.1.1・**2026-09-11**（claude を親に実機 run。codex は未） | 2026-09-04（経路） |
-| `cmate-worktree-cleanup` | 0.1.6 | native | native | unknown | native | native | — | 0.1.2・2026-07-31 | 2026-09-04（経路） |
-| `cmate-worktree-setup` | 0.1.6 | native | native | unknown | native | native | — | 0.1.2・2026-07-31 | 2026-09-04（経路） |
+| Skill | 宣言 version | claude | codex | gemini | opencode | command-code | antigravity | opencode-v2 | claude / codex 実測 | opencode / command-code 実測 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `cmate-acceptance-test` | 0.2.0 | native | native | unknown | native | native | — | native | 0.1.1・2026-07-31 | 2026-09-04（経路） |
+| `cmate-delegate` | 0.1.2 | native | native | unknown | native | native | unknown | native | 未（経路からの敷衍） | 2026-09-04（経路） |
+| `cmate-issue-authoring` | 0.9.1 | native | native | unknown | native | native | — | native | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
+| `cmate-issue-refinement` | 0.4.1 | native | native | unknown | native | native | — | native | 0.1.1・2026-07-31 | 2026-09-04（経路） |
+| `cmate-orchestrate` | 0.33.0 | native | native | unknown | native | native | — | native | 0.9.0・**2026-08-02** | **2026-09-04（Command Code は 0.32.0 を実 package で実測）** |
+| `cmate-orchestrate-monitor` | 0.7.1 | native | native | unknown | native | native | — | native | 0.4.0・**2026-08-02** | 2026-09-04（経路） |
+| `cmate-repository-analysis` | 0.2.1 | native | native | unknown | native | native | — | native | 0.1.1・2026-07-31 | **2026-09-04（両者とも 0.2.0 を実 package で実測）** |
+| `cmate-task-contract` | 0.2.3 | native | native | unknown | native | native | — | native | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
+| `cmate-uat` | 0.1.0 | native | native | unknown | native | native | native | native | 未（経路からの敷衍） | 未（経路からの敷衍） |
+| `cmate-verify` | 0.5.1 | native | native | unknown | native | native | — | native | 0.1.1・**2026-08-02** | **2026-09-04（Command Code は 0.5.0 を実 package で実測）** |
+| `cmate-verify-advisor` | 0.3.1 | native | native | unknown | native | native | — | native | 0.1.0・**2026-08-02** | 2026-09-04（経路） |
+| `cmate-worker-development` | 0.2.1 | native | native | unknown | native | native | — | native | 未（経路からの敷衍） | 2026-09-04（経路） |
+| `cmate-workspace-research` | 0.1.2 | native | native | unknown | native | native | unknown | native | 0.1.1・**2026-09-11**（claude を親に実機 run。codex は未） | 2026-09-04（経路） |
+| `cmate-worktree-cleanup` | 0.1.6 | native | native | unknown | native | native | — | native | 0.1.2・2026-07-31 | 2026-09-04（経路） |
+| `cmate-worktree-setup` | 0.1.6 | native | native | unknown | native | native | — | native | 0.1.2・2026-07-31 | 2026-09-04（経路） |
 
 「宣言 version」は本 commit 時点で各 package の `commandmate.skill.yaml` が名乗っている
 version である。**evidence の文面を直すだけでも bump が要る**（公開済み version は immutable）

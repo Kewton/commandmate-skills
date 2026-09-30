@@ -28,6 +28,7 @@ degradation, not a failure.
 | `codex` | native | Codex CLI 0.145.0, measured 2026-07-26: reads `SKILL.md` from `.agents/skills` (model self-report, not a mechanical trace). That version exposes no skill as a slash command, so invoke it by name. |
 | `gemini` | unknown | Not measured. |
 | `opencode` | unknown | Not measured. |
+| `opencode-v2` | native | opencode2 2.0.18, measured 2026-09-29 (CommandMate#2975): `GET /api/skill` lists `SKILL.md` from `.agents/skills` and `.claude/skills`; sending `/<name>` makes the model call the `skill` tool. No restart needed. Not in v2's `/` palette (`@` and `/skills` picker only). This package was not separately measured. |
 
 `support` records the **discovery path**, which the installer decides: since
 CommandMate 0.15.0 a package is written to `.agents/skills/<skill-id>/` and
