@@ -1,0 +1,94 @@
+{
+  "description": "[#296] **Command Code の worker が止めて報告した。** cliToolId は `command-code`（Claude の転写は無い）で、CLI は `reply` を持つ。1 回目の nudge の後のターンが exit 21 で終わり、`commandmate reply <worktree-id> --since <nudge を送る直前の時刻> --json` が nudge への返答を返す。runner はこれを報告と読み、2 回目の nudge を送らず、`worker_report`（`source: commandmate_reply`）と blocking `worker_stopped_with_report` を残す（send は 2 回で止まる）。`--instance` は send / wait と同じく渡さない。裁定（`worker_state: failed` / `worker_failed`）は #287 と同じ。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "235",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      235
+    ],
+    "worker_states": {
+      "235": "failed"
+    },
+    "send_counts": {
+      "235": 2
+    },
+    "verification_outcomes": {
+      "235": "fail"
+    },
+    "worker_report": {
+      "235": {
+        "code": "worker_stopped_with_report",
+        "turn": 2,
+        "source": "commandmate_reply",
+        "truncated": false,
+        "text_includes": [
+          "止めて報告します。",
+          "`src/storage.ts` が対象ファイルに無いため"
+        ]
+      }
+    },
+    "worker_turn_evidence": {
+      "235": null
+    },
+    "worker_notes_include": {
+      "235": [
+        "the worker stopped and reported on turn 2"
+      ]
+    },
+    "blocking_codes": [
+      "worker_stopped_with_report",
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_produced_nothing",
+      "worker_upstream_unavailable",
+      "worker_output_unreadable"
+    ],
+    "blocking_details_include": [
+      [
+        "#235:",
+        "止めて報告します。",
+        "commandmate reply"
+      ]
+    ],
+    "blocking_order": [
+      "worker_stopped_with_report:#235",
+      "worker_failed:#235"
+    ],
+    "summary_includes": [
+      "`worker_stopped_with_report`",
+      "報告を読んでから決める"
+    ],
+    "cli_args_include": {
+      "reply": [
+        "--since",
+        "--json"
+      ]
+    },
+    "cli_args_absent": {
+      "reply": [
+        "--instance",
+        "--agent"
+      ]
+    }
+  }
+}

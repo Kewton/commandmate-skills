@@ -1,0 +1,26 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "235": {
+      "state": "completed",
+      "verify_exits": [
+        21
+      ],
+      "reply": {
+        "text": "止めて報告します。Issue は `src/bookmark.ts` に書くよう指示していますが、ブックマークの保存先 `src/storage.ts` が対象ファイルに無いため、指示どおりには書けません。対象ファイルに `src/storage.ts` を加えるか、保存先を指定してください。"
+      },
+      "capture_extra": {
+        "cliToolId": "command-code"
+      }
+    }
+  },
+  "cli_reply": true
+}

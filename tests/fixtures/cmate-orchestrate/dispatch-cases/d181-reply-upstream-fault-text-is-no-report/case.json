@@ -1,0 +1,46 @@
+{
+  "description": "[#296] **`reply` の返答が上流エラーの署名に当たるときは報告と読まない**（#287 の規則をそのまま適用）。cap まで nudge する。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "235",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      235
+    ],
+    "worker_states": {
+      "235": "failed"
+    },
+    "send_counts": {
+      "235": 3
+    },
+    "worker_report": {
+      "235": null
+    },
+    "blocking_codes": [
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_stopped_with_report"
+    ]
+  }
+}

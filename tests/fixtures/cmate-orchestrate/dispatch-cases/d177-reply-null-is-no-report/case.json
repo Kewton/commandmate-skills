@@ -1,0 +1,49 @@
+{
+  "description": "[#296] **`reply` が `reply: null` を返す（nudge の後の転写行がまだ無い）ときは、報告の無い無進捗として従来どおり。** `--max-turns 3` まで nudge を送り（send 3 回）、`worker_report` も `worker_stopped_with_report` も付かない。pane にはフォールバックしない。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "235",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      235
+    ],
+    "worker_states": {
+      "235": "failed"
+    },
+    "send_counts": {
+      "235": 3
+    },
+    "verification_outcomes": {
+      "235": "fail"
+    },
+    "worker_report": {
+      "235": null
+    },
+    "blocking_codes": [
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_stopped_with_report"
+    ]
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "description": "[#296] **長い返答は既存の規則どおり末尾 600 字に切る。** `truncated: true`、`text` は `…` で始まる。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-max-turns-evidence.json",
+    "orchestrate_args": [
+      "235",
+      "--profile",
+      "node-commandmate",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "no_respond": true,
+    "sent": [
+      235
+    ],
+    "worker_states": {
+      "235": "failed"
+    },
+    "send_counts": {
+      "235": 2
+    },
+    "verification_outcomes": {
+      "235": "fail"
+    },
+    "worker_report": {
+      "235": {
+        "code": "worker_stopped_with_report",
+        "turn": 2,
+        "source": "commandmate_reply",
+        "truncated": true,
+        "text_includes": [
+          "最後の一文がこれです。"
+        ]
+      }
+    },
+    "worker_turn_evidence": {
+      "235": null
+    },
+    "worker_notes_include": {
+      "235": [
+        "the worker stopped and reported on turn 2",
+        "no further nudge was sent (the --max-turns cap is 8)"
+      ]
+    },
+    "blocking_codes": [
+      "worker_stopped_with_report",
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "worker_produced_nothing",
+      "worker_upstream_unavailable",
+      "worker_output_unreadable"
+    ],
+    "blocking_details_include": [
+      [
+        "#235:",
+        "最後の一文がこれです。",
+        "cut to 600 characters"
+      ]
+    ],
+    "blocking_order": [
+      "worker_stopped_with_report:#235",
+      "worker_failed:#235"
+    ],
+    "summary_includes": [
+      "`worker_stopped_with_report`",
+      "報告を読んでから決める"
+    ],
+    "cli_args_include": {
+      "reply": [
+        "--since",
+        "--json"
+      ]
+    },
+    "cli_args_absent": {
+      "reply": [
+        "--instance",
+        "--agent"
+      ]
+    }
+  }
+}
