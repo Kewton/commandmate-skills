@@ -40,6 +40,7 @@ import {
   isOverBroadScope,
   normalizeObservations,
   normalizePrTitleTemplate,
+  workerMessageProblem,
 } from './lib.mjs';
 
 const PLAN_SCHEMA_VERSION = 2;
@@ -116,6 +117,7 @@ const PROFILE_FIELDS = [
   // CommandMate#3005 — read by merge.mjs --create-prs. Appended last, like every
   // optional field before it, so a profile without it plans the same bytes.
   'pr_title_template',
+  'worker_messages',
 ];
 
 // =============================================================================
@@ -487,7 +489,42 @@ function normalizeProfile(raw) {
   // rules live in lib.mjs because merge.mjs re-validates the plan's copy.
   const prTitleTemplate = normalizePrTitleTemplate(raw.pr_title_template, 'profile.pr_title_template', 'load_error', 6);
   if (prTitleTemplate !== null) profile.pr_title_template = prTitleTemplate;
+  // ABSENT-stays-absent a fifth time (CommandMate#3009). Lives outside
+  // `dispatch_defaults` on purpose: that object is booleans and counts and refuses
+  // an unknown key, so a string there would be a second kind of thing in it.
+  const workerMessages = normalizeWorkerMessages(raw.worker_messages);
+  if (workerMessages !== null) profile.worker_messages = workerMessages;
   return profile;
+}
+
+// worker_messages — text the runners append to the messages they send workers
+// (CommandMate#3009, references/profile-contract.md §14). Closed like
+// dispatch_defaults: an unknown key is refused so a profile written for a newer
+// runner is not half-honored. REBUILT rather than passed through, for the
+// run-id reason normalizeDispatchDefaults gives.
+const WORKER_MESSAGE_KEYS = ['nudge'];
+function normalizeWorkerMessages(raw) {
+  if (raw === undefined) return null;
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new SkillError('load_error',
+      `profile.worker_messages must be a JSON object of ${WORKER_MESSAGE_KEYS.join(' / ')}, got ${JSON.stringify(raw)}`, 6);
+  }
+  for (const key of Object.keys(raw)) {
+    if (!WORKER_MESSAGE_KEYS.includes(key)) {
+      throw new SkillError('load_error',
+        `profile.worker_messages has an unknown key "${key}"; this runner understands ${WORKER_MESSAGE_KEYS.join(', ')}`, 6);
+    }
+  }
+  const declared = {};
+  for (const key of WORKER_MESSAGE_KEYS) {
+    if (!(key in raw)) continue;
+    const problem = workerMessageProblem(raw[key]);
+    if (problem !== null) {
+      throw new SkillError('load_error', `profile.worker_messages.${key} ${problem}`, 6);
+    }
+    declared[key] = raw[key];
+  }
+  return declared;
 }
 
 // =============================================================================
@@ -3526,6 +3563,9 @@ function publicProfile(profile) {
   // `pr_title_template` is here for merge.mjs --create-prs (CommandMate#3005,
   // profile-contract.md §13), and last for the same byte-order reason.
   if (profile.pr_title_template !== undefined) out.pr_title_template = profile.pr_title_template;
+  // `worker_messages` is here because dispatch reads `plan.profile.worker_messages`
+  // and never opens the profile. Appended LAST, like every optional field.
+  if (profile.worker_messages !== undefined) out.worker_messages = profile.worker_messages;
   return out;
 }
 

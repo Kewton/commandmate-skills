@@ -863,3 +863,30 @@ planner は読むだけで使わない。検証して `plan.profile` の最後�
 タイトルの規約は CI の設定（semantic-pull-request の type 一覧など）から**推測はできる**が、
 推測した型と検出した型は出力上見分けがつかない（第10.5節と同じ理由）。人間が書き足す。
 
+
+## 14. `worker_messages` — worker へ送る文面への追記（任意）
+
+runner 側の正本は [dispatch-contract.md](./dispatch-contract.md) 第1.1節である
+（CommandMate#3009）。
+
+```json
+"worker_messages": {
+  "nudge": "指示どおりに書けないと分かったら、進めずに止めて報告してください。"
+}
+```
+
+| key | 型 | 消費するのは |
+|---|---|---|
+| `nudge` | 空白のみでない文字列（2000 文字以下） | dispatch の監督 nudge（`--nudge-message` が同じ位置を上書きする） |
+
+- **差し替えではなく追記**である。dispatch の既定 nudge の**後ろ**に足す。既定文の
+  「単一 commit が完了の合図」の行は runner が必ず付けるので、profile からは消せない。
+- 既定文にも「指示どおりに書けないと分かったら、進めずに止めて報告してください。」が入っている。
+  この field は、リポジトリ固有の但し書きを足したいときのものである。
+- `dispatch_defaults` の**外**に置く。あちらは真偽値と整数だけで、未知の key を拒否する object である。
+- 未知の key・空文字・空白のみ・文字列以外・2000 文字超は `load_error` / exit 6（planner）、
+  plan 経由なら `plan_invalid` / exit 3（dispatch）で拒否する。
+- 宣言は plan の `profile.worker_messages` に写る（宣言が無ければ写らず、plan は従来と byte 一致）。
+  profile ごと run_id の hash に入るので、直して取り直すと別の run_id になる。
+- 対象は dispatch の監督 nudge だけである。commit 依頼（`COMMIT_REQUEST_MESSAGE`）と
+  `cmate-uat` の fix nudge は変えない。

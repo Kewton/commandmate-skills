@@ -1,0 +1,17 @@
+{
+  "description": "CommandMate#3009: profile.worker_messages の空白のみは拒否する。load_error / exit 6、profile load の時点で止まる。",
+  "args": [
+    "461",
+    "--profile-json",
+    "PROFILE:worker-messages-invalid-empty.json"
+  ],
+  "expect": {
+    "exit": 6,
+    "status": "failure",
+    "error_code": "load_error",
+    "error_details_include": [
+      "profile.worker_messages.nudge must be a non-empty string"
+    ],
+    "plan_null": true
+  }
+}

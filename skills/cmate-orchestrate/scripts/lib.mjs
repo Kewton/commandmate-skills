@@ -59,6 +59,18 @@ import { join } from 'node:path';
 
 export const SKILL_ID = 'cmate-orchestrate';
 
+// The text a profile's `worker_messages.nudge` (or dispatch's --nudge-message)
+// appends to the supervision nudge (CommandMate#3009). One reader on each side of
+// the plan file — the planner for the profile, dispatch for the plan and the flag
+// — so the rule lives here and only the refusal code differs. Returns the reason
+// the value is refused, or null.
+export const WORKER_MESSAGE_MAX_CHARS = 2000;
+export function workerMessageProblem(value) {
+  if (typeof value !== 'string' || value.trim() === '') return 'must be a non-empty string';
+  if (value.length > WORKER_MESSAGE_MAX_CHARS) return `must be at most ${WORKER_MESSAGE_MAX_CHARS} characters, got ${value.length}`;
+  return null;
+}
+
 // Stamped into the `skill_version` field of every report the four runners write,
 // which is the field a bug report against this package is triaged by. It must
 // equal `version:` in commandmate.skill.yaml, and scripts/validate.py fails the

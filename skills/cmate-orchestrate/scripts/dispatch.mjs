@@ -84,6 +84,7 @@ import {
   isOverBroadScope,
   readVerifyConfigGates,
   VERIFY_CONFIG_RELATIVE,
+  workerMessageProblem,
 } from './lib.mjs';
 
 const DISPATCH_SCHEMA_VERSION = 1;
@@ -521,6 +522,11 @@ Options:
                          before giving up with no commit (default ${DEFAULT_MAX_TURNS}).
                          The plan's profile may declare this default instead
                          (dispatch_defaults.max_turns); the flag always wins.
+  --nudge-message <text> Appended after the default supervision nudge (which always
+                         keeps its "single commit is the completion signal" line).
+                         The plan's profile may declare this instead
+                         (worker_messages.nudge); the flag always wins. Non-blank,
+                         at most 2000 characters.
   --poll-limit <n>       Retained for compatibility; wait now blocks (default ${DEFAULT_POLL_LIMIT}).
   --interrupt-stale-prompt
                          Before a worker's first send, dispatch reads the
@@ -570,6 +576,7 @@ function parseCli(argv) {
         'max-turns': { type: 'string' },
         'poll-limit': { type: 'string' },
         'interrupt-stale-prompt': { type: 'boolean' },
+        'nudge-message': { type: 'string' },
         help: { type: 'boolean' },
       },
     });
@@ -794,6 +801,10 @@ function resolveInputs(parsed) {
     waitTimeout: values['wait-timeout'] === undefined ? null : positiveInt(values['wait-timeout'], 'wait-timeout', null),
     maxTurns: values['max-turns'] === undefined ? null : positiveInt(values['max-turns'], 'max-turns', null),
   };
+  if (values['nudge-message'] !== undefined) {
+    const problem = workerMessageProblem(values['nudge-message']);
+    if (problem !== null) throw new SkillError('invalid_input', `--nudge-message ${problem}`, 3);
+  }
   return {
     planPath: values.plan,
     outDir: values.out ?? null,
@@ -826,6 +837,9 @@ function resolveInputs(parsed) {
     // whose profile declares nothing, which is what keeps such a run's report
     // byte-for-byte the one it was before this field existed.
     dispatchDefaultNotes: [],
+    // CLI flag → profile (applyWorkerMessages) → nothing. Appended to NUDGE_MESSAGE.
+    nudgeExtra: values['nudge-message'] ?? null,
+    nudgeExtraSource: values['nudge-message'] === undefined ? null : '--nudge-message',
   };
 }
 
@@ -991,6 +1005,44 @@ function applyDispatchDefaults(inputs, plan) {
         + 'structurally unreachable — the same reason --auto-yes itself is refused. Pass --no-auto-yes to decline the profile '
         + 'default for this run, or drop auto_yes from the profile', 3);
   }
+}
+
+// worker_messages (CommandMate#3009): text appended to the supervision nudge.
+// Precedence is flag → profile → nothing, and the flag is already in `inputs`.
+// A malformed declaration is `plan_invalid` for the reason readDispatchDefaults
+// gives. Only the length is recorded, never the text.
+function applyWorkerMessages(inputs, plan) {
+  const raw = plan.profile?.worker_messages;
+  if (raw !== undefined) {
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new SkillError('plan_invalid',
+        `plan.profile.worker_messages must be a JSON object of nudge, got ${JSON.stringify(raw)}`, 3);
+    }
+    for (const key of Object.keys(raw)) {
+      if (key !== 'nudge') {
+        throw new SkillError('plan_invalid',
+          `plan.profile.worker_messages has an unknown key "${key}"; this runner understands nudge`, 3);
+      }
+    }
+    if ('nudge' in raw) {
+      const problem = workerMessageProblem(raw.nudge);
+      if (problem !== null) throw new SkillError('plan_invalid', `plan.profile.worker_messages.nudge ${problem}`, 3);
+    }
+  }
+  const declared = raw?.nudge;
+  if (declared === undefined && inputs.nudgeExtra === null) return;
+  const profileId = String(plan.profile?.id ?? 'unknown');
+  if (inputs.nudgeExtra === null) {
+    inputs.nudgeExtra = declared;
+    inputs.nudgeExtraSource = 'profile';
+  }
+  const detail = inputs.nudgeExtraSource === '--nudge-message'
+    ? `nudge=${inputs.nudgeExtra.length} chars (--nudge-message${declared === undefined ? '' : ` overrode profile ${profileId}'s worker_messages.nudge`})`
+    : `nudge=${inputs.nudgeExtra.length} chars (from profile ${profileId})`;
+  inputs.dispatchDefaultNotes.push({
+    code: 'worker_messages_applied',
+    detail: `${detail}, appended after the default supervision nudge; the default's single-commit completion line is always sent`,
+  });
 }
 
 // `auto_yes=true (from the profile)` / `max_turns=10 overridden by --max-turns (8)`.
@@ -4101,8 +4153,15 @@ function stalePromptInterruptedLimitation(issue, stale) {
 // The message that nudges an idle-but-uncommitted worker to keep going.
 const NUDGE_MESSAGE = [
   '続けて作業を進め、この Issue の実装を最後まで完遂してください。',
+  '指示どおりに書けないと分かったら、進めずに止めて報告してください。',
   'まだ変更が commit されていません。完了したら work ブランチに単一 commit を作成してください（それが完了の合図です）。',
 ].join('\n');
+
+// The default nudge, plus the profile's / flag's text appended AFTER it — never
+// instead of it, so the single-commit completion line cannot be dropped.
+function nudgeMessage(inputs) {
+  return inputs.nudgeExtra === null ? NUDGE_MESSAGE : `${NUDGE_MESSAGE}\n${inputs.nudgeExtra}`;
+}
 
 // Sent after a `send --contract` that capture says never started. It doubles as
 // the submission the first send may have left unconfirmed and as a harmless nudge
@@ -4677,7 +4736,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
         };
       }
       previousScopeViolations = null; // this turn was not a scope-gate failure
-      const nudged = await sendAndConfirm(inputs, worktreeId, NUDGE_MESSAGE);
+      const nudged = await sendAndConfirm(inputs, worktreeId, nudgeMessage(inputs));
       if (!nudged.sent) return budgetCutoff() ?? done('failed', `nudge failed: ${nudged.note}`);
       closeTurn();
       turns += 1;
@@ -4861,7 +4920,7 @@ async function superviseUntilCommit(inputs, worktreeId, worktreePath, initialMes
         note: `no new commit after ${turns} turn(s); gave up at the --max-turns ${inputs.maxTurns} cap`,
       };
     }
-    const nudged = await sendAndConfirm(inputs, worktreeId, NUDGE_MESSAGE);
+    const nudged = await sendAndConfirm(inputs, worktreeId, nudgeMessage(inputs));
     if (!nudged.sent) {
       const cutShort = budgetCutoff();
       if (cutShort) return cutShort;
@@ -7729,6 +7788,7 @@ async function run(argv) {
   // decides are inputs to all four, and because a refusal it raises has to leave
   // the world exactly as untouched as an argv refusal does.
   applyDispatchDefaults(inputs, plan);
+  applyWorkerMessages(inputs, plan);
 
   // The resume decision (Issue #98) is made FIRST: it decides which directory
   // this attempt writes into, which wave the pre-flight has to probe, and which
