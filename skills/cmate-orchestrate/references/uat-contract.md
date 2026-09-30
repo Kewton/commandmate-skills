@@ -202,7 +202,10 @@ per-issue の `acceptance.findings`（`fail` した criterion ＋ blocking reaso
    - 不合格 Issue ごとに fix worktree を作る（第6節）。作れなければ `worktree_failed` で停止。
    - fix worker を **dispatch runner と同じ監督ループ**で駆動する（#1468）。worktree-id は fix branch
      から導出する。fix worktree の開始時 SHA を `git rev-parse HEAD` で記録し、`commandmate send`
-     （送信直後に `capture` で確定を確認し、未確定なら1回だけ再送）→ `commandmate wait` で idle 化を
+     （送信直後に `capture` で確定を確認し、未確定なら1回だけ再送。fix worktree はこの run が作るので
+     最初の送信は必ず新しいセッションの起動を伴い、起動が間に合わず断られた send ——
+     503 `SESSION_STARTING` / prompt not ready（exit 99）—— は dispatch と同じ判定で**1回だけ**送り直し、
+     その事実を fix 記録の `note` に残す。[dispatch-contract.md](./dispatch-contract.md) 第2.13節）→ `commandmate wait` で idle 化を
      待つ。**wait の exit 0（idle）は完了ではない**。fix worktree のブランチに **新規 commit** が出れば
      `completed`、未 commit なら **継続 nudge** を送って `wait` へ戻る（fix prompt には「完了時に単一
      commit」を明記）。prompt を出したら `fix_failed`（fix loop は自動応答しない）、`--max-turns`

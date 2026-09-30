@@ -119,6 +119,10 @@ function baseEnv() {
   // `~/.claude/projects` would be reading somebody's actual sessions, and the
   // answer would differ between machines.
   delete env.CLAUDE_CONFIG_DIR;
+  // The send-side pauses (CommandMate#3006: the wait before a not-ready retry).
+  // Zero for every run the suite starts, so a retry is exercised without the
+  // suite sleeping; the runners' constants are what a real run waits.
+  env.CMATE_ORCHESTRATE_SEND_PAUSE_MS = '0';
   return env;
 }
 
@@ -2946,6 +2950,14 @@ function runUatCase(caseId) {
 
   if (expect.worktree_add_calls !== undefined) check(worktreeAddCalls === expect.worktree_add_calls, `worktree add called ${worktreeAddCalls} time(s) !== ${expect.worktree_add_calls}`);
   if (expect.send_calls !== undefined) check(sendCalls === expect.send_calls, `send called ${sendCalls} time(s) !== ${expect.send_calls}`);
+  // What a fix record's note says about how its worker was reached
+  // (CommandMate#3006: a not-ready first send that was re-sent). Every fix of
+  // every attempt for the issue is searched; one of them has to carry ALL needles.
+  for (const [num, needles] of Object.entries(expect.fix_notes_include ?? {})) {
+    const notes = (report.attempts ?? []).flatMap((a) => a.fixes ?? []).filter((f) => f.issue === Number(num)).map((f) => String(f.note ?? ''));
+    check(notes.some((note) => needles.every((needle) => note.includes(needle))),
+      `no fix note for #${num} contains ${JSON.stringify(needles)}; notes: ${JSON.stringify(notes)}`);
+  }
   if (expect.merge_calls !== undefined) check(mergeCalls === expect.merge_calls, `git merge called ${mergeCalls} time(s) !== ${expect.merge_calls}`);
   if (expect.uat_calls_min !== undefined) check(uatCalls >= expect.uat_calls_min, `uat called ${uatCalls} time(s) < ${expect.uat_calls_min}`);
   if (expect.uat_calls_max !== undefined) check(uatCalls <= expect.uat_calls_max, `uat called ${uatCalls} time(s) > ${expect.uat_calls_max}`);
@@ -3288,7 +3300,7 @@ function runStatusCase(caseId) {
 // is itself a subset of the live `--help`. The fake CLI additionally rejects any
 // off-contract flag at call time, so every fixture case is a parity check too.
 
-const COMMANDMATE_SUBS = ['ls', 'send', 'wait', 'capture', 'respond', 'verify', 'sync'];
+const COMMANDMATE_SUBS = ['ls', 'send', 'wait', 'capture', 'respond', 'verify', 'sync', 'interrupt'];
 
 function resolveRealCli() {
   const bin = process.env.CMATE_REAL_CLI || 'commandmate';
@@ -3366,13 +3378,14 @@ function parityTest() {
   const subs = contract.subcommands ?? {};
   check(COMMANDMATE_SUBS.every((s) => subs[s]), 'the CLI contract is missing a commandmate subcommand the runners use');
 
-  // (B) Runner ⊆ contract. Three runs are needed to reach the whole surface:
+  // (B) Runner ⊆ contract. Four runs are needed to reach the whole surface:
   //   1. a legacy --auto-yes prompt run: ls -> send -> wait (prompt) -> capture
   //      -> respond -> wait;
   //   2. a contract run whose verdict is 20: send --help / wait --help (the
   //      version gate) -> send --contract -> wait --verify -> verify --json;
   //   3. a run whose worktree is registered only after a re-scan: ls -> sync ->
-  //      ls (Issue #91).
+  //      ls (Issue #91);
+  //   4. a stale question interrupted before the first send (below).
   // The logs are unioned, so a flag that only one path uses is still
   // parity-checked (Issue #1588).
   const runsDir = mkdtempSync(join(tmpdir(), 'cmate-parity-plan-'));
@@ -3420,7 +3433,22 @@ function parityTest() {
     },
   }, syncWork, join(syncWork, 'dispatch'), [], syncLog);
 
-  const calls = [...readCliLog(logPath), ...readCliLog(contractLog), ...readCliLog(syncLog)].filter((entry) => COMMANDMATE_SUBS.includes(entry.sub));
+  // 4. a session an earlier turn left on a question, dispatched with
+  //    --interrupt-stale-prompt: capture -> interrupt -> capture -> send
+  //    (CommandMate#3007).
+  const staleWork = mkdtempSync(join(tmpdir(), 'cmate-parity-stale-'));
+  const staleLog = join(staleWork, 'cli.log');
+  runDispatchRunner(planPath, {
+    cli_available: true,
+    git: { branch: 'feature/integration', dirty: false },
+    gh: { repo_access: true },
+    workers: {
+      201: { state: 'completed', verify: 'pass', stale_screen: 'askuserquestion.json' },
+      200: { state: 'completed', verify: 'pass' },
+    },
+  }, staleWork, join(staleWork, 'dispatch'), ['--interrupt-stale-prompt'], staleLog);
+
+  const calls = [...readCliLog(logPath), ...readCliLog(contractLog), ...readCliLog(syncLog), ...readCliLog(staleLog)].filter((entry) => COMMANDMATE_SUBS.includes(entry.sub));
   const used = new Set(calls.map((entry) => entry.sub));
   for (const sub of COMMANDMATE_SUBS) {
     check(used.has(sub), `the runner never exercised commandmate ${sub}, so its parity is untested`);

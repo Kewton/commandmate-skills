@@ -1,0 +1,53 @@
+{
+  "description": "[CommandMate#3007] `--interrupt-stale-prompt` 指定時に、interrupt は exit 0 で返ったのに画面が戻らない世界（AskUserQuestion のまま）。runner は interrupt の後の capture でまだ `isPromptWaiting` が立っているのを見て、**送らずに止める**（同じ code `stale_prompt_on_session`、detail は interrupt で畳めなかったことを言う）。interrupt の exit code だけを信じて送る実装を落とす: send 0 回・interrupt 1 回・capture 2 回・respond 0 回。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "100",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--interrupt-stale-prompt"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "human_required",
+    "human_required": true,
+    "waves_count": 1,
+    "no_respond": true,
+    "never_sent": [
+      100
+    ],
+    "worker_states": {
+      "100": "prompt"
+    },
+    "cli_subcommand_counts": {
+      "interrupt": 1,
+      "respond": 0,
+      "capture": 2
+    },
+    "blocking_codes": [
+      "stale_prompt_on_session"
+    ],
+    "blocking_details_include": [
+      [
+        "#100:",
+        "--interrupt-stale-prompt was given and did not clear it",
+        "still reports isPromptWaiting after the interrupt"
+      ]
+    ],
+    "absent_limitation_codes": [
+      "stale_prompt_interrupted"
+    ]
+  }
+}

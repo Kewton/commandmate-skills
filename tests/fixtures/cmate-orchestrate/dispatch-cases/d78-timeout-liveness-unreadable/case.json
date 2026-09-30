@@ -1,5 +1,5 @@
 {
-  "description": "[#179] 受入条件4: **capture が読めなかった**世界。読めなかったことを「動いている」とも「止まっている」とも読み替えず、`worker_liveness_unreadable` として**測れなかったこと自体**を記録するか（merge の `change_evidence_unavailable` と同型の考え方: 「見られなかった」は「何も無かった」ではない）。読めない形は2つあるので2 Issue で両方を注入する: #101 は `capture` が exit 0 のまま**想定外の出力**を返す（JSON でない）、#102 は `capture` **自体が失敗**する（exit 1）。detail はどちらなのかを名指しし、code は同じ1つになる。blocking reason は timeout した worker ごとに1件で、**`workers` の順**（#101 → #102）に並ぶ —— 並行監督の完了順で report が変わってはならない。",
+  "description": "[#179] 受入条件4: **capture が読めなかった**世界。読めなかったことを「動いている」とも「止まっている」とも読み替えず、`worker_liveness_unreadable` として**測れなかったこと自体**を記録するか（merge の `change_evidence_unavailable` と同型の考え方: 「見られなかった」は「何も無かった」ではない）。読めない形は2つあるので2 Issue で両方を注入する: #101 は `capture` が exit 0 のまま**想定外の出力**を返す（JSON でない）、#102 は `capture` **自体が失敗**する（exit 1）。detail はどちらなのかを名指しし、code は同じ1つになる。blocking reason は timeout した worker ごとに1件で、**`workers` の順**（#101 → #102）に並ぶ —— 並行監督の完了順で report が変わってはならない。 （CommandMate#3007 以降、capture の回数には各 Issue の最初の send の前の確認 1 回ずつが加わり 4→6 回になった。この確認が読めない capture は送信を止めない。）",
   "plan": {
     "issues_fixture": "cases/01-independent/issues.json",
     "orchestrate_args": [
@@ -37,7 +37,7 @@
       "102": 2
     },
     "cli_subcommand_counts": {
-      "capture": 4
+      "capture": 6
     },
     "worker_states": {
       "101": "timeout",
