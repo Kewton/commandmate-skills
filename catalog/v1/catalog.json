@@ -1165,7 +1165,7 @@
         "review",
         "github"
       ],
-      "latest": "0.4.1",
+      "latest": "0.4.2",
       "versions": [
         {
           "version": "0.1.0",
@@ -1473,6 +1473,60 @@
               {
                 "agent": "command-code",
                 "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.4.2",
+          "changelog": "cmate-issue-refinement 0.4.2 — compatibility.agents に opencode-v2 の行を足した（commandmate-skills#275）。挙動の変更は無い。\n\nCommandMate に追加された OpenCode V2（opencode-v2、CommandMate Epic #2370）を、#2975 の実測（opencode2 2.0.18、2026-09-29: GET /api/skill が .agents/skills と .claude/skills の SKILL.md を列挙し、/<name> の送信で model が skill tool を呼ぶ。再起動不要。v2 の / 補完には出ない）を根拠に native として申告する。この package 単体では測っていない。公開済みの版は immutable なので、宣言だけの変更でも patch を上げている。",
+          "published_at": "2026-09-30T11:05:14Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-issue-refinement-v0.4.2",
+            "commit": "db28146d9130f74be9fffa5f8cf2f61c7d841a6b"
+          },
+          "artifact": {
+            "asset_name": "cmate-issue-refinement-0.4.2.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-issue-refinement-v0.4.2/cmate-issue-refinement-0.4.2.tar.gz",
+            "sha256": "b9db22d1fc170e424d42cabb94ac0283de04b49791adeaf5a5a7788fdcd44ff7",
+            "size": 32511,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. No rubric evaluation recorded yet.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not evaluated",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              },
+              {
+                "agent": "opencode-v2",
+                "evidence": "Measured 2026-09-29 on opencode2 2.0.18 (CommandMate#2975): GET /api/skill lists SKILL.md from .agents/skills and .claude/skills; /<name> makes the model call the skill tool. No restart needed. Not in v2's / palette (@ and /skills only). This package was NOT separately measured.",
                 "support": "native"
               }
             ],
