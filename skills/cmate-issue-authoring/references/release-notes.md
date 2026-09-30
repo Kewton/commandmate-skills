@@ -19,6 +19,31 @@ install 先で走らせるよう案内している箇所は無い。
 
 ## Changelog
 
+### 成果物見出しの下は backtick の file 名を拡張子によらず拾う（planner CommandMate #3003 / #272）
+
+- **planner の抽出に5つ目の source（`CANDIDATE_DECLARED`）が入ったので、mirror も同じ commit で揃えた**
+  （定数は byte 同一、`plannerFileCandidates` の `declaredOnly` 分岐も同じ）。
+- **これが消しに来た事象**: `## 対象ファイル` に書いた `expression.ebnf`・`Cargo.lock`・
+  `requirements/ci.txt` が `FILE_EXT` の外なので scope に入らなかった（Kewton/Musunest#212、
+  Kewton/CommandAgent#520）。
+- **profile で拡張子を足す案を採らなかったのは、この写しのためである。** 起票時の検査は profile を
+  読まないので、欄で足した拡張子は起票時の判定と planner の判定を食い違わせる。
+- 書き方は [issue-body-contract.md](./issue-body-contract.md) 第 2.3 節に足した。
+
+### 成果物見出しの外の path は scope に入らない（planner CommandMate #3002 / #273）
+
+- **planner の抽出規則が変わったので、mirror も同じ commit で揃えた。** 成果物見出しを持つ本文では、
+  見出しの範囲の外にだけ書いた path が `suspected_files` に入らない（`plannerFileCandidates` が
+  `proseOnly` を返し、`plannerSuspectedFiles` がそれを除く）。見出しの範囲は下位の `###` で切れず
+  （#273）、「外」「以外」「しない」で終わる見出しは成果物見出しではない（新定数
+  `NEGATED_HEADING_RE`。planner と byte 同一）。
+- **これが消しに来た事象**: 完了条件に「`package.json` の差分が 0」「`ci.yml` に手を入れるなら止める」
+  と書いた file に書き込み権限が付いていた（Kewton/Musunest #181 / #183）。
+- **`planner_ready` の判定が変わる本文がある。** 成果物見出しはあるが、その下に読める path が無く、
+  散文にだけ path を書いた本文は、これまで ready だったが今は unready である —— planner が
+  `no_suspected_files` を立てるのと同じ判定である。書き方は
+  [issue-body-contract.md](./issue-body-contract.md) 第 2.3 節に足した。
+
 ### CommandMate#3013 — 計画を `.commandmate/` の外に置けず、人がやる文書の Issue を計画に入れられなかった
 
 版の見出しはリリース時に付ける。

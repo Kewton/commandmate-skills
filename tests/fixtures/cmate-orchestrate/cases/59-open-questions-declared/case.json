@@ -15,6 +15,8 @@
     "exit": 0,
     "status": "partial",
     "warning_codes": [
+      "prose_path_ignored",
+      "prose_path_ignored",
       "open_question_declared",
       "open_question_declared"
     ],
@@ -54,25 +56,17 @@
     "suspected_files": {
       "430": [
         "src/geo.ts",
-        "scripts/validate.py",
-        "tests/fixtures/cmate-orchestrate/run_tests.mjs",
         "src/geo.test.ts",
         "src/geo.spec.ts",
         "src/__tests__/geo.ts",
-        "src/__tests__/geo.test.ts",
-        "scripts/test_validate.py",
-        "tests/test_validate.py"
+        "src/__tests__/geo.test.ts"
       ],
       "431": [
         "src/geo.ts",
-        "scripts/validate.py",
-        "tests/fixtures/cmate-orchestrate/run_tests.mjs",
         "src/geo.test.ts",
         "src/geo.spec.ts",
         "src/__tests__/geo.ts",
-        "src/__tests__/geo.test.ts",
-        "scripts/test_validate.py",
-        "tests/test_validate.py"
+        "src/__tests__/geo.test.ts"
       ]
     },
     "scope_defaults": {
@@ -80,22 +74,24 @@
         "src/geo.test.ts",
         "src/geo.spec.ts",
         "src/__tests__/geo.ts",
-        "src/__tests__/geo.test.ts",
-        "scripts/test_validate.py",
-        "tests/test_validate.py"
+        "src/__tests__/geo.test.ts"
       ],
       "431": [
         "src/geo.test.ts",
         "src/geo.spec.ts",
         "src/__tests__/geo.ts",
-        "src/__tests__/geo.test.ts",
-        "scripts/test_validate.py",
-        "tests/test_validate.py"
+        "src/__tests__/geo.test.ts"
       ]
     },
     "reference_files": {
-      "430": [],
-      "431": []
+      "430": [
+        "scripts/validate.py",
+        "tests/fixtures/cmate-orchestrate/run_tests.mjs"
+      ],
+      "431": [
+        "scripts/validate.py",
+        "tests/fixtures/cmate-orchestrate/run_tests.mjs"
+      ]
     },
     "classifications": {
       "430": "conflicting",
@@ -114,6 +110,12 @@
       431
     ],
     "dependencies": [],
-    "risk_level": "moderate"
+    "risk_level": "moderate",
+    "warning_severities": [
+      "notice",
+      "notice",
+      null,
+      null
+    ]
   }
 }

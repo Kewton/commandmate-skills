@@ -21,10 +21,9 @@ goal: |
   - data/geo/**/*.json
   - src/regen.ts
   - data/geo/stations/
-  - src/regen.test.ts
-  - src/regen.spec.ts
-  - src/__tests__/regen.ts
-  - src/__tests__/regen.test.ts
+  Also allowed, not listed: 4 path(s) the planner derived from the files above (lockfiles
+  beside a dependency manifest, conventional test paths beside a source file). They are permissions,
+  not work items: write one only if the task needs it.
 
   ## Rules
   - A prohibition this contract does not state is NOT a permission — it is text the

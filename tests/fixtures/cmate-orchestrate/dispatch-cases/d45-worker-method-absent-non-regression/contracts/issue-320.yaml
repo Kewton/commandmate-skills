@@ -21,14 +21,9 @@ goal: |
   ## Files you may change
   - src/retry/budget.ts
   - src/retry/index.ts
-  - src/retry/budget.test.ts
-  - src/retry/budget.spec.ts
-  - src/retry/__tests__/budget.ts
-  - src/retry/__tests__/budget.test.ts
-  - src/retry/index.test.ts
-  - src/retry/index.spec.ts
-  - src/retry/__tests__/index.ts
-  - src/retry/__tests__/index.test.ts
+  Also allowed, not listed: 8 path(s) the planner derived from the files above (lockfiles
+  beside a dependency manifest, conventional test paths beside a source file). They are permissions,
+  not work items: write one only if the task needs it.
 
   ## Rules
   - A prohibition this contract does not state is NOT a permission — it is text the

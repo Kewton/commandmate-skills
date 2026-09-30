@@ -383,6 +383,13 @@ runner は承認済み plan **だけ**から契約を組み立てる。時刻・
 - Issue が受入ゲートを宣言している場合、`goal` に `## Acceptance gates this issue declared`
   （`require:`）／`## Acceptance gates this issue defined`（`gates:`）節が足される。
   宣言が無い Issue の `goal` は **byte 単位で従来どおり**である。
+- `goal` の `## Files you may change` には **Issue が宣言した file だけ**を並べる（CommandMate #3004）。
+  planner が導出した分（plan の `scope_defaults`: lockfile と慣習的なテスト path）は列挙せず、
+  「導出した許可が N 件ある。作業項目ではなく許可である」の1行で本数だけを述べる。
+  **`scope.allow` は変わらない** —— 導出分も含めた `suspected_files` 全体のままである
+  （[adr-scope-derivation.md](./adr-scope-derivation.md) 第15.2節の裁定はそのまま）。Issue が自分で
+  書いたテスト path（`__tests__/x.test.ts`）は宣言した file なので残る。`scope_defaults` を持たない
+  plan（#44 以前）では、従来どおり全件を並べる。
 - `success.requireScopeClean` は**常に `true`** である。以前は `<allow が非空か>` で決めており、
   対象 file を1つも挙げていない Issue だけ scope ゲートが丸ごと無効化されていた。scope 判定が
   無い契約は「worktree 内の何を書いても clean」と同義なので、これは過剰拒否の裏返しの
