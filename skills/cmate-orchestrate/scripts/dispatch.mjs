@@ -3188,7 +3188,8 @@ function buildContractGoal(plan, issue, requiredGates = [], workerMethod = null,
     bullets(issue.acceptance_criteria, 'Derive from the issue; if unclear, stop and ask.'),
     '',
     '## Files you may change',
-    bullets(issue.suspected_files, 'Unknown — inspect first; do not touch files owned by another issue.'),
+    bullets(declaredScopeFiles(issue), 'Unknown — inspect first; do not touch files owned by another issue.'),
+    ...derivedScopeNote(issue),
     '',
     ...(requiredGates.length === 0 ? [] : [
       '## Acceptance gates this issue declared',
@@ -3583,6 +3584,36 @@ function placeContract(worktreePath, issueNumber, text, artifactDir) {
 function bullets(items, fallback) {
   if (!Array.isArray(items) || items.length === 0) return `- ${fallback}`;
   return items.map((item) => `- ${item}`).join('\n');
+}
+
+// The files the ISSUE declared, without the ones the planner derived from them
+// (CommandMate #3004). `scope_defaults` — same-directory lockfiles and the
+// conventional test paths of every declared source file (ADR layer L1) — is a
+// PERMISSION the contract's `scope.allow` still carries in full; listing it in
+// the goal presented it as work. Measured on Kewton/Musunest: 55 / 61 / 60
+// listed paths for 20 / 22 / 22 real files (#180 / #182 / #181), so the goal
+// read as three times the work, the 8000-character cap was spent on files that
+// do not exist, and "is this dispatchable" was judged on the inflated number.
+// A plan without `scope_defaults` (written before #44) lists every entry, as
+// before. A test path the issue itself declared is a declared file and stays.
+function declaredScopeFiles(issue) {
+  const files = Array.isArray(issue.suspected_files) ? issue.suspected_files : [];
+  const derived = new Set(Array.isArray(issue.scope_defaults) ? issue.scope_defaults : []);
+  return files.filter((file) => !derived.has(file));
+}
+
+// One line saying the derived allowances exist and what they are for, so a
+// worker that needs a lockfile or a test beside a declared file knows it may
+// write one — without the goal enumerating paths most of which never exist.
+function derivedScopeNote(issue) {
+  const files = new Set(Array.isArray(issue.suspected_files) ? issue.suspected_files : []);
+  const derived = (Array.isArray(issue.scope_defaults) ? issue.scope_defaults : []).filter((file) => files.has(file));
+  if (derived.length === 0) return [];
+  return [
+    `Also allowed, not listed: ${derived.length} path(s) the planner derived from the files above (lockfiles`,
+    'beside a dependency manifest, conventional test paths beside a source file). They are permissions,',
+    'not work items: write one only if the task needs it.',
+  ];
 }
 
 // Everything a worker needs to act on one issue, drawn only from the plan. It is

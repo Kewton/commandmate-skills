@@ -791,6 +791,12 @@ function runCase(caseId) {
     }
   }
   if (expect.risk_level) check(plan.risk.level === expect.risk_level, `risk ${plan.risk.level} !== ${expect.risk_level}`);
+  // The human-readable half of a plan (CommandMate #3004): what a reviewer reads
+  // before deciding whether an issue is dispatchable. Each listed substring must
+  // appear in the result's summary_markdown.
+  for (const needle of expect.summary_includes ?? []) {
+    check(result.summary_markdown.includes(needle), `summary_markdown does not contain ${JSON.stringify(needle)}`);
+  }
   if (expect.profile_verified !== undefined) check(plan.profile.verified === expect.profile_verified, `profile.verified ${plan.profile.verified} !== ${expect.profile_verified}`);
   if (expect.base) check(plan.profile.base === expect.base, `base ${plan.profile.base} !== ${expect.base}`);
   // The ORDERED field list of `plan.profile` (Issue #196). The optional fields
@@ -1063,6 +1069,17 @@ function checkContracts(spec, expect, planPath, scenarioObject, caseDir, outDir,
     }
     for (const needle of (expect.contract_absent ?? {})[number] ?? []) {
       check(!text.includes(needle), `${label}: unexpectedly contains ${JSON.stringify(needle)}`);
+    }
+    // The GOAL alone (CommandMate #3004). `contract_absent` reads the whole
+    // contract, and a derived test path is SUPPOSED to be in `scope.allow` while
+    // absent from the goal's file list — so the two halves need two readers.
+    const goalMatch = /\ngoal: \|\n((?: {2}.*\n|\n)*)/.exec(text);
+    const goal = goalMatch ? goalMatch[1] : '';
+    for (const needle of (expect.contract_goal_includes ?? {})[number] ?? []) {
+      check(goal.includes(needle), `${label}: the goal does not contain ${JSON.stringify(needle)}`);
+    }
+    for (const needle of (expect.contract_goal_absent ?? {})[number] ?? []) {
+      check(!goal.includes(needle), `${label}: the goal unexpectedly contains ${JSON.stringify(needle)}`);
     }
 
     // Section ORDER, not just presence. Where a section sits is load-bearing:

@@ -1,0 +1,61 @@
+{
+  "plan_schema_version": 1,
+  "skill_id": "cmate-issue-authoring",
+  "skill_version": "0.9.1",
+  "plan_id": "split-75587b58912d",
+  "generated_mode": "dry-run",
+  "repository": "Kewton/Musunest",
+  "source": {
+    "kind": "text",
+    "ref": "caller input: M1.5 デモ手順",
+    "digest": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "issues": [
+    {
+      "key": "demo-seed-data",
+      "title": "feat(demo): add the seed data the phone demo walks through",
+      "objective": "スマホのデモで辿る画面に必要な seed データを投入する script を追加する。",
+      "acceptance_criteria": ["`npm test -- scripts/demo` が exit 0 で終わる"],
+      "target_files": ["scripts/demo/seed.ts"],
+      "reference_files": [],
+      "test_expectations": ["npm test -- scripts/demo"],
+      "depends_on": [],
+      "labels": [],
+      "size": "s",
+      "parallel_safe": "unknown",
+      "evidence": [
+        {"claim": "デモは seed データを前提に画面を辿る", "kind": "input", "ref": "caller input: M1.5 デモ手順"}
+      ],
+      "body": "スマホのデモで辿る画面に必要な seed データを投入する script を追加する。\n\n## 対象ファイル\n\n- `scripts/demo/seed.ts`\n\n## 受入条件\n\n- [ ] `npm test -- scripts/demo` が exit 0 で終わる\n"
+    },
+    {
+      "key": "phone-demo-walkthrough",
+      "title": "docs(demo): walk through the M1.5 flow on a phone and record the result",
+      "objective": "M1.5 の流れを人がスマホで通しで操作し、結果を手順書に記録する。",
+      "acceptance_criteria": ["手順書の全 step に実施日と結果が記入されている"],
+      "target_files": ["docs/demo/m1-5-walkthrough.md"],
+      "reference_files": [],
+      "test_expectations": [],
+      "depends_on": ["demo-seed-data"],
+      "labels": ["human-only"],
+      "size": "xs",
+      "parallel_safe": "unknown",
+      "evidence": [
+        {"claim": "M1.5 のデモは人がスマホで行う", "kind": "input", "ref": "caller input: M1.5 デモ手順"}
+      ],
+      "body": "M1.5 の流れを人がスマホで通しで操作し、結果を手順書に記録する。\n\n## 手順書\n\n- `docs/demo/m1-5-walkthrough.md`\n\n## 受入条件\n\n- [ ] 手順書の全 step に実施日と結果が記入されている\n\n## 依存\n\n- {{issue:demo-seed-data}}\n"
+    }
+  ],
+  "duplicate_suspicions": [],
+  "open_questions": [],
+  "commands": [
+    {
+      "purpose": "既存 Issue との重複を検査する",
+      "command": "gh issue list --repo Kewton/Musunest --state all --search \"demo walkthrough in:title,body\" --limit 30",
+      "mutating": false,
+      "executed": true
+    }
+  ],
+  "warnings": [],
+  "notes": []
+}

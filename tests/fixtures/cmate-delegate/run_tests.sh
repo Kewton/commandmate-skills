@@ -70,7 +70,7 @@ case "$sub" in
     case "${1:-}" in
       --help) exit 0 ;;
     esac
-    printf 'ASK-REPLY\n'
+    if [ -n "${CMATE_STUB_REPLY_TEXT:-}" ]; then printf '%s\n' "$CMATE_STUB_REPLY_TEXT"; else printf 'ASK-REPLY\n'; fi
     exit "${CMATE_STUB_ASK_EXIT:-0}"
     ;;
   send)
@@ -82,7 +82,7 @@ case "$sub" in
     exit "${CMATE_STUB_WAIT_EXIT:-0}"
     ;;
   capture)
-    printf 'REPLY-LINE-1\nDONE: ok\n'
+    if [ -n "${CMATE_STUB_REPLY_TEXT:-}" ]; then printf '%s\n' "$CMATE_STUB_REPLY_TEXT"; else printf 'REPLY-LINE-1\nDONE: ok\n'; fi
     exit "${CMATE_STUB_CAPTURE_EXIT:-0}"
     ;;
   *)
@@ -108,6 +108,8 @@ reset_stub() {
   CMATE_STUB_SEND_EXIT=0
   CMATE_STUB_WAIT_EXIT=0
   CMATE_STUB_CAPTURE_EXIT=0
+  CMATE_STUB_REPLY_TEXT=
+  export CMATE_STUB_REPLY_TEXT
   export CMATE_STUB_HAS_ASK CMATE_STUB_ASK_EXIT CMATE_STUB_SEND_EXIT \
     CMATE_STUB_WAIT_EXIT CMATE_STUB_CAPTURE_EXIT
 }
@@ -505,6 +507,102 @@ if check_section8 "$copy" >/dev/null 2>&1; then
   fail 'a re-added "まだ存在しない" is rejected' 'check_section8 accepted the stale assertion'
 else
   pass 'a re-added "まだ存在しない" is rejected'
+fi
+
+
+# ---------------------------------------------------------------------------
+# 6. A context-limit error in the reply is a failure (exit 11, id=context-limit)
+# ---------------------------------------------------------------------------
+printf '\n== 6. ask.sh turns a context-limit reply into exit 11 ==\n'
+
+# run_ctx <script> <use-ask 0|1> <reply text>  -> sets ctx_rc, ctx_err
+run_ctx() {
+  reset_stub
+  CMATE_STUB_HAS_ASK="$2"
+  CMATE_STUB_REPLY_TEXT="$3"
+  export CMATE_STUB_HAS_ASK CMATE_STUB_REPLY_TEXT
+  ctx_err=$(bash "$1" wt-b codex-2 'please review' --timeout 5 2>&1 >/dev/null)
+  ctx_rc=$?
+}
+
+expect_ctx() { # expect_ctx <name> <script> <use-ask> <want-rc> <reply text>
+  run_ctx "$2" "$3" "$5"
+  if [ "$ctx_rc" -eq "$4" ]; then
+    pass "$1"
+  else
+    fail "$1" "exit=$ctx_rc want=$4 stderr=$ctx_err"
+  fi
+}
+
+MAXCTX="400 This model's maximum context length is 1048576 tokens. However, you requested 1070861 tokens"
+# The screen as Command Code printed it (CommandMate#3011), verbatim.
+REAL_SCREEN="⚠ Error: 400 This model's maximum context length is 1048576 tokens. However, you requested 1070861 tokens (1006861 in the messages, 64000 in the completion). Please reduce the
+  length of the messages or complet...
+
+  Type \"continue\" to try again. If the issue persists, contact support: https://commandcode.ai/discord"
+for path in 0 1; do
+  label=$([ "$path" = 1 ] && echo ask || echo send/wait/capture)
+  expect_ctx "[$label] the real Command Code screen -> 11"   "$ASK" $path 11 "$REAL_SCREEN"
+  expect_ctx "[$label] bare maximum context length line -> 11" "$ASK" $path 11 "$MAXCTX"
+  expect_ctx "[$label] decorated API Error line -> 11"       "$ASK" $path 11 "⎿  API Error: $MAXCTX"
+  expect_ctx "[$label] Prompt is too long is out of scope -> 0" "$ASK" $path 0 "Prompt is too long"
+  expect_ctx "[$label] context_length_exceeded is out of scope -> 0" "$ASK" $path 0 '  "code": "context_length_exceeded",'
+  expect_ctx "[$label] quoted phrase in prose stays 0"       "$ASK" $path 0 'The API said "This model'"'"'s maximum context length is 8 tokens" once, and the maximum context length is per model.'
+  expect_ctx "[$label] a sentence starting with the words stays 0" "$ASK" $path 0 "This model's maximum context length is a per-model setting."
+  expect_ctx "[$label] an ordinary reply stays 0"            "$ASK" $path 0 'REVIEW OK'
+done
+
+# The old error scrolled out of the last 20 lines is not this turn's error.
+reset_stub
+CMATE_STUB_REPLY_TEXT="$MAXCTX$(printf '\nline%s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22)"
+export CMATE_STUB_REPLY_TEXT
+bash "$ASK" wt-b codex-2 'x' --timeout 5 >/dev/null 2>&1
+rc=$?
+if [ "$rc" -eq 0 ]; then
+  pass 'an error older than the last 20 lines does not fail the turn'
+else
+  fail 'an error older than the last 20 lines does not fail the turn' "exit=$rc"
+fi
+
+# Only 0 is rewritten: wait's 124 / 10 come through even with the text present.
+reset_stub
+CMATE_STUB_REPLY_TEXT="$MAXCTX"
+CMATE_STUB_WAIT_EXIT=124
+export CMATE_STUB_REPLY_TEXT CMATE_STUB_WAIT_EXIT
+bash "$ASK" wt-b codex-2 'x' --timeout 5 >/dev/null 2>&1
+rc=$?
+if [ "$rc" -eq 124 ]; then
+  pass 'a non-zero wait code is never rewritten to 11'
+else
+  fail 'a non-zero wait code is never rewritten to 11' "exit=$rc"
+fi
+
+# stdout keeps the reply, stderr carries the advice with the kill command.
+run_ctx "$ASK" 0 "$MAXCTX"
+out=$(CMATE_STUB_REPLY_TEXT="$MAXCTX" bash "$ASK" wt-b codex-2 'x' --timeout 5 2>/dev/null)
+if [ "$out" = "$MAXCTX" ] && printf '%s' "$ctx_err" | grep -q 'id=context-limit' \
+  && printf '%s' "$ctx_err" | grep -q 'commandmate instances wt-b kill codex-2'; then
+  pass 'exit 11 keeps the reply on stdout and names the kill command on stderr'
+else
+  fail 'exit 11 keeps the reply on stdout and names the kill command on stderr' "out=$out err=$ctx_err"
+fi
+
+# Mutation: with the detector disabled the positive case must fail.
+mutations=$((mutations + 1))
+MUT_ASK="$WORK/ask-nodetect.sh"
+awk '/^has_context_limit_error\(\) \{/ { print; print "  cat >/dev/null; return 1"; skip = 1; next }
+     skip && /^\}/ { skip = 0 }
+     skip { next }
+     { print }' "$ASK" > "$MUT_ASK"
+if cmp -s "$ASK" "$MUT_ASK"; then
+  fail 'a disabled context-limit detector is caught' 'the mutation changed nothing'
+else
+  run_ctx "$MUT_ASK" 0 "$MAXCTX"
+  if [ "$ctx_rc" -ne 11 ]; then
+    pass 'a disabled context-limit detector is caught (the positive case no longer gives 11)'
+  else
+    fail 'a disabled context-limit detector is caught' 'still 11 with detection removed'
+  fi
 fi
 
 # ---------------------------------------------------------------------------

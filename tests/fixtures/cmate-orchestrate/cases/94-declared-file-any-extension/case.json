@@ -1,0 +1,41 @@
+{
+  "description": "CommandMate #3003 (folding in Kewton/commandmate-skills#272): under `## 対象ファイル`, a backtick-quoted file name reaches `suspected_files` whatever its extension — or none. Measured: `expression.ebnf` declared there never reached scope.allow (Kewton/Musunest#212, worked around by renaming it to `.md`), nor did `Cargo.lock` / `requirements/ci.txt` (Kewton/CommandAgent#520; `Cargo.lock`, having no \"/\", did not even raise `unrecognized_file_extension`). FILE_EXT stays closed: it guards PROSE tokens, and under a deliverable heading there is none — the argument #219 already made for patterns. `Makefile` is the extensionless shape (`…file`). The `.ts` source still derives its L1 test companions; the others derive nothing (no rule for their extensions), which is the non-source exclusion working as before.",
+  "args": [
+    "940",
+    "--profile",
+    "node-commandmate"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "suspected_files": {
+      "940": [
+        "packages/appspec-schema/src/parse.ts",
+        "packages/appspec-schema/contract/expression.ebnf",
+        "Cargo.lock",
+        "requirements/ci.txt",
+        "Makefile",
+        "packages/appspec-schema/src/parse.test.ts",
+        "packages/appspec-schema/src/parse.spec.ts",
+        "packages/appspec-schema/src/__tests__/parse.ts",
+        "packages/appspec-schema/src/__tests__/parse.test.ts"
+      ]
+    },
+    "scope_defaults": {
+      "940": [
+        "packages/appspec-schema/src/parse.test.ts",
+        "packages/appspec-schema/src/parse.spec.ts",
+        "packages/appspec-schema/src/__tests__/parse.ts",
+        "packages/appspec-schema/src/__tests__/parse.test.ts"
+      ]
+    },
+    "reference_files": {
+      "940": []
+    },
+    "questions_count": {
+      "940": 0
+    },
+    "risk_level": "low"
+  }
+}

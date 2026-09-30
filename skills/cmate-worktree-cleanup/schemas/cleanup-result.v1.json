@@ -212,6 +212,16 @@
         },
         "pr_number": { "type": ["integer", "null"], "minimum": 1 },
         "merge_commit_oid": { "anyOf": [{ "$ref": "#/$defs/git_oid" }, { "type": "null" }] },
+        "cherry_unmatched": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Optional evidence for merged_equivalent: the number of `+` lines git cherry <base> <tip> printed. Recorded, never a veto on its own (CommandMate#3010): a branch that merged its base in before a squash always has some. null when not measured."
+        },
+        "equivalence_path": {
+          "type": ["string", "null"],
+          "enum": ["patch_equivalent", "net_diff_equal", null],
+          "description": "Optional: how condition 4 held for merged_equivalent. patch_equivalent: git cherry found every patch in base and the net diff matched. net_diff_equal: git cherry printed `+` lines, and the net diff from the merge base to the tip was byte-identical to the diff the merge commit introduced. null otherwise."
+        },
         "expected_old_oid": {
           "anyOf": [{ "$ref": "#/$defs/git_oid" }, { "type": "null" }],
           "description": "The tip passed to the guarded ref delete, for proof_type merged_equivalent. Equal to `tip`."

@@ -1,0 +1,48 @@
+{
+  "description": "CommandMate #3003, the negative half: the same names written OUTSIDE the deliverable heading do not reach the scope. The declared-only source is read under the heading and nowhere else, so `Makefile` in prose extracts nothing at all, and the backtick `.ebnf` path in prose is reported with the rest of the prose (`prose_path_ignored`, notice) and sent to `reference_files` — NOT as `unrecognized_file_extension`, because in an issue that has a deliverable heading the extension is not why a prose path is out of scope, and telling the author to change it would be a misdiagnosis. A body with no deliverable heading keeps the old warning (16-unrecognized-extension).",
+  "args": [
+    "950",
+    "--profile",
+    "node-commandmate"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [
+      "prose_path_ignored"
+    ],
+    "suspected_files": {
+      "950": [
+        "packages/appspec-schema/src/parse.ts",
+        "packages/appspec-schema/src/parse.test.ts",
+        "packages/appspec-schema/src/parse.spec.ts",
+        "packages/appspec-schema/src/__tests__/parse.ts",
+        "packages/appspec-schema/src/__tests__/parse.test.ts"
+      ]
+    },
+    "scope_defaults": {
+      "950": [
+        "packages/appspec-schema/src/parse.test.ts",
+        "packages/appspec-schema/src/parse.spec.ts",
+        "packages/appspec-schema/src/__tests__/parse.ts",
+        "packages/appspec-schema/src/__tests__/parse.test.ts"
+      ]
+    },
+    "reference_files": {
+      "950": [
+        "packages/appspec-schema/contract/expression.ebnf"
+      ]
+    },
+    "questions_count": {
+      "950": 0
+    },
+    "risk_level": "low",
+    "warning_severities": [
+      "notice"
+    ],
+    "warning_details_include": [
+      "`packages/appspec-schema/contract/expression.ebnf`",
+      "1 path(s)"
+    ]
+  }
+}

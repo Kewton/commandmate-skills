@@ -1,0 +1,12 @@
+{
+  "issues": [
+    {
+      "number": 940,
+      "title": "feat: 式の文法を更新する",
+      "body": "式の文法と依存を更新する。\n\n## 対象ファイル\n- `packages/appspec-schema/contract/expression.ebnf` — 文法の正本\n- `Cargo.lock` — rustls を修正版へ更新する\n- `requirements/ci.txt` — pytest を更新する\n- `Makefile` — 生成 target を足す\n- `packages/appspec-schema/src/parse.ts`\n\n## 完了条件\n- [ ] 文法どおりに式を読める",
+      "labels": [
+        "feature"
+      ]
+    }
+  ]
+}
