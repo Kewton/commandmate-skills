@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-orchestrate
 name: cmate-orchestrate
-version: 0.37.0
+version: 0.38.0
 summary: 複数 Issue の並列実行を dry-run で計画し、承認後に実行契約付きで dispatch して検証 exit code で裁定し、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT と回数上限つき修正ループを回す。UAT の意味ゲートには cmate-acceptance-test の別途 install が要る。
 description: >-
   複数 Issue を並列で進めるための、計画（dry-run）・その承認後の監督付き実行・verification pass 後の
@@ -161,14 +161,14 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: 1955f8eb67511f9923dca70cda217efaff7ce162f437ae6c6d7828ca0ee6092e
-    size: 111303
+    sha256: b775f0591e0d4fbf7a386d1f94723df665fa4fd5ff1b029812c807a90684d98f
+    size: 113580
     kind: instruction
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: 9082e456d80654fea84693fd20d519a5d4a757bbf0631b0ea4064359dfdd3995
-    size: 172302
+    sha256: b86041feec4c28a71fa3441c0532c1f65f7e3dd46b7d94a0a9c3ac10d4556e7d
+    size: 172761
     kind: instruction
     executable: false
     script: false
@@ -191,20 +191,20 @@ files:
     executable: false
     script: false
   - path: references/plan-contract.md
-    sha256: b9ba7e77250bf1cbc3c86b7af53ada72c481012fe3068283bdd3589e42d791c4
-    size: 79418
+    sha256: 04f46477d013a4db3887b59449ea8faba710c45ca31b628854127df3dcb86d1a
+    size: 81353
     kind: instruction
     executable: false
     script: false
   - path: references/profile-contract.md
-    sha256: f2f1dfbecfacac89f38567cb41383daa2a77f7d3348e143e4f491d58c8be9e59
-    size: 66584
+    sha256: 3ede4cb61382053d551443e8e067d335a8c2fdd0df2a66c2bf6ea446c2a1d3cb
+    size: 66967
     kind: instruction
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: df668adfeb252874ca55e782289f19733129fc60eca52487b4274661122f8c55
-    size: 269813
+    sha256: 02af18f999eeceb9097228f17729e8bdc03fa4b74c26f681b4fd5107b916b560
+    size: 272530
     kind: instruction
     executable: false
     script: false
@@ -233,8 +233,8 @@ files:
     executable: false
     script: false
   - path: schemas/execution-plan.v2.json
-    sha256: 282cae972afecadf0371d856c308847c5a259f572b6ee04113348918a8119773
-    size: 35503
+    sha256: 723de41478af733b5232d8c34a505bd4c672421ee3666e9aecaec2bd479057a6
+    size: 36033
     kind: asset
     executable: false
     script: false
@@ -263,19 +263,19 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: 74073da1357deda19a817d2360b36e5be155eaab10f1d82d580a9d97296284d7
-    size: 501596
+    sha256: 44bd597c87793b4d98d95f5b6bc6aba7c1ee84a97ea5e7fca126540edd084df8
+    size: 502536
     kind: script
     executable: true
     script: true
   - path: scripts/inspect.mjs
-    sha256: e3a068b29ef60a4fcff8d4ca84fd850111b77339edf70a7e0613e9d1e49a88ad
-    size: 64647
+    sha256: 53a0953bd9f8d7e2c9038bd3c5dce8e8d7d5608ef950b462038e63f435d04dac
+    size: 64655
     kind: script
     executable: true
     script: true
   - path: scripts/lib.mjs
-    sha256: d7cabc5f3a6c77e87ec380b98dc0722bae664893c6da16c863f0983e3f9920fb
+    sha256: a9f89ae037a7417ca9615155e383838f57d9f4e420b71ed86886b819c3d310da
     size: 77707
     kind: script
     executable: false
@@ -293,8 +293,8 @@ files:
     executable: true
     script: true
   - path: scripts/orchestrate.mjs
-    sha256: 1b5508be3dfe017ece6e826ce8abf5542d07afebe509007d8148d98722706a02
-    size: 221281
+    sha256: 9c3bbefb19884a66beb66cf14a12ab36572ba75b38c336ae20930c0631c7f5c7
+    size: 227088
     kind: script
     executable: true
     script: true

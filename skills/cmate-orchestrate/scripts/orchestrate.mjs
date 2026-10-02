@@ -37,6 +37,7 @@ import {
   compileScopeCompanions,
   companionsForPath,
   scopeEntriesOverlap,
+  scopeMatches,
   isOverBroadScope,
   normalizeObservations,
   normalizePrTitleTemplate,
@@ -1343,6 +1344,71 @@ function isSafeRepoPath(candidate) {
   return true;
 }
 
+// The opposite declaration (Issue #301): the paths the issue says may NOT be
+// changed. A task contract's `scope.deny` — `test/**`, `.commandmate/**` — used
+// to be read as prose: a pattern was dropped as `scope_pattern_dropped`, and a
+// plain path under a forbidden heading of an issue WITHOUT a deliverable heading
+// reached scope.allow. Now every candidate under such a heading, or on a line
+// labelled that way (`- 変更してはならないパス: …`), is carried to the plan's
+// `scope_deny` and from there to the contract's `scope.deny`, and is never a
+// scope candidate. A negated deliverable heading (`## 変更対象外`) says the same
+// thing and is read the same way.
+const FORBIDDEN_LABEL_RE = /(変更(?:し)?て?は(?:ならない|いけない)|(?:変更|編集)禁止|触(?:ら|れ)ない|禁止(?:パス|ファイル|対象)|forbidden|(?:must|do) not (?:be )?(?:change|edit|touch|modif)|\bscope\.deny\b|^\W*deny\b)/i;
+const FORBIDDEN_LINE_RE = /^\s*(?:[-*+]\s+|\d+\.\s+)?(?:\*\*)?([^:：`\n]{1,60}?)(?:\*\*)?\s*[:：]/;
+
+function isForbiddenHeading(line) {
+  const text = line.replace(/^#+\s*/, '');
+  return FORBIDDEN_LABEL_RE.test(text)
+    || (DELIVERABLE_HEADING_RE.test(line) && NEGATED_HEADING_RE.test(line));
+}
+
+// A deny entry the contract cannot carry: absolute, home-relative, drive-letter,
+// `..`-escaping or backslashed. Dropping it would widen the worker's permission
+// silently, so it is a question instead (`scope_deny_untransferable`).
+const UNSAFE_DENY_RE = /^(?:\/|~|[A-Za-z]:)|(?:^|\/)\.\.(?:\/|$)|\\/;
+
+// Forbidden sections (nested, like a deliverable heading) plus every single line
+// whose label is a forbidden one.
+function forbiddenSpans(text) {
+  const spans = headingSpans(text, isForbiddenHeading, true);
+  let offset = 0;
+  for (const line of text.split('\n')) {
+    if (!HEADING_RE.test(line.trim())) {
+      const label = FORBIDDEN_LINE_RE.exec(line);
+      if (label !== null && FORBIDDEN_LABEL_RE.test(label[1].trim())) spans.push([offset, offset + line.length]);
+    }
+    offset += line.length + 1;
+  }
+  return spans;
+}
+
+// The candidates under a forbidden section or label, read by the same five
+// sources the scope extraction uses — kept OUTSIDE that extraction, which
+// cmate-issue-authoring mirrors byte for byte: the scope candidates are what
+// they were, and analyzeIssue takes the denied ones back out of the scope.
+function extractScopeDeny(text) {
+  const fSpans = forbiddenSpans(text);
+  const denied = [];
+  if (fSpans.length === 0) return { denied, unsafe: [], spans: fSpans };
+  for (const source of [CANDIDATE_BACKTICK, CANDIDATE_KNOWN_ROOT, CANDIDATE_WITH_EXT, CANDIDATE_PATTERN, CANDIDATE_DECLARED]) {
+    for (const match of text.matchAll(new RegExp(source, 'g'))) {
+      const candidate = match[1].trim();
+      if (!inSpans(fSpans, match.index) || !isSafeRepoPath(candidate)) continue;
+      if (!denied.includes(candidate)) denied.push(candidate);
+    }
+  }
+  return { denied, unsafe: forbiddenUnsafe(text, fSpans), spans: fSpans };
+}
+
+function forbiddenUnsafe(text, fSpans) {
+  const out = [];
+  for (const match of text.matchAll(/`([^`\s]+)`/g)) {
+    const candidate = match[1];
+    if (inSpans(fSpans, match.index) && UNSAFE_DENY_RE.test(candidate) && !out.includes(candidate)) out.push(candidate);
+  }
+  return out;
+}
+
 // =============================================================================
 // The agent harness — deny-by-default (Issue #177)
 // =============================================================================
@@ -1448,7 +1514,7 @@ const BACKTICK_PATH_RE = /`([^`\s]*\/[^`\s]*\.[A-Za-z][A-Za-z0-9]*)`/g;
 // has one — reported as `prose_path_ignored` with the rest of the prose, not as
 // an extension to fix. Without a heading `spans` is empty and everything lands
 // in `unrecognized`, exactly as before.
-function extractUnrecognizedPaths(text, candidates, spans = []) {
+function extractUnrecognizedPaths(text, candidates, spans = [], fSpans = []) {
   const extracted = new Set(candidates);
   const seen = new Set();
   const unrecognized = [];
@@ -1457,6 +1523,7 @@ function extractUnrecognizedPaths(text, candidates, spans = []) {
     const candidate = match[1].trim();
     if (extracted.has(candidate) || seen.has(candidate)) continue;
     if (!isSafeRepoPath(candidate)) continue;
+    if (inSpans(fSpans, match.index)) continue;
     // A scope PATTERN that did not reach `paths` was refused by the
     // deliverable-heading rule, not by FILE_EXT (Issue #219). `.json` is a
     // recognised extension; saying otherwise would send the author to fix a
@@ -2728,6 +2795,7 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
   const objective = redact(firstNonEmptyLine(body) || issue.title);
   const acceptance = extractAcceptanceCriteria(body).map(redact);
   const extraction = extractFileCandidates(text);
+  const deny = extractScopeDeny(text);
   const classified = classifyFileCandidates(
     extraction.paths,
     extraction.deliverable,
@@ -2766,8 +2834,27 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
     text,
     extraction.paths,
     extraction.hasDeliverableHeading ? deliverableSpans(text) : [],
+    deny.spans,
   );
-  const references = [...classified.references, ...harness.denied, ...unreadable.prose];
+  // The issue's own prohibitions (Issue #301). A suspected path one of them
+  // covers leaves the scope for `reference_files` — unless the issue DECLARED it
+  // under a deliverable heading too, which is a contradiction only the author
+  // can resolve (`scope_deny_conflict`); the path then stays, and the deny still
+  // reaches the contract.
+  const scopeDeny = deny.denied;
+  const isDenied = (path) => scopeDeny.some((pattern) => scopeMatches(pattern, path));
+  const denyConflicts = [];
+  const deniedSuspects = [];
+  for (const path of [...suspected]) {
+    if (!isDenied(path)) continue;
+    if (extraction.deliverable.has(path)) {
+      denyConflicts.push(path);
+    } else {
+      suspected.splice(suspected.indexOf(path), 1);
+      deniedSuspects.push(path);
+    }
+  }
+  const references = [...classified.references, ...harness.denied, ...unreadable.prose, ...deniedSuspects];
   // The shadow pairs the plan cannot tell apart: BOTH spellings reached the
   // scope (Issue #182). Read here, before the derived paths below join the list,
   // because a spelling is something the issue WROTE.
@@ -2799,6 +2886,11 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
   const scopeDefaults = scopeDefaultsFor(suspected);
   scopeDefaults.push(...testScopeDefaultsFor(suspected, scopeDefaults));
   scopeDefaults.push(...profileScopeDefaultsFor(companionRules, suspected, scopeDefaults));
+  // A derived path never re-grants what the issue forbade (#301): `test/**`
+  // denied keeps a `scope_companions` rule from adding `test/greet.test.js`.
+  for (let i = scopeDefaults.length - 1; i >= 0; i -= 1) {
+    if (isDenied(scopeDefaults[i])) scopeDefaults.splice(i, 1);
+  }
   suspected.push(...scopeDefaults);
   const tests = extractTestExpectations(text, binaries).map(redact);
 
@@ -2844,6 +2936,29 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
     openQuestions.push({
       code: 'no_suspected_files',
       text: 'Affected files are unclear; add likely modules or paths.',
+    });
+  }
+  // A prohibition the plan cannot carry is a stop, never a silent drop (#301).
+  const untransferable = [
+    ...deny.unsafe,
+    ...contractScopeDrops(scopeDeny).filter((entry) => entry.reason !== 'over_broad').map((entry) => entry.pattern),
+  ];
+  if (untransferable.length > 0) {
+    openQuestions.push({
+      code: 'scope_deny_untransferable',
+      text:
+        'The issue forbids paths the execution contract cannot carry in scope.deny; ' +
+        'write them as repository-relative paths or globs and re-plan. ' +
+        `Paths: ${untransferable.slice(0, 3).map((path) => `\`${path}\``).join(', ')}`,
+    });
+  }
+  for (const path of denyConflicts) {
+    openQuestions.push({
+      code: 'scope_deny_conflict',
+      text:
+        'A path is declared as a deliverable and also forbidden. ' +
+        'Remove it from one of the two and re-plan. ' +
+        `Path: \`${path}\``,
     });
   }
   // Which of two overlapping paths the issue means (Issue #182). Raised here,
@@ -2915,6 +3030,7 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
     suspected_files: suspected,
     scope_defaults: scopeDefaults,
     reference_files: references,
+    scope_deny: scopeDeny,
     test_expectations: tests,
     labels: issue.labels,
     branch,
@@ -2936,7 +3052,8 @@ function analyzeIssue(issue, profile, binaries, companionRules) {
     _rawBody: body,
     _unrecognizedPaths: unreadable.unrecognized,
     // Scope patterns the body wrote outside every deliverable heading (#219).
-    _droppedPatterns: extraction.droppedPatterns,
+    // A pattern the issue FORBIDS is carried in `scope_deny`, not dropped (#301).
+    _droppedPatterns: extraction.droppedPatterns.filter((pattern) => !scopeDeny.includes(pattern)),
     // Harness paths a deliverable heading claimed, hence granted (Issue #177).
     // The denied ones need no private field: they are in `reference_files`.
     _harnessPathsInScope: harness.declared,
@@ -3655,6 +3772,9 @@ function issueForPlan(analysis, analyses, edges) {
     worktree_id: analysis.worktree_id,
     questions: analysis.questions,
     classification: classifyIssue(analysis, analyses, edges),
+    // Written only when the issue forbids something (#301), so a plan with no
+    // prohibition stays byte-identical to the one 0.37.0 wrote.
+    ...(analysis.scope_deny.length > 0 ? { scope_deny: analysis.scope_deny } : {}),
   };
 }
 
@@ -3828,10 +3948,6 @@ function withSeverity(warnings) {
   return warnings.map((warning) =>
     NOTICE_WARNING_CODES.has(warning.code) ? { ...warning, severity: 'notice' } : warning,
   );
-}
-
-function hasBlockingWarning(warnings) {
-  return warnings.some((warning) => !NOTICE_WARNING_CODES.has(warning.code));
 }
 
 function buildResult({ status, runId, runDir, artifacts, plan, errors, warnings, completionCheck, summary }) {
@@ -4163,10 +4279,12 @@ function run(argv) {
   ];
 
   const completionCheck = completionChecks(plan, depErrors, true);
-  // `partial` iff a BLOCKING warning was raised (#199). A run whose only warnings
-  // are notices is `success` WITH warnings: the concerns are all in the artifact,
-  // named and addressed to someone, and none of them is a decision still owed.
-  const status = hasBlockingWarning(warnings) ? 'partial' : 'success';
+  // `partial` iff ANY warning was raised (#301), as SKILL.md has always said.
+  // #199 let a notice-only run read `success`, and a lead measured what that
+  // costs: two `scope_pattern_dropped` notices — the issue's prohibitions, lost —
+  // under a green `success`. `severity` still ranks what to read first; it no
+  // longer decides the colour.
+  const status = warnings.length > 0 ? 'partial' : 'success';
   const result = buildResult({
     status,
     runId,

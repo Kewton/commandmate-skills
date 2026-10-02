@@ -1,5 +1,5 @@
 {
-  "description": "CommandMate #3002 (+ Kewton/commandmate-skills#273): an issue WITH a deliverable heading has declared its scope, so a path it writes anywhere else — `## やること`, `## 完了条件`, `## 追記 N`, with or without a `/` (`app.spec.yaml`) — is a mention, not a declaration. Measured on Kewton/Musunest: \"the diff of package.json is zero\" (#181) and \"stop if ci.yml needs a change\" (#183) GRANTED write permission on the file they forbade; a bare `app.spec.yaml` (#211) became an undeclared scope entry; and a short sample spelling in an addendum (#180) raised `ambiguous_file_candidate` for two days. All of them now go to `reference_files` and ONE `prose_path_ignored` notice per issue names them (a harness path is left out: #177 already denies it silently by design). Three more halves are pinned here: `### 既存ファイル` / `### 新規ファイル` do NOT close `## 対象ファイル` (#273 — the document under a subsection stays a deliverable), and `## 変更対象外` is NOT a deliverable heading even though it contains 変更対象 (its file stays out of scope).",
+  "description": "CommandMate #3002 (+ Kewton/commandmate-skills#273): an issue WITH a deliverable heading has declared its scope, so a path it writes anywhere else — `## やること`, `## 完了条件`, `## 追記 N`, with or without a `/` (`app.spec.yaml`) — is a mention, not a declaration. Measured on Kewton/Musunest: \"the diff of package.json is zero\" (#181) and \"stop if ci.yml needs a change\" (#183) GRANTED write permission on the file they forbade; a bare `app.spec.yaml` (#211) became an undeclared scope entry; and a short sample spelling in an addendum (#180) raised `ambiguous_file_candidate` for two days. All of them now go to `reference_files` and ONE `prose_path_ignored` notice per issue names them (a harness path is left out: #177 already denies it silently by design). Three more halves are pinned here: `### 既存ファイル` / `### 新規ファイル` do NOT close `## 対象ファイル` (#273 — the document under a subsection stays a deliverable), and `## 変更対象外` is NOT a deliverable heading even though it contains 変更対象 (its file stays out of scope, and since Issue #301 is also carried to `scope_deny`). Issue #301 以降、warning（notice を含む）が1件でもある plan の status は `partial` である。",
   "args": [
     "910",
     "--profile",
@@ -7,7 +7,7 @@
   ],
   "expect": {
     "exit": 0,
-    "status": "success",
+    "status": "partial",
     "warning_codes": [
       "prose_path_ignored"
     ],
@@ -36,6 +36,11 @@
         "packages/appspec/src/schema.spec.ts",
         "packages/appspec/src/__tests__/schema.ts",
         "packages/appspec/src/__tests__/schema.test.ts"
+      ]
+    },
+    "scope_deny": {
+      "910": [
+        "packages/appspec/package.json"
       ]
     },
     "reference_files": {

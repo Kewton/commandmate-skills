@@ -663,6 +663,13 @@
           },
           "description": "Paths the planner read out of the issue and deliberately kept OUT of scope.allow: context the issue only cites (under a 根拠 / 参考 / references heading, or documentation named nowhere else), and agent-harness paths denied by default (.claude/skills/**, .agents/skills/**, .commandmate/**). The worker reads them; it may not write them. A path missing from suspected_files is otherwise indistinguishable from one the planner never noticed, so a drop is reported here rather than discarded. See references/plan-contract.md sections 5 and 5.3."
         },
+        "scope_deny": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/repo_path"
+          },
+          "description": "Optional (Issue #301). Paths and globs the issue forbids — under a forbidden heading (変更してはならない / 変更禁止 / forbidden / 変更対象外 …) or on a line labelled that way. The dispatch runner carries them verbatim into the execution contract's scope.deny. Absent when the issue forbids nothing. See references/plan-contract.md section 5.10."
+        },
         "test_expectations": {
           "type": "array",
           "items": {

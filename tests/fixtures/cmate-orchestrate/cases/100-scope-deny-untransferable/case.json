@@ -1,0 +1,31 @@
+{
+  "description": "Issue #301（対応方針1）: 契約の `scope.deny` に引き継げない形（絶対 path・`..` で repository の外へ出る path）の禁止は、黙って落とさず `scope_deny_untransferable` の open question で計画を止める。運べる `test/**` はそのまま運ぶ。",
+  "args": [
+    "621",
+    "--profile-json",
+    "PROFILE:companions-node-test-mirror.json",
+    "--run-id",
+    "fixture-scope-deny-untransferable"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "scope_deny_untransferable"
+    ],
+    "scope_deny": {
+      "621": [
+        "test/**"
+      ]
+    },
+    "questions_count": {
+      "621": 1
+    },
+    "questions_include": {
+      "621": [
+        "`/etc/hosts`",
+        "`../shared/config.js`"
+      ]
+    }
+  }
+}

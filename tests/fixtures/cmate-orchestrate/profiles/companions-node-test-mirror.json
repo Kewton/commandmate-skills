@@ -1,0 +1,14 @@
+{
+  "id": "companions-node-test-mirror",
+  "repository": "Kewton/CommandMate",
+  "base": "origin/develop",
+  "branch_template": "feature/issue-{number}-{slug}",
+  "worktree_template": "../{repo}-issue-{number}-{slug}",
+  "baseline": ["npm test"],
+  "verified": true,
+  "scope_companions": {
+    "derive": [
+      { "when": "src/{dir}{base}.js", "add": ["test/{dir}{base}.test.js"] }
+    ]
+  }
+}

@@ -1086,10 +1086,10 @@ function evaluateIssueGates(inputs, issues, warnings) {
 }
 
 // A finding is a warning; a `not_evaluable` is a notice and does not colour the
-// run. That split is the planner's (`withSeverity` / `hasBlockingWarning` in
-// orchestrate.mjs, Issue #199) and is reused rather than re-invented: `partial`
-// means somebody has to change something, and "this gate could not be measured
-// here" is a fact about the runner's reach, not a defect in the issue.
+// run. That split was the planner's (Issue #199) until #301 made every planner
+// warning colour its run; it stays here because inspect is not the planner:
+// `partial` means somebody has to change something, and "this gate could not be
+// measured here" is a fact about the runner's reach, not a defect in the issue.
 function hasGateWarning(warnings) {
   return warnings.some((warning) => warning.severity !== 'notice');
 }

@@ -395,6 +395,10 @@ runner は承認済み plan **だけ**から契約を組み立てる。時刻・
   （[adr-scope-derivation.md](./adr-scope-derivation.md) 第15.2節の裁定はそのまま）。Issue が自分で
   書いたテスト path（`__tests__/x.test.ts`）は宣言した file なので残る。`scope_defaults` を持たない
   plan（#44 以前）では、従来どおり全件を並べる。
+- `scope.deny` は plan の任意 field `issues[].scope_deny`（Issue 本文の禁止パス。
+  [plan-contract.md](./plan-contract.md) 第5.10節、[#301](https://github.com/Kewton/commandmate-skills/issues/301)）を
+  ソート＋重複除去して書き、`goal` に `## Files you must not change` 節として同じ一覧を足す。
+  `scope_deny` の無い Issue は従来どおり `deny: []` で、`goal` も byte 単位で従来どおりである。
 - `success.requireScopeClean` は**常に `true`** である。以前は `<allow が非空か>` で決めており、
   対象 file を1つも挙げていない Issue だけ scope ゲートが丸ごと無効化されていた。scope 判定が
   無い契約は「worktree 内の何を書いても clean」と同義なので、これは過剰拒否の裏返しの

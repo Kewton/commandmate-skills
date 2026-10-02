@@ -1,5 +1,5 @@
 {
-  "description": "Issue #114: a body carrying one well-formed ```acceptance-gates block puts its `require:` ids on `plan.issues[].acceptance_gates`, transcribed in the author's order. #331 is the SAME body with the block deleted, which pins the two halves of the ADR's Phase 0 item 3 at once: the block never becomes acceptance_criteria bullets or path candidates, and `test_expectations` is byte-identical with and without it. Without the strip the block's CLOSING fence pairs with the ```bash block's OPENING fence and swallows it whole — measured: 3 commands drop to 1.",
+  "description": "Issue #114: a body carrying one well-formed ```acceptance-gates block puts its `require:` ids on `plan.issues[].acceptance_gates`, transcribed in the author's order. #331 is the SAME body with the block deleted, which pins the two halves of the ADR's Phase 0 item 3 at once: the block never becomes acceptance_criteria bullets or path candidates, and `test_expectations` is byte-identical with and without it. Without the strip the block's CLOSING fence pairs with the ```bash block's OPENING fence and swallows it whole — measured: 3 commands drop to 1. Issue #301 以降、warning（notice を含む）が1件でもある plan の status は `partial` である。",
   "args": [
     "330",
     "331",
@@ -13,7 +13,7 @@
   ],
   "expect": {
     "exit": 0,
-    "status": "success",
+    "status": "partial",
     "warning_codes": [
       "prose_path_ignored",
       "prose_path_ignored"
