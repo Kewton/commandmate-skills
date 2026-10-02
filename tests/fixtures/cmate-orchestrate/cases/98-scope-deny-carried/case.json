@@ -1,0 +1,53 @@
+{
+  "description": "Issue #301（受入条件1）: 入力の禁止パスを落とさず plan の `scope_deny` に引き継ぐ。0.37.0 では `## 変更してはならないパス` の下の `test/**` / `.commandmate/**` が成果物見出しの外の pattern として `scope_pattern_dropped` で落ち、禁止は計画にも契約にも残らなかった（Kewton/CommandMate#3059 の実機確認）。#601 は見出し、#602 はラベル行（`- 変更してはならないパス: …`）で書いた形で、どちらも pattern と plain path をそのまま運び、`scope_pattern_dropped` を出さない。契約の `scope.deny` に載ることは dispatch case d184 が golden で固定する。",
+  "args": [
+    "601",
+    "602",
+    "--profile-json",
+    "PROFILE:companions-node-test-mirror.json",
+    "--run-id",
+    "fixture-scope-deny"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "suspected_files": {
+      "601": [
+        "src/greet.js",
+        "src/greet.test.js",
+        "src/greet.spec.js",
+        "src/__tests__/greet.js",
+        "src/__tests__/greet.test.js"
+      ],
+      "602": [
+        "src/shout.js",
+        "src/shout.test.js",
+        "src/shout.spec.js",
+        "src/__tests__/shout.js",
+        "src/__tests__/shout.test.js"
+      ]
+    },
+    "reference_files": {
+      "601": [],
+      "602": [
+        "docs/guide.md"
+      ]
+    },
+    "scope_deny": {
+      "601": [
+        "test/**",
+        ".commandmate/**"
+      ],
+      "602": [
+        "docs/guide.md",
+        "test/**",
+        ".commandmate/**"
+      ]
+    },
+    "questions_count": {
+      "601": 0,
+      "602": 0
+    }
+  }
+}

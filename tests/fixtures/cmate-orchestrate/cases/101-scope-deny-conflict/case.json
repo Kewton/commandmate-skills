@@ -1,0 +1,36 @@
+{
+  "description": "Issue #301: 同じ path を成果物として宣言し、かつ禁止している本文は矛盾であり、planner はどちらにも決めない（`scope_deny_conflict` の open question）。宣言した `src/greet.js` は scope に残り、禁止も plan に残る。導出 path のうち禁止に当たる `src/greet.test.js` 等は足されず、当たらない `test/greet.test.js`（profile の伴走）は足される。",
+  "args": [
+    "631",
+    "--profile-json",
+    "PROFILE:companions-node-test-mirror.json",
+    "--run-id",
+    "fixture-scope-deny-conflict"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "partial",
+    "warning_codes": [
+      "scope_deny_conflict"
+    ],
+    "suspected_files": {
+      "631": [
+        "src/greet.js",
+        "test/greet.test.js"
+      ]
+    },
+    "scope_deny": {
+      "631": [
+        "src/**"
+      ]
+    },
+    "questions_count": {
+      "631": 1
+    },
+    "questions_include": {
+      "631": [
+        "`src/greet.js`"
+      ]
+    }
+  }
+}

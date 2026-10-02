@@ -260,6 +260,10 @@ plan の risk には `unverified_profile`（high）が載る。これは劣化�
 裁定の記録は [adr-scope-derivation.md](./adr-scope-derivation.md)（第2節・第3節・第15節）、
 plan 側の正本は [plan-contract.md](./plan-contract.md) 第5.1節である。
 
+**Issue が禁止した path は足さない**（[#301](https://github.com/Kewton/commandmate-skills/issues/301)）。
+伴走の展開結果が Issue 本文の禁止（plan の `scope_deny`）に当たる場合、その path は `scope_defaults` にも
+`suspected_files` にも入らない —— profile の規約より Issue の禁止が優る（plan-contract.md 第5.10節）。
+
 ### 9.1 何を解く field か
 
 `suspected_files` は dispatch がそのまま契約の `scope.allow` へ写す。したがって

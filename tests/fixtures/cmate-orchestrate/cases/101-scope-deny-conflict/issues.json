@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 631,
+      "title": "fix: greet の挨拶文",
+      "body": "`src/greet.js` の挨拶文を直す。\n\n## 対象ファイル\n- `src/greet.js`\n\n## Forbidden paths\n- `src/**`\n\n## 受入条件\n- [ ] `npm test` が exit 0\n",
+      "labels": ["bug"]
+    }
+  ]
+}

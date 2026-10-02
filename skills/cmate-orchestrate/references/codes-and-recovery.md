@@ -46,13 +46,14 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 失敗時も stdout に `status: failure` の result を出す。**plan を推測で埋めない。**
 
 
-## 2. plan の warning code（**blocking** が1件でも出れば `partial`）
+## 2. plan の warning code（warning が1件でも出れば `partial`）
 
 **warning には severity がある**（[#199](https://github.com/Kewton/commandmate-skills/issues/199)）。
-`plan.status` を落とすのは **blocking** な warning だけで、**notice** は落とさない。
-既定は blocking であり、**新しい code は誰かが明示的に notice と判断するまで blocking のままになる**
+**0.38.0（[#301](https://github.com/Kewton/commandmate-skills/issues/301)）以降、`plan.status` は
+severity によらず warning が1件でもあれば `partial` である**（下の「#301 で改めたこと」）。
+severity は色ではなく**読む順**を決める。既定は blocking であり、**新しい code は誰かが明示的に notice と判断するまで blocking のままになる**
 （fail-closed。「黙って `partial` でなくなる」向きには倒れない）。notice が blocking を隠すことは
-ない —— blocking が1件でも在れば `partial` である。
+ない。
 
 **下表は `plan.warnings` に入りうる warning code の全一覧であり、1 code につき severity と
 その判断理由を1行持つ**（[#210](https://github.com/Kewton/commandmate-skills/issues/210)）。
@@ -79,7 +80,7 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 **`status` は人間が読む色であって、run を止める信号ではない。** dispatch を止めるのは
 `plan.issues[].questions` の配列であり（`execution-plan.v2` schema の `questions` が
 「this array — not plan.status — is what stops a run」と明言している）、`status` ではない。
-したがって notice を `success` に含めても**自動化系の振る舞いは1つも変わらない**。
+#199〜0.37.0 はこれを理由に notice を `success` に含めていたが、#301 で改めた（本節末尾）。
 
 | code | severity | 意味と、その severity にした理由 |
 |---|---|---|
@@ -102,6 +103,8 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | `open_question_block_invalid` | blocking | ```open-questions ブロックが読めない（2個以上・未閉・未知 version・未知 key・空・重複・subset 違反）。**「ブロックが無かった」に丸めない**。**blocking が正しい。** 「planner が読めなかった」の報告である |
 | `acceptance_gate_block_invalid` | blocking | ```acceptance-gates ブロックが読めない（2個以上・未閉・tab・未知 version・未知 key・不正な gate id・重複・空・上限超過、および `gates:` の定義が予約 id / `issue-<番号>-` 始まりでない / command 無し / timeout 範囲外）。**「ブロックが無かった」に丸めない**（[acceptance-gates-notation.md](./acceptance-gates-notation.md) 第4節）。**blocking が正しい。** 「planner が読めなかった」の報告であり、丸めれば著者が書いたはずの受入ゲートが黙って消えた run が緑で終わる |
 | `acceptance_requires_tests_but_scope_has_none` | blocking | 受入条件がテストの**作成**を能動的に要求しているのに、対象 file（**段1 の導出結果を含めて**）にテストらしき path が1件も無い。**blocking が正しい。** 「テストを足すのか、足さないのか」を著者が決めていない（判定は推論なので偽陽性がありうる。detail に原文が入っている） |
+| `scope_deny_untransferable` | blocking | Issue が禁止した path（禁止の見出し・ラベル行の下。[#301](https://github.com/Kewton/commandmate-skills/issues/301)）のうち、実行契約の `scope.deny` に**運べない**形（絶対 path・`~`・`..`・バックスラッシュ・件数/長さ超過）がある。question でもある。**blocking が正しい。** 黙って落とすと worker の禁止が宣言より**狭く**なる。[plan-contract.md](./plan-contract.md) 第5.10節 |
+| `scope_deny_conflict` | blocking | 同じ path を成果物見出しで宣言し、かつ禁止している（#301）。question でもある。**blocking が正しい。** どちらが意図かを著者が決めていない。planner はどちらにも決めず、path は scope に、禁止は `scope_deny` に残す |
 | `contract_scope_dropped` | blocking | 宣言された対象 file の一部が、dispatch の実行契約の `scope.allow` に**入らない**（件数上限 200 超過、契約が扱えない形の path、または repository 全体を意味する pattern ＝ `over_broad`。[#219](https://github.com/Kewton/commandmate-skills/issues/219)）。detail に**落ちた件数・落ちた path（先頭3件）・落ちた理由**が入る。**blocking が正しい。** worker の権限が Issue の宣言より**狭く**なるという予告であり、`--unattended` では dispatch 側で blocking reason になって run ごと止まる |
 
 **この表に無い code が `plan.warnings` に出ることはない。** #210 は runner の
@@ -225,6 +228,13 @@ Issue が `## 対象ファイル`（成果物見出し）に書いた場合だ�
 ままである。warning 自身も detail ごと `plan.warnings` に残り、`dependency-plan.md` にも
 `(notice)` の印つきで出る。**`success` は「読まなくてよい」ではない。**
 
+**#301 で改めたこと（0.38.0）。** 上の2件で「落としたのは色だけ」としてきたが、その色が実障害を隠した。
+Kewton/CommandMate#3059 の実機確認では、入力の禁止パス（`test/**` / `.commandmate/**`）が
+`scope_pattern_dropped`（notice）で落ちた plan が `success` で返り、SKILL.md の「warning が1件でもあれば
+success にしない」と食い違った。**以後 notice も `partial` にする。** severity の分類と各行の判断理由は
+そのまま残り、「どれから読むか」の順位として使う。禁止パスそのものは今は落ちず、`scope_deny` に運ばれる
+（[plan-contract.md](./plan-contract.md) 第5.10節）。
+
 
 ## 3. limitation code（停止はしていないが、後から効いてくる制約）
 
@@ -321,15 +331,16 @@ status runner はそれを引くだけなので、**ここに無い code は sta
 | plan `status: partial` + `open_question_block_invalid`（同上） | ```open-questions ブロックを読めなかった（2個以上・未知 version・未知 key・空・重複・subset 違反）。**「ブロックが無かった」には丸めていない** | **ブロックの構文を直すか、ブロックごと消して re-plan する。** warning detail が壊れ方を名指ししている。記法は [open-questions-notation.md](./open-questions-notation.md)（YAML subset は acceptance-gates 記法 第3節と同じ: 2スペース・tab 禁止・行頭 `#` のみコメント） |
 | plan `status: partial` + `acceptance_requires_tests_but_scope_has_none`（dispatch 側では `open_questions` として止まる） | 受入条件はテストの作成を要求しているのに、宣言された file からテスト path が1件も導出できていない。**そのまま dispatch すれば worker は正しくテストを書いて scope ゲートで落ち、契約 scope は send 時 snapshot なので worker 側に回復手段は無い** | **Issue 本文の対象 file にテスト path を書いて re-plan する。** テストが本当に不要なら受入条件にそう書く（否定形は検出から除外される）。判定の元になった受入条件が warning detail と question に原文で入っているので、偽陽性の確認はその1行で済む。**`--allow-questions` で押し通すのは、そのまま worker 1人分の run を捨てることである** |
 | plan `status: partial` + `ambiguous_file_candidate`（dispatch 側では `open_questions` として止まる） | 同じ file の2つの綴りが本文に在る（一方が他方の path 境界つき suffix）。**どちらも scope に入れてある** —— 以前は長い方を残して短い方を落としており、実測では「宣言した path が落ちて、触るなと書いたビルド生成物が scope に残る」向きに外れた | **どちらが対象かを決めて、もう片方を本文から消して re-plan する。** 両方とも対象なら `--allow-questions` で進めてよい（両方入っている）。question の本文が2つの path を名指ししているので、判断は本文を開かずに済む |
+| plan `status: partial` + `scope_deny_untransferable` / `scope_deny_conflict`（dispatch 側では `open_questions` として止まる） | Issue が禁止した path が契約の `scope.deny` に運べない形だった、または同じ path を成果物と禁止の両方に書いた（[#301](https://github.com/Kewton/commandmate-skills/issues/301)）。**禁止は黙って落としていない** | 前者は禁止を repository-relative な path / glob に書き直し、後者は成果物か禁止のどちらかから消して re-plan する。`--allow-questions` で押し通すと、前者は運べない禁止が契約から抜けたまま worker が走る |
 | plan `status: partial` + `unconfirmed_lexical_dependency`（同上） | 生産者/消費者の推論が当たったが、根拠が**共有 topic token だけ**で共有 file が無かったので edge にしていない。**その2 Issue は同じ wave に入る** | **順序が要るなら述べる**（Issue 本文に `depends on #N`、または `--depends <consumer>:<producer>`）。要らないなら `--allow-questions` で進めてよい。散文の語が一致しただけで3 Issue が3 wave に直列化していたのが元の障害なので、**「独立である」が正しい答えであることが多い**。**edge が欲しいのに `--no-infer` を足さない** —— それは推論を丸ごと切るだけで、この question の答えにはならない |
-| plan `harness_path_in_scope`（`severity: notice`。**`status` は落ちない** —— 他に blocking が無ければ `success` である） | Issue が `## 対象ファイル`（成果物見出し）に agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を書いたので、**worker がそれを書き換えられる状態で dispatch される**。既定では入らない path が、明示宣言によって入っている。**ハーネスを成果物とする Issue では正常に出る**（第2節） | **その Issue の成果物が本当にハーネスなのかを読んで決める。** そうなら（このリポジトリ自身の Issue のように）そのまま進めてよい —— warning は宣言の記録であって停止ではない。そうでない（ただ「その runner を実行して通ること」を言いたいだけの）なら、**成果物見出しから path を消して散文か参考見出し（`根拠` / `参考`）へ移し、re-plan する**。移しても worker はその path を読める（`reference_files` に出る）。**審判を書き換えられる worker を「たぶん大丈夫」で送らない。`success` は「読まなくてよい」ではない** —— この行を読ませるために warning は残してある（#199） |
-| plan `scope_pattern_declared`（`severity: notice`。**`status` は落ちない**） | Issue が成果物見出しの下で **glob / ディレクトリ**を宣言し、それがそのまま worker の `scope.allow` になる（[#219](https://github.com/Kewton/commandmate-skills/issues/219)）。plan は pattern を**展開しない**（working tree を開かない）ので、何 file を指すかは plan から読めない | **列挙された pattern を1つずつ、権限として読む。** `**` は階層を跨ぐ（`data/geo/**` は `data/geo/` 配下すべて）、`*` と `?` は跨がない、`{a,b}` は選択、`[` と `]` は literal、ディレクトリは配下すべて。広すぎるなら **Issue 本文の pattern を狭めて re-plan する**（`data/geo/**` → `data/geo/{landmarks,stations}/`）。妥当ならそのまま進めてよい —— warning は宣言の記録であって停止ではない。**変更 file ごとにどの pattern が許可したかは、裁定を行う CommandMate の scope ゲート側に残る** |
-| plan `scope_pattern_dropped`（`severity: notice`。**`status` は落ちない**） | 成果物見出しの**外**（`## 根拠` / `## 参考` の配下、または見出しの外の散文）に書かれた glob / ディレクトリを、scope に入れずに落とした（#219）。0.31.0 までは backtick の中の glob だけが本文のどこからでも `scope.allow` に届いていたので、**その書き方をしていた Issue はここで scope が狭くなる** | **その pattern を worker に書かせたいのかを決める。** 書かせたいなら **`## 対象ファイル` へ移して re-plan する**（それが唯一の直し方である）。引用しているだけなら何もしなくてよい —— warning は「宣言として読まなかった」の記録である。**`unrecognized_file_extension` と混同しない**: 拡張子は正しく、位置だけが宣言になっていない |
-| plan `prose_path_ignored`（`severity: notice`。**`status` は落ちない**） | 成果物見出しを持つ Issue が見出しの**外**にだけ書いた path を、scope に入れずに `reference_files` へ回した（CommandMate #3002）。worker はその path を読めるが書けない | **名指された path を worker に書かせたいのかを決める。** 書かせたいなら **`## 対象ファイル` の下へ書き足して re-plan する**（それが唯一の直し方である）。「差分 0」「触るな」と書いただけなら何もしなくてよい —— それがこの規則の狙いである。完了条件にしか書いていないテスト path は `acceptance_requires_tests_but_scope_has_none` と一緒に出ることがある（直し方は同じ） |
+| plan `harness_path_in_scope`（`severity: notice`。0.38.0 以降は `partial`、#301） | Issue が `## 対象ファイル`（成果物見出し）に agent ハーネスの path（`.claude/skills/` / `.agents/skills/` / `.commandmate/`）を書いたので、**worker がそれを書き換えられる状態で dispatch される**。既定では入らない path が、明示宣言によって入っている。**ハーネスを成果物とする Issue では正常に出る**（第2節） | **その Issue の成果物が本当にハーネスなのかを読んで決める。** そうなら（このリポジトリ自身の Issue のように）そのまま進めてよい —— warning は宣言の記録であって停止ではない。そうでない（ただ「その runner を実行して通ること」を言いたいだけの）なら、**成果物見出しから path を消して散文か参考見出し（`根拠` / `参考`）へ移し、re-plan する**。移しても worker はその path を読める（`reference_files` に出る）。**審判を書き換えられる worker を「たぶん大丈夫」で送らない。`success` は「読まなくてよい」ではない** —— この行を読ませるために warning は残してある（#199） |
+| plan `scope_pattern_declared`（`severity: notice`。0.38.0 以降は `partial`、#301） | Issue が成果物見出しの下で **glob / ディレクトリ**を宣言し、それがそのまま worker の `scope.allow` になる（[#219](https://github.com/Kewton/commandmate-skills/issues/219)）。plan は pattern を**展開しない**（working tree を開かない）ので、何 file を指すかは plan から読めない | **列挙された pattern を1つずつ、権限として読む。** `**` は階層を跨ぐ（`data/geo/**` は `data/geo/` 配下すべて）、`*` と `?` は跨がない、`{a,b}` は選択、`[` と `]` は literal、ディレクトリは配下すべて。広すぎるなら **Issue 本文の pattern を狭めて re-plan する**（`data/geo/**` → `data/geo/{landmarks,stations}/`）。妥当ならそのまま進めてよい —— warning は宣言の記録であって停止ではない。**変更 file ごとにどの pattern が許可したかは、裁定を行う CommandMate の scope ゲート側に残る** |
+| plan `scope_pattern_dropped`（`severity: notice`。0.38.0 以降は `partial`、#301） | 成果物見出しの**外**（`## 根拠` / `## 参考` の配下、または見出しの外の散文）に書かれた glob / ディレクトリを、scope に入れずに落とした（#219）。0.31.0 までは backtick の中の glob だけが本文のどこからでも `scope.allow` に届いていたので、**その書き方をしていた Issue はここで scope が狭くなる** | **その pattern を worker に書かせたいのかを決める。** 書かせたいなら **`## 対象ファイル` へ移して re-plan する**（それが唯一の直し方である）。引用しているだけなら何もしなくてよい —— warning は「宣言として読まなかった」の記録である。**`unrecognized_file_extension` と混同しない**: 拡張子は正しく、位置だけが宣言になっていない |
+| plan `prose_path_ignored`（`severity: notice`。0.38.0 以降は `partial`、#301） | 成果物見出しを持つ Issue が見出しの**外**にだけ書いた path を、scope に入れずに `reference_files` へ回した（CommandMate #3002）。worker はその path を読めるが書けない | **名指された path を worker に書かせたいのかを決める。** 書かせたいなら **`## 対象ファイル` の下へ書き足して re-plan する**（それが唯一の直し方である）。「差分 0」「触るな」と書いただけなら何もしなくてよい —— それがこの規則の狙いである。完了条件にしか書いていないテスト path は `acceptance_requires_tests_but_scope_has_none` と一緒に出ることがある（直し方は同じ） |
 | plan `cycle_detected` / `override_incomplete` / `dependency_order_violation` | 依存グラフが実行不能 | `dependency-plan.md` の edge `reason`（どの方向語をどの行から読んだか）を見て、Issue 本文か `--depends` を直す |
 | plan `run_exists` | **同じ既定 run_id に hash された run が既にある**（Issue 集合・Issue 内容・**profile 全体**・CLI option がすべて同じ、が典型）。「何も変えていない」とまでは断定できない —— 既定 profile の cwd `origin` 判定は hash の外にある（Issue #157） | エラーが指す既存の `plan.json` と突き合わせて、意図した plan かを確かめる。違うなら Issue 本文か profile を直す（**profile はどの field を編集しても別 run_id になる**）。同じでよいなら `--run-id <new-id>` / `--runs-dir <dir>` を渡す |
 | plan `profile_repository_mismatch` | cwd の origin と profile の対象リポジトリが違う | `--profile` / `--profile-json` / `--repo` のどれかを渡して意図を明示する。**`--repo` を選ぶと `verified` が降格するので `--allow-unverified` も要り、次の行の notice が出る**（#210 以降、それで `status` は落ちない） |
-| plan `profile_repository_override`（`severity: notice`。**`status` は落ちない** —— 他に blocking が無ければ `success` である） | `--repo` で profile の対象リポジトリを差し替え、`--allow-unverified` でその降格を受諾した run である。**`branch_template` / `worktree_template` / `base` / `baseline` は別のリポジトリで確認された値のまま**であり、この plan はそれらを検証なしで使う。`risk.level` は `high`、`profile.verified` は `false` | **その4項目がこのリポジトリで正しいかを確かめる。** 正しいなら進めてよい —— 2つの flag がその判断の記録であり、warning は記録の側である。恒常的にこのリポジトリを対象にするなら **`profile-init.mjs` で専用 profile を作って検証し、`--profile-json` で渡す**（[profile-contract.md](./profile-contract.md) 第7節・第8節）。そうすれば降格そのものが起きない。**`success` は「読まなくてよい」ではない** —— この行を読ませるために warning は残してある（#210） |
+| plan `profile_repository_override`（`severity: notice`。0.38.0 以降は `partial`、#301） | `--repo` で profile の対象リポジトリを差し替え、`--allow-unverified` でその降格を受諾した run である。**`branch_template` / `worktree_template` / `base` / `baseline` は別のリポジトリで確認された値のまま**であり、この plan はそれらを検証なしで使う。`risk.level` は `high`、`profile.verified` は `false` | **その4項目がこのリポジトリで正しいかを確かめる。** 正しいなら進めてよい —— 2つの flag がその判断の記録であり、warning は記録の側である。恒常的にこのリポジトリを対象にするなら **`profile-init.mjs` で専用 profile を作って検証し、`--profile-json` で渡す**（[profile-contract.md](./profile-contract.md) 第7節・第8節）。そうすれば降格そのものが起きない。**`success` は「読まなくてよい」ではない** —— この行を読ませるために warning は残してある（#210） |
 | dispatch `open_questions` + `human_required` | 未回答の question を持つ Issue がある | blocking reason に**質問の本文**が出ている。Issue 本文に回答を書いて re-plan する |
 | dispatch `drift` | plan 承認後に branch / HEAD / 権限が動いた | drift の内容を確認し、必要なら re-plan する。**drift の上に dispatch しない** |
 | dispatch `worktree_unresolved`（`stop_reason: drift`） | 対象 Issue の worktree が `commandmate ls` で解決できない（runner は `commandmate sync` を1度試したうえでの結論。`limitations` の `worktree_sync_ran` / `worktree_sync_unavailable` を見る）。**worker は1人も起動していない**（`task_id: null`・worker ログ無し） | **`cmate-worktree-setup` で worktree を作成し、同じコマンドで再実行する**（最初の Wave 前で止まった場合、`--out` は消費されていない）。plan と同じ profile（同じ `branch_template`）を使う。**Issue の分割や re-plan は不要** |
@@ -537,7 +548,7 @@ run view に表示しない。** ただし `NEXT_ACTION_HINTS` には5件とも�
 ということであり、報告すべき所見ではない —— `evaluation.gates[]` に記録は残る。
 
 `already_satisfied` / `nondeterministic` が1件でもあれば `status: partial`。`not_evaluable` だけなら
-`status: success`（notice は色を変えない。planner の `severity: notice`（[#199](https://github.com/Kewton/commandmate-skills/issues/199)）と同じ規約である）。
+`status: success`（notice は色を変えない。#199 の規約で、planner は #301 でこれをやめたが inspect は「測れなかった」を所見に数えないためこのまま残す）。
 **どちらも exit 0 である。**
 
 **読めない入力・汚れた tree は点検せずに拒否する。** `--repo-root` が clean でない / git checkout でない、

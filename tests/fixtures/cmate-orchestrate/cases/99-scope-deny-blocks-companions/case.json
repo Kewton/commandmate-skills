@@ -1,0 +1,37 @@
+{
+  "description": "Issue #301（受入条件2）: `scope_companions` の導出は入力の deny に当たる path を許可に足さない。profile は `src/{dir}{base}.js` → `test/{dir}{base}.test.js` を宣言している。陽性: `test/**` を禁止した #611 には `test/greet.test.js` が入らない（L1 の `src/` 配下の慣習 test path は deny に当たらないので残る）。陰性対照: 禁止の無い #612 には従来どおり `test/shout.test.js` が入り、`scope_deny` は書かれない（禁止の無い plan は 0.37.0 と byte 一致）。",
+  "args": [
+    "611",
+    "612",
+    "--profile-json",
+    "PROFILE:companions-node-test-mirror.json",
+    "--run-id",
+    "fixture-scope-deny-companions"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "warning_codes": [],
+    "scope_defaults": {
+      "611": [
+        "src/greet.test.js",
+        "src/greet.spec.js",
+        "src/__tests__/greet.js",
+        "src/__tests__/greet.test.js"
+      ],
+      "612": [
+        "src/shout.test.js",
+        "src/shout.spec.js",
+        "src/__tests__/shout.js",
+        "src/__tests__/shout.test.js",
+        "test/shout.test.js"
+      ]
+    },
+    "scope_deny": {
+      "611": [
+        "test/**"
+      ],
+      "612": null
+    }
+  }
+}

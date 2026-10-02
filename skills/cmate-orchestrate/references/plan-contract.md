@@ -667,8 +667,9 @@ Kewton/BorderFreeKidsMap#63）: 「未決の問い」3件を本文に残した�
 
 ## 5.6 warning の severity と `status`（`plan.warnings[].severity`）
 
-**規範。** `plan.status` は **blocking** な warning が1件以上あるとき `partial`、そうでなければ
-`success` である（[#199](https://github.com/Kewton/commandmate-skills/issues/199)）。
+**規範。** `plan.status` は warning が**1件でも**あるとき `partial`、無いとき `success` である
+（[#301](https://github.com/Kewton/commandmate-skills/issues/301)。0.37.0 までは #199 により blocking な warning
+だけが `partial` にしていた）。`severity` は色を決めず、**どれから読むか**の順位として残る。
 `plan.warnings[]` の entry は任意 field `severity`（`blocking` / `notice`）を持ちうる。
 
 | 項目 | 規範 |
@@ -717,17 +718,12 @@ plan がすべて 1 byte 変わる。notice にだけ書けば、**notice を1�
 既にディスクに在る `plan.json` も、そのまま生き残る。副作用として
 「`severity` が無い」が fail-closed 既定そのものを表すので、読み手は欠落を解釈しなくてよい。
 
-**なぜ `success` にしてよいか。** **`status` は人間が読む色であって、run を止める信号ではない。**
-dispatch を止めるのは `issues[].questions` の配列であり（`execution-plan.v2` schema の
-`questions` の記述が「this array — not plan.status — is what stops a run」と明言し、
-dispatch runner はその field だけを読む）、`plan.status` を読んで分岐する自動化系は無い。
-したがって notice を `success` に含めても**自動化系の振る舞いは1つも変わらない**。
-変わるのは色の情報量だけであり、それがこの節の主題である。
-
-**`success` は「warning が無い」ではない。** notice は `plan.warnings` に残り、
-`dependency-plan.md` の `## Warnings` にも `(notice)` の印つきで出て、
-[codes-and-recovery.md](./codes-and-recovery.md) 第4節の対処表にも在る。
-**落としたのは色だけで、記録は落としていない。**
+**なぜ notice も `partial` にするか（#301 で #199 を改めた）。** #199 は「`status` は色であって
+自動化系の信号ではない」ことを理由に notice を `success` に含めた。Kewton/CommandMate#3059 の実機確認では、
+入力の禁止パスが `scope_pattern_dropped`（notice）で2件落ちた plan が `success` で返り、SKILL.md の
+「warning が1件でもあれば success にしない」と食い違った。**色を読むのは人であり、緑は「読まなくてよい」と
+読まれる。** だから warning は1件でも `partial` にし、notice / blocking の区別は「著者の宣言の報告か、
+未決の報告か」という読む順の情報として残す。dispatch を止めるのが `issues[].questions` であることは変わらない。
 
 ## 5.7 著者が宣言した scope pattern（`scope_pattern_declared` / `scope_pattern_dropped`）
 
@@ -861,6 +857,26 @@ camelCase の識別子（`parseFoo`）・flag（`--json`）・数字列（`0.33.
 すべて拾われ、見出しの外の path は拡張子と無関係に scope の外なので、見出しの外の未知拡張子 path は
 `prose_path_ignored` と `reference_files` に回る（拡張子を直せと言うのは誤診になる）。見出しの無い Issue では
 従来どおり `unrecognized_file_extension`（blocking）が出る。
+
+## 5.10 本文の禁止パス（`issues[].scope_deny`、[#301](https://github.com/Kewton/commandmate-skills/issues/301)）
+
+**規範。** 禁止の見出し（`変更してはならない` / `変更禁止` / `編集禁止` / `触らない` / `禁止パス` / `forbidden` /
+`must not change` / `scope.deny` / `deny`、および否定の成果物見出し `変更対象外` など）の下と、同じ語をラベルに持つ行
+（`` - 変更してはならないパス: `test/**` ``）にある path と pattern は、**scope 候補にしない**。plan の任意 field
+`issues[].scope_deny` に書いた順で入り、dispatch が実行契約の `scope.deny` に（sort して）そのまま書く。
+禁止した pattern は `scope_pattern_dropped` に、未知拡張子の path は `unrecognized_file_extension` に数えない
+（成果物見出しを持つ Issue では、禁止した plain path は従来どおり `prose_path_ignored` に名指され `reference_files` に出る）。
+
+| 場合 | 扱い |
+|---|---|
+| 禁止の無い Issue | `scope_deny` を**書かない**（plan は 0.37.0 と byte 一致、契約は `deny: []`） |
+| 散文から scope に入った path が禁止に当たる | scope から外して `reference_files` に回す |
+| 導出 path（lockfile・慣習 test・`scope_companions`）が禁止に当たる | **足さない**（`scope_defaults` にも出ない） |
+| 成果物見出しの path が禁止に当たる | `scope_deny_conflict`（question）。どちらにも決めない |
+| 契約が運べない禁止（絶対 path・`~`・`..`・バックスラッシュ・件数/長さ超過） | `scope_deny_untransferable`（question）。**黙って落とさない** |
+
+禁止の判定は CommandMate の scope gate と同じ glob 語彙（`lib.mjs` の `scopeMatches`）で行う。
+`.commandmate/tasks/*.yaml` のタスク契約を planner が直接読むことはしない（入力は Issue だけ）。
 
 ## 6. risk
 

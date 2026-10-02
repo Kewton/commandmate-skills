@@ -574,6 +574,26 @@ cmate-issue-authoring 0.10.0（CommandMate #3013）で、人がやる Issue（�
 
 正本: [plan-contract.md](./plan-contract.md) 第3.3節。
 
+### #301 — 入力の禁止パスが落ち、伴走導出が禁止を上書きし、警告があるのに `success` だった
+
+Kewton/CommandMate#3059 の実機確認（0.37.0）。`scope.allow: [src/greet.js]`・`scope.deny: ["test/**", ".commandmate/**"]`
+のタスク契約を Issue に書き写して計画させると、(1) `test/**` / `.commandmate/**` は成果物見出しの外の pattern として
+`scope_pattern_dropped` で落ち、計画にも契約にも禁止が残らなかった。(2) profile の `scope_companions` が
+`test/greet.test.js` を許可に足した —— 元の契約が禁止していた path である。(3) 警告が2件あるのに `success` だった
+（SKILL.md は「warning が1件でもあれば success にしない」と書いている。#199 が notice を色から外していた）。
+lead は計画を実行せずに人へ報告した。
+
+→ **禁止は宣言として読む。** 禁止の見出し（`変更してはならない` / `変更禁止` / `forbidden` / `変更対象外` …）の下、
+または同じ語のラベル行（`- 変更してはならないパス: …`）の候補は、scope 候補にせず plan の `scope_deny` に入れ、
+dispatch がそのまま契約の `scope.deny` に書く（従来は常に `deny: []`）。運べない形（絶対 path・`..`・件数/長さ超過）は
+`scope_deny_untransferable`、成果物と禁止の両方に書いた path は `scope_deny_conflict` の question で止める（黙って落とさない）。
+導出（lockfile・慣習 test・`scope_companions`）は禁止に当たる path を足さない。禁止の無い plan は byte 一致。
+
+→ **warning が1件でもあれば `partial`。** #199 の「notice は色を変えない」をやめた。`severity` は「どれから読むか」の
+順位として残る。notice だけの plan が緑だったので、禁止が落ちた plan を読み手が「通った」と読めた。
+
+正本: [plan-contract.md](./plan-contract.md) 第5.6節・第5.10節。
+
 ## dispatch（`scripts/dispatch.mjs`）
 
 ### #274 — `--reverify` が対象 Issue を必ず同時に検証し、重いゲートを直列にできなかった
@@ -2434,6 +2454,13 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 ---
 
 ## パッケージ
+
+### 0.38.0 — 入力の禁止パスを契約の `scope.deny` まで運び、warning のある plan を `partial` にした（#301）
+
+- **#301** —— 本文の禁止（見出し・ラベル行）を plan の `scope_deny`（任意 field）に入れ、dispatch が契約の `scope.deny` に書く。
+  運べない禁止と、成果物との矛盾は question で止める。伴走導出は禁止に当たる path を足さない。planner は warning
+  （notice を含む）が1件でもあれば `partial`。`.commandmate/tasks/*.yaml` を planner の入力として直接読むことはしていない
+  （planner の入力は今も Issue fixture / GitHub Issue だけである）。
 
 ### 0.37.0 — 止めて報告した返答を、Claude 以外のワーカーからも読めるようにした（#296）
 

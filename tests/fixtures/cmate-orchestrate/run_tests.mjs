@@ -733,6 +733,19 @@ function runCase(caseId) {
       );
     }
   }
+  // The issue's own prohibitions (Issue #301), which dispatch carries into the
+  // contract's `scope.deny`. `null` asserts the field is ABSENT — the byte shape
+  // of a plan whose issue forbids nothing, unchanged from 0.37.0.
+  if (expect.scope_deny) {
+    for (const [number, files] of Object.entries(expect.scope_deny)) {
+      const issue = plan.issues.find((i) => i.number === Number(number));
+      const actual = issue === undefined ? undefined : (Object.hasOwn(issue, 'scope_deny') ? issue.scope_deny : null);
+      check(
+        issue !== undefined && deepEqual(actual, files),
+        `scope_deny of #${number} ${JSON.stringify(actual)} !== ${JSON.stringify(files)}`,
+      );
+    }
+  }
   // `issues[].questions` is the field DISPATCH reads to refuse an issue, and the
   // only place the planner's reason survives into the plan artifact. Two shapes are
   // asserted (Issue #145): the exact COUNT, because "one warning and one question"
@@ -901,20 +914,20 @@ function runCase(caseId) {
   //     only, which is what keeps a plan with no notice byte-identical to the one
   //     the pre-#199 runner wrote — the property every full-text golden rests on,
   //     and one no golden can measure because no golden case raises a warning.
-  //   * `status` is `partial` iff something blocking was raised. This is the whole
-  //     of the behaviour change, and stating it globally means a code accidentally
-  //     moved into the notice set turns some other case red rather than passing
-  //     quietly. A notice can never mask a blocking warning.
+  //   * `status` is `partial` iff ANY warning was raised (Issue #301, which
+  //     reverted #199's colour rule: a notice-only run used to read `success`,
+  //     and the lead of Kewton/CommandMate#3059 got a green plan whose issue
+  //     prohibitions had been dropped). `severity` ranks what to read first; it
+  //     no longer decides the colour.
   for (const warning of plan.warnings) {
     check(
       !('severity' in warning) || warning.severity === 'notice',
       `warning ${warning.code} has severity ${JSON.stringify(warning.severity)}; the planner emits notice or nothing`,
     );
   }
-  const blocking = plan.warnings.filter((w) => w.severity !== 'notice');
   check(
-    result.status === (blocking.length > 0 ? 'partial' : 'success'),
-    `status "${result.status}" disagrees with ${blocking.length} blocking of ${plan.warnings.length} warning(s)`,
+    result.status === (plan.warnings.length > 0 ? 'partial' : 'success'),
+    `status "${result.status}" disagrees with ${plan.warnings.length} warning(s)`,
   );
 
   // Determinism: a second run into a fresh directory — from the SAME working

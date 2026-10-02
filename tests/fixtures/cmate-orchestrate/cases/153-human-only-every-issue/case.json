@@ -1,5 +1,5 @@
 {
-  "description": "Issue #286: 全 Issue が human-only の plan は wave も merge_order も空になる（plan は出る）。dispatch はこの plan を `plan_invalid` で断る（dispatch-cases d154）。",
+  "description": "Issue #286: 全 Issue が human-only の plan は wave も merge_order も空になる（plan は出る）。dispatch はこの plan を `plan_invalid` で断る（dispatch-cases d154）。 Issue #301 以降、warning（notice を含む）が1件でもある plan の status は `partial` である。",
   "args": [
     "1530",
     "1531",
@@ -12,7 +12,7 @@
   ],
   "expect": {
     "exit": 0,
-    "status": "success",
+    "status": "partial",
     "waves": [],
     "merge_order": [],
     "dispatch_excluded": [

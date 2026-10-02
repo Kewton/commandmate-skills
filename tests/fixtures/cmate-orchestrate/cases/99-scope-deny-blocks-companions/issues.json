@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "number": 611,
+      "title": "fix: greet の挨拶文",
+      "body": "`src/greet.js` の挨拶文を直す。\n\n## 対象ファイル\n- `src/greet.js`\n\n## 変更してはならないパス\n- `test/**`\n\n## 受入条件\n- [ ] `npm test` が exit 0\n",
+      "labels": ["bug"]
+    },
+    {
+      "number": 612,
+      "title": "fix: shout の大文字化",
+      "body": "`src/shout.js` の大文字化を直す。\n\n## 対象ファイル\n- `src/shout.js`\n\n## 受入条件\n- [ ] `npm test` が exit 0\n",
+      "labels": ["bug"]
+    }
+  ]
+}

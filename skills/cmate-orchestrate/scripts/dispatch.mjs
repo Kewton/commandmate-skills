@@ -3103,6 +3103,17 @@ function contractScopeDroppedDetail(number, declared, dropped) {
   );
 }
 
+// `scope.deny` for one issue: the paths the issue itself forbids (Issue #301),
+// carried verbatim from the plan's optional `scope_deny`. The planner already
+// refused every shape the contract cannot carry (`scope_deny_untransferable`),
+// so this only normalises — trim, de-duplicate, sort — like `scope.allow`.
+function contractScopeDeny(issue) {
+  const raw = Array.isArray(issue.scope_deny) ? issue.scope_deny : [];
+  const deny = [...new Set(raw.filter((entry) => typeof entry === 'string').map((entry) => entry.trim()))]
+    .filter((entry) => entry !== '');
+  return deny.sort();
+}
+
 function contractTitle(issue) {
   const title = typeof issue.title === 'string' ? issue.title.trim() : '';
   const raw = redact(title === '' ? `Issue #${issue.number}` : `#${issue.number} ${title}`);
@@ -3530,6 +3541,11 @@ function buildContractGoal(plan, issue, requiredGates = [], workerMethod = null,
     bullets(declaredScopeFiles(issue), 'Unknown — inspect first; do not touch files owned by another issue.'),
     ...derivedScopeNote(issue),
     '',
+    ...(contractScopeDeny(issue).length === 0 ? [] : [
+      '## Files you must not change',
+      bullets(contractScopeDeny(issue), ''),
+      '',
+    ]),
     ...(requiredGates.length === 0 ? [] : [
       '## Acceptance gates this issue declared',
       ...requiredGates.map((id) => `- ${id}`),
@@ -3648,7 +3664,13 @@ function buildTaskContract(plan, issue, inputs, requiredGates = [], workerMethod
     lines.push('  allow:');
     for (const pattern of allow) lines.push(`    - ${yamlString(pattern)}`);
   }
-  lines.push('  deny: []');
+  const deny = contractScopeDeny(issue);
+  if (deny.length === 0) {
+    lines.push('  deny: []');
+  } else {
+    lines.push('  deny:');
+    for (const pattern of deny) lines.push(`    - ${yamlString(pattern)}`);
+  }
   // `verify` is omitted unless the operator named gates: an id that does not
   // exist in the repository's verify.yaml makes `send --contract` exit 2.
   // Omitting the key means "run every declared gate", which is the stricter

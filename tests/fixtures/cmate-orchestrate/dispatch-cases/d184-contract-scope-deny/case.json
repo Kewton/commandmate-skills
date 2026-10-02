@@ -1,0 +1,52 @@
+{
+  "description": "Issue #301（受入条件1）: 本文の禁止パスが実行契約の `scope.deny` に**綴りのまま**載ることを golden で固定する。0.37.0 は `deny: []` を常に書いており、`## 変更してはならないパス` の `test/**` / `.commandmate/**` は plan の段階で `scope_pattern_dropped` として落ちていた（Kewton/CommandMate#3059）。`scope.deny` は `scope.allow` と同じく sort 済みで、goal にも `## Files you must not change` として同じ一覧が載る。禁止の無い契約は従来どおり `deny: []` のまま（他の全 golden が固定している）。",
+  "plan": {
+    "issues_fixture": "dispatch-cases/issues-scope-deny.json",
+    "orchestrate_args": [
+      "640",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      true
+    ],
+    "sent": [
+      640
+    ],
+    "worker_states": {
+      "640": "completed"
+    },
+    "verification_outcomes": {
+      "640": "pass"
+    },
+    "contract_issues": [
+      640
+    ],
+    "contract_contains": {
+      "640": [
+        "  deny:\n    - \".commandmate/**\"\n    - \"test/**\"\n",
+        "## Files you must not change\n  - .commandmate/**\n  - test/**\n"
+      ]
+    },
+    "absent_limitation_codes": [
+      "contract_unsupported",
+      "contract_disabled"
+    ]
+  }
+}
