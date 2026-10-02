@@ -1,0 +1,192 @@
+TAP version 13
+# Subtest: case 1
+ok 1 - case 1
+  ---
+  duration_ms: 0.471208
+  type: 'test'
+  ...
+# Subtest: case 10
+ok 2 - case 10
+  ---
+  duration_ms: 0.48525
+  type: 'test'
+  ...
+# Subtest: case 11
+ok 3 - case 11
+  ---
+  duration_ms: 0.471708
+  type: 'test'
+  ...
+# Subtest: case 12
+ok 4 - case 12
+  ---
+  duration_ms: 0.454083
+  type: 'test'
+  ...
+# Subtest: case 13
+ok 5 - case 13
+  ---
+  duration_ms: 0.452709
+  type: 'test'
+  ...
+# Subtest: case 14
+ok 6 - case 14
+  ---
+  duration_ms: 0.450333
+  type: 'test'
+  ...
+# Subtest: case 15
+ok 7 - case 15
+  ---
+  duration_ms: 0.470458
+  type: 'test'
+  ...
+# Subtest: case 16
+ok 8 - case 16
+  ---
+  duration_ms: 0.459375
+  type: 'test'
+  ...
+# Subtest: case 17
+ok 9 - case 17
+  ---
+  duration_ms: 0.447625
+  type: 'test'
+  ...
+# Subtest: case 18
+ok 10 - case 18
+  ---
+  duration_ms: 0.467584
+  type: 'test'
+  ...
+# Subtest: case 19
+ok 11 - case 19
+  ---
+  duration_ms: 0.452209
+  type: 'test'
+  ...
+# Subtest: case 2
+ok 12 - case 2
+  ---
+  duration_ms: 0.44475
+  type: 'test'
+  ...
+# Subtest: case 20
+ok 13 - case 20
+  ---
+  duration_ms: 0.451166
+  type: 'test'
+  ...
+# Subtest: case 21
+ok 14 - case 21
+  ---
+  duration_ms: 0.428
+  type: 'test'
+  ...
+# Subtest: case 22
+ok 15 - case 22
+  ---
+  duration_ms: 0.580833
+  type: 'test'
+  ...
+# Subtest: case 23
+ok 16 - case 23
+  ---
+  duration_ms: 0.454125
+  type: 'test'
+  ...
+# Subtest: case 24
+ok 17 - case 24
+  ---
+  duration_ms: 0.466667
+  type: 'test'
+  ...
+# Subtest: case 25
+ok 18 - case 25
+  ---
+  duration_ms: 0.425709
+  type: 'test'
+  ...
+# Subtest: case 26
+ok 19 - case 26
+  ---
+  duration_ms: 0.466958
+  type: 'test'
+  ...
+# Subtest: case 27
+ok 20 - case 27
+  ---
+  duration_ms: 0.471792
+  type: 'test'
+  ...
+# Subtest: broken
+not ok 21 - broken
+  ---
+  duration_ms: 0.589709
+  type: 'test'
+  location: '/work/demo/t28.test.mjs:1:65'
+  failureType: 'testCodeFailure'
+  error: '1 == 2'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 2
+  actual: 1
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file:///work/demo/t28.test.mjs:1:93)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1062:25)
+    Test.start (node:internal/test_runner/test:959:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:332:17)
+  ...
+# Subtest: case 3
+ok 22 - case 3
+  ---
+  duration_ms: 0.482084
+  type: 'test'
+  ...
+# Subtest: case 4
+ok 23 - case 4
+  ---
+  duration_ms: 0.478583
+  type: 'test'
+  ...
+# Subtest: case 5
+ok 24 - case 5
+  ---
+  duration_ms: 0.44225
+  type: 'test'
+  ...
+# Subtest: case 6
+ok 25 - case 6
+  ---
+  duration_ms: 0.490875
+  type: 'test'
+  ...
+# Subtest: case 7
+ok 26 - case 7
+  ---
+  duration_ms: 0.472166
+  type: 'test'
+  ...
+# Subtest: case 8
+ok 27 - case 8
+  ---
+  duration_ms: 0.456166
+  type: 'test'
+  ...
+# Subtest: case 9
+ok 28 - case 9
+  ---
+  duration_ms: 0.48
+  type: 'test'
+  ...
+1..28
+# tests 28
+# suites 0
+# pass 27
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 116.934209

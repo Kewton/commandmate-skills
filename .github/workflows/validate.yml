@@ -237,3 +237,18 @@ jobs:
       # repository.
       - name: Run the cmate-worktree-cleanup suite
         run: bash tests/fixtures/cmate-worktree-cleanup/run_tests.sh
+
+      # cmate-acceptance-test ships its runner (scripts/run-acceptance.mjs)
+      # together with this suite (#299). Before it, every agent wrote its own
+      # judge, and one read `node --test` spec output (`ℹ pass 28`) as TAP
+      # (`# pass 28`) and called an exit-0, 28/28 run NO-GO. The suite checks
+      # that the exit code alone decides pass / fail for spec, TAP and
+      # count-less output, that every document fits acceptance-result.v1 and
+      # the verdict rubric, and injects the mutation that judges by TAP counts
+      # — the spec case must fail against it. Wired here and in
+      # .commandmate/verify.yaml in the same change that adds the suite; the
+      # defect class of #57/#69, #70, #241 is a suite named nowhere.
+      #
+      # bash, node (set up above) and stdlib-only python3; no network.
+      - name: Run the cmate-acceptance-test suite
+        run: bash tests/fixtures/cmate-acceptance-test/run_tests.sh

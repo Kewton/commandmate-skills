@@ -123,6 +123,28 @@ Skill 自身が実行してよいのは、manifest の `requirements.commands` �
 ### Step 4 — 実行と evidence 収集
 
 確認済みの check を、plan の順に実行する。1 件ごとに evidence を作る。
+
+**合否は exit code で判定する。件数は参考。** command・test を実行した check の
+`pass` / `fail` は、その command の exit code（0 なら pass、0 以外なら fail）だけで
+決める。出力から読んだテスト件数（`node --test` の spec reporter なら `ℹ tests 28`、
+TAP なら `# tests 28`）は参考情報であり、判定に使わない。reporter の形式は実行環境で
+変わるので、件数の読み取りに判定を依存させると、exit 0 の実行を NO-GO と誤る。
+
+command で検証する受入条件は、同梱の runner で実行して result document を書く。
+判定用のスクリプトをその場で自作しない。
+
+```
+node skills/cmate-acceptance-test/scripts/run-acceptance.mjs \
+  --plan <plan.json> --out <result_path> [--cwd <target worktree>]
+```
+
+runner は受入条件 1 行ごとに渡された command を実行し、exit code・実行時間・出力の
+末尾を evidence にして、`schemas/acceptance-result.v1.json` に適合する JSON と
+§7 の summary を出す。`status` / `verdict` は
+[`references/verdict-rubric.md`](./references/verdict-rubric.md) の決定表どおりに導く。
+plan の形式と runner が判定しないもの（command の無い条件、未承認の
+`confirm_required` など）は [`references/runner.md`](./references/runner.md) にある。
+plan に入れる command は §3 で利用者の確認を取ったものに限る。
 evidence の type ごとの必須項目、flaky の記録方法、redaction 規則は
 [`references/evidence.md`](./references/evidence.md) が正本である。
 
@@ -210,6 +232,8 @@ version ごとの変更点・期待効果・制約は
 - [`references/test-plan.md`](./references/test-plan.md) — 分類と risk tier、cleanup plan
 - [`references/evidence.md`](./references/evidence.md) — evidence の必須項目と redaction
 - [`references/verdict-rubric.md`](./references/verdict-rubric.md) — 決定表と summary 雛形
+- [`references/runner.md`](./references/runner.md) — runner の plan 形式と判定規則
+- [`scripts/run-acceptance.mjs`](./scripts/run-acceptance.mjs) — runner（`node` で呼ぶ。実行 bit 無し）
 - [`references/agent-compatibility.md`](./references/agent-compatibility.md) — Agent 差異と reload
 - [`references/changelog.md`](./references/changelog.md) — version 履歴・期待効果・制約
 - [`schemas/acceptance-result.v1.json`](./schemas/acceptance-result.v1.json) — result document schema
