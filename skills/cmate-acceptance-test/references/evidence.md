@@ -33,6 +33,13 @@ evidence の目的は「そう判定した理由」を再構成できるよう�
 exit code を取得できなかった場合（timeout、強制終了）は `exit_code` を `null` にし、
 `summary` にその理由を書く。0 と書かない。
 
+command・test を実行した check の `pass` / `fail` は **exit code で判定する**
+（0 なら pass、0 以外なら fail）。出力から読んだテスト件数は参考情報として `summary`
+に書いてよいが、判定には使わない。件数の行は reporter ごとに形式が違い
+（`node --test` の spec は `ℹ pass 28`、TAP は `# pass 28`）、読み違えると exit 0 の
+実行を fail と誤る（commandmate-skills#299）。件数と exit code が食い違うときは
+exit code を採り、食い違いを `notes` に書く。
+
 ### `test`
 
 - `framework` — 実行した test runner

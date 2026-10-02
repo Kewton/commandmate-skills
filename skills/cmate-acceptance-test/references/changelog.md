@@ -4,6 +4,40 @@ Catalog の `changelog` はこの Skill の release tag の annotation から生
 その annotation の元になる記述をここに置く。install 前の利用者が読む前提で書く。
 **新しい version を上に置く。version を上げたらこの file も同じ commit で更新する。**
 
+## 0.3.0
+
+command で検証する受入条件のための runner（`scripts/run-acceptance.mjs`）を同梱し、
+**合否は exit code で判定する。件数は参考** を SKILL.md と `evidence.md` に明記した
+（#299）。
+
+### なぜ
+
+cmate-orchestrate 0.37.0 の UAT（2026-10-02、4 Issue）で、開発リーダーがこの Skill を
+読んだうえで受入判定を自作スクリプトで行い、`node --test` の件数行を読み違えた
+（既定の spec reporter は `ℹ pass 28`、スクリプトは TAP の `# pass 28` を探していた）。
+`npm test` が exit 0・28/28 だったのに 4 件とも NO-GO と判定し、リーダーが自分で
+気付いて直した。結果は正しかったが、判定の正しさが書いた人の注意力に依っていた。
+
+### 何が変わるか
+
+- **runner が受入条件 1 行ごとに command を実行し、result document を書く。**
+  evidence は実行した command・exit code・実行時間・出力の末尾（3000 文字まで）。
+  `status` / `verdict` は `verdict-rubric.md` の決定表どおりに導き、runner 独自の
+  規則は無い。plan の形式は `references/runner.md`。
+- **判定は exit code だけで決まる。** spec と TAP どちらの件数行も、読めれば evidence の
+  `summary` に参考として書くが、読めなくても判定は変わらない。
+- **schema は変わらない。** `acceptance-result.v1` に field を足していないので、
+  cmate-orchestrate の uat runner はそのまま読める。
+- Node 22 以上が要る（`requirements.commands` に `node` を追加）。runner は標準
+  ライブラリだけで動き、実行 bit は無い（`node` 経由で呼ぶ）。`declared_risk` は
+  `moderate` のまま。
+
+### 使う側への影響
+
+- 手順・outcome・決定表は変わらない。0.2.x の result document はそのまま有効である。
+- command の無い条件、未承認の `confirm_required`、手動確認は runner が `pass` に
+  しない（`manual_pending` / `not_run`）。手動確認は従来どおり人が行う。
+
 ## 0.2.0
 
 `acceptance-result.v1` の `skill.id` を、この Skill の名前に固定した `const` から

@@ -9,6 +9,10 @@ cases/<case-id>/
   expected-result.json  golden な result document
 rubric.md               採点基準（hard requirement と graded criteria）
 check_result.py         採点器。schema・rubric 不変条件・期待値を判定する
+run_tests.sh            runner（scripts/run-acceptance.mjs）の回帰 suite（#299）。
+                        golden の採点も含む。verify.yaml / validate.yml から呼ばれる
+check_runner_result.py  runner が書いた document を check_result.py の検査で採点する
+node-test-output/       記録済みの `node --test` 出力（spec / TAP、exit 0 / 1）
 ```
 
 ## 実行

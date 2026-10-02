@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-acceptance-test
 name: cmate-acceptance-test
-version: 0.2.1
+version: 0.3.0
 summary: Issue の受入条件を証跡付きで検証し、Go / Conditional Go / No-Go を versioned な result として返す。
 description: |-
   対象 Issue の受入条件を自動検証と手動確認に分け、command exit code、test 結果、diff、手動観察を evidence として構造化したうえで、受入の可否を判定する手順である。
@@ -16,6 +16,7 @@ capabilities:
   - pass / fail / flaky / blocked / not_run / manual_pending を区別して判定する
   - go / conditional_go / no_go を、決定表に従って再現可能に導出する
   - versioned な result document と human-readable summary を出力する
+  - command で検証する受入条件を、exit code を一次証拠として判定する runner（scripts/run-acceptance.mjs）を同梱する
 expected_outcomes:
   - 受入判断の根拠が、実行者の記憶ではなく evidence として残る
   - 未検証・環境依存・flaky・未承認が pass に丸められなくなる
@@ -59,6 +60,8 @@ requirements:
   commands:
     - name: gh
     - name: git
+    - name: node
+      version_range: '>=22.0.0'
   network_hosts:
     - api.github.com
     - github.com
@@ -71,14 +74,15 @@ declared_permissions:
 declared_risk: moderate
 risk_rationale: >-
   Executes processes by design: read-only gh and git, plus the project test
-  commands the user passes in and confirms. Writes only the result document and
-  the evidence directory. Network use is limited to reading the issue. Environment
-  variables are checked for presence, never read into evidence. No script file and
-  no executable file ships in this package.
+  commands the user passes in and confirms, run directly or through the bundled
+  runner scripts/run-acceptance.mjs (Node standard library only, no executable
+  bit, invoked via node). Writes only the result document and the evidence
+  directory. Network use is limited to reading the issue. Environment variables
+  are checked for presence, never read into evidence. No executable file ships.
 files:
   - path: SKILL.md
-    sha256: 0870823a8ef3f79b269f12e7dafc2dfbcb2e35968e1690721ecc9a0de262eb92
-    size: 13402
+    sha256: 684c19c03253b27672428d6a27d033674e418c611f121e4f1509a1dd59d5cfa2
+    size: 15078
     kind: skill_md
     executable: false
     script: false
@@ -89,14 +93,20 @@ files:
     executable: false
     script: false
   - path: references/changelog.md
-    sha256: 22beca83250a7467b8e6a95ae4ccf361ecf96e8f5f1ef651061cf208255720f5
-    size: 8693
+    sha256: 44b9ed9a5d01015fb87b6c5e90c19bb7e8222d03891c92aeb1c0969f2ffba8c1
+    size: 10801
     kind: instruction
     executable: false
     script: false
   - path: references/evidence.md
-    sha256: 961a1ec2523c0f447cd46a927fd46fe521996669345290a4557e704472dda969
-    size: 4584
+    sha256: 2c0a9066815e979d019ffe361b1e6f280235b9fbf253eb6ed95fa800f1509e46
+    size: 5152
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/runner.md
+    sha256: 26eaf43ae58af96d3a10879f25c8417e65e730382083816153bb8962abc5b586
+    size: 5908
     kind: instruction
     executable: false
     script: false
@@ -118,3 +128,9 @@ files:
     kind: asset
     executable: false
     script: false
+  - path: scripts/run-acceptance.mjs
+    sha256: 6034e165f58eb2390535bc8e7a2abd8d6693371247c8ab55831b6dfb101abbd9
+    size: 23768
+    kind: script
+    executable: false
+    script: true

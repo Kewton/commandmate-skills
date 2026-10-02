@@ -79,6 +79,19 @@
 #   uat-fixtures                  25s     (2026-09-16; it waits on real loopback
 #                                          sockets and on TERM grace periods)
 #   worktree-cleanup-fixtures      7s     (2026-09-30)
+#   acceptance-test-fixtures       7s     (2026-10-02; real `node --test` runs and
+#                                          a 1s timeout case)
+#
+# acceptance-test-fixtures (commandmate-skills#299) ships with the runner it
+# tests, wired here and in validate.yml in the same change. cmate-acceptance-test
+# had no script: an agent wrote its own judge, read `node --test` spec output
+# (`ℹ pass 28`) as if it were TAP (`# pass 28`) and called an exit-0, 28/28 run
+# NO-GO. The suite replays recorded spec and TAP output, runs real `node --test`
+# with both reporters, holds every document to the acceptance-result.v1 schema
+# and the verdict rubric (it also runs the long-unwired golden-case grader
+# check_result.py), and injects the mutation that judges by TAP counts instead
+# of the exit code — the spec case must fail against it. bash, node and python3;
+# no network.
 #
 # The runner reads a YAML subset: 2-space indent, single-line scalars, no inline
 # comments. Keep it that way — a file it cannot parse is exit 2, not a partial run.
@@ -125,6 +138,9 @@ gates:
     timeoutSec: 600
   - id: worktree-cleanup-fixtures
     command: "bash tests/fixtures/cmate-worktree-cleanup/run_tests.sh"
+    timeoutSec: 300
+  - id: acceptance-test-fixtures
+    command: "bash tests/fixtures/cmate-acceptance-test/run_tests.sh"
     timeoutSec: 300
 options:
   baseRef: origin/main

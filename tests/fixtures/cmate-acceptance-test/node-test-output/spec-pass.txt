@@ -1,0 +1,36 @@
+✔ case 1 (0.458708ms)
+✔ case 10 (0.471167ms)
+✔ case 11 (0.834459ms)
+✔ case 12 (0.480833ms)
+✔ case 13 (0.468875ms)
+✔ case 14 (0.453541ms)
+✔ case 15 (0.473125ms)
+✔ case 16 (0.481167ms)
+✔ case 17 (0.484625ms)
+✔ case 18 (0.458834ms)
+✔ case 19 (0.4495ms)
+✔ case 2 (0.473042ms)
+✔ case 20 (0.490041ms)
+✔ case 21 (0.450375ms)
+✔ case 22 (0.476167ms)
+✔ case 23 (0.459709ms)
+✔ case 24 (0.50925ms)
+✔ case 25 (0.439ms)
+✔ case 26 (0.464084ms)
+✔ case 27 (0.459958ms)
+✔ case 28 (0.472459ms)
+✔ case 3 (0.488ms)
+✔ case 4 (0.4965ms)
+✔ case 5 (0.463167ms)
+✔ case 6 (0.439083ms)
+✔ case 7 (0.480209ms)
+✔ case 8 (0.484375ms)
+✔ case 9 (0.474ms)
+ℹ tests 28
+ℹ suites 0
+ℹ pass 28
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 109.694792

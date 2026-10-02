@@ -1,0 +1,53 @@
+✔ case 1 (0.440625ms)
+✔ case 10 (1.069666ms)
+✔ case 11 (1.477125ms)
+✔ case 12 (0.473709ms)
+✔ case 13 (0.672666ms)
+✔ case 14 (0.437625ms)
+✔ case 15 (0.50675ms)
+✔ case 16 (0.465167ms)
+✔ case 17 (0.427916ms)
+✔ case 18 (0.481875ms)
+✔ case 19 (0.499541ms)
+✔ case 2 (0.486125ms)
+✔ case 20 (0.444417ms)
+✔ case 21 (0.44725ms)
+✔ case 22 (0.454709ms)
+✔ case 23 (0.446875ms)
+✔ case 24 (0.46375ms)
+✔ case 25 (0.456625ms)
+✔ case 26 (0.459292ms)
+✔ case 27 (0.46725ms)
+✖ broken (0.60125ms)
+✔ case 3 (0.434166ms)
+✔ case 4 (0.56875ms)
+✔ case 5 (0.4825ms)
+✔ case 6 (0.4705ms)
+✔ case 7 (0.466834ms)
+✔ case 8 (0.492042ms)
+✔ case 9 (0.472125ms)
+ℹ tests 28
+ℹ suites 0
+ℹ pass 27
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 118.691625
+
+✖ failing tests:
+
+test at t28.test.mjs:1:65
+✖ broken (0.60125ms)
+  AssertionError [ERR_ASSERTION]: 1 == 2
+      at TestContext.<anonymous> (file:///work/demo/t28.test.mjs:1:93)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1062:25)
+      at Test.start (node:internal/test_runner/test:959:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:332:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: '=='
+  }
