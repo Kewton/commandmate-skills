@@ -1,0 +1,106 @@
+{
+  "description": "Issue #303 (a): 検証不合格 → 再指示の後のターンは、`wait --verify` ではなく `wait`（`--verify` なし）→ `commandmate verify <id> --task <taskId> --json` で裁定する。1 回目の裁定で契約 task は succeeded / failed に閉じ、素の send は task を作らないので、2 回目以降の `wait --verify` は task に紐づかない（scope が SKIP、env-clean がベースライン無しで ERROR → exit 20、ゲートは verify.yaml の全部。Kewton/CommandMate#3118）。fake CLI は `cli_verify_task: true` で `verify --help` に `--task` を載せる（CommandMate 0.43.0+）。#201 は 20 → 20 → 0: 1 ターン目は従来どおり `wait --verify`、失敗ゲートの内訳は `verify --task` で読み、2 ターン目の 20 は `verify --task` の run 文書を**そのまま**再指示に使う（再実行しないので verify は 1 ターン 1 回）、3 ターン目の 0 で pass。呼び出しの並びを fake CLI の記録で完全一致として固定する。#200 は 1 ターン目で合格する対照で、`wait --verify` 1 回だけ。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [
+      true,
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      201,
+      200
+    ],
+    "send_counts": {
+      "201": 3,
+      "200": 1
+    },
+    "worker_states": {
+      "201": "completed",
+      "200": "completed"
+    },
+    "verification_outcomes": {
+      "201": "pass",
+      "200": "pass"
+    },
+    "verification_gates": {
+      "201": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "baseline",
+          "verdict": "pass",
+          "origin": "repo"
+        }
+      ],
+      "200": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "baseline",
+          "verdict": "pass",
+          "origin": "repo"
+        }
+      ]
+    },
+    "verification_checks_include": {
+      "201": [
+        "commandmate verify --task --json → exit 0"
+      ],
+      "200": [
+        "commandmate wait --verify → exit 0"
+      ]
+    },
+    "task_ids": {
+      "201": "task-issue-201",
+      "200": "task-issue-200"
+    },
+    "verification_call_sequence": {
+      "201": [
+        "wait --verify",
+        "verify --task task-issue-201",
+        "wait",
+        "verify --task task-issue-201",
+        "wait",
+        "verify --task task-issue-201"
+      ],
+      "200": [
+        "wait --verify"
+      ]
+    },
+    "absent_limitation_codes": [
+      "verify_task_unsupported",
+      "contract_unsupported"
+    ]
+  }
+}

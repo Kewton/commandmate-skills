@@ -81,7 +81,7 @@
         "sent": [],
         "no_worker_driven": true,
         "cli_subcommand_counts": {
-          "verify": 3,
+          "verify": 4,
           "capture": 0,
           "respond": 0
         },

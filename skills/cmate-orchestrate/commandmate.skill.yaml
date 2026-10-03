@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-orchestrate
 name: cmate-orchestrate
-version: 0.38.0
+version: 0.39.0
 summary: 複数 Issue の並列実行を dry-run で計画し、承認後に実行契約付きで dispatch して検証 exit code で裁定し、pass 後は承認と CI の 2 gate で PR 作成・guarded merge、納品後は UAT と回数上限つき修正ループを回す。UAT の意味ゲートには cmate-acceptance-test の別途 install が要る。
 description: >-
   複数 Issue を並列で進めるための、計画（dry-run）・その承認後の監督付き実行・verification pass 後の
@@ -161,14 +161,14 @@ files:
     executable: false
     script: false
   - path: references/codes-and-recovery.md
-    sha256: b775f0591e0d4fbf7a386d1f94723df665fa4fd5ff1b029812c807a90684d98f
-    size: 113580
+    sha256: 7e8fd8af7695380f82b954833ab365122823236c9d752bb72d18c55184716484
+    size: 114205
     kind: instruction
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: b86041feec4c28a71fa3441c0532c1f65f7e3dd46b7d94a0a9c3ac10d4556e7d
-    size: 172761
+    sha256: bb7bc1f70fa39b452cf0f43ecd1405fd744da0f601474d261af56de851fdf9a7
+    size: 177715
     kind: instruction
     executable: false
     script: false
@@ -203,8 +203,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 02af18f999eeceb9097228f17729e8bdc03fa4b74c26f681b4fd5107b916b560
-    size: 272530
+    sha256: 97b64ee7185123ff48f4d79dd37b76e9da29a207757bb0965ca3c91ca3c19325
+    size: 275397
     kind: instruction
     executable: false
     script: false
@@ -263,8 +263,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: 44bd597c87793b4d98d95f5b6bc6aba7c1ee84a97ea5e7fca126540edd084df8
-    size: 502536
+    sha256: f58853ab1b5427b7affc234b82c5c9a98bcb6a8b2cdd391335ed4f0b83fe7eda
+    size: 509491
     kind: script
     executable: true
     script: true
@@ -275,7 +275,7 @@ files:
     executable: true
     script: true
   - path: scripts/lib.mjs
-    sha256: a9f89ae037a7417ca9615155e383838f57d9f4e420b71ed86886b819c3d310da
+    sha256: c878287becbfefc7389d5c45bb1ab190983e6c6e849c71215180cfcb68e22a1b
     size: 77707
     kind: script
     executable: false

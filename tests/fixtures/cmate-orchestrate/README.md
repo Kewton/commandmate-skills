@@ -68,6 +68,13 @@ fake-cli.mjs                    commandmate/git/gh を模した stub（failure i
                                 最後に spread するので `cliToolId: null` のような**欠落**も書ける。
                                 hook の timestamp は run 中に決まるので、`"@now"` / `"@long-ago"` の
                                 2 token が capture 時に解決される（最後の send の前後を書き分けるため）
+                                `cli_verify_task: true` は `verify --help` に `--task` を載せ、`verify --task
+                                <taskId>` を受ける CLI（CommandMate 0.43.0+、#303）を模す。無ければ `--task` を
+                                拒否する古い CLI である（#303 以前の scenario はすべてこちら）。`--task` 付きの
+                                run は、そのターンの `wait --verify` と同じ `verify_exits` / `failed_gates_by_turn`
+                                で裁定する。dispatch case の `verification_call_sequence` は、Issue ごとの
+                                `wait` / `verify`（`--help` を除く）を `--verify` / `--task <id>` 付きの綴りで
+                                **順序どおり完全一致**で照合する
 profiles/                       独自 profile の例（unverified）
 run_tests.mjs                   fixture test harness（Node stdlib のみ）
 rubric.md                       人が見る採点基準

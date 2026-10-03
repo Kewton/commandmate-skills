@@ -1,0 +1,78 @@
+{
+  "description": "Issue #303 (d): exit 20 の失敗ゲートの内訳（describeFailingGates）は、`verify --task` を持つ CLI では `verify <id> --task <taskId> --json` で読む。1 ターン目の `wait --verify` の裁定で task は閉じているので、`--task` の無い `verify --json` は契約に紐づかない別の run になり、名指すゲートが契約の `verify.gates` ではなく verify.yaml の全部になる。`--max-turns 1` なので再指示は送らず、呼び出しは `wait --verify` → `verify --task` の 2 つだけ。裁定は従来どおり wait の exit code（fail）のまま。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "1"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "verification_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      201
+    ],
+    "never_sent": [
+      200
+    ],
+    "send_counts": {
+      "201": 1
+    },
+    "worker_states": {
+      "201": "completed"
+    },
+    "verification_outcomes": {
+      "201": "fail"
+    },
+    "verification_gates": {
+      "201": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "lint",
+          "verdict": "fail",
+          "origin": "repo"
+        }
+      ]
+    },
+    "verification_checks_include": {
+      "201": [
+        "gate lint: failed (exit 1)"
+      ]
+    },
+    "verification_call_sequence": {
+      "201": [
+        "wait --verify",
+        "verify --task task-issue-201"
+      ]
+    },
+    "verify_calls": 1,
+    "absent_limitation_codes": [
+      "verify_task_unsupported"
+    ]
+  }
+}

@@ -49,7 +49,7 @@
         "verified": [102],
         "never_verified": [100, 101],
         "no_worker_driven": true,
-        "cli_subcommand_counts": { "capture": 0, "respond": 0, "verify": 1, "send": 1, "wait": 1 },
+        "cli_subcommand_counts": { "capture": 0, "respond": 0, "verify": 2, "send": 1, "wait": 1 },
         "worker_states": { "100": "completed", "101": "completed", "102": "completed" },
         "verification_outcomes": { "100": "pass", "101": "pass", "102": "pass" },
         "verification_checks_include": {

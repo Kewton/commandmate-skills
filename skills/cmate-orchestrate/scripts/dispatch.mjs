@@ -2936,6 +2936,61 @@ function probeContractSupport(inputs) {
   };
 }
 
+// Can a verdict be bound to a contract task that is no longer in flight? (#303)
+//
+// `wait --verify` binds only to a task that is still running / waiting_input /
+// verifying. The first verdict moves the task to succeeded / failed, and a plain
+// re-instruction `send` creates no task, so every LATER `wait --verify` runs
+// detached: its scope gate is SKIPped instead of judged against the contract, its
+// env-clean gate has no baseline (an ERROR, so exit 20 on a fixed worker), and its
+// gate set is the whole verify.yaml rather than the contract's `verify.gates`
+// (Kewton/CommandMate#3118). `verify <id> --task <taskId>` (CommandMate 0.43.0+)
+// binds to a finished task too, and without `--gates` runs the contract's gates
+// plus the mandatory builtins.
+//
+// Asked ONCE per process, lazily, and the same way `probeContractSupport` asks:
+// does `verify --help` list `--task` (a version number is never compared). Lazily
+// because only a run that re-judges needs the answer, and a run that passes on its
+// first turn must call exactly what it called before.
+let verifyTaskSupported = null;
+function probeVerifyTaskSupport(inputs) {
+  if (verifyTaskSupported === null) {
+    const help = runCm(inputs, ['verify', '--help']);
+    verifyTaskSupported = help.ok && `${help.stdout}${help.stderr}`.includes('--task');
+  }
+  return verifyTaskSupported;
+}
+
+// Set when a verdict that should have been bound to the contract task was read
+// from an unbound run because the CLI has no `verify --task`. Stated once per
+// report (recordVerifyTaskBinding), never per worker: it is a fact about the CLI.
+let unboundRejudgeUsed = false;
+
+function recordVerifyTaskBinding(report) {
+  if (!unboundRejudgeUsed) return;
+  report.limitations.push({
+    code: 'verify_task_unsupported',
+    detail: 'a verdict reached after a re-instruction was NOT bound to the contract task: this commandmate has no `verify --task` (CommandMate < 0.43.0), '
+      + 'so it was read from `wait --verify` / `verify --json`, which cannot bind to a task the first verdict already closed — its scope gate is not '
+      + 'judged against the contract, env-clean has no baseline, and the gates run are verify.yaml\'s rather than the contract\'s verify.gates',
+  });
+}
+
+// The task id a `verify --task` may be given, or null when the run must stay on
+// the unbound path. Only a REAL task id qualifies: without a contract `task_id`
+// carries the worktree id (no task exists), and that must never be passed as one.
+// `rejudge` marks a call whose VERDICT should have been bound (a turn after a
+// re-instruction, a --reverify): only those make an unsupporting CLI a limitation.
+// Naming the failing gates of a first-turn 20 was unbound before #303 as well.
+function bindableTaskId(inputs, taskId, worktreeId, { rejudge = false } = {}) {
+  if (typeof taskId !== 'string' || taskId === '' || taskId === worktreeId) return null;
+  if (!probeVerifyTaskSupport(inputs)) {
+    if (rejudge) unboundRejudgeUsed = true;
+    return null;
+  }
+  return taskId;
+}
+
 // =============================================================================
 // Execution contract generation (CommandMate task contract v1)
 // =============================================================================
@@ -4621,6 +4676,18 @@ function gatesFromWaitOutput(output, requiredGateIds = new Set()) {
   return capGates(gates);
 }
 
+// The run document `commandmate verify … --json` printed, or null. Parsed
+// regardless of exit status: `verify` exits WITH the verdict, so a failing run
+// exits 20 and still prints its document.
+function parseVerifyDocument(stdout) {
+  try {
+    const run = JSON.parse(stdout);
+    return run !== null && typeof run === 'object' ? run : null;
+  } catch {
+    return null;
+  }
+}
+
 // `commandmate verify <worktree-id> --json` prints the verification run document
 // (CommandMate's VerificationRunView), whose `gates[]` is what turns "verification
 // failed" into something a worker can act on.
@@ -4633,24 +4700,37 @@ function gatesFromWaitOutput(output, requiredGateIds = new Set()) {
 // Async on purpose: it runs inside the per-worker supervision that a wave drives
 // concurrently (#1474). A synchronous execFileSync here would block the event loop
 // for a whole gate run and stall every other worker in the wave.
-async function describeFailingGates(inputs, worktreeId) {
-  // `verify` exits with the verdict, so on the very runs this function exists to
-  // read — a failing gate — the exit is 20, not 0. The run document is still on
-  // stdout; parse it regardless of exit status (parseCliJson's ok-check would
-  // discard every failing run and leave the re-instruction with no gate names).
-  const result = await runCmAsync(inputs, ['verify', worktreeId, '--json']);
+//
+// Bound to the contract task when the CLI can (#303): `verify --task` judges the
+// contract's own gates, so the gates it names are the ones the verdict was about,
+// not verify.yaml's whole list. And when the verdict ITSELF came from a
+// `verify --task --json` run (a turn after a re-instruction), that document is
+// passed in as `boundRun` and read as it is — running the gates again would only
+// produce a second run to disagree with the first.
+async function describeFailingGates(inputs, worktreeId, { taskId = null, boundRun } = {}) {
   let run = null;
-  try {
-    run = JSON.parse(result.stdout);
-  } catch {
-    run = null;
+  let source = 'commandmate verify --json';
+  let verdictSource = 'commandmate wait --verify';
+  if (boundRun !== undefined) {
+    run = boundRun;
+    source = 'commandmate verify --task --json';
+    verdictSource = source;
+  } else {
+    const boundTask = bindableTaskId(inputs, taskId, worktreeId);
+    if (boundTask !== null) source = 'commandmate verify --task --json';
+    // `verify` exits with the verdict, so on the very runs this function exists to
+    // read — a failing gate — the exit is 20, not 0. The run document is still on
+    // stdout; parse it regardless of exit status (parseCliJson's ok-check would
+    // discard every failing run and leave the re-instruction with no gate names).
+    const result = await runCmAsync(inputs, ['verify', worktreeId, ...(boundTask === null ? [] : ['--task', boundTask]), '--json']);
+    run = parseVerifyDocument(result.stdout);
   }
   const gates = run && Array.isArray(run.gates) ? run.gates : null;
   if (!gates) {
     return {
       failing: [],
-      checks: [`commandmate wait --verify → exit ${VERIFY_EXIT_FAILED} (a gate failed; the breakdown could not be read from commandmate verify --json)`],
-      summary: 'the failing gates could not be read from commandmate verify --json',
+      checks: [`${verdictSource} → exit ${VERIFY_EXIT_FAILED} (a gate failed; the breakdown could not be read from ${source})`],
+      summary: `the failing gates could not be read from ${source}`,
     };
   }
   const failing = gates
@@ -4675,7 +4755,7 @@ async function describeFailingGates(inputs, worktreeId) {
   if (failing.length === 0) {
     return {
       failing,
-      checks: [`commandmate wait --verify → exit ${VERIFY_EXIT_FAILED} (a gate failed; the confirming commandmate verify run named none)`],
+      checks: [`${verdictSource} → exit ${VERIFY_EXIT_FAILED} (a gate failed; the confirming commandmate verify run named none)`],
       summary: 'the confirming verify run named no failing gate',
     };
   }
@@ -4885,6 +4965,11 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
   // Asking twice would manufacture the very "no verdict" state we escalate on.
   let verdict = null;
   let passed = false;
+  // Whether a verdict (20 / 21) has already been reached, which CLOSED the
+  // contract task (#303). From then on a `wait --verify` cannot bind to it, so
+  // the verdict of every later turn is read from `verify --task` when the CLI
+  // has it. A pass needs no such flag: nothing is judged after a pass at all.
+  let verdictReached = false;
   // The previous turn's scope violations (ADR section 6 / Issue #148), kept so
   // this loop can tell a worker that is CONVERGING from one that is repeating
   // itself. Reset by every turn that is not a scope-gate failure, so only two
@@ -4918,7 +5003,13 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
         note: `the --wall-clock-budget was exhausted after ${turns} turn(s); supervision stopped without waiting for this worker`,
       };
     }
-    const waitArgs = passed
+    // The task a turn after a re-instruction is judged against (#303), or null:
+    // the first turn's `wait --verify` is still bound (the task is in flight),
+    // and a CLI without `verify --task` keeps the unbound `wait --verify`.
+    const boundTask = !passed && verdictReached
+      ? bindableTaskId(inputs, taskId, worktreeId, { rejudge: true })
+      : null;
+    const waitArgs = passed || boundTask !== null
       ? ['wait', worktreeId, '--on-prompt', 'agent', '--timeout', String(inputs.waitTimeout)]
       : ['wait', worktreeId, '--on-prompt', 'agent', '--verify', '--timeout', String(inputs.waitTimeout)];
     const waited = await runCmAsync(inputs, waitArgs);
@@ -4933,7 +5024,29 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
         note: `the --wall-clock-budget was exhausted during turn ${turns}; the pending \`commandmate wait\` was cut short and this worker was left mid-supervision`,
       };
     }
-    const code = waited.ok ? VERIFY_EXIT_PASS : (waited.status ?? null);
+    let code = waited.ok ? VERIFY_EXIT_PASS : (waited.status ?? null);
+    // Where this turn's verdict was read: the wait's own exit code and GATE lines,
+    // or — on a bound re-judgment — the exit code and run document of
+    // `verify --task`. Its exit vocabulary is the wait's (0 / 20 / 21 / 99 / other),
+    // so every branch below reads `code` the same way whichever produced it.
+    let judged = waited;
+    let boundRun;
+    let verdictSource = 'commandmate wait --verify';
+    if (boundTask !== null && code === WAIT_EXIT_IDLE) {
+      judged = await runCmAsync(inputs, ['verify', worktreeId, '--task', boundTask, '--json']);
+      if (wallClockExhausted()) {
+        return {
+          state: 'timeout', taskId, verdict, notJudged: false, promptExcerpt: null, nudges: turns - 1, autoResponded,
+          note: `the --wall-clock-budget was exhausted during turn ${turns}; the pending \`commandmate verify --task\` was cut short and this worker was left mid-supervision`,
+        };
+      }
+      boundRun = parseVerifyDocument(judged.stdout);
+      code = judged.ok ? VERIFY_EXIT_PASS : (judged.status ?? null);
+      verdictSource = 'commandmate verify --task --json';
+    }
+    const turnGates = () => (boundRun !== undefined
+      ? gatesFromVerifyDocument(boundRun, requiredGateIds)
+      : gatesFromWaitOutput(waitStreams(waited), requiredGateIds));
     const done = (state, note) => ({ state, taskId, verdict, notJudged: false, promptExcerpt: null, nudges: turns - 1, autoResponded, note: `${note}${scopeCutClause()}` });
 
     if (code === WAIT_EXIT_PROMPT) {
@@ -4963,7 +5076,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
         ran: true,
         outcome: 'not_run',
         gates: [],
-        checks: [`commandmate wait --verify → exit ${VERIFY_EXIT_NO_VERDICT} (the verification run ended error/cancelled; no verdict was reached)`],
+        checks: [`${verdictSource} → exit ${VERIFY_EXIT_NO_VERDICT} (the verification run ended error/cancelled; no verdict was reached)`],
       };
       const committed = await hasNewCommit(inputs, worktreePath, baseSha);
       return {
@@ -4979,13 +5092,15 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
         // The GATE lines of THIS passing run are the only safe source of the
         // gate list: a `commandmate verify` after a pass cannot bind to the
         // succeeded task and manufactures exit 99 (#1620).
-        const passGates = gatesFromWaitOutput(waitStreams(waited), requiredGateIds);
+        // On a bound re-judgment the source is the `verify --task` document of
+        // this very run, for the same reason.
+        const passGates = turnGates();
         verdict = {
           ran: true,
           outcome: 'pass',
           gates: passGates.gates,
           checks: [
-            `commandmate wait --verify → exit ${VERIFY_EXIT_PASS} (every declared gate passed)`,
+            `${verdictSource} → exit ${VERIFY_EXIT_PASS} (every declared gate passed)`,
             ...droppedGateChecks(passGates),
           ],
         };
@@ -5018,13 +5133,14 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
     if (code === VERIFY_EXIT_NOT_STARTED) {
       // work-evidence found no commit and no change: the worker has not started,
       // or has nothing to show yet. Never a pass.
-      const startGates = gatesFromWaitOutput(waitStreams(waited), requiredGateIds);
+      const startGates = turnGates();
+      verdictReached = true;
       verdict = {
         ran: true,
         outcome: 'fail',
         gates: startGates.gates,
         checks: [
-          `commandmate wait --verify → exit ${VERIFY_EXIT_NOT_STARTED} (work-evidence found no commit and no uncommitted change)`,
+          `${verdictSource} → exit ${VERIFY_EXIT_NOT_STARTED} (work-evidence found no commit and no uncommitted change)`,
           ...droppedGateChecks(startGates),
         ],
       };
@@ -5074,8 +5190,9 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
     }
 
     if (code === VERIFY_EXIT_FAILED) {
-      const waitGates = gatesFromWaitOutput(waitStreams(waited), requiredGateIds);
-      const failing = await describeFailingGates(inputs, worktreeId);
+      const waitGates = turnGates();
+      verdictReached = true;
+      const failing = await describeFailingGates(inputs, worktreeId, { taskId, boundRun });
       verdict = {
         ran: true,
         outcome: 'fail',
@@ -5139,7 +5256,7 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
     }
 
     // 1 / 2 / anything else: infrastructure, not a verdict.
-    return done('failed', excerpt(waited.stderr || waited.stdout || `wait exited ${code ?? 'with an error'}`));
+    return done('failed', excerpt(judged.stderr || judged.stdout || `${judged === waited ? 'wait' : 'verify --task'} exited ${code ?? 'with an error'}`));
   }
   return { state: 'failed', taskId, verdict, notJudged: false, promptExcerpt: null, nudges: turns - 1, autoResponded, note: 'supervision exceeded its hard iteration bound' };
 }
@@ -6145,7 +6262,13 @@ function gatesFromVerifyDocument(run, requiredGateIds = new Set()) {
 // 0 pass, 20 judged-and-failed, 21 the work-evidence gate finding nothing,
 // 99 NO VERDICT AT ALL (escalated, never re-instructed), anything else
 // infrastructure and therefore no verdict to record.
-async function reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePath, issueGateIds) {
+//
+// Bound to the contract task (#303) only when the prior record names one: a
+// reverify judges work whose task the earlier verdict already closed, so an
+// unbound `verify` would skip the contract's scope and find no env baseline. No
+// task id on record (an older report, a send that returned none) keeps the
+// unbound run this function always made.
+async function reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePath, issueGateIds, taskId = null) {
   if (!contractMode) {
     // The fallback judge, unchanged: the profile baseline re-run inside the
     // worktree. It is the same function, called with the same arguments, as the
@@ -6165,16 +6288,13 @@ async function reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePa
       note: verification.note,
     };
   }
-  const result = await runCmAsync(inputs, ['verify', worktreeId, '--json']);
+  const boundTask = bindableTaskId(inputs, taskId, worktreeId, { rejudge: true });
+  const result = await runCmAsync(inputs, ['verify', worktreeId, ...(boundTask === null ? [] : ['--task', boundTask]), '--json']);
   // `verify` exits WITH the verdict, so on a failing run the exit is 20 and the
   // run document is still on stdout. Parse it regardless of exit status — the
   // same reading describeFailingGates takes, and for the same reason.
-  let run = null;
-  try {
-    run = JSON.parse(result.stdout);
-  } catch {
-    run = null;
-  }
+  const run = parseVerifyDocument(result.stdout);
+  const judgeLabel = boundTask === null ? 'commandmate verify --json' : 'commandmate verify --task --json';
   const code = result.ok ? VERIFY_EXIT_PASS : (result.status ?? null);
   const reverifyGates = gatesFromVerifyDocument(run, new Set(issueGateIds));
   const done = (outcome, checks, extra = {}) => ({
@@ -6185,17 +6305,17 @@ async function reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePa
     ...extra,
   });
   if (code === VERIFY_EXIT_PASS) {
-    return done('pass', [`commandmate verify --json → exit ${VERIFY_EXIT_PASS} (every declared gate passed; re-judged in place, nothing was sent)`]);
+    return done('pass', [`${judgeLabel} → exit ${VERIFY_EXIT_PASS} (every declared gate passed; re-judged in place, nothing was sent)`]);
   }
   if (code === VERIFY_EXIT_FAILED) {
-    return done('fail', [`commandmate verify --json → exit ${VERIFY_EXIT_FAILED} (a gate failed; re-judged in place, nothing was sent)`]);
+    return done('fail', [`${judgeLabel} → exit ${VERIFY_EXIT_FAILED} (a gate failed; re-judged in place, nothing was sent)`]);
   }
   if (code === VERIFY_EXIT_NOT_STARTED) {
     // The judge disagrees with the git measurement that selected this issue.
     // Recorded as the verdict it is (exit 21 has always been `fail`), and the
     // disagreement itself is reported by the caller rather than smoothed over.
     return done('fail',
-      [`commandmate verify --json → exit ${VERIFY_EXIT_NOT_STARTED} (work-evidence found no commit and no uncommitted change)`],
+      [`${judgeLabel} → exit ${VERIFY_EXIT_NOT_STARTED} (work-evidence found no commit and no uncommitted change)`],
       { workEvidenceDisagreed: true });
   }
   if (code === VERIFY_EXIT_NO_VERDICT) {
@@ -6207,7 +6327,7 @@ async function reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePa
         report_schema_version: null,
         outcome: 'not_run',
         gates: [],
-        checks: [`commandmate verify --json → exit ${VERIFY_EXIT_NO_VERDICT} (the verification run ended error/cancelled; no verdict was reached)`],
+        checks: [`${judgeLabel} → exit ${VERIFY_EXIT_NO_VERDICT} (the verification run ended error/cancelled; no verdict was reached)`],
       },
       note: `escalated to a human rather than re-judged (exit ${VERIFY_EXIT_NO_VERDICT}: the run ended error/cancelled)`,
     };
@@ -7303,7 +7423,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
           : 'not re-judged by this --reverify attempt: its worktree holds no work evidence (no commit, no uncommitted change)');
         return;
       }
-      const judged = await reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePath, issueGateIds);
+      const judged = await reverifyWorker(inputs, plan, contractMode, worktreeId, worktreePath, issueGateIds, worker.task_id);
       if (judged.workEvidenceDisagreed) {
         report.limitations.push({
           code: 'reverify_evidence_disagreement',
@@ -7848,6 +7968,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   // `commandmate sync` is a fact about how this run resolved its targets, so it is
   // recorded whatever the outcome — including on the runs it made succeed.
   recordSyncAttempt(report);
+  recordVerifyTaskBinding(report);
 
   // `--only` (CommandMate#3008): account for the issues this run was told not to
   // touch. After every wave, so it cannot be mistaken for a scheduling decision,
