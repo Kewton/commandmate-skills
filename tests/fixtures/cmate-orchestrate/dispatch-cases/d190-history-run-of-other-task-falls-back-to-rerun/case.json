@@ -1,0 +1,66 @@
+{
+  "description": "Issue #306 (b): 陰性対照。`verify history` の直近 run の `taskId` がこの task と違う（並行する別の `commandmate verify` が上に積んだ run を模す。`history_run` で taskId / trigger を上書き）ときは、その run を使わず `verify show` も呼ばず、従来どおり `verify <id> --task <taskId> --json` の再実行で内訳を読む。取り違えなかったことは checks の行で report に残る。`--max-turns 1` なので再指示は送らない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "1"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "verification_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      201
+    ],
+    "never_sent": [
+      200
+    ],
+    "send_counts": {
+      "201": 1
+    },
+    "worker_states": {
+      "201": "completed"
+    },
+    "verification_outcomes": {
+      "201": "fail"
+    },
+    "verification_checks_include": {
+      "201": [
+        "gate lint: failed (exit 1)",
+        "the newest run in commandmate verify history, #201001 (task task-issue-999, trigger manual), is not this task's wait --verify run, so the failing gates were named by re-running them"
+      ]
+    },
+    "verification_call_sequence": {
+      "201": [
+        "wait --verify",
+        "verify history",
+        "verify --task task-issue-201"
+      ]
+    },
+    "absent_limitation_codes": [
+      "verify_history_unsupported",
+      "verify_task_unsupported"
+    ]
+  }
+}

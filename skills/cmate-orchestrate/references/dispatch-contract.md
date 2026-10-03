@@ -531,6 +531,37 @@ scope が **SKIP**（契約の範囲で判定されない）、env-clean が「�
 - task id は `send --contract` の stdout の値（`task_id`）である。task id が無い worker は従来の
   経路のままにする。
 
+#### 1ターン目の失敗ゲートの内訳は、その裁定の run を読み戻す（[#306](https://github.com/Kewton/commandmate-skills/issues/306)）
+
+1ターン目の `wait --verify` が exit 20 を返したとき、再指示に載せる失敗ゲートの内訳（`describeFailingGates`）は
+検証を**再実行せず**、その裁定の run を読み戻して取る。再実行すると、**1回目だけ落ちるゲート**（負荷で落ちる
+テスト、ティアダウンの race、worktree の外の要因による env-clean）は2回目で通り、再指示に内訳が載らない
+（#303 の実機確認: run 1205 で marker が FAIL、内訳を読むための再実行 run 1206 は全 PASS）。
+
+| 手順 | 呼び出し | 使わずに再実行へ戻る条件 |
+|---|---|---|
+| 1 | `commandmate verify history --worktree <worktree-id> --limit 1 --json` | 読めない・run が無い・直近 run の `taskId` がこの task と違う・`trigger` が `wait` でない |
+| 2 | `commandmate verify show <run-id> --json`（`gates[]` と `logTail`） | 読めない・`gates[]` が無い・`id` / `taskId` / `trigger` が手順 1 と一致しない |
+
+- `taskId` と `trigger: wait` の突き合わせは、並行する別の run（手で走らせた `commandmate verify`、GUI、
+  別の process）の取り違えを防ぐためである。一致しない run は**読まない**（`show` も呼ばない）。
+- 再実行は、読み戻せなかったときだけの退避路である。そのときも `verify --task` があれば `--task <taskId>` を付ける
+  （上の表）。退避した理由は `verification.checks` に1行残る（`… so the failing gates were named by re-running them`）。
+  読み戻せたときは `the failing gates were read from commandmate verify show <run-id>, the run that reached this verdict (not re-run)`
+  の1行が残る。裁定は従来どおり `wait --verify` の exit code のままで、読み戻した run は**ゲートを名指すためだけ**に使う。
+- 読み戻すのは**最初の裁定**だけである。再指示の後のターンは `verify --task` の run 文書をそのまま使い（上の表）、
+  `--task` の無い CLI の2ターン目以降の `wait --verify` は task に紐づかない run なので、照合しても一致しない。
+- history / show があるかは、`--task` と同じ `verify --help` の出力（commander の Commands 欄に `history` と `show`）
+  で判定する。`verify --help` は run に1回しか呼ばない。1ターン目で合格する run は従来と同じ呼び出ししかしない。
+- 無い CLI（CommandMate < 0.21.0）では従来どおり再実行し、limitation `verify_history_unsupported` を**run に1件**残す。
+- task id の無い worker（契約なし。`task_id` が worktree id）は読み戻さず、従来の再実行のままにする。
+
+内訳が取れなかったとき（`failing` が空）の再指示は、task id があり CLI に `verify --task` があれば
+`` `commandmate verify <worktree-id> --task <taskId>` を自分で実行して確認してください `` と案内する。exit 20 の後は
+task が閉じているので、`--task` の無い `commandmate verify <worktree-id>` は task に紐づかない別の run になり
+（scope SKIP・env-clean ERROR。Kewton/CommandMate#3118 / #3123）、worker を別の問いに答えさせてしまう。
+task id が無い・`--task` が無い CLI では従来の文言のままである。
+
 ### 2.6 exit 99 は「判定していない」
 
 `99`（`UNEXPECTED_ERROR`）は検証 run が `error` / `cancelled` で終わったこと、すなわち

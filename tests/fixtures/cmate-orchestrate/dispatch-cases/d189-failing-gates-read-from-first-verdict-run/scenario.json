@@ -1,0 +1,36 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "cli_verify_task": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "cli_verify_history": true,
+  "workers": {
+    "201": {
+      "state": "completed",
+      "verify_exits": [
+        20,
+        0
+      ],
+      "verify_exit": 0,
+      "failed_gates": [
+        {
+          "id": "marker",
+          "exit": 1,
+          "logTail": "marker: fails on the first run only"
+        }
+      ]
+    },
+    "200": {
+      "state": "completed",
+      "verify_exits": [
+        0
+      ]
+    }
+  }
+}

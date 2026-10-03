@@ -1,0 +1,93 @@
+{
+  "description": "Issue #306 (e): 陰性対照。history / show を持つ CLI でも、1 ターン目で合格する run は従来どおり `wait --verify` 1 回だけで裁定し、`verify` は（history / show も、それを確かめる `verify --help` も）1 度も呼ばない。読み戻しは「1 ターン目の exit 20 の内訳を名指す」ときにだけ入る。limitation も残らない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [
+      true,
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      201,
+      200
+    ],
+    "send_counts": {
+      "201": 1,
+      "200": 1
+    },
+    "worker_states": {
+      "201": "completed",
+      "200": "completed"
+    },
+    "verification_outcomes": {
+      "201": "pass",
+      "200": "pass"
+    },
+    "verification_gates": {
+      "201": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "baseline",
+          "verdict": "pass",
+          "origin": "repo"
+        }
+      ],
+      "200": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "baseline",
+          "verdict": "pass",
+          "origin": "repo"
+        }
+      ]
+    },
+    "verification_call_sequence": {
+      "201": [
+        "wait --verify"
+      ],
+      "200": [
+        "wait --verify"
+      ]
+    },
+    "cli_subcommand_counts": {
+      "verify": 0
+    },
+    "verify_calls": 0,
+    "absent_limitation_codes": [
+      "verify_history_unsupported",
+      "verify_task_unsupported"
+    ]
+  }
+}

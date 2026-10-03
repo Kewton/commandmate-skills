@@ -1431,6 +1431,17 @@ function runDispatchCase(caseId) {
       );
     }
   }
+  // The other half (Issue #306): a substring NO message sent to that worker may
+  // carry — e.g. the "breakdown could not be read" line on a run whose breakdown
+  // was read back from the verdict's own run.
+  for (const [num, needles] of Object.entries(expect.sent_message_excludes ?? {})) {
+    const messages = cliLog
+      .filter((entry) => entry.sub === 'send' && /issue-(\d+)/.exec(entry.args[0] ?? '')?.[1] === String(num))
+      .map((entry) => String(entry.args[1] ?? ''));
+    for (const needle of needles) {
+      check(!messages.some((message) => message.includes(needle)), `#${num}: a sent message contains ${JSON.stringify(needle)}`);
+    }
+  }
   // The argv of the send that OPENED a worker's supervision (Issue #136). The
   // worktree auto-yes state — the one the server's Auto-Yes poller checks before
   // it reads any policy at all (ADR §14.6) — is enabled by `commandmate send
@@ -1732,13 +1743,31 @@ function runDispatchCase(caseId) {
   // wait judged, bound only while the task is in flight) and `--task <id>` (a run
   // bound to the contract task). An exact list, so "the second turn was judged by
   // verify --task" and "nothing else was run" are one assertion.
+  //
+  // The read-only `verify history` / `verify show` (Issue #306) are part of the
+  // sequence too, spelled as those two words: `history` is attributed by its
+  // `--worktree` value and `show` by its run id, which the fake mints as
+  // `<issue> * 1000 + <turn>` precisely so it can be attributed here.
+  const verificationCallIssue = (entry) => {
+    const args = entry.args.map(String);
+    if (entry.sub === 'verify' && args[0] === 'history') {
+      const worktree = args.indexOf('--worktree');
+      return /issue-(\d+)/.exec(worktree >= 0 ? args[worktree + 1] ?? '' : '')?.[1] ?? null;
+    }
+    if (entry.sub === 'verify' && args[0] === 'show') {
+      const runId = Number(args[1]);
+      return Number.isInteger(runId) && runId >= 1000 ? String(Math.floor(runId / 1000)) : null;
+    }
+    return /issue-(\d+)/.exec(args[0] ?? '')?.[1] ?? null;
+  };
   for (const [num, sequence] of Object.entries(expect.verification_call_sequence ?? {})) {
     const actual = cliLog
       .filter((entry) => (entry.sub === 'wait' || entry.sub === 'verify')
         && !entry.args.includes('--help')
-        && /issue-(\d+)/.exec(String(entry.args[0] ?? ''))?.[1] === String(num))
+        && verificationCallIssue(entry) === String(num))
       .map((entry) => {
         const args = entry.args.map(String);
+        if (entry.sub === 'verify' && (args[0] === 'history' || args[0] === 'show')) return `verify ${args[0]}`;
         const task = args.indexOf('--task');
         return [
           entry.sub,
@@ -3507,6 +3536,24 @@ function liveContractCheck(contract) {
       help = error.stdout ? error.stdout.toString() : '';
     }
     if (!check(help.length > 0, `real commandmate ${sub} --help produced no output (subcommand missing?)`)) continue;
+    // Nested subcommands (`verify history` / `verify show`, Issue #306) are asked
+    // with their own `--help`, under their own `since`.
+    for (const [nestedName, nested] of Object.entries(spec.subcommands ?? {})) {
+      if (nested.since && !atLeast(version, nested.since)) {
+        log(`    (skipping live parity for "${sub} ${nestedName}": needs commandmate >= ${nested.since})`);
+        continue;
+      }
+      let nestedHelp = '';
+      try {
+        nestedHelp = execFileSync(bin, [sub, nestedName, '--help'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      } catch (error) {
+        nestedHelp = error.stdout ? error.stdout.toString() : '';
+      }
+      if (!check(nestedHelp.length > 0, `real commandmate ${sub} ${nestedName} --help produced no output (subcommand missing?)`)) continue;
+      for (const flag of nested.flags) {
+        check(nestedHelp.includes(flag), `real commandmate ${sub} ${nestedName} --help does not list ${flag} — the contract drifted from the CLI`);
+      }
+    }
     for (const flag of spec.flags) {
       const since = spec.since_flags?.[flag];
       if (since && !atLeast(version, since)) {
@@ -3603,15 +3650,40 @@ function parityTest() {
     },
   }, staleWork, join(staleWork, 'dispatch'), ['--interrupt-stale-prompt'], staleLog);
 
-  const calls = [...readCliLog(logPath), ...readCliLog(contractLog), ...readCliLog(syncLog), ...readCliLog(staleLog)].filter((entry) => COMMANDMATE_SUBS.includes(entry.sub));
+  // 5. a first-turn verdict of 20 on a CLI with the run history: verify --help
+  //    -> verify history --worktree --limit --json -> verify show <run-id> --json
+  //    (Issue #306), the nested subcommands' own flag lists.
+  const historyWork = mkdtempSync(join(tmpdir(), 'cmate-parity-history-'));
+  const historyLog = join(historyWork, 'cli.log');
+  runDispatchRunner(planPath, {
+    cli_available: true,
+    cli_contract: true,
+    cli_verify_task: true,
+    cli_verify_history: true,
+    git: { branch: 'feature/integration', dirty: false },
+    gh: { repo_access: true },
+    workers: {
+      201: { state: 'completed', verify_exits: [20], failed_gates: ['lint'] },
+      200: { state: 'completed', verify_exits: [0] },
+    },
+  }, historyWork, join(historyWork, 'dispatch'), ['--max-turns', '1'], historyLog);
+
+  const calls = [...readCliLog(logPath), ...readCliLog(contractLog), ...readCliLog(syncLog), ...readCliLog(staleLog), ...readCliLog(historyLog)].filter((entry) => COMMANDMATE_SUBS.includes(entry.sub));
   const used = new Set(calls.map((entry) => entry.sub));
   for (const sub of COMMANDMATE_SUBS) {
     check(used.has(sub), `the runner never exercised commandmate ${sub}, so its parity is untested`);
   }
+  for (const nested of ['history', 'show']) {
+    check(calls.some((entry) => entry.sub === 'verify' && entry.args[0] === nested),
+      `the runner never exercised commandmate verify ${nested}, so its parity is untested`);
+  }
   let violations = 0;
   for (const entry of calls) {
-    const allowed = new Set(subs[entry.sub]?.flags ?? []);
-    for (const token of entry.args) {
+    // A nested subcommand (`verify history` / `verify show`, Issue #306) answers
+    // to its own flag list, exactly as the fake's enforceContract reads it.
+    const nested = subs[entry.sub]?.subcommands?.[entry.args[0]];
+    const allowed = new Set((nested ?? subs[entry.sub])?.flags ?? []);
+    for (const token of nested ? entry.args.slice(1) : entry.args) {
       if (typeof token !== 'string' || !token.startsWith('--')) continue;
       const flag = token.split('=')[0];
       if (!allowed.has(flag)) {

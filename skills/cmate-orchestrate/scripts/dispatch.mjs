@@ -2952,13 +2952,50 @@ function probeContractSupport(inputs) {
 // does `verify --help` list `--task` (a version number is never compared). Lazily
 // because only a run that re-judges needs the answer, and a run that passes on its
 // first turn must call exactly what it called before.
-let verifyTaskSupported = null;
-function probeVerifyTaskSupport(inputs) {
-  if (verifyTaskSupported === null) {
+//
+// The `verify --help` text is read once and shared with the `verify history` /
+// `verify show` probe below (#306), so a run that needs both still asks once.
+let verifyHelpText = null;
+function readVerifyHelp(inputs) {
+  if (verifyHelpText === null) {
     const help = runCm(inputs, ['verify', '--help']);
-    verifyTaskSupported = help.ok && `${help.stdout}${help.stderr}`.includes('--task');
+    verifyHelpText = help.ok ? `${help.stdout}${help.stderr}` : '';
   }
-  return verifyTaskSupported;
+  return verifyHelpText;
+}
+
+function probeVerifyTaskSupport(inputs) {
+  return readVerifyHelp(inputs).includes('--task');
+}
+
+// Can the run that reached the FIRST verdict be read back? (#306)
+//
+// A first-turn exit 20 used to be broken down by running the gates AGAIN
+// (`verify [--task] --json`). A gate that fails only once — a test that falls
+// over under load, a teardown race, an env-clean tripped by something outside the
+// worktree — passes on that second run, so the re-instruction named no gate at
+// all and the worker was left guessing. `verify history` / `verify show`
+// (CommandMate 0.21.0+, #1593) read the run that already happened instead.
+// Asked the way `--task` is asked: does `verify --help` list both subcommands
+// (commander prints them under "Commands:"); a version number is never compared.
+function probeVerifyHistorySupport(inputs) {
+  const help = readVerifyHelp(inputs);
+  return /^\s*history\b/m.test(help) && /^\s*show\b/m.test(help);
+}
+
+// Set when a first-turn 20 had to be broken down by re-running the gates because
+// this commandmate cannot read the run back. Stated once per report, like
+// `verify_task_unsupported`: it is a fact about the CLI, not about a worker.
+let verifyHistoryUnavailableUsed = false;
+
+function recordVerifyHistoryRead(report) {
+  if (!verifyHistoryUnavailableUsed) return;
+  report.limitations.push({
+    code: 'verify_history_unsupported',
+    detail: 'the failing gates of a first-turn verification failure were named by RE-RUNNING the gates: this commandmate has no `verify history` / '
+      + '`verify show` (CommandMate < 0.21.0), so the run that reached the verdict could not be read back — a gate that failed only once '
+      + '(load, a teardown race, an outside env-clean) can pass on the re-run and leave the re-instruction without its breakdown',
+  });
 }
 
 // Set when a verdict that should have been bound to the contract task was read
@@ -4688,6 +4725,54 @@ function parseVerifyDocument(stdout) {
   }
 }
 
+// Is this run the one `wait --verify` produced for THIS task? (#306) A worktree's
+// newest run is not necessarily the verdict's: a run started by hand, by the GUI,
+// or by another process can land between the wait and this read. Only a run that
+// carries this task's id and was started by `wait` is read; anything else is
+// left alone and the gates are re-run as before.
+function isFirstVerdictRun(run, taskId) {
+  return run !== null && typeof run === 'object'
+    && Number.isInteger(run.id) && run.id > 0
+    && run.taskId === taskId
+    && run.trigger === 'wait';
+}
+
+// Read back the run that reached the first verdict: { run, runLabel, note }.
+// `run` is the `verify show --json` document, or null when it could not be read
+// or was not provably this verdict's run; `note` says why (a `checks` line), or
+// is null when nothing was attempted. Never reached without a REAL task id:
+// without a contract there is no task the run could be matched against.
+async function readFirstVerdictRun(inputs, worktreeId, taskId) {
+  const none = { run: null, runLabel: null, note: null };
+  if (typeof taskId !== 'string' || taskId === '' || taskId === worktreeId) return none;
+  if (!probeVerifyHistorySupport(inputs)) {
+    verifyHistoryUnavailableUsed = true;
+    return none;
+  }
+  const fallback = (why) => ({ run: null, runLabel: null, note: `${why}, so the failing gates were named by re-running them` });
+  const listed = await runCmAsync(inputs, ['verify', 'history', '--worktree', worktreeId, '--limit', '1', '--json']);
+  let runs = null;
+  try {
+    runs = listed.ok ? JSON.parse(listed.stdout) : null;
+  } catch {
+    runs = null;
+  }
+  if (!Array.isArray(runs)) return fallback('commandmate verify history could not be read');
+  if (runs.length === 0) return fallback('commandmate verify history listed no run for this worktree');
+  const latest = runs[0];
+  const describe = (run) => `#${redact(String(run?.id ?? '?'))} (task ${redact(String(run?.taskId ?? 'none'))}, trigger ${redact(String(run?.trigger ?? 'unknown'))})`;
+  if (!isFirstVerdictRun(latest, taskId)) {
+    return fallback(`the newest run in commandmate verify history, ${describe(latest)}, is not this task's wait --verify run`);
+  }
+  const shown = await runCmAsync(inputs, ['verify', 'show', String(latest.id), '--json']);
+  const run = shown.ok ? parseVerifyDocument(shown.stdout) : null;
+  if (run === null || !Array.isArray(run.gates)) return fallback(`commandmate verify show ${latest.id} could not be read`);
+  if (run.id !== latest.id || !isFirstVerdictRun(run, taskId)) {
+    return fallback(`commandmate verify show ${latest.id} returned ${describe(run)}, not this task's wait --verify run`);
+  }
+  return { run, runLabel: `commandmate verify show ${latest.id}`, note: null };
+}
+
 // `commandmate verify <worktree-id> --json` prints the verification run document
 // (CommandMate's VerificationRunView), whose `gates[]` is what turns "verification
 // failed" into something a worker can act on.
@@ -4707,14 +4792,27 @@ function parseVerifyDocument(stdout) {
 // `verify --task --json` run (a turn after a re-instruction), that document is
 // passed in as `boundRun` and read as it is — running the gates again would only
 // produce a second run to disagree with the first.
-async function describeFailingGates(inputs, worktreeId, { taskId = null, boundRun } = {}) {
+//
+// And on the FIRST verdict (#306) the run `wait --verify` itself produced is read
+// back first — `verify history --worktree <id> --limit 1` → `verify show <run-id>`
+// — so a gate that failed only once is still named. Re-running is the fallback,
+// taken only when that run cannot be read or is not provably this verdict's run.
+async function describeFailingGates(inputs, worktreeId, { taskId = null, boundRun, firstVerdict = false } = {}) {
   let run = null;
   let source = 'commandmate verify --json';
   let verdictSource = 'commandmate wait --verify';
+  const readBackNotes = [];
+  const readBack = boundRun === undefined && firstVerdict
+    ? await readFirstVerdictRun(inputs, worktreeId, taskId)
+    : { run: null, note: null };
+  if (readBack.note !== null) readBackNotes.push(readBack.note);
   if (boundRun !== undefined) {
     run = boundRun;
     source = 'commandmate verify --task --json';
     verdictSource = source;
+  } else if (readBack.run !== null) {
+    run = readBack.run;
+    source = 'commandmate verify show --json';
   } else {
     const boundTask = bindableTaskId(inputs, taskId, worktreeId);
     if (boundTask !== null) source = 'commandmate verify --task --json';
@@ -4729,7 +4827,7 @@ async function describeFailingGates(inputs, worktreeId, { taskId = null, boundRu
   if (!gates) {
     return {
       failing: [],
-      checks: [`${verdictSource} → exit ${VERIFY_EXIT_FAILED} (a gate failed; the breakdown could not be read from ${source})`],
+      checks: [`${verdictSource} → exit ${VERIFY_EXIT_FAILED} (a gate failed; the breakdown could not be read from ${source})`, ...readBackNotes],
       summary: `the failing gates could not be read from ${source}`,
     };
   }
@@ -4755,7 +4853,7 @@ async function describeFailingGates(inputs, worktreeId, { taskId = null, boundRu
   if (failing.length === 0) {
     return {
       failing,
-      checks: [`${verdictSource} → exit ${VERIFY_EXIT_FAILED} (a gate failed; the confirming commandmate verify run named none)`],
+      checks: [`${verdictSource} → exit ${VERIFY_EXIT_FAILED} (a gate failed; the confirming commandmate verify run named none)`, ...readBackNotes],
       summary: 'the confirming verify run named no failing gate',
     };
   }
@@ -4764,7 +4862,11 @@ async function describeFailingGates(inputs, worktreeId, { taskId = null, boundRu
     // The flaky note goes AFTER the exit code, never before it: merge.mjs reads
     // the first `exit <n>` in this line into the PR body's Exit column, and a
     // second number in front of it would be transcribed as this gate's exit.
-    checks: failing.map((gate) => `gate ${gate.id}: ${gate.status}${gate.exitCode !== null ? ` (exit ${gate.exitCode})` : ''}${gate.flakyOutcome === 'flaky' ? ' — FLAKY: it failed, then passed on a re-run of the same tree, and this repository does not declare flakyIsPass for it' : ''}`),
+    checks: [
+      ...failing.map((gate) => `gate ${gate.id}: ${gate.status}${gate.exitCode !== null ? ` (exit ${gate.exitCode})` : ''}${gate.flakyOutcome === 'flaky' ? ' — FLAKY: it failed, then passed on a re-run of the same tree, and this repository does not declare flakyIsPass for it' : ''}`),
+      ...(readBack.run !== null && run === readBack.run ? [`the failing gates were read from ${readBack.runLabel}, the run that reached this verdict (not re-run)`] : []),
+      ...readBackNotes,
+    ],
     summary: failing.map((gate) => gate.id).join(', '),
   };
 }
@@ -4840,10 +4942,17 @@ function scopeViolationSet(failing) {
 
 // The re-instruction sent to a worker whose contract verification failed. It
 // quotes the gates, because "verification failed" alone makes the worker guess.
-function buildVerifyReinstruction(failing) {
+//
+// When the breakdown is missing, the command it hands the worker carries
+// `--task <taskId>` whenever there is a real task (#306): after the verdict the
+// task is closed, and a bare `commandmate verify <worktree-id>` is a detached run
+// — scope SKIPped, env-clean with no baseline — that answers a different question
+// (Kewton/CommandMate#3118 / #3123).
+function buildVerifyReinstruction(failing, { taskId = null } = {}) {
   const lines = ['検証（commandmate verify）が不合格でした。次のゲートが通っていません。'];
   if (failing.length === 0) {
-    lines.push('- （失敗ゲートの内訳を取得できませんでした。`commandmate verify <worktree-id>` を自分で実行して確認してください）');
+    const command = taskId === null ? 'commandmate verify <worktree-id>' : `commandmate verify <worktree-id> --task ${taskId}`;
+    lines.push(`- （失敗ゲートの内訳を取得できませんでした。\`${command}\` を自分で実行して確認してください）`);
   }
   for (const gate of failing) {
     const exit = gate.exitCode !== null ? ` (exit ${gate.exitCode})` : '';
@@ -5191,8 +5300,11 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
 
     if (code === VERIFY_EXIT_FAILED) {
       const waitGates = turnGates();
+      // The FIRST verdict is the one `wait --verify` bound to the in-flight task,
+      // so its run can be read back instead of re-run (#306).
+      const firstVerdict = !verdictReached;
       verdictReached = true;
-      const failing = await describeFailingGates(inputs, worktreeId, { taskId, boundRun });
+      const failing = await describeFailingGates(inputs, worktreeId, { taskId, boundRun, firstVerdict });
       verdict = {
         ran: true,
         outcome: 'fail',
@@ -5247,7 +5359,14 @@ async function superviseWithContract(inputs, worktreeId, worktreePath, relativeC
         };
       }
       previousScopeViolations = scopeViolations;
-      const resent = await sendAndConfirm(inputs, worktreeId, buildVerifyReinstruction(failing.failing));
+      const resent = await sendAndConfirm(inputs, worktreeId, buildVerifyReinstruction(failing.failing, {
+        // Only a task id this commandmate can be given back (`verify --task`,
+        // already probed by the breakdown above): telling the worker to pass a
+        // flag its CLI refuses would be a worse guess than the bare command.
+        // Read only when the message needs it (no breakdown).
+        taskId: failing.failing.length === 0 && typeof taskId === 'string' && taskId !== '' && taskId !== worktreeId
+          && probeVerifyTaskSupport(inputs) ? taskId : null,
+      }));
       if (!resent.sent) return budgetCutoff() ?? done('failed', `re-instruction failed: ${resent.note}`);
       closeTurn();
       turns += 1;
@@ -7969,6 +8088,7 @@ async function runDispatch(inputs, plan, outDir, preflight = null, preparation =
   // recorded whatever the outcome — including on the runs it made succeed.
   recordSyncAttempt(report);
   recordVerifyTaskBinding(report);
+  recordVerifyHistoryRead(report);
 
   // `--only` (CommandMate#3008): account for the issues this run was told not to
   // touch. After every wave, so it cannot be mistaken for a scheduling decision,

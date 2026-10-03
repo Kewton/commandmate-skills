@@ -1,0 +1,77 @@
+{
+  "description": "Issue #306 (a): 1 ターン目の `wait --verify` が exit 20 を返したとき、失敗ゲートの内訳は検証を**再実行せず**、その裁定の run を `verify history --worktree <id> --limit 1 --json` → `verify show <run-id> --json` で読み戻して取る。fake CLI は `cli_verify_history: true` で `verify --help` の Commands に history / show を載せる（CommandMate 0.21.0+）。#201 の `marker` ゲートは 1 回目だけ落ちる（`verify_exit: 0` で、再実行していれば全 PASS になり内訳が消える —— #303 の実機確認 run 1205/1206 の再現）。再指示には `marker` のゲート名と logTail が載り、「内訳を取得できませんでした」の行は載らない。呼び出しの並びは `wait --verify` → `verify history` → `verify show` → （再指示）→ `wait` → `verify --task` で、1 ターン目の再実行（`verify --task` / `verify --json`）は呼ばれない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "2"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [
+      true,
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      201,
+      200
+    ],
+    "send_counts": {
+      "201": 2,
+      "200": 1
+    },
+    "worker_states": {
+      "201": "completed",
+      "200": "completed"
+    },
+    "verification_outcomes": {
+      "201": "pass",
+      "200": "pass"
+    },
+    "sent_message_includes": {
+      "201": [
+        "- marker: failed (exit 1) — marker: fails on the first run only"
+      ]
+    },
+    "sent_message_excludes": {
+      "201": [
+        "失敗ゲートの内訳を取得できませんでした"
+      ]
+    },
+    "verification_call_sequence": {
+      "201": [
+        "wait --verify",
+        "verify history",
+        "verify show",
+        "wait",
+        "verify --task task-issue-201"
+      ],
+      "200": [
+        "wait --verify"
+      ]
+    },
+    "absent_limitation_codes": [
+      "verify_history_unsupported",
+      "verify_task_unsupported"
+    ]
+  }
+}

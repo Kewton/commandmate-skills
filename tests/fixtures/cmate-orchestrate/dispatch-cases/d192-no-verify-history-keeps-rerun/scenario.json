@@ -1,0 +1,40 @@
+{
+  "cli_available": true,
+  "cli_contract": true,
+  "cli_verify_task": true,
+  "git": {
+    "branch": "feature/integration",
+    "dirty": false
+  },
+  "gh": {
+    "repo_access": true
+  },
+  "workers": {
+    "100": {
+      "state": "completed",
+      "verify_exits": [
+        20
+      ],
+      "failed_gates": [
+        {
+          "id": "lint",
+          "exit": 1,
+          "logTail": "src/a.ts: 1 problem"
+        }
+      ]
+    },
+    "101": {
+      "state": "completed",
+      "verify_exits": [
+        20
+      ],
+      "failed_gates": [
+        {
+          "id": "unit",
+          "exit": 1,
+          "logTail": "1 failing"
+        }
+      ]
+    }
+  }
+}

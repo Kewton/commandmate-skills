@@ -1,0 +1,89 @@
+{
+  "description": "Issue #306 (d): 対照。`verify --help` に history / show の無い CLI（CommandMate < 0.21.0 を模す。`cli_verify_history` を付けない）では、1 ターン目の exit 20 の内訳は従来どおり再実行（`verify <id> --task <taskId> --json`）で読み、`verify history` / `verify show` は呼ばない。そのかわり「再実行で内訳を取った」ことを limitation `verify_history_unsupported` として**run に 1 件だけ**記録する（同じ wave の 2 worker が両方とも 20 でも 1 件。版の事実なので worker ごとではない）。`verify --help` は 1 回だけ聞く。",
+  "plan": {
+    "issues_fixture": "cases/01-independent/issues.json",
+    "orchestrate_args": [
+      "100",
+      "101",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "2",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "1"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "verification_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      100,
+      101
+    ],
+    "send_counts": {
+      "100": 1,
+      "101": 1
+    },
+    "worker_states": {
+      "100": "completed",
+      "101": "completed"
+    },
+    "verification_outcomes": {
+      "100": "fail",
+      "101": "fail"
+    },
+    "verification_checks_include": {
+      "100": [
+        "gate lint: failed (exit 1)"
+      ],
+      "101": [
+        "gate unit: failed (exit 1)"
+      ]
+    },
+    "verification_call_sequence": {
+      "100": [
+        "wait --verify",
+        "verify --task task-issue-100"
+      ],
+      "101": [
+        "wait --verify",
+        "verify --task task-issue-101"
+      ]
+    },
+    "cli_args_absent": {
+      "verify": [
+        "history",
+        "show"
+      ]
+    },
+    "limitation_codes": [
+      "verify_history_unsupported"
+    ],
+    "limitation_code_counts": {
+      "verify_history_unsupported": 1
+    },
+    "limitation_details_include": [
+      "CommandMate < 0.21.0"
+    ],
+    "absent_limitation_codes": [
+      "verify_task_unsupported"
+    ],
+    "cli_subcommand_counts": {
+      "verify": 3
+    }
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "description": "Issue #306 (c): 内訳が取れなかったときのワーカー向け文言は、task id があり CLI が `verify --task` を持つなら `commandmate verify <worktree-id> --task <taskId>` を案内する。exit 20 の後は task が閉じているので、`--task` の無い `commandmate verify <worktree-id>` は task に紐づかない別の run になる（#303 の実機確認 run 1207: scope SKIP・env-clean ERROR。Kewton/CommandMate#3118 / #3123）。history / show の無い CLI で 1 回目だけ落ちるゲート（`verify_exit: 0`）を再実行が取り逃がす形を作り、再指示の文言を固定する。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "2"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [
+      true,
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      201,
+      200
+    ],
+    "send_counts": {
+      "201": 2,
+      "200": 1
+    },
+    "worker_states": {
+      "201": "completed",
+      "200": "completed"
+    },
+    "verification_outcomes": {
+      "201": "pass",
+      "200": "pass"
+    },
+    "sent_message_includes": {
+      "201": [
+        "失敗ゲートの内訳を取得できませんでした。`commandmate verify <worktree-id> --task task-issue-201` を自分で実行して確認してください"
+      ]
+    },
+    "verification_call_sequence": {
+      "201": [
+        "wait --verify",
+        "verify --task task-issue-201",
+        "wait",
+        "verify --task task-issue-201"
+      ],
+      "200": [
+        "wait --verify"
+      ]
+    },
+    "limitation_codes": [
+      "verify_history_unsupported"
+    ]
+  }
+}
