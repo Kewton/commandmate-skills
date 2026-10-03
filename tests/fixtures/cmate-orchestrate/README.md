@@ -75,6 +75,13 @@ fake-cli.mjs                    commandmate/git/gh を模した stub（failure i
                                 で裁定する。dispatch case の `verification_call_sequence` は、Issue ごとの
                                 `wait` / `verify`（`--help` を除く）を `--verify` / `--task <id>` 付きの綴りで
                                 **順序どおり完全一致**で照合する
+                                `cli_verify_history: true` は `verify --help` の Commands に `history` / `show`
+                                を載せ、`verify history --worktree <id> --limit 1 --json` / `verify show <run-id>
+                                --json` を受ける CLI（CommandMate 0.21.0+、#306）を模す。run はそのターンの
+                                `wait --verify` の run（`taskId: task-issue-<n>`・`trigger: wait`、id は
+                                `<n> * 1000 + <turn>`）で、worker の `history_run` で上書きできる（`null` で run 無し）。
+                                `verification_call_sequence` では `verify history` / `verify show` と綴る。
+                                `sent_message_excludes` は、どの送信にも含まれてはならない文字列（#306）
 profiles/                       独自 profile の例（unverified）
 run_tests.mjs                   fixture test harness（Node stdlib のみ）
 rubric.md                       人が見る採点基準

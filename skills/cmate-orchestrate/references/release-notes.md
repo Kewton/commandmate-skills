@@ -596,6 +596,30 @@ dispatch がそのまま契約の `scope.deny` に書く（従来は常に `deny
 
 ## dispatch（`scripts/dispatch.mjs`）
 
+### #306 — 1回目だけ落ちるゲートの内訳が、内訳を読むための再実行で消えていた
+
+1ターン目の `wait --verify` が exit 20 を返すと、runner は失敗の内訳を読むために**検証をもう一度実行していた**
+（`describeFailingGates`）。#303 の実機確認（cmate-orchestrate 0.39.0 / CommandMate 0.43.0）では、初回だけ落ちる
+`marker` ゲートが run 1205 で FAIL し、内訳のための再実行 run 1206 は全 PASS だった。ワーカーへの再指示は
+「内訳を取得できませんでした。`commandmate verify <worktree-id>` を自分で実行して確認してください」になり、ワーカーは
+案内どおり `--task` なしで実行して（run 1207）task に紐づかない run（scope SKIP・env-clean ERROR）を受け取った。
+再実行は全ゲートをもう一度走らせるコストもかかる（CommandMate 本体なら unit 全体で約20分）。
+
+→ **1回目の裁定の run を読む。** `verify history --worktree <id> --limit 1 --json` → `verify show <run-id> --json` で
+その run の `gates[]` と `logTail` を取り、再実行は読めなかったときだけの退避路にした。内訳が無いときの文言は、
+task id があり CLI に `verify --task` があれば `commandmate verify <worktree-id> --task <taskId>` を案内する。
+
+判断したこと:
+
+- **#303 で見送った理由（並行する別の run の取り違え）は、`taskId` と `trigger: wait` の突き合わせで抑える。**
+  直近 run がこの task の `wait` の run でなければ読まない（`show` も呼ばない）で、従来の再実行に戻る。戻った理由は
+  `verification.checks` に1行残る。
+- **読み戻すのは最初の裁定だけ。** 再指示の後のターンは #303 の `verify --task` の run 文書をそのまま使う。
+- **history / show の有無は `--task` と同じ `verify --help` の1回で判定する。** 無い CLI（< 0.21.0）では従来の
+  再実行のまま、limitation `verify_history_unsupported` を run に1件。1ターン目で合格する run の呼び出しは変えない。
+- **fake CLI は `cli_verify_history: true` の scenario でだけ history / show を持つ。** #306 より前の case は再実行の
+  CLI のままで、期待値は変えていない。
+
 ### #303 — 再指示の後の `wait --verify` が契約 task に紐づかず、直った worker が不合格になりえた
 
 CommandMate の `wait --verify` は進行中の task にしか紐づかない。1回目の裁定で task は `succeeded` / `failed` に
@@ -2477,6 +2501,14 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 ---
 
 ## パッケージ
+
+### 0.40.0 — 1ターン目の失敗ゲートの内訳を、その裁定の run から読むようにした（#306）
+
+- **#306** —— 1ターン目の exit 20 の失敗ゲートは、検証を再実行せず `verify history --worktree <id> --limit 1 --json` →
+  `verify show <run-id> --json` で裁定の run を読み戻して名指す（CommandMate 0.21.0+）。直近 run の `taskId` がこの task と
+  違う・`trigger` が `wait` でないときは読まずに従来の再実行（`--task` 付き）へ戻る。内訳が無いときの再指示は
+  `commandmate verify <worktree-id> --task <taskId>` を案内する。history / show の無い CLI では従来どおり再実行し、
+  limitation `verify_history_unsupported` を1件残す。
 
 ### 0.39.0 — 再指示の後の裁定を契約 task に紐づけた（#303）
 

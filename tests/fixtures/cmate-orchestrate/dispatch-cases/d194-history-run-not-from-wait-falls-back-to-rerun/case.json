@@ -1,0 +1,66 @@
+{
+  "description": "Issue #306 (f): 陰性対照（d190 の trigger 版）。直近 run の `taskId` がこの task と一致していても、`trigger` が `wait` でない（`commandmate verify <id> --task <taskId>` を人や別の process が手で走らせた run）ならそれは 1 回目の裁定の run ではないので使わず、`verify show` も呼ばずに従来の再実行へ戻る。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "1"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "verification_failed",
+    "human_required": false,
+    "waves_count": 1,
+    "advanced": [
+      false
+    ],
+    "no_respond": true,
+    "sent": [
+      201
+    ],
+    "never_sent": [
+      200
+    ],
+    "send_counts": {
+      "201": 1
+    },
+    "worker_states": {
+      "201": "completed"
+    },
+    "verification_outcomes": {
+      "201": "fail"
+    },
+    "verification_checks_include": {
+      "201": [
+        "gate lint: failed (exit 1)",
+        "(task task-issue-201, trigger manual), is not this task's wait --verify run"
+      ]
+    },
+    "verification_call_sequence": {
+      "201": [
+        "wait --verify",
+        "verify history",
+        "verify --task task-issue-201"
+      ]
+    },
+    "absent_limitation_codes": [
+      "verify_history_unsupported",
+      "verify_task_unsupported"
+    ]
+  }
+}

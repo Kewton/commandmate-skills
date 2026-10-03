@@ -183,6 +183,64 @@ function verifyTaskCapable(spec) {
   return contractCapable(spec) && spec.cli_verify_task === true;
 }
 
+// `verify history` / `verify show` (CommandMate 0.21.0+, #1593; read by the
+// runner since Issue #306 to name the failing gates of the run that reached the
+// first verdict instead of re-running them). Opted into per scenario with
+// `cli_verify_history: true`, for the same reason as `cli_verify_task`: every
+// scenario written before #306 keeps the re-run it was written against.
+function verifyHistoryCapable(spec) {
+  return contractCapable(spec) && spec.cli_verify_history === true;
+}
+
+// A run id carries its worker: `<issue> * 1000 + <turn>`. The real ids are a
+// global sequence; this shape lets a stateless fake serve `verify show <id>` back
+// for the right worker and lets the harness attribute that call to an issue.
+function historyRunId(issue) {
+  return Number(issue) * 1000 + Math.max(1, readSends(issue));
+}
+
+// The run the turn's `wait --verify` would have recorded: the verdict is the
+// turn's `verify_exits` entry and the gates are the ones its GATE lines name. The
+// worker's `history_run` object is laid over it (e.g. another task's id, or a
+// `manual` trigger — the run a concurrent `commandmate verify` would leave on
+// top), and `history_run: null` models a worktree with no run at all. `withLogs`
+// is `show`; `history` carries gate verdicts but no logTail (agent-operations.ts).
+function historyRunFor(worker, issue, worktreeId, { withLogs }) {
+  if (worker.history_run === null) return null;
+  const exit = verifyExitFor(worker, issue);
+  const gate = (entry, status, exitCode, durationMs, fallbackTail) => {
+    const item = typeof entry === 'string' ? { id: entry } : entry;
+    return {
+      gateId: item.id,
+      status,
+      exitCode: Number.isInteger(item.exit) ? item.exit : exitCode,
+      durationMs,
+      ...(withLogs ? { logTail: item.logTail ?? fallbackTail(item.id) } : {}),
+    };
+  };
+  const gates = [
+    exit === VERIFY_NOT_STARTED
+      ? { gateId: 'work-evidence', status: 'failed', exitCode: null, durationMs: 12, ...(withLogs ? { logTail: 'commits=0 uncommitted=0' } : {}) }
+      : { gateId: 'work-evidence', status: 'passed', exitCode: null, durationMs: 12, ...(withLogs ? { logTail: 'commits=1 uncommitted=0' } : {}) },
+    ...(exit === 0 ? (worker.pass_gates ?? ['baseline']).map((entry) => gate(entry, 'passed', 0, 210, (id) => `${id}: ok`)) : []),
+    ...(exit === VERIFY_FAILED ? failedGatesFor(worker, issue).map((entry) => gate(entry, 'failed', 1, 340, (id) => `${id}: 1 problem`)) : []),
+  ];
+  const statusByExit = { 0: 'passed', [VERIFY_FAILED]: 'failed', [VERIFY_NOT_STARTED]: 'not_started' };
+  return {
+    id: historyRunId(issue),
+    worktreeId,
+    instanceId: null,
+    taskId: `task-issue-${issue}`,
+    trigger: 'wait',
+    status: statusByExit[exit] ?? 'error',
+    baseRef: 'origin/develop',
+    startedAt: '2026-01-01T00:00:00.000Z',
+    finishedAt: '2026-01-01T00:00:01.000Z',
+    gates,
+    ...(worker.history_run && typeof worker.history_run === 'object' ? worker.history_run : {}),
+  };
+}
+
 // The options each subcommand lists in `commandmate <sub> --help`, in the real
 // CLI's order. The gated ones above are appended only when the scenario says the
 // CLI is new enough.
@@ -253,14 +311,19 @@ function enforceContract() {
   } catch {
     return; // no contract on disk => skip enforcement rather than mis-fail
   }
-  const spec = contract.subcommands?.[sub];
-  if (!spec) {
+  const parent = contract.subcommands?.[sub];
+  if (!parent) {
     process.stderr.write(`fake-cli: contract violation: commandmate has no subcommand "${sub}"\n`);
     process.exit(2);
   }
+  // A nested subcommand (`verify history` / `verify show`, Issue #306) is checked
+  // against its OWN flag list, never the parent's: `verify history --task` would
+  // be a runner reaching for a flag the read command does not have.
+  const nested = parent.subcommands?.[argv[1]];
+  const spec = nested ?? parent;
   const allowed = new Set(spec.flags ?? []);
   const enums = spec.flag_values ?? {};
-  const tokens = argv.slice(1);
+  const tokens = argv.slice(nested ? 2 : 1);
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (typeof token !== 'string' || !token.startsWith('--')) continue;
@@ -719,6 +782,13 @@ function helpFor(sub, spec) {
   const lines = [`Usage: commandmate ${sub} [options]`, '', 'Options:'];
   for (const flag of flags) lines.push(`  ${flag} <value>`);
   lines.push('  -h, --help                 display help for command');
+  // commander lists a command's subcommands under "Commands:", which is what the
+  // runner's `verify history` / `verify show` probe reads (Issue #306).
+  if (sub === 'verify' && verifyHistoryCapable(spec)) {
+    lines.push('', 'Commands:');
+    lines.push('  history [options]          List past verification runs, newest first');
+    lines.push('  show [options] <run-id>    Show one verification run with its gate results and log tails');
+  }
   return lines.join('\n');
 }
 
@@ -1773,6 +1843,27 @@ function main() {
     // (VerificationRunView). The runner reads `gates[]` only to NAME the gates a
     // failing verdict is about; the verdict itself stays the wait's exit code.
     if (!contractCapable(spec)) fail(`error: unknown command 'verify'`, 1);
+    // `verify history --worktree <id> --limit <n> --json` / `verify show <run-id>
+    // --json` (0.21.0+, Issue #306). Read-only: they start no run and exit 0 on a
+    // successful read, never 20/21. A CLI without them reads the word as a
+    // worktree id, which the fake refuses outright instead of inventing a run.
+    if (argv[1] === 'history' || argv[1] === 'show') {
+      if (!verifyHistoryCapable(spec)) fail(`Error: Invalid worktree ID format: ${argv[1]}`, 2);
+      if (argv[1] === 'history') {
+        const worktreeId = optionValue('--worktree');
+        const issue = issueFromId(worktreeId);
+        const run = issue === null ? null : historyRunFor(workerSpec(spec, issue), issue, worktreeId, { withLogs: false });
+        process.stdout.write(`${JSON.stringify(run === null ? [] : [run])}\n`);
+        process.exit(0);
+      }
+      const runId = Number(argv[2]);
+      const issue = Number.isInteger(runId) && runId >= 1000 ? String(Math.floor(runId / 1000)) : null;
+      const worktreeId = issue === null ? null : `fake-issue-${issue}`;
+      const run = issue === null ? null : historyRunFor(workerSpec(spec, issue), issue, worktreeId, { withLogs: true });
+      if (run === null || run.id !== runId) fail(`Verification run ${argv[2]} not found.`, 99);
+      process.stdout.write(`${JSON.stringify(run)}\n`);
+      process.exit(0);
+    }
     const worktreeId = argv[1];
     const issue = issueFromId(worktreeId);
     const worker = workerSpec(spec, issue);
