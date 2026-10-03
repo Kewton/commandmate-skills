@@ -596,6 +596,29 @@ dispatch がそのまま契約の `scope.deny` に書く（従来は常に `deny
 
 ## dispatch（`scripts/dispatch.mjs`）
 
+### #303 — 再指示の後の `wait --verify` が契約 task に紐づかず、直った worker が不合格になりえた
+
+CommandMate の `wait --verify` は進行中の task にしか紐づかない。1回目の裁定で task は `succeeded` / `failed` に
+閉じ、再指示の素の `send` は task を作らないので、2ターン目以降の `wait --verify` は契約に紐づかない run になる。
+CommandMate 側の実測（Kewton/CommandMate#3118）では、その run は scope が SKIP、env-clean が「ベースライン無し」の
+ERROR で exit 20 になり、ゲートも契約の `verify.gates` ではなく verify.yaml の全部（unit 全体で約21分）だった。
+runner にとっては、正しく直った worker が不合格と裁定され、`--max-turns` まで再指示が続くことになる。
+
+→ **裁定が出た後のターンは `wait`（`--verify` なし）→ `verify <id> --task <taskId> --json` の exit code で裁く。**
+`verify --task`（CommandMate 0.43.0+）は終了済みの task にも紐づき、`--gates` を省くと契約の `verify.gates` ＋必須の
+builtin で検証する。exit の意味は `wait --verify` と同じに扱う。1ターン目は従来どおり `wait --verify`。失敗ゲートの
+内訳（`describeFailingGates`）も `--task` 付きで読み、裁定が `verify --task --json` から来たターンはその run 文書を
+そのまま使って再実行しない。`--reverify` は前の report の `task_id` が引けるときだけ `--task` を渡す。
+
+判断したこと:
+
+- **`--task` の有無は `verify --help` で、必要になった時点で1回だけ聞く。** `probeContractSupport` と同じ形で、
+  版番号は比べない。1ターン目で合格する run は従来と同じ呼び出ししかしない。
+- **無い CLI では従来の `wait --verify` のまま、limitation `verify_task_unsupported` を run に1件。** 紐づかない裁定を
+  黙って続けると、report の `pass` / `fail` が「契約で判定した」のか「verify.yaml 全部で、scope を判定せずに」なのか
+  読めない。
+- **`verify history` / `show` で直前の run を読む案は採らなかった。** 並行する別の run を取り違えない手当てが要る。
+
 ### #274 — `--reverify` が対象 Issue を必ず同時に検証し、重いゲートを直列にできなかった
 
 `--reverify` は再判定の対象を全件同時に走らせていたので、`cargo test --all-targets` のような重いゲートを
@@ -2454,6 +2477,13 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 ---
 
 ## パッケージ
+
+### 0.39.0 — 再指示の後の裁定を契約 task に紐づけた（#303）
+
+- **#303** —— 裁定（20 / 21）が出た後のターンは `wait`（`--verify` なし）→ `verify <id> --task <taskId> --json` の
+  exit code で裁く（CommandMate 0.43.0+）。失敗ゲートの内訳も `--task` 付きで読み、`--reverify` は記録に task id が
+  あるときだけ `--task` を渡す。`--task` の有無は `verify --help` を1回だけ確かめ、無い CLI では従来どおり
+  `wait --verify` で裁き、limitation `verify_task_unsupported` を1件残す。
 
 ### 0.38.0 — 入力の禁止パスを契約の `scope.deny` まで運び、warning のある plan を `partial` にした（#301）
 

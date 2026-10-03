@@ -19,8 +19,8 @@
 // else before it sends). The real CLI is worktree-id based:
 // `send <worktree-id> <message>`, `wait <worktree-ids...>`, `capture <worktree-id>
 // --json`, `respond <worktree-id> <answer>`, `ls --json`. There is no `--json
-// --worktree --prompt-file` on send, no `--task` anywhere, and no `verify`/`uat`
-// subcommand. `wait` signals state by EXIT CODE (0 completed, 10 prompt, 124
+// --worktree --prompt-file` on send, no `--task` on `wait`, and no `uat`
+// subcommand (`verify --task` arrived in 0.43.0 — see `cli_verify_task` below). `wait` signals state by EXIT CODE (0 completed, 10 prompt, 124
 // timeout), printing prompt JSON to stdout on a prompt.
 //
 // Worktree registration (Issue #91): `commandmate sync` re-scans repositories and
@@ -173,6 +173,15 @@ const COMMANDMATE_SUBS = new Set(['ls', 'send', 'wait', 'capture', 'respond', 'v
 // `cli_contract: true` refuses them and hides them from --help, so the runner's
 // version gate sees exactly what an older binary would show it.
 const CONTRACT_GATED_FLAGS = { send: ['--contract'], wait: ['--verify', '--require-work'] };
+
+// `verify --task` (CommandMate 0.43.0+, Issue #303) binds a verification run to a
+// contract task that is no longer in flight. Opted into per scenario with
+// `cli_verify_task: true`: a scenario without it models a 0.17.0–0.42.x binary,
+// whose `verify --help` does not list the flag and which refuses it — so every
+// scenario written before #303 keeps the CLI it was written against.
+function verifyTaskCapable(spec) {
+  return contractCapable(spec) && spec.cli_verify_task === true;
+}
 
 // The options each subcommand lists in `commandmate <sub> --help`, in the real
 // CLI's order. The gated ones above are appended only when the scenario says the
@@ -706,6 +715,7 @@ function contractCapable(spec) {
 function helpFor(sub, spec) {
   const flags = [...(HELP_FLAGS[sub] ?? [])];
   if (contractCapable(spec)) flags.push(...(CONTRACT_GATED_FLAGS[sub] ?? []));
+  if (sub === 'verify' && verifyTaskCapable(spec)) flags.push('--task');
   const lines = [`Usage: commandmate ${sub} [options]`, '', 'Options:'];
   for (const flag of flags) lines.push(`  ${flag} <value>`);
   lines.push('  -h, --help                 display help for command');
@@ -716,6 +726,7 @@ function helpFor(sub, spec) {
 // cases would "pass" against a fake that quietly accepted a flag the CLI they
 // model does not have.
 function refuseGatedFlags(spec) {
+  if (sub === 'verify' && argv.includes('--task') && !verifyTaskCapable(spec)) fail(`error: unknown option '--task'`, 1);
   if (contractCapable(spec)) return;
   for (const flag of CONTRACT_GATED_FLAGS[sub] ?? []) {
     if (argv.includes(flag)) fail(`error: unknown option '${flag}'`, 1);
@@ -1766,6 +1777,19 @@ function main() {
     const issue = issueFromId(worktreeId);
     const worker = workerSpec(spec, issue);
     if (Number.isInteger(worker.verify_hold_ms)) logSpan('verify-start', issue);
+    // `--task <id>` (0.43.0+, Issue #303) binds the run to the contract task even
+    // after the task finished, so it judges THIS turn's work exactly as the turn's
+    // `wait --verify` would have: the verdict is the turn's `verify_exits` entry
+    // and the gates are the turn's `failed_gates_by_turn` / `pass_gates`. Only the
+    // task `send --contract` created is accepted — any other id is a runner that
+    // passed the wrong handle, which the real CLI answers with an error, not a run.
+    const boundTask = optionValue('--task');
+    if (boundTask !== null && boundTask !== `task-issue-${issue}`) {
+      fail(`Error: task ${boundTask} not found for worktree ${worktreeId}`, 2);
+    }
+    const boundExit = boundTask === null || spec.run_declared_gates
+      ? null
+      : (Number.isInteger(worker.verify_exit) ? worker.verify_exit : verifyExitFor(worker, issue));
     // A failed_gates entry is a gate id string, or an object {id, logTail, exit}
     // when a scenario needs to control the gate's log — e.g. a scope gate whose
     // logTail lists the out-of-scope paths (#1678 B-2). Under
@@ -1774,16 +1798,20 @@ function main() {
     // reads names the actual command and its actual exit status (Issue #114).
     const failedGates = spec.run_declared_gates
       ? runDeclaredGates(spec, issue, worktreeId).failing
-      : failedGatesFor(worker, issue);
+      : (boundExit === null || boundExit === VERIFY_FAILED ? failedGatesFor(worker, issue) : []);
     // The gates a PASSING run names. Empty by default, so every scenario written
     // before `--reverify` keeps the document it had; a case that re-judges a
     // worktree in place declares `pass_gates` so the report can say what the
     // pass was based on (Issue #121 / #1678 B-5).
+    // A bound run that PASSED names the same gates the wait's GATE lines would
+    // (default ['baseline']); an unbound one keeps the empty default above.
     const passGates = failedGates.length === 0 && !spec.run_declared_gates
-      ? (worker.pass_gates ?? [])
+      ? (worker.pass_gates ?? (boundExit === 0 ? ['baseline'] : []))
       : [];
     const gates = [
-      { gateId: 'work-evidence', status: 'passed', exitCode: null, durationMs: 12, logTail: 'commits=1 uncommitted=0' },
+      boundExit === VERIFY_NOT_STARTED
+        ? { gateId: 'work-evidence', status: 'failed', exitCode: null, durationMs: 12, logTail: 'commits=0 uncommitted=0' }
+        : { gateId: 'work-evidence', status: 'passed', exitCode: null, durationMs: 12, logTail: 'commits=1 uncommitted=0' },
       // A pass_gates entry is a gate id, or an object when a scenario needs the
       // extra fields the run document carries — today `flaky`, which is how
       // `verify show/verify --json` exposes the runner's `[flaky]` log marker
@@ -1822,7 +1850,7 @@ function main() {
         instanceId: null,
         taskId: `task-issue-${issue}`,
         trigger: 'manual',
-        status: failedGates.length > 0 ? 'failed' : 'passed',
+        status: boundExit !== null ? (boundExit === 0 ? 'passed' : 'failed') : (failedGates.length > 0 ? 'failed' : 'passed'),
         baseRef: 'origin/develop',
         startedAt: '2026-01-01T00:00:00.000Z',
         finishedAt: '2026-01-01T00:00:01.000Z',
@@ -1842,6 +1870,7 @@ function main() {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, worker.verify_hold_ms);
       logSpan('verify-end', issue);
     }
+    if (boundExit !== null) process.exit(boundExit);
     process.exit(Number.isInteger(worker.verify_exit)
       ? worker.verify_exit
       : (failedGates.length > 0 ? VERIFY_FAILED : 0));

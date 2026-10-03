@@ -1726,6 +1726,28 @@ function runDispatchCase(caseId) {
   // the profile's 600 on another turn, and a supervision loop that read the
   // override once and the declaration afterwards is exactly the bug worth pinning.
   // NO invocation of the subcommand may carry any of these tokens.
+  // The ORDERED verification calls one worker's worktree received (Issue #303):
+  // each `wait` / `verify` that is not a `--help` probe, spelled as the
+  // subcommand plus the two flags that decide what it judged — `--verify` (the
+  // wait judged, bound only while the task is in flight) and `--task <id>` (a run
+  // bound to the contract task). An exact list, so "the second turn was judged by
+  // verify --task" and "nothing else was run" are one assertion.
+  for (const [num, sequence] of Object.entries(expect.verification_call_sequence ?? {})) {
+    const actual = cliLog
+      .filter((entry) => (entry.sub === 'wait' || entry.sub === 'verify')
+        && !entry.args.includes('--help')
+        && /issue-(\d+)/.exec(String(entry.args[0] ?? ''))?.[1] === String(num))
+      .map((entry) => {
+        const args = entry.args.map(String);
+        const task = args.indexOf('--task');
+        return [
+          entry.sub,
+          ...(args.includes('--verify') ? ['--verify'] : []),
+          ...(task >= 0 ? ['--task', args[task + 1] ?? ''] : []),
+        ].join(' ');
+      });
+    check(deepEqual(actual, sequence), `#${num} verification calls ${JSON.stringify(actual)} !== ${JSON.stringify(sequence)}`);
+  }
   if (expect.cli_args_absent) {
     for (const [name, tokens] of Object.entries(expect.cli_args_absent)) {
       const calls = cliLog.filter((entry) => entry.sub === name).map((entry) => entry.args.map(String));
@@ -1970,7 +1992,9 @@ function runDispatchCase(caseId) {
   }
   // `commandmate verify --json` names the failing gates of a 20. It must NOT be
   // reached by a 99: "we could not judge" is not a verification failure to fix.
-  const verifyCalls = cliLog.filter((entry) => entry.sub === 'verify').length;
+  // Counted as verification RUNS: the `verify --help` probe for `--task` (#303)
+  // runs no gate, so it is not one.
+  const verifyCalls = cliLog.filter((entry) => entry.sub === 'verify' && !entry.args.includes('--help')).length;
   if (expect.verify_calls !== undefined) {
     check(verifyCalls === expect.verify_calls, `commandmate verify was called ${verifyCalls} time(s) !== ${expect.verify_calls}`);
   }
@@ -3511,7 +3535,8 @@ function parityTest() {
   //   1. a legacy --auto-yes prompt run: ls -> send -> wait (prompt) -> capture
   //      -> respond -> wait;
   //   2. a contract run whose verdict is 20: send --help / wait --help (the
-  //      version gate) -> send --contract -> wait --verify -> verify --json;
+  //      version gate) -> send --contract -> wait --verify -> verify --help (the
+  //      `--task` probe, #303) -> verify --task --json;
   //   3. a run whose worktree is registered only after a re-scan: ls -> sync ->
   //      ls (Issue #91);
   //   4. a stale question interrupted before the first send (below).
@@ -3541,6 +3566,7 @@ function parityTest() {
   runDispatchRunner(planPath, {
     cli_available: true,
     cli_contract: true,
+    cli_verify_task: true,
     git: { branch: 'feature/integration', dirty: false },
     gh: { repo_access: true },
     workers: {

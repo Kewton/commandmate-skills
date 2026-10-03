@@ -1,0 +1,100 @@
+{
+  "description": "Issue #303 (c): 陰性対照。`verify --task` を持つ CLI でも、1 ターン目で合格する run は従来どおり `wait --verify` 1 回だけで裁定し、`verify` は（`--task` の確認の `--help` も含めて）1 度も呼ばない。1 ターン目の task は進行中なので `wait --verify` が紐づくし、合格の後は何も裁定しない —— `--task` の経路は「裁定が出た後の再指示のターン」にだけ入る。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--expect-branch",
+    "feature/integration",
+    "--max-turns",
+    "3"
+  ],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [
+      true,
+      true
+    ],
+    "no_respond": true,
+    "sent": [
+      201,
+      200
+    ],
+    "send_counts": {
+      "201": 1,
+      "200": 1
+    },
+    "worker_states": {
+      "201": "completed",
+      "200": "completed"
+    },
+    "verification_outcomes": {
+      "201": "pass",
+      "200": "pass"
+    },
+    "verification_gates": {
+      "201": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "baseline",
+          "verdict": "pass",
+          "origin": "repo"
+        }
+      ],
+      "200": [
+        {
+          "id": "work-evidence",
+          "verdict": "pass",
+          "origin": "repo"
+        },
+        {
+          "id": "baseline",
+          "verdict": "pass",
+          "origin": "repo"
+        }
+      ]
+    },
+    "verification_checks_include": {
+      "201": [
+        "commandmate wait --verify → exit 0"
+      ],
+      "200": [
+        "commandmate wait --verify → exit 0"
+      ]
+    },
+    "verification_call_sequence": {
+      "201": [
+        "wait --verify"
+      ],
+      "200": [
+        "wait --verify"
+      ]
+    },
+    "cli_subcommand_counts": {
+      "verify": 0
+    },
+    "verify_calls": 0,
+    "absent_limitation_codes": [
+      "verify_task_unsupported"
+    ]
+  }
+}

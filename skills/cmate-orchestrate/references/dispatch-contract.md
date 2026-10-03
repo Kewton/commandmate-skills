@@ -102,7 +102,8 @@ limitation `dispatch_defaults_no_infer_not_applied` を残して「`--no-infer` 
 ## 2. commandmate CLI の呼び出し規約（worktree-id ベース）
 
 実 `commandmate` CLI は **worktree-id ベース**であり、`--json --worktree`・`--prompt-file`・
-`--task` は無い（#1467）。CommandMate **0.17.0** で実行契約（`send --contract`）と検証
+`wait --task` は無い（#1467）。`verify --task <taskId>` は CommandMate **0.43.0** で入った
+（第2.5.1節。[#303](https://github.com/Kewton/commandmate-skills/issues/303)）。CommandMate **0.17.0** で実行契約（`send --contract`）と検証
 （`verify` / `wait --verify`）が入り、`send --contract` は **task id を stdout に返す**
 （[#1544](https://github.com/Kewton/CommandMate/issues/1544) /
 [#1545](https://github.com/Kewton/CommandMate/issues/1545)）。dispatch runner は次を呼ぶ。
@@ -115,12 +116,14 @@ limitation `dispatch_defaults_no_infer_not_applied` を残して「`--no-infer` 
 | `send` | `<worktree-id> <message>` | exit 0 で送信成功 | 継続 nudge・再指示・送信確定・フォールバック時の generic worker prompt |
 | `capture` | `<worktree-id> --json` | `{ "isGenerating", "isPromptWaiting", "content", "promptData": { "question" }, … }` | 送信確定の確認・prompt/出力の human 提示用取得 |
 | `wait` | `<worktree-id> --on-prompt agent --verify --timeout <sec>` | **exit code**: 0 pass / 20 判定して不合格 / 21 作業証跡ゼロ / 10 prompt / 99 **判定に到達せず** / 124 timeout / 1・2 インフラ | 1ターンの終了を待ち、契約ゲートの裁定を受け取る |
-| `wait` | `<worktree-id> --on-prompt agent --timeout <sec>` | **exit code**: 0 idle / 10 prompt / 124 timeout / その他 failed | 裁定済み（pass 後）の commit 待ち・フォールバック時の idle 待ち |
-| `verify` | `<worktree-id> --json` | 検証 run document（`{ status, gates: [{ gateId, status, exitCode, logTail }] }`） | exit 20 のとき**失敗ゲートを特定**する（裁定そのものではない。第2.3節） |
+| `wait` | `<worktree-id> --on-prompt agent --timeout <sec>` | **exit code**: 0 idle / 10 prompt / 124 timeout / その他 failed | 裁定済み（pass 後）の commit 待ち・再指示の後のターンの完了待ち（`verify --task` がある CLI。第2.5.1節）・フォールバック時の idle 待ち |
+| `verify` | `<worktree-id> --task <taskId> --json` | 検証 run document と**裁定の exit code**（`wait --verify` と同じ 0 / 20 / 21 / 99 / その他） | 再指示の後のターンの裁定と、exit 20 の失敗ゲートの特定（0.43.0 以降。第2.3節・第2.5.1節） |
+| `verify` | `<worktree-id> --json` | 検証 run document（`{ status, gates: [{ gateId, status, exitCode, logTail }] }`） | `--task` の無い CLI で exit 20 のとき**失敗ゲートを特定**する（裁定そのものではない。第2.3節） |
 | `respond` | `<worktree-id> yes` | exit 0 | prompt への応答（`--auto-yes` 時のみ） |
 | `capture` | `<worktree-id> --json`（最初の send の前） | `isPromptWaiting` / `isSelectionListActive` | 前の回の質問画面が残っていないかを見る（第2.14節） |
 | `interrupt` | `<worktree-id>` | exit 0 で中断。30 は「動いているセッションが無く何も中断していない」 | `--interrupt-stale-prompt` 時だけ、残った質問画面を**答えずに**畳む（第2.14節。CommandMate 0.28.0+） |
 | `send`/`wait` | `--help` | 出力に `--contract` / `--verify` が載るか | 実行冒頭のバージョンゲート（第2.7節） |
+| `verify` | `--help` | 出力に `--task` が載るか | 裁定を契約 task に紐づけられるか（必要になった時点で1回だけ。第2.5.1節） |
 
 **`--on-prompt` は「誰が prompt に答えるか」である。** `agent`（既定）は prompt を**呼び出し元へ
 exit 10 で返す**。`human` は「人が UI で答えるまで `wait` が block する」ため **exit 10 を返さない**。
@@ -299,6 +302,14 @@ exit 20 は「ゲートが判定して落ちた」なので、**何が落ちた�
 注意: この呼び出しは**2回目の run を開始する**ので、その run 自身の裁定は wait のものと食い違いうる。
 **裁定は wait の exit code のままとし**、この呼び出しは gate を**名指しする**用途に限る。内訳が
 取れなかった場合はその事実を `checks` と再指示メッセージに書く（取れなかったことを隠さない）。
+
+`verify --task` がある CLI（0.43.0 以降）では `commandmate verify <worktree-id> --task <taskId> --json`
+で読む（[#303](https://github.com/Kewton/commandmate-skills/issues/303)）。wait の裁定で task は
+閉じているので、`--task` の無い `verify` は契約に紐づかない run になり、名指すゲートが契約の
+`verify.gates` ではなく `.commandmate/verify.yaml` の全部になる。再指示の後のターンで裁定そのものが
+`verify --task --json` から来た場合（第2.5.1節）は、**その run 文書をそのまま読み、再実行しない**
+（同じ裁定に対して食い違いうる2つ目の run を作らない）。`verify history` / `verify show` で直前の
+run を読む方式は採らない —— 並行する別の run を取り違えない手当てが要るからである。
 
 ### 2.3.1 収束しない scope 再指示は遮断する（`scope_unsatisfiable`）
 
@@ -489,6 +500,36 @@ exit 0 の run は契約タスクを `succeeded`（終端）へ遷移させる�
 返る（[#1620](https://github.com/Kewton/CommandMate/issues/1620)）。したがって runner は、いったん
 pass を得た worker に対して `--verify` を**二度と付けない**。付ければ、自分で「判定に到達しなかった」
 状態を作り出すことになる。pass 後に commit を待つ必要があるときは `--verify` 無しの `wait` を使う。
+
+### 2.5.1 再指示の後の裁定は契約 task に紐づける（[#303](https://github.com/Kewton/commandmate-skills/issues/303)）
+
+`wait --verify` は**進行中**（`running` / `waiting_input` / `verifying`）の task にしか紐づかない。
+1ターン目の裁定（exit 20 / 21）で task は `succeeded` / `failed` に閉じ、再指示・nudge の素の `send` は
+task を作らないので、**2ターン目以降の `wait --verify` は契約に紐づかない run になる**。その run では
+scope が **SKIP**（契約の範囲で判定されない）、env-clean が「ベースライン無し」の **ERROR**（宣言ゲートが
+全部 PASS でも exit 20）、ゲートは契約の `verify.gates` ではなく verify.yaml の全部になる
+（Kewton/CommandMate#3118 の実測）。正しく直った worker が不合格と裁定され、`--max-turns` まで
+再指示が続く。
+
+`commandmate verify <worktree-id> --task <taskId>`（CommandMate 0.43.0 以降）は終了済みの task にも
+紐づき、`--gates` を省くと契約の `verify.gates` ＋必須の builtin（work-evidence / scope / env-clean）で
+検証する。runner は次のように使い分ける。
+
+| ターン | `verify --task` がある | 無い（< 0.43.0） |
+|---|---|---|
+| 1ターン目（task は進行中） | `wait --verify`（従来どおり） | 同左 |
+| 裁定（20 / 21）が出た後のターン | `wait`（`--verify` なし）で完了を待ち、`verify <id> --task <taskId> --json` の **exit code** で裁定する | `wait --verify`（従来どおり）＋ limitation `verify_task_unsupported` を run に1件 |
+| pass の後 | `wait`（`--verify` なし。第2.5節） | 同左 |
+
+- `verify --task` の exit code の意味は `wait --verify` と**同じ**に扱う（0 pass / 20 / 21 / 99 / その他は
+  インフラ）。`wait` が prompt（10）・timeout（124）・失敗で返ったときは `verify` を呼ばず、従来の
+  分岐をそのまま通る。gate の一覧は GATE 行ではなく run 文書の `gates[]` から読み、`checks` の行は
+  `commandmate verify --task --json → exit <n> (…)` と書く（どちらの機構で裁定したかが report で読める）。
+- `--task` があるかは、第2.7節の probe と同じ形で `verify --help` に `--task` が載るかで判定する
+  （版番号は比べない）。**必要になった時点で1回だけ**聞く: 1ターン目で合格する run は従来と同じ
+  呼び出ししかしない。
+- task id は `send --contract` の stdout の値（`task_id`）である。task id が無い worker は従来の
+  経路のままにする。
 
 ### 2.6 exit 99 は「判定していない」
 
@@ -1720,6 +1761,14 @@ merge の eligible（`worker_state === 'completed' && verification.outcome === '
 worker をもう一度走らせることではなく、**その worktree の現在の状態をもう一度ゲートにかけること**
 であり、再 dispatch は worker のターンを1つ消費し、終わっていると分かっている worker に契約を
 再送するので、契約 scope 内とはいえ不要な差分が生まれる余地も残す。
+
+**task への紐づけ（[#303](https://github.com/Kewton/commandmate-skills/issues/303)）。** reverify が
+判定し直すのは、前の attempt の裁定で task が閉じた worktree である。前の report の worker 記録から
+task id（`task_id`）が引け、かつ CLI に `verify --task` があるときだけ
+`verify <worktree-id> --task <taskId> --json` で判定する。task id が引けない（古い report・契約なしの
+run で `task_id` が worktree id の場合を含む）ときは従来どおり `verify <worktree-id> --json` である。
+task id があるのに CLI に `--task` が無いときは、第2.5.1節と同じ limitation `verify_task_unsupported`
+を1件記録する。
 
 #### 8.5.1 分割規則
 

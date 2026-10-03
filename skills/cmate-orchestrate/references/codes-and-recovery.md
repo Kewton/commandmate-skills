@@ -242,6 +242,7 @@ success にしない」と食い違った。**以後 notice も `partial` にす
 |---|---|---|
 | `contract_unsupported` | dispatch | CLI が実行契約に非対応で、より弱い baseline 裁定に落ちた |
 | `contract_disabled` | dispatch | `--contract-mode off` を明示したため probe していない |
+| `verify_task_unsupported` | dispatch | 再指示後（または `--reverify`）の裁定が契約 task に紐づかなかった: CLI の `verify --help` に `--task` が無い（CommandMate < 0.43.0）ので、従来どおり `wait --verify` / `verify --json` で裁いた。その裁定では scope が契約で判定されず、env-clean にベースラインが無く、ゲートは verify.yaml の全部になる。**run に1件**。CommandMate を 0.43.0 以上に上げれば消える（[#303](https://github.com/Kewton/commandmate-skills/issues/303)、[dispatch-contract.md](./dispatch-contract.md) 第2.5.1節） |
 | `contract_scope_unknown` | dispatch | 対象 file が空の Issue を dispatch しなかった（その wave は advance しない） |
 | `acceptance_gate_id_unknown` | dispatch | Issue の ```acceptance-gates ブロックが `require:` した gate id が worktree の `.commandmate/verify.yaml` に無い、あるいはそのファイルを読めない（`gates:` を宣言した Issue も同じく読めなければ止まる —— `gateDefinitions` を運ぶ契約は config 無しでは評価され得ない）。**Issue ごとに1件。send する前に止める。** detail が実在する id を列挙するので、綴り違いなら diff がそのまま出る |
 | `acceptance_gate_id_conflict` | dispatch | Issue の `gates:` が定義した id が、worktree の `.commandmate/verify.yaml` が**既に宣言している** id と衝突している（[#125](https://github.com/Kewton/commandmate-skills/issues/125)）。**Issue ごとに1件。send する前に止める。** 契約は**足せるだけで上書きできない** —— 同じ id なら report がどちらの裁定か言えず、リポジトリ自身の「合格の定義」を委任単位で差し替えられてしまう。Issue 側の id を `issue-<番号>-<何を測るか>` に直すか、定義をやめて既存ゲートを `require:` する。上流は同じ契約を送信時 exit 2 で拒否するので、**そこへ到達させないための停止**である |
