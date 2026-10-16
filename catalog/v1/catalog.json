@@ -1663,7 +1663,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.40.0",
+      "latest": "0.41.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -3235,6 +3235,60 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.40.0/cmate-orchestrate-0.40.0.tar.gz",
             "sha256": "fd30c03614d3a5ac343bdfcbddfeed83eae4d0ee29a3dd04947eca199af189d6",
             "size": 881256,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              },
+              {
+                "agent": "opencode-v2",
+                "evidence": "Measured 2026-09-29 on opencode2 2.0.18 (CommandMate#2975): GET /api/skill lists SKILL.md from .agents/skills and .claude/skills; /<name> makes the model call the skill tool. No restart needed. Not in v2's / palette (@ and /skills only). This package was NOT separately measured.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.41.0",
+          "changelog": "fix(cmate-orchestrate): refuse an auto-yes-off dispatch over an armed instance and pass the stop pattern (#309) (#310)\n\nAn operator who armed Auto-Yes on a worker with a stop pattern and then dispatched with\n`--no-auto-yes` (to keep dispatch from re-arming it without the pattern) got a contract with\n`autoYes.mode: off`. CommandMate gives the contract priority over the armed state, so Auto-Yes\nstayed on and never answered (CommandAgent #676 / #680, `suppressed-by-policy` / `mode-off`).\n\n- (A) `--auto-yes-stop-pattern <regex>`: rides on the send that arms the worktree\n  (`send --auto-yes --duration <w> --stop-pattern <regex>`). Valid only when the resolved\n  auto-yes is on; otherwise invalid_input. Judged and sent on its trimmed value; blank,\n  multi-line, >500 chars or an invalid regex is invalid_input. Flag only (not in dispatch_defaults)\n- (B) a run whose resolved auto-yes is off sends to a worktree only once the Auto-Yes of the\n  instance it drives is confirmed off in `commandmate ls --json` autoYesByInstance (no entry,\n  enabled false, or expired). Armed, or not confirmable (ls failed, no row, a row without\n  autoYesByInstance from a server older than CommandMate #2512), is refused - fail closed\n  - at the start: every issue whose target resolves then (later waves included, resolved\n    without `commandmate sync`) is checked after the pre-flight and before --out; any refusal\n    is invalid_input, exit 3, nothing sent, no --out\n  - an issue whose worktree only resolves in a later wave is checked when that wave resolves\n    and halts partial / dispatch_error before its send\n  - the row read is the one the send reaches: the resolved id, then the same branch rule\n    (`rowMatchesBranch`, shared with lookupWorktree), so a stale plan worktree_id reads the current row\n- `--no-auto-yes` keeps its meaning (contract `autoYes.mode: off`)\n- behaviour change: an auto-yes-off dispatch against a CommandMate that does not report\n  autoYesByInstance (older than #2512) now stops instead of sending\n- fixtures d195-d206; fake CLI rows carry `autoYesByInstance: {}` by default\n- docs: dispatch-contract.md argument table and section 1.1, release notes, fixtures README;\n  version 0.40.0 -> 0.41.0, skill_version goldens updated\n\n本文に無い指摘: skills/cmate-orchestrate/SKILL.md argument table does not list\n`--auto-yes-stop-pattern` (SKILL.md is 18 bytes under its 60,000-byte limit; the canonical\nreferences/dispatch-contract.md documents it).",
+          "published_at": "2026-10-16T15:26:30Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.41.0",
+            "commit": "40de023ee323b3ecb32696256a795e650bfa52b9"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.41.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.41.0/cmate-orchestrate-0.41.0.tar.gz",
+            "sha256": "6e2638d44e55694960b13b16a6970f522e77ec2c5f42fb06780a3fe862415536",
+            "size": 889657,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
