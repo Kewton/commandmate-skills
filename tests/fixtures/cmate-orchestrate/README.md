@@ -342,6 +342,10 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 | `d152-human-only-with-only` | `--only`（CommandMate#3008）との組み合わせ。human-only への辺は `--only` の依存検査より先に外れるので断らない。選外と human-only は同じ最後の entry に Issue 番号順で並ぶ |
 | `d153-only-names-human-only` | `--only` に human-only の Issue を書くと `invalid_input` で全体を断る（何も send せず `--out` も作らない） |
 | `d154-every-issue-human-only` | 全 Issue が human-only の plan を `plan_invalid` で断り、理由を名指す |
+| `d195-auto-yes-stop-pattern-rides-send` | **stop pattern を dispatch から渡す（[#309](https://github.com/Kewton/commandmate-skills/issues/309) (A)）。** `--auto-yes --auto-yes-stop-pattern harness-stop` の run で、worker を開く `send` に `--auto-yes --duration 1h --stop-pattern harness-stop` が連続して載るか。渡さない run の argv が変わらないことは d57 / d58 が測る |
+| `d196-stop-pattern-without-auto-yes-refused` | 解決後の auto-yes が off の run に渡した stop pattern を、黙って捨てずに `invalid_input`（exit 3）で拒否するか。`--out` を作らず CLI を1回も呼ばず、`accepted_with_args`（`--auto-yes` を足す）では完走する（#309 (A)） |
+| `d197-armed-instance-auto-yes-off-refused` | **Auto-Yes が有効な instance へ off で dispatch しない（#309 (B)）。** wave 2 の #200 の primary instance（`cliToolId` claude）が `ls --json` の `autoYesByInstance` で有効なとき、`--no-auto-yes` の run は**最初の send より前に** `invalid_input`（exit 3）で止まり、`--out` を作らず、メッセージに Issue・instance・取るべき手（`--auto-yes`／Auto-Yes を無効にする）が出るか。`accepted_with_args`（`--auto-yes`）では完走する |
+| `d198-unarmed-instance-auto-yes-off-non-regression` | **d197 の相方（非回帰）。** `autoYesByInstance` は在るが、駆動する instance は無効（#201 は駆動しない codex だけが有効、#200 は `expiresAt` が過去）。拒否せず d58 と同じく完走し、どの `send` にも `--auto-yes` / `--duration` / `--stop-pattern` が付かないか。fake CLI は worker の `ls_row` を `ls --json` の行に重ねる |
 
 ## merge case 一覧
 

@@ -36,7 +36,8 @@ CommandMate の exit code へ移しただけで、report 上の表現（field �
 | `--git <path>` | 任意 | `git` | drift 確認に使う git |
 | `--gh <path>` | 任意 | `gh` | repo 到達性確認に使う gh |
 | `--auto-yes` | 任意 | off（profile 既定可） | worker prompt を自動応答する。既定 off（prompt で停止し human へ提示）。profile の `dispatch_defaults.auto_yes` が既定を宣言できる（第1.1節）。flag は常に勝つ |
-| `--no-auto-yes` | 任意 | — | **off 側を明示する**（第1.1節）。profile が `auto_yes: true` を宣言していても、この run だけ off にできる。`--auto-yes` との同時指定は `invalid_input` |
+| `--no-auto-yes` | 任意 | — | **off 側を明示する**（第1.1節）。profile が `auto_yes: true` を宣言していても、この run だけ off にできる。`--auto-yes` との同時指定は `invalid_input`。**dispatch 対象の instance で Auto-Yes がすでに有効なら、解決後の off は拒否する**（第1.1節「Auto-Yes が有効な instance へ off で dispatch しない」。#309） |
+| `--auto-yes-stop-pattern <regex>` | 任意 | なし | auto-yes を arm する `send` に `--stop-pattern <regex>` として渡す（第1.1節。#309）。**解決後の auto-yes が on のときだけ有効**で、off の run（flag も profile 宣言も無い・`--no-auto-yes`・`--unattended`）に渡すと `invalid_input`（exit 3・CLI を呼ばず `--out` も作らない）。空・改行入り・500 文字超（`commandmate send` の上限）・正規表現として不正なものも `invalid_input`。profile では宣言できない（flag のみ）。渡さない run の send argv と report は、この flag が無かった頃と byte 一致する |
 | `--unattended` | 任意 | **off** | **この invocation に人間が居ないことの宣言**（第3.0.3節）。mutation の権限は1つも足さず、**`--approve` を含意しない**。含意するのは締め付けだけ: `--contract-mode require` / pre-flight の scope 検査（all-or-nothing・`--out` 未消費）/ worktree 単位の排他 lock / `--wall-clock-budget` の明示必須 / `unattended_baseline` の記録。緩和フラグ（`--auto-yes` / `--allow-questions` / `--contract-mode off｜auto`）との併用は `invalid_input`（exit 3）で拒否する |
 | `--wall-clock-budget <sec>` | 任意（`--unattended` では**必須**）| なし（off） | run 全体の壁時計上限（第3.0.4節）。**残り budget は run が起動する子プロセスすべての timeout でもある**（profile baseline と acceptance コマンドは自前の timeout を持たない）。到達は `partial` / `stop_reason: timeout` であって成功ではない |
 | `--prepare-worktrees` | 任意 | **off** | pre-flight で未解決だった worktree を `cmate-worktree-setup` provider に作らせてから dispatch する（第3.0.1節）。既定 off＝従来どおり停止する |
@@ -98,6 +99,52 @@ limitation `dispatch_defaults_no_infer_not_applied` を残して「`--no-infer` 
 宣言の形が壊れている（未知 key・boolean でない・0 以下）場合は `plan_invalid`（exit 3）で
 **dispatch を始めない**。未知 key を読み飛ばす実装だと、新しい runner 向けに書かれた profile が
 古い runner で**半分だけ効いた**状態で走ることになり、それは宣言が防ごうとした事故そのものである。
+
+#### stop pattern は auto-yes を arm する send に載る（[#309](https://github.com/Kewton/commandmate-skills/issues/309) (A)）
+
+`--auto-yes-stop-pattern <regex>` は、worker を開く `send` に `--auto-yes --duration <window>` に続けて
+`--stop-pattern <regex>` を付ける（fixture `d195-auto-yes-stop-pattern-rides-send`）。これが無かった頃、
+stop pattern を使いたい利用者は先に自分で Auto-Yes を有効化し、dispatch には `--no-auto-yes` を付けて
+「dispatch に再 arm させない」しかなかった。その `--no-auto-yes` が契約の `autoYes.mode: off` を書き、
+Auto-Yes はオンのまま一度も答えなくなっていた（CommandAgent #676 / #680、`suppressed-by-policy` / `mode-off`）。
+
+- **優先順位は auto_yes と同じく解決後の値で決まる。** auto-yes が flag 由来でも profile の
+  `dispatch_defaults.auto_yes` 由来でも、pattern は arm する `send` に載る。pattern 自体は **flag だけ**で渡す。
+  `dispatch_defaults` は真偽値と正の整数の object であり（[profile-contract.md](./profile-contract.md)
+  第10.2節）、文字列を入れると種類の違うものが混ざる。
+- **解決後の auto-yes が off なら拒否する**（`invalid_input`、exit 3、CLI を1回も呼ばず `--out` も作らない。
+  fixture `d196-stop-pattern-without-auto-yes-refused`）。渡す先の無い pattern を黙って捨てると、
+  利用者は自分の pattern が worker を守っていると思い込む。
+- 渡さない run の `send` argv と report は変わらない（d57 / d58）。
+
+#### Auto-Yes が有効な instance へ off で dispatch しない（[#309](https://github.com/Kewton/commandmate-skills/issues/309) (B)）
+
+`--no-auto-yes` の意味は変えない ——「profile の既定を off で上書きする」であり、契約には
+`autoYes.mode: off`（積極的な禁止）を書く。ただし、**dispatch 対象の instance で Auto-Yes がすでに
+有効なら、その off は書く前に拒否する。** サーバーは契約の方針を有効状態より優先するので、
+そのまま書くと Auto-Yes はオンなのに一度も答えない。
+
+- **いつ:** 解決後の auto-yes が off（flag 無し・`--no-auto-yes`・`--unattended` のいずれでも）で、
+  blocking pre-flight（第3.0節）を通った後、`--out` を作る前。**最初の `send` より前**なので、
+  後続 wave の Issue が該当しても何も dispatch しない。`--reverify`（何も送らない）と、
+  pre-flight を省く run（開いた planner 質問で止まる run、再開で送るものが無い run）では読まない。
+- **何を読むか:** `commandmate ls --json` の `autoYesByInstance`（CommandMate #2512。
+  `{ <instanceId>: { enabled, expiresAt } }`）。この runner は `--instance` を渡さないので、駆動するのは
+  行の `cliToolId` の instance（primary）であり、それだけを見る。`cliToolId` の無い行は列挙された全 instance を見る。
+  `enabled: true` で `expiresAt` が `null` か未来のものを「有効」とする（失効済みは `ls` 自身と同じく off）。
+  対象は今回 dispatch する Issue（`--resume` が引き継ぐ Issue を除く）。
+- **何をするか:** `invalid_input`（exit 3）。何も dispatch せず `--out` も作らない。メッセージは Issue・worktree・
+  instance を名指し、取るべき手を2つ示す ——`--auto-yes` を付ける（arm した stop pattern は
+  `--auto-yes-stop-pattern` で渡す）か、その instance の Auto-Yes を無効にしてから dispatch し直す
+  （fixture `d197-armed-instance-auto-yes-off-refused`）。
+- **拒否しないもの:** map の無い行（#2512 より古いサーバー）、行がまだ無い Issue、一覧を返さない `ls` は
+  従来どおり（判定は pre-flight の担当）。駆動しない instance だけが有効な行、失効済みの行も拒否しない。
+  これらの run の report と send argv は変更前と byte 一致する（fixture `d198-unarmed-instance-auto-yes-off-non-regression`）。
+- `--unattended` の `--auto-yes` 拒否とは**向きが逆**で、矛盾しない。あちらは「arm すること」を拒み、
+  こちらは「他者が arm した instance へ arm しないまま契約で禁止すること」を拒む。
+
+**不採用:** `--no-auto-yes` のときに `autoYes` ブロックを省略する（`mode: null`）。`--no-auto-yes` の定義
+（profile の既定を off で上書き）が緩む方向へ変わり、既存の run の authorisation が読めなくなるため（第2.10節）。
 
 ## 2. commandmate CLI の呼び出し規約（worktree-id ベース）
 

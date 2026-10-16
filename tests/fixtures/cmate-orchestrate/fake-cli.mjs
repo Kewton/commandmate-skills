@@ -1627,7 +1627,14 @@ function main() {
     // `commandmate ls --json` — the dispatch-time worktree-id resolver. Returns
     // the worktrees the harness injected from the plan's branches, plus any
     // `sync_worktrees` row once a `commandmate sync` has registered it (#91).
-    const rows = visibleWorktrees(spec);
+    // A worker's `ls_row` is merged into its row (Issue #309): it is how a case
+    // states the server-side fields the harness does not derive from the plan —
+    // `cliToolId` and `autoYesByInstance` (CommandMate #2512). A worker without
+    // one gets the row it always got.
+    const rows = visibleWorktrees(spec).map((row) => {
+      const extra = workerSpec(spec, issueFromBranch(row.branch)).ls_row;
+      return extra && typeof extra === 'object' ? { ...row, ...extra } : row;
+    });
     if (argv.includes('--json')) {
       process.stdout.write(`${JSON.stringify(rows)}\n`);
       process.exit(0);

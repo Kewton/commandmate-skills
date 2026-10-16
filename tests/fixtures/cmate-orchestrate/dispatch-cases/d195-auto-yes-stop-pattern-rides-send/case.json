@@ -1,0 +1,25 @@
+{
+  "description": "**stop pattern を dispatch から渡す（#309 (A)）。** `--auto-yes --auto-yes-stop-pattern harness-stop` の run は、worker を開く `send` に `--auto-yes --duration 1h --stop-pattern harness-stop` を連続して載せる。それ以前は stop pattern を使いたい利用者が先に自分で Auto-Yes を有効化し、dispatch に `--no-auto-yes` を付けるしかなく、その `--no-auto-yes` が契約の `autoYes.mode: off` を書いて Auto-Yes を黙らせていた（CommandAgent #676 / #680）。stop pattern を渡さない run の argv が変わらないことは d57 / d58 がそのまま測る。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--auto-yes", "--auto-yes-stop-pattern", "harness-stop"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "no_respond": true,
+    "sent": [201, 200],
+    "send_counts": { "201": 1, "200": 1 },
+    "dispatch_send_args": {
+      "201": ["--auto-yes", "--duration", "1h", "--stop-pattern", "harness-stop"],
+      "200": ["--auto-yes", "--duration", "1h", "--stop-pattern", "harness-stop"]
+    },
+    "absent_limitation_codes": ["auto_yes_used", "auto_yes_window_short"]
+  }
+}

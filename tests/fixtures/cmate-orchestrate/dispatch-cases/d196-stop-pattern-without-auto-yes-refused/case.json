@@ -1,0 +1,30 @@
+{
+  "description": "**auto-yes を arm しない run の stop pattern は拒否する（#309 (A)）。** stop pattern は auto-yes を arm する `send` に載る値なので、解決後の auto-yes が off の run（ここでは flag も profile 宣言も無い）では渡す先が無い。黙って捨てると、利用者は自分の pattern が worker を守っていると思い込む。`invalid_input`（exit 3）で、**`--out` を作らず CLI を1回も呼ばない**。逃げ道が在ることは `accepted_with_args`（`--auto-yes` を足すと完走する）で測る。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--auto-yes-stop-pattern", "harness-stop"],
+  "expect": {
+    "exit": 3,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "auto_yes": false,
+    "waves_count": 0,
+    "out_dir_created": false,
+    "completion_check_passed": false,
+    "no_cli_calls": true,
+    "blocking_codes": ["invalid_input"],
+    "blocking_details_include": [
+      ["--auto-yes-stop-pattern", "--auto-yes"]
+    ],
+    "accepted_with_args": {
+      "args": ["--auto-yes-stop-pattern", "harness-stop", "--auto-yes"],
+      "exit": 0,
+      "status": "success",
+      "auto_yes": true
+    }
+  }
+}

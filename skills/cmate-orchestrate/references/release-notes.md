@@ -596,6 +596,33 @@ dispatch がそのまま契約の `scope.deny` に書く（従来は常に `deny
 
 ## dispatch（`scripts/dispatch.mjs`）
 
+### #309 — 先に Auto-Yes を有効化した worker へ `--no-auto-yes` で dispatch すると、Auto-Yes が一度も答えなかった
+
+dispatch の `--auto-yes` は `send --auto-yes --duration …` しか渡せず、stop pattern を渡す手段が無かった。stop pattern を
+使いたい利用者は先に `send --auto-yes --duration 8h --stop-pattern …` で自分で有効化し、dispatch には「再 arm させない」
+つもりで `--no-auto-yes` を付けた。runner はそれを「この worker への自動応答を禁止する」と読み、契約に
+`autoYes.mode: off` を書いた。サーバーは契約の方針を有効状態より優先するので、CommandAgent #676 では
+`suppressed-by-policy {"reason":"mode-off"}` が 71 件、#680 では 55 件出て、許可ダイアログで 11 時間以上止まった。
+
+→ **(A)** `--auto-yes-stop-pattern <regex>` を足し、arm する `send` に `--stop-pattern` として渡す。回避策としての
+`--no-auto-yes` がそもそも要らなくなる。**(B)** 解決後の auto-yes が off の run は、dispatch の前に
+`commandmate ls --json` の `autoYesByInstance` を読み、駆動する instance（`cliToolId`）で Auto-Yes が有効なら
+`invalid_input`（exit 3）で止める。何も dispatch せず `--out` も作らない。
+
+判断したこと:
+
+- **`--no-auto-yes` の意味は変えない。** off のときに `autoYes` ブロックを省く案は、「profile の既定を off で上書き」の
+  定義を緩む方向へ動かすので採らなかった。矛盾は黙って書かず、書く前に止めて名指す。
+- **stop pattern は flag だけ。** `dispatch_defaults` は真偽値と整数の object であり（profile-contract.md 第13.3節と同じ理由）、
+  planner と dispatch の二重検証もその型集合で揃えてある。auto-yes が profile 由来でも、pattern は arm する send に載る。
+  解決後の auto-yes が off の run に渡された pattern は捨てずに `invalid_input` で拒否する。長さは CLI の上限 500 文字。
+- **(B) は測れたときだけ拒否する。** map の無い行（#2512 より古いサーバー）・行の無い Issue・一覧を返さない `ls` は
+  従来どおり。駆動しない instance だけが有効な行と、`expiresAt` が過去の行も拒否しない（`ls` 自身が off と読む値）。
+  `--reverify` と、pre-flight を省く run では読まない（契約を書かない）。
+- **`--unattended` の拒否と向きが逆で、両立する。** あちらは arm を、こちらは「他者が arm した instance を arm しないまま
+  契約で禁止すること」を拒む。
+- fake CLI は worker の `ls_row` を `ls --json` の行に重ねる。宣言の無い scenario の行は変わらない。
+
 ### #306 — 1回目だけ落ちるゲートの内訳が、内訳を読むための再実行で消えていた
 
 1ターン目の `wait --verify` が exit 20 を返すと、runner は失敗の内訳を読むために**検証をもう一度実行していた**
@@ -2501,6 +2528,13 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 ---
 
 ## パッケージ
+
+### 0.41.0 — stop pattern を dispatch から渡せるようにし、Auto-Yes が有効な instance への off の dispatch を止めた（#309）
+
+- **#309** —— `--auto-yes-stop-pattern <regex>` を足し、auto-yes を arm する `send` に `--stop-pattern` として渡す（解決後の
+  auto-yes が off の run では `invalid_input`）。解決後の auto-yes が off の run は、`commandmate ls --json` の
+  `autoYesByInstance` で駆動する instance の Auto-Yes が有効なら、`autoYes.mode: off` を書く前に `invalid_input`（exit 3）で
+  止める。どちらも使わない・該当しない run の report と send argv は変わらない。
 
 ### 0.40.0 — 1ターン目の失敗ゲートの内訳を、その裁定の run から読むようにした（#306）
 

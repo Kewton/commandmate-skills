@@ -451,7 +451,15 @@ Options:
                          declares dispatch_defaults.auto_yes can be declined for
                          one run. Without it there is no way to type "not this
                          time": an absent boolean flag and an off one are the
-                         same argv.
+                         same argv. Auto-Yes that is ALREADY enabled on a
+                         worker's instance (commandmate ls --json,
+                         autoYesByInstance) contradicts the off side: the run is
+                         refused before anything is dispatched (invalid_input).
+  --auto-yes-stop-pattern <regex>
+                         The stop pattern the auto-yes send arms with (passed to
+                         send --stop-pattern; at most 500 characters). Needs a
+                         resolved auto-yes (--auto-yes or the profile's
+                         dispatch_defaults.auto_yes); otherwise it is refused.
   --allow-questions      Dispatch a plan whose issues still carry unanswered
                          open questions. OFF by default: an issue the planner
                          could not read acceptance criteria or affected files
@@ -583,6 +591,7 @@ function parseCli(argv) {
         // absent boolean and an off one are the same argv, so a profile-declared
         // default could not otherwise be declined for a single run.
         'no-auto-yes': { type: 'boolean' },
+        'auto-yes-stop-pattern': { type: 'string' },
         'allow-questions': { type: 'boolean' },
         unattended: { type: 'boolean' },
         'wall-clock-budget': { type: 'string' },
@@ -870,6 +879,9 @@ function resolveInputs(parsed) {
     // three below once the plan (and with it the profile) has been read; a run
     // whose profile declares nothing keeps exactly these values.
     autoYes: stated.autoYes === true,
+    // Flag-only (Issue #309). Validated here, judged against the RESOLVED
+    // auto-yes once the profile has been read (requireArmedStopPattern).
+    autoYesStopPattern: resolveStopPattern(values['auto-yes-stop-pattern']),
     allowQuestions: Boolean(values['allow-questions']),
     unattended: unattended.unattended,
     wallClockBudget: unattended.wallClockBudget,
@@ -1162,6 +1174,50 @@ function onlyLimitation(scope) {
 // because a profile is one declaration and not one per runner — and rather than
 // ignore it, this runner compares it with the plan it was handed and records the
 // disagreement (`dispatch_defaults_no_infer_not_applied`).
+
+// `--auto-yes-stop-pattern` (Issue #309): the stop pattern `send --auto-yes`
+// arms the worktree with. Before it existed an operator who wanted one armed
+// Auto-Yes by hand and passed `--no-auto-yes` so dispatch would not re-arm it
+// without the pattern — and `--no-auto-yes` writes the contract's `mode: off`,
+// which the server reads as "never answer" (CommandAgent #676 / #680).
+//
+// It is a FLAG and not a `dispatch_defaults` key: that object is booleans and
+// counts (profile-contract.md §10.2, §13.3), the planner validates the same set,
+// and a string there would be a second kind of thing in it. The precedence it
+// shares with auto_yes is the resolved value: whether auto-yes came from the
+// flag or the profile, the pattern rides on the send that arms it.
+//
+// The length bound is the CLI's own (`MAX_STOP_PATTERN_LENGTH`, SEC4-06), checked
+// here so a pattern `send` would refuse cannot stop the run after `--out` exists.
+const MAX_STOP_PATTERN_LENGTH = 500;
+function resolveStopPattern(raw) {
+  if (raw === undefined) return null;
+  if (raw.length === 0 || /[\r\n]/.test(raw)) {
+    throw new SkillError('invalid_input', '--auto-yes-stop-pattern must be a non-empty single-line regular expression', 3);
+  }
+  if (raw.length > MAX_STOP_PATTERN_LENGTH) {
+    throw new SkillError('invalid_input',
+      `--auto-yes-stop-pattern is ${raw.length} characters; commandmate send accepts at most ${MAX_STOP_PATTERN_LENGTH}`, 3);
+  }
+  try {
+    new RegExp(raw);
+  } catch (error) {
+    throw new SkillError('invalid_input', `--auto-yes-stop-pattern is not a valid regular expression: ${error.message}`, 3);
+  }
+  return raw;
+}
+
+// A stop pattern on a run that arms nothing would be dropped in silence, and the
+// operator would believe their pattern guards a worker it never reached. Judged on
+// the RESOLVED value, after applyDispatchDefaults: a profile auto_yes arms the
+// same send, and `--no-auto-yes` / `--unattended` leave nothing to arm.
+function requireArmedStopPattern(inputs) {
+  if (inputs.autoYesStopPattern === null || inputs.autoYes) return;
+  throw new SkillError('invalid_input',
+    '--auto-yes-stop-pattern needs auto-yes, and this run resolved auto-yes off: the pattern is passed on the send that arms '
+      + 'the worktree auto-yes (send --auto-yes --stop-pattern), and an off run sends none. Add --auto-yes (or declare '
+      + 'dispatch_defaults.auto_yes in the profile), or drop the pattern', 3);
+}
 
 // The keys a profile may declare. Closed, and closed LOUDLY: an unknown key is
 // refused rather than skipped, for the reason the profile loader refuses an
@@ -4360,9 +4416,74 @@ function autoYesWindow(inputs) {
 // what it sent before. The contract's `autoYes.mode` is written either way: it
 // declares the policy, this enables the state the poller checks before it reads
 // any policy at all.
+// `--stop-pattern` is appended only when `--auto-yes-stop-pattern` was given
+// (Issue #309), so a run without one sends the argv it always sent.
 function autoYesSendFlags(inputs) {
   if (!inputs.autoYes) return [];
-  return ['--auto-yes', '--duration', autoYesWindow(inputs).duration];
+  const flags = ['--auto-yes', '--duration', autoYesWindow(inputs).duration];
+  if (inputs.autoYesStopPattern !== null) flags.push('--stop-pattern', inputs.autoYesStopPattern);
+  return flags;
+}
+
+// Auto-Yes ALREADY enabled on an instance this run would dispatch to, on a run
+// that resolved auto-yes off (Issue #309). Such a run writes the contract's
+// `autoYes.mode: off`, the server holds that policy above the enabled state, and
+// the instance's Auto-Yes then answers nothing (`suppressed-by-policy`,
+// `mode-off`) while every view says it is on — CommandAgent #676 / #680 sat on
+// a permission prompt for 11 hours that way. The contradiction is refused here,
+// before `--out` exists and before any send, rather than written into the contract.
+//
+// Read from `commandmate ls --json` (`autoYesByInstance`, CommandMate #2512:
+// `{ <instanceId>: { enabled, expiresAt } }`). Dispatch names no `--instance`, so
+// the instance it drives is the row's primary, keyed by `cliToolId`; a row that
+// does not say which one it is is judged on every instance it lists. Enabled
+// with a lapsed `expiresAt` is off, the same reading `ls` itself prints. A row
+// without the map (a server older than #2512), an issue with no row yet, or an
+// `ls` that returned no list leaves the run exactly as it was before this check:
+// those are the pre-flight's to judge, and this check only ever refuses on a
+// measured `enabled: true`.
+//
+// The direction is the opposite of `--unattended`'s refusal of `--auto-yes`, so
+// the two cannot both fire on one stated value: that one refuses arming, this
+// one refuses NOT arming over an instance someone else armed.
+function armedAutoYesInstances(row, now) {
+  const byInstance = row?.autoYesByInstance;
+  if (byInstance === null || typeof byInstance !== 'object' || Array.isArray(byInstance)) return [];
+  const targets = typeof row.cliToolId === 'string' ? [row.cliToolId] : Object.keys(byInstance);
+  return targets.filter((instance) => {
+    const entry = byInstance[instance];
+    if (!entry || entry.enabled !== true) return false;
+    return entry.expiresAt === null || (typeof entry.expiresAt === 'number' && entry.expiresAt > now);
+  });
+}
+
+function refuseArmedAutoYesOff(inputs, plan, resume) {
+  if (inputs.autoYes || (resume !== null && resume.reverifying)) return;
+  const issues = resume === null
+    ? (plan.issues ?? [])
+    : (plan.issues ?? []).filter((issue) => !resume.carried.has(issue.number));
+  if (issues.length === 0) return;
+  const rows = parseCliJson(runCm(inputs, ['ls', '--json']));
+  if (!Array.isArray(rows)) return;
+  const now = Date.now();
+  const armed = [];
+  for (const issue of issues) {
+    const carriedId = typeof issue.worktree_id === 'string' && WORKTREE_ID_RE.test(issue.worktree_id) ? issue.worktree_id : null;
+    const branch = typeof issue.branch === 'string' ? issue.branch : null;
+    const row = rows.find((candidate) => candidate && (carriedId !== null
+      ? candidate.id === carriedId
+      : branch !== null && (candidate.branch === branch || candidate.name === branch)));
+    if (!row) continue;
+    for (const instance of armedAutoYesInstances(row, now)) {
+      armed.push(`#${issue.number} (worktree ${redact(String(row.id))}, instance ${redact(instance)})`);
+    }
+  }
+  if (armed.length === 0) return;
+  throw new SkillError('invalid_input',
+    `Auto-Yes is enabled on ${armed.join(', ')}, and this run resolved auto-yes off, so its contract would state `
+      + 'autoYes.mode: off — a policy the server holds above the enabled state, which leaves that Auto-Yes answering nothing. '
+      + 'Nothing was dispatched. Either pass --auto-yes (with --auto-yes-stop-pattern for the stop pattern you armed it '
+      + 'with), or disable Auto-Yes on that instance and dispatch again', 3);
 }
 
 // `commandmate send <worktree-id> <message>`, then confirm the worker actually
@@ -8613,6 +8734,7 @@ async function run(argv) {
   // decides are inputs to all four, and because a refusal it raises has to leave
   // the world exactly as untouched as an argv refusal does.
   applyDispatchDefaults(inputs, plan);
+  requireArmedStopPattern(inputs);
   applyWorkerMessages(inputs, plan);
 
   // The resume decision (Issue #98) is made FIRST: it decides which directory
@@ -8718,6 +8840,10 @@ async function run(argv) {
       : `nothing was dispatched; ${attemptDir} was not created, so the same command can be re-run once the drift is fixed\n`);
     return { exitCode: 1, stdout: `${JSON.stringify(report, null, 2)}\n` };
   }
+
+  // Issue #309. After the pre-flight, so a world it refuses is reported exactly as
+  // before; skipped with it, since a run that dispatches nothing writes no contract.
+  if (!skipPreflight) refuseArmedAutoYesOff(inputs, plan, resume);
 
   mkdirSync(attemptDir, { recursive: true });
 
