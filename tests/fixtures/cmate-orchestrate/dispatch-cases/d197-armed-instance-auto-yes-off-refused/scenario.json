@@ -4,14 +4,14 @@
   "git": { "branch": "feature/integration", "dirty": false },
   "gh": { "repo_access": true },
   "workers": {
-    "201": { "state": "completed", "verify_exits": [0] },
-    "200": {
+    "201": {
       "state": "completed",
       "verify_exits": [0],
       "ls_row": {
         "cliToolId": "claude",
         "autoYesByInstance": { "claude": { "enabled": true, "expiresAt": null } }
       }
-    }
+    },
+    "200": { "state": "completed", "verify_exits": [0] }
   }
 }

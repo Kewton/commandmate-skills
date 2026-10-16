@@ -1,0 +1,23 @@
+{
+  "description": "**空白だけの stop pattern を拒否する（#309 (A)）。** CommandMate の auto-yes route は pattern を trim し、空なら stop pattern を設定しない。`'   '` を受理すると、Auto-Yes は stop pattern 無しで arm され、run は pattern があると思い込む。trim 後の実効値で空と判定し、`invalid_input`（exit 3）で CLI を呼ばず `--out` も作らない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--auto-yes", "--auto-yes-stop-pattern", "   "],
+  "expect": {
+    "exit": 3,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "waves_count": 0,
+    "out_dir_created": false,
+    "completion_check_passed": false,
+    "no_cli_calls": true,
+    "blocking_codes": ["invalid_input"],
+    "blocking_details_include": [
+      ["--auto-yes-stop-pattern", "non-empty"]
+    ]
+  }
+}

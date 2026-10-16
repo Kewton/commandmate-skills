@@ -1,5 +1,5 @@
 {
-  "description": "**Auto-Yes が有効な instance へ auto-yes off で dispatch しない（#309 (B)）。** #200 の primary instance（`cliToolId` claude）は `ls --json` の `autoYesByInstance` で有効（`expiresAt: null`）であり、run は `--no-auto-yes` を渡す。このまま dispatch すると契約は `autoYes.mode: off` になり、サーバーはその方針を有効状態より優先するので、Auto-Yes はオンのまま一度も答えない（CommandAgent #676 / #680 の `suppressed-by-policy` / `mode-off`）。#200 は wave 2 の issue だが、拒否は**最初の send より前**に出る —— wave 1 の #201 も送らない。`invalid_input`（exit 3）、`--out` を作らず、メッセージに issue・instance・取るべき手（`--auto-yes`／Auto-Yes を無効にする）が出る。逃げ道は `accepted_with_args`（同じ世界で `--auto-yes` を渡すと完走する）で測る。",
+  "description": "**Auto-Yes が有効な instance へ auto-yes off で dispatch しない（#309 (B)）。** 最初の wave の #201 の primary instance（`cliToolId` claude）は `ls --json` の `autoYesByInstance` で有効（`expiresAt: null`）であり、run は `--no-auto-yes` を渡す。このまま dispatch すると契約は `autoYes.mode: off` になり、サーバーはその方針を有効状態より優先するので、Auto-Yes はオンのまま一度も答えない（CommandAgent #676 / #680 の `suppressed-by-policy` / `mode-off`）。pre-flight の解決を使って **最初の send より前に** `invalid_input`（exit 3）で止め、`--out` を作らず、メッセージに issue・instance・取るべき手（`--auto-yes`／Auto-Yes を無効にする）が出る。逃げ道は `accepted_with_args`（同じ世界で `--auto-yes` を渡すと完走する）で測る。後続 wave の場合は d199。",
   "plan": {
     "issues_fixture": "cases/02-explicit-dependency/issues.json",
     "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
@@ -18,7 +18,7 @@
     "never_sent": [201, 200],
     "blocking_codes": ["invalid_input"],
     "blocking_details_include": [
-      ["#200", "instance claude", "autoYes.mode: off", "--auto-yes", "disable Auto-Yes", "Nothing was dispatched"]
+      ["Auto-Yes is enabled on #201", "instance claude", "autoYes.mode: off", "--auto-yes", "disable Auto-Yes", "Nothing was dispatched"]
     ],
     "accepted_with_args": {
       "args": ["--auto-yes"],

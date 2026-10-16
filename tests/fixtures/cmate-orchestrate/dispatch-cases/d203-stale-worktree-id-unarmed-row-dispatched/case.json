@@ -1,0 +1,51 @@
+{
+  "description": "d202 の相方（#309 (B) の非回帰）: 同じ古い `worktree_id` で、branch で引いた今の行の claude は `enabled: false`（#200 の行は `autoYesByInstance: {}`＝項目が無い）。無効と確かめられるので Auto-Yes の検査は止めず、run は**変更前と同じく** #201 へ dispatch する（`invalid_input` は出ない）。送り先は plan の古い ID のままなので、fake CLI は実機と同じく契約ファイルをその worktree に見つけられず（`contract file not found`）、#201 は `worker_failed` で wave が止まる —— これが #309 以前からの結果であり、この case が固定するのは「検査が結果を変えない」ことである。send には `--auto-yes` / `--duration` / `--stop-pattern` が付かない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "issue_patch": {
+    "201": {
+      "worktree_id": "commandmate-stale-issue-201"
+    }
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--no-auto-yes"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "worker_failed",
+    "human_required": false,
+    "auto_yes": false,
+    "sent": [
+      201
+    ],
+    "never_sent": [
+      200
+    ],
+    "blocking_codes": [
+      "worker_failed"
+    ],
+    "absent_blocking_codes": [
+      "invalid_input"
+    ],
+    "absent_send_args": {
+      "201": [
+        "--auto-yes",
+        "--duration",
+        "--stop-pattern"
+      ]
+    }
+  }
+}
