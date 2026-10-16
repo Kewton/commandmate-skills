@@ -167,8 +167,8 @@ files:
     executable: false
     script: false
   - path: references/dispatch-contract.md
-    sha256: 00c18db53b3b70f142090888b7ad36f9da4fd70e7d2eb42b24b8d53be3491f03
-    size: 188660
+    sha256: 33aeea37c96a29f425e556096c916f54d4e7e92e8f4720cf26a6ea24ed0a4a1f
+    size: 189627
     kind: instruction
     executable: false
     script: false
@@ -203,8 +203,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: d8f84efde86b86f3143f2edcf103ade36c1772f01b72f5d8b54c09de0fa2e066
-    size: 283887
+    sha256: af655271e386e7e35529e50dcb5ba656565961ab028082794419d9e741c3c57a
+    size: 284847
     kind: instruction
     executable: false
     script: false
@@ -263,8 +263,8 @@ files:
     executable: false
     script: false
   - path: scripts/dispatch.mjs
-    sha256: ad553647fda103596391547c667859a9393c7037b9462dfb86e169f2c0a613c0
-    size: 527588
+    sha256: 674f16ee1c06525bf082ade1f934fea2070f82b2d8f658ce9f27ec16aa589bc5
+    size: 528485
     kind: script
     executable: true
     script: true

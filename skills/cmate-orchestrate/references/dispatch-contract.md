@@ -133,16 +133,25 @@ Auto-Yes はオンのまま一度も答えなくなっていた（CommandAgent #
   - **有効:** `enabled: true` で `expiresAt` が `null` か未来
   - **確かめられない:** `ls --json` が一覧を返さない（失敗）・送り先の行が無い・行に `autoYesByInstance` が無い
     （#2512 より古いサーバー）
-- **どの行を見るか:** send が実際に届く worktree の行である。worktree の解決（pre-flight と各 wave の
-  `resolveWave`）が選んだ ID の行を完全一致で引き、無ければ（plan に古い `worktree_id` がある等）同じ解決が
+- **どの行を見るか:** send が実際に届く worktree の行である。worktree の解決（pre-flight の `resolveWave` と
+  同じ resolver）が選んだ ID の行を完全一致で引き、無ければ（plan に古い `worktree_id` がある等）同じ解決が
   使う branch の規則で今の行を引く。それでも無ければ「確かめられない」。この検査のための別の解決規則は持たない。
   worktree が解決しなかった Issue にはそもそも送らない（従来どおり `worktree_unresolved`）。
-- **いつ:** 最初に送る wave は pre-flight（第3.0節）の解決結果を使い、pre-flight を通った後・`--out` を作る前に
-  確かめる。止めるときは `invalid_input`（exit 3）で、**何も dispatch せず `--out` も作らない**。後続の wave は、
-  その wave の worktree を解決した時点（`--worker-method` の検査と同じ位置）で確かめ、止めるときはその wave に
-  1件も送らずに `partial`（exit 7）/ `stop_reason: dispatch_error` / blocking `invalid_input` で止める
-  （fixture `d199-armed-later-wave-halts-before-its-send`）。`--reverify`（何も送らない）と、pre-flight を省く run
-  （開いた planner 質問で止まる run、再開で送るものが無い run）では読まない。
+- **いつ（2段）:**
+  1. **開始時に全件。** pre-flight（第3.0節）を通った後・`--out` を作る前に、この run が送る**すべての Issue**
+     （`--resume` が引き継ぐものを除く。後の wave のものも含む）のうち、**開始時に送り先が決まるもの**を確かめる。
+     最初の wave は pre-flight の解決結果を使い、後の wave は同じ resolver（`resolveWave` / `resolveWorktreeId`）で
+     解決する —— ただし `commandmate sync` は呼ばない（サーバー全体の再走査は、それを要する wave が行う）。
+     1件でも有効または確かめられなければ `invalid_input`（exit 3）で止め、**何も dispatch せず `--out` も作らない**
+     （fixture `d197-armed-instance-auto-yes-off-refused`・`d199-armed-later-wave-refused-before-first-send`）。
+  2. **決まらないものは wave ごと。** 開始時に worktree が解決しなかった Issue（後の wave で sync や作成によって
+     初めて解決するもの）は、その wave の worktree を解決した時点（`--worker-method` の検査と同じ位置）で確かめる。
+     止めるときはその wave に1件も送らずに `partial`（exit 7）/ `stop_reason: dispatch_error` / blocking
+     `invalid_input` で止める（fixture `d206-armed-later-wave-resolved-late-halts-before-its-send`）。この再確認は
+     後のすべての wave で行う（開始時に確かめた送り先も、その wave の解決で読み直す）。
+
+  `--reverify`（何も送らない）と、pre-flight を省く run（開いた planner 質問で止まる run、再開で送るものが無い run）では
+  どちらの段も読まない。
 - **メッセージ:** Issue・worktree・instance（有効な場合）または確かめられなかった理由を名指し、取るべき手を示す ——
   `--auto-yes` を付ける（arm した stop pattern は `--auto-yes-stop-pattern` で渡す）か、有効なら その instance の
   Auto-Yes を無効にし、確かめられないなら `autoYesByInstance` を返す CommandMate で実行し直す。

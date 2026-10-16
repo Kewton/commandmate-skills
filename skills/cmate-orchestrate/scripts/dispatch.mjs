@@ -4265,7 +4265,12 @@ function attemptSync(inputs, { force = false } = {}) {
 // ONCE and read `ls` again (Issue #91). A CLI too old to have `sync` fails that
 // call; the branch then stays unresolved and the run stops exactly as it did
 // before (Issue #90) — the sync failure itself never stops it.
-function resolveWorktreeId(inputs, issue) {
+//
+// `sync: false` stops after the first `ls` (Issue #309): the start-of-run Auto-Yes
+// check resolves the later waves' targets ahead of time, and a server-wide
+// re-scan belongs to the wave that actually needs it — a branch the first `ls`
+// does not resolve is left to that wave, exactly as before.
+function resolveWorktreeId(inputs, issue, { sync: allowSync = true } = {}) {
   if (typeof issue.worktree_id === 'string' && WORKTREE_ID_RE.test(issue.worktree_id)) {
     return { id: issue.worktree_id, path: null, note: '' };
   }
@@ -4274,7 +4279,7 @@ function resolveWorktreeId(inputs, issue) {
   const first = lookupWorktree(inputs, branch);
   // Resolved, or `ls` did not answer at all: a re-scan is only meaningful against
   // a registry we could actually read.
-  if (first.id !== null || !first.listed) return { id: first.id, path: first.path, note: first.note };
+  if (first.id !== null || !first.listed || !allowSync) return { id: first.id, path: first.path, note: first.note };
 
   const sync = attemptSync(inputs);
   const stillUnresolved = (note) => {
@@ -4338,11 +4343,11 @@ function recordSyncAttempt(report) {
 // this single resolution, so the id path and the git path can never diverge
 // (Issue #1473). Called once per wave — and, for the first wave, by the
 // pre-flight, whose result the loop reuses rather than resolving twice.
-function resolveWave(inputs, plan, waveIssues) {
+function resolveWave(inputs, plan, waveIssues, options = {}) {
   return waveIssues.map((number) => {
     const issue = issueOf(plan, number);
     const templatePath = safeWorktreeTarget(issue.worktree ?? '');
-    const resolved = resolveWorktreeId(inputs, issue);
+    const resolved = resolveWorktreeId(inputs, issue, options);
     const worktreePath = resolved.path ?? templatePath;
     return { number, issue, templatePath, resolved, worktreePath };
   });
@@ -8909,12 +8914,22 @@ async function run(argv) {
     return { exitCode: 1, stdout: `${JSON.stringify(report, null, 2)}\n` };
   }
 
-  // Issue #309, for the worktrees the pre-flight resolved — the first wave this
-  // run sends to. After the pre-flight, so a world it refuses is reported exactly
-  // as before; skipped with it (and on --reverify, which sends nothing). A later
-  // wave is checked at the moment it resolves, like the worker-method probe.
-  if (preflight !== null && !(resume !== null && resume.reverifying)) {
-    const conflict = autoYesOffConflict(inputs, preflight.resolutions);
+  // Issue #309, stage 1: every target this run can already name, before the
+  // first send. The first wave is the pre-flight's resolution; every later issue
+  // this run would dispatch is resolved by the same resolver (without the sync,
+  // see resolveWorktreeId), and one whose worktree does not resolve yet is left
+  // to stage 2 — the check each later wave runs when it resolves. After the
+  // pre-flight, so a world it refuses is reported exactly as before; skipped with
+  // it (and on --reverify, which sends nothing).
+  if (preflight !== null && !(resume !== null && resume.reverifying) && !inputs.autoYes) {
+    const first = new Set(preflightIssues);
+    const later = (plan.issues ?? [])
+      .map((issue) => issue.number)
+      .filter((number) => !first.has(number) && !(resume !== null && resume.carried.has(number)));
+    const conflict = autoYesOffConflict(inputs, [
+      ...preflight.resolutions,
+      ...resolveWave(inputs, plan, later, { sync: false }),
+    ]);
     if (conflict !== null) throw new SkillError('invalid_input', conflict.detail, 3);
   }
 
