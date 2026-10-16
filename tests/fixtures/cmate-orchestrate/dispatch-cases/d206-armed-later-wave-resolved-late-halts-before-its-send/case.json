@@ -1,0 +1,46 @@
+{
+  "description": "d199 の対照（#309 (B) 第2段）: wave 2 の #200 の worktree は開始時にはサーバーに登録されておらず（`sync_only_worktrees`）、開始時の `ls --json` では送り先が決まらない。開始時の確認は決まらない Issue を飛ばし（その時点では sync もしない）、#201 は無効と確かめて送って完走する。wave 2 の解決で `commandmate sync` が #200 を登録し、その行の claude が有効なので、#200 には送らず `partial`（exit 7）/ `dispatch_error` / blocking `invalid_input` で止まる。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": [
+      "200",
+      "201",
+      "--profile",
+      "node-commandmate",
+      "--max-parallel",
+      "3",
+      "--run-id",
+      "plan"
+    ]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": [
+    "--no-auto-yes"
+  ],
+  "expect": {
+    "exit": 7,
+    "status": "partial",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "auto_yes": false,
+    "sent": [
+      201
+    ],
+    "never_sent": [
+      200
+    ],
+    "blocking_codes": [
+      "invalid_input"
+    ],
+    "blocking_details_include": [
+      [
+        "Auto-Yes is enabled on #200",
+        "instance claude",
+        "autoYes.mode: off"
+      ]
+    ],
+    "limitation_codes": [
+      "worktree_sync_ran"
+    ]
+  }
+}

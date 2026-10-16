@@ -342,6 +342,18 @@ scenario の `worktree_files`（`{"<相対 path>": "<内容>"}`）が作る。
 | `d152-human-only-with-only` | `--only`（CommandMate#3008）との組み合わせ。human-only への辺は `--only` の依存検査より先に外れるので断らない。選外と human-only は同じ最後の entry に Issue 番号順で並ぶ |
 | `d153-only-names-human-only` | `--only` に human-only の Issue を書くと `invalid_input` で全体を断る（何も send せず `--out` も作らない） |
 | `d154-every-issue-human-only` | 全 Issue が human-only の plan を `plan_invalid` で断り、理由を名指す |
+| `d195-auto-yes-stop-pattern-rides-send` | **stop pattern を dispatch から渡す（[#309](https://github.com/Kewton/commandmate-skills/issues/309) (A)）。** `--auto-yes --auto-yes-stop-pattern harness-stop` の run で、worker を開く `send` に `--auto-yes --duration 1h --stop-pattern harness-stop` が連続して載るか。渡さない run の argv が変わらないことは d57 / d58 が測る |
+| `d196-stop-pattern-without-auto-yes-refused` | 解決後の auto-yes が off の run に渡した stop pattern を、黙って捨てずに `invalid_input`（exit 3）で拒否するか。`--out` を作らず CLI を1回も呼ばず、`accepted_with_args`（`--auto-yes` を足す）では完走する（#309 (A)） |
+| `d197-armed-instance-auto-yes-off-refused` | **Auto-Yes が有効な instance へ off で dispatch しない（#309 (B)）。** 最初の wave の #201 の primary instance（`cliToolId` claude）が `ls --json` の `autoYesByInstance` で有効なとき、`--no-auto-yes` の run は pre-flight の解決を使って**最初の send より前に** `invalid_input`（exit 3）で止まり、`--out` を作らず、メッセージに Issue・instance・取るべき手（`--auto-yes`／Auto-Yes を無効にする）が出るか。`accepted_with_args`（`--auto-yes`）では完走する |
+| `d198-unarmed-instance-auto-yes-off-non-regression` | **d197 の相方（非回帰）。** `autoYesByInstance` は在るが、駆動する instance は無効（#201 は駆動しない codex だけが有効、#200 は `expiresAt` が過去）。拒否せず d58 と同じく完走し、どの `send` にも `--auto-yes` / `--duration` / `--stop-pattern` が付かないか。fake CLI の `ls --json` は各行に `autoYesByInstance: {}` を持たせ、worker の `ls_row` を重ねる（null はその key を消す） |
+| `d199-armed-later-wave-refused-before-first-send` | **開始時に全件（#309 (B) 第1段）。** 後の wave の #200 の instance が有効で、その worktree は開始時に解決できるとき、pre-flight と同じ resolver で開始時に確かめ、#201 も含めて1件も送らず `invalid_input`（exit 3）で止まり `--out` を作らないか |
+| `d200-auto-yes-state-absent-fails-closed` | **fail closed（#309 (B)）。** #201 の行に `autoYesByInstance` が無い（#2512 より古いサーバー）とき、確かめられないので何も送らず `invalid_input`（exit 3）で止まり、`--out` を作らず、理由と取るべき手（`--auto-yes`／状態を返す CommandMate）が出るか |
+| `d201-auto-yes-state-ls-fails-closed` | d200 の相方: 確かめる `ls --json`（2回目。`ls_json_fail_from: 2`）が失敗したときも、何も送らず `invalid_input`（exit 3）で止まるか |
+| `d202-stale-worktree-id-armed-row-refused` | **見る行は送り先の行（#309 (B)）。** plan の #201 が古い `worktree_id`（`issue_patch`）を持ち、ID の完全一致が無いとき、branch で今の行を引き、そこで有効なので `invalid_input`（exit 3）で何も送らないか |
+| `d203-stale-worktree-id-unarmed-row-dispatched` | d202 の相方: 同じ形で今の行が無効（#200 は項目の無い map）なら検査は止めず、変更前と同じく #201 へ dispatch するか（古い ID の send は fake でも契約ファイルが見つからず `worker_failed` になる —— #309 以前からの結果を固定する） |
+| `d204-blank-stop-pattern-refused` | 空白だけの `--auto-yes-stop-pattern '   '` を trim 後の値で空と判定し、`invalid_input`（exit 3）で CLI を呼ばずに拒否するか（#309 (A)） |
+| `d205-padded-stop-pattern-sent-trimmed` | d204 の相方: `'  harness-stop  '` は受理し、`send` に trim 後の `harness-stop` を渡すか |
+| `d206-armed-later-wave-resolved-late-halts-before-its-send` | d199 の対照（第2段）: #200 の worktree は開始時に未登録（`sync_only_worktrees`）で送り先が決まらないので開始時の確認は飛ばし、#201 を送って完走する。wave 2 の解決（sync）で決まった #200 の行が有効なので、#200 には送らず `partial` / `dispatch_error` / blocking `invalid_input` で止まるか |
 
 ## merge case 一覧
 

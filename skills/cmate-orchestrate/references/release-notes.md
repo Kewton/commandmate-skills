@@ -596,6 +596,49 @@ dispatch がそのまま契約の `scope.deny` に書く（従来は常に `deny
 
 ## dispatch（`scripts/dispatch.mjs`）
 
+### #309 — 先に Auto-Yes を有効化した worker へ `--no-auto-yes` で dispatch すると、Auto-Yes が一度も答えなかった
+
+dispatch の `--auto-yes` は `send --auto-yes --duration …` しか渡せず、stop pattern を渡す手段が無かった。stop pattern を
+使いたい利用者は先に `send --auto-yes --duration 8h --stop-pattern …` で自分で有効化し、dispatch には「再 arm させない」
+つもりで `--no-auto-yes` を付けた。runner はそれを「この worker への自動応答を禁止する」と読み、契約に
+`autoYes.mode: off` を書いた。サーバーは契約の方針を有効状態より優先するので、CommandAgent #676 では
+`suppressed-by-policy {"reason":"mode-off"}` が 71 件、#680 では 55 件出て、許可ダイアログで 11 時間以上止まった。
+
+→ **(A)** `--auto-yes-stop-pattern <regex>` を足し、arm する `send` に `--stop-pattern` として渡す。回避策としての
+`--no-auto-yes` がそもそも要らなくなる。**(B)** 解決後の auto-yes が off の run は、送る前に
+`commandmate ls --json` の `autoYesByInstance` を読み、送り先の行の駆動する instance（`cliToolId`）の Auto-Yes が
+**無効と確かめられたときだけ**送る。有効なとき・確かめられないときは `invalid_input` で止める。開始時に送り先が
+決まる Issue は後の wave のものも含めて最初の send の前に確かめ（exit 3、何も dispatch せず `--out` も作らない）、
+開始時に決まらない Issue だけをその wave の送信前に確かめる（その wave に送らず `partial`）。
+
+判断したこと:
+
+- **`--no-auto-yes` の意味は変えない。** off のときに `autoYes` ブロックを省く案は、「profile の既定を off で上書き」の
+  定義を緩む方向へ動かすので採らなかった。矛盾は黙って書かず、書く前に止めて名指す。
+- **stop pattern は flag だけ。** `dispatch_defaults` は真偽値と整数の object であり（profile-contract.md 第13.3節と同じ理由）、
+  planner と dispatch の二重検証もその型集合で揃えてある。auto-yes が profile 由来でも、pattern は arm する send に載る。
+  解決後の auto-yes が off の run に渡された pattern は捨てずに `invalid_input` で拒否する。長さは CLI の上限 500 文字。
+- **(B) は fail closed。** 整合性レビューの指摘で、最初の実装（有効と測れたときだけ拒否し、map の無い行・行の無い
+  Issue・失敗した `ls` は従来どおり送る）を改めた。確かめられないまま off の契約を書けば、#676 / #680 と同じ矛盾を
+  黙って作りうるからである。map に項目が無い・`enabled: false`・`expiresAt` が過去の項目は「無効と確かめられた」
+  扱いで、従来どおり送る。駆動しない instance だけが有効な行も送る。`--reverify` と、pre-flight を省く run では読まない。
+- **見る行は送り先の行。** worktree の解決（pre-flight と同じ resolver）が選んだ ID で完全一致を引き、
+  無ければ同じ解決の branch 規則で引く。plan に古い `worktree_id` があっても今の行を見る。
+- **開始時に全件、決まらないものは wave ごと。** 再レビューの指摘で、後の wave の Issue を wave ごとにしか見ない形
+  （先の wave を送ってから止まる）を改めた。pre-flight が解決する最初の wave に加え、後の wave の送り先も同じ resolver で
+  開始時に解決して確かめ、どれか1件でも該当すれば1件も送らない。開始時の解決では `commandmate sync` を呼ばない
+  （サーバー全体の再走査は、それを要する wave が従来どおり1回だけ行う）。開始時に決まらなかった Issue と、確かめた後で
+  状態が変わりうる後の wave は、その wave の解決時点で読み直す（`--worker-method` の検査と同じ位置）。
+- **stop pattern は trim 後の値で判定し、trim 後の値を送る。** CommandMate の auto-yes route は pattern を trim し、
+  空なら stop pattern を設定せず、trim 後の値を検証・保存する。空白だけの pattern を受理すると stop pattern 無しで
+  arm されるので拒否する。送る値も trim 後にそろえるのは、CLI の長さ検査（trim 前の argv を見る）とサーバーが保存する
+  値を同じ文字列にし、runner が判定した pattern を効いている pattern と一致させるためである。
+- **`--unattended` の拒否と向きが逆で、両立する。** あちらは arm を、こちらは「他者が arm した instance を arm しないまま
+  契約で禁止すること」を拒む。
+- fake CLI の `ls --json` は各行に `autoYesByInstance: {}`（項目なし）を持たせ、worker の `ls_row` を重ねる
+  （null の値はその key を消す）。`ls_json_fail_from` で N 回目以降の `ls --json` を失敗させ、dispatch case の
+  `issue_patch` で plan の Issue に古い `worktree_id` を入れられる。
+
 ### #306 — 1回目だけ落ちるゲートの内訳が、内訳を読むための再実行で消えていた
 
 1ターン目の `wait --verify` が exit 20 を返すと、runner は失敗の内訳を読むために**検証をもう一度実行していた**
@@ -2501,6 +2544,15 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 ---
 
 ## パッケージ
+
+### 0.41.0 — stop pattern を dispatch から渡せるようにし、Auto-Yes が有効な instance への off の dispatch を止めた（#309）
+
+- **#309** —— `--auto-yes-stop-pattern <regex>` を足し、auto-yes を arm する `send` に trim 後の値を `--stop-pattern` として
+  渡す（解決後の auto-yes が off の run・空白だけの pattern は `invalid_input`）。解決後の auto-yes が off の run は、
+  送り先の行（解決した ID、無ければ branch）の `autoYesByInstance` で駆動する instance の Auto-Yes が無効と確かめられた
+  ときだけ送り、有効なとき・確かめられない（`ls` の失敗・行が無い・map の無い古いサーバー）ときは `invalid_input` で
+  止める。開始時に送り先が決まる Issue は後の wave のものも含めて最初の send の前に確かめ（exit 3、何も dispatch しない）、
+  決まらない Issue はその wave の送信前に確かめる（`partial`）。どちらも使わない・無効と確かめられる run の report と send argv は変わらない。
 
 ### 0.40.0 — 1ターン目の失敗ゲートの内訳を、その裁定の run から読むようにした（#306）
 

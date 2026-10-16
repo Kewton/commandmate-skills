@@ -1176,6 +1176,9 @@ function runDispatchCase(caseId) {
   // The planner's half — accepting the field and echoing it — is measured by the
   // plan cases 66/67, which run a real profile through a real plan.
   if (spec.plan_patch) patchPlan(planPath, spec.plan_patch);
+  // Per-issue fields (Issue #309: a stale `worktree_id`), merged into the plan's
+  // issue of that number. `plan_patch` replaces `issues` whole, so it cannot.
+  if (spec.issue_patch) patchPlanIssues(planPath, spec.issue_patch);
 
   const work = mkdtempSync(join(tmpdir(), 'cmate-disp-'));
   const outDir = join(work, 'dispatch'); // must not pre-exist; dispatch creates it
@@ -2569,6 +2572,12 @@ function countCalls(cliLog, sub, action) {
 // always be produced by running the planner, because the harness's own dispatch
 // step needs a working baseline to produce an eligible set at all. Only the keys
 // the patch names are replaced, one level into `profile`.
+function patchPlanIssues(planPath, patch) {
+  const plan = JSON.parse(readFileSync(planPath, 'utf8'));
+  plan.issues = plan.issues.map((issue) => ({ ...issue, ...(patch[String(issue.number)] ?? {}) }));
+  writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+}
+
 function patchPlan(planPath, patch) {
   const plan = JSON.parse(readFileSync(planPath, 'utf8'));
   for (const [key, value] of Object.entries(patch)) {

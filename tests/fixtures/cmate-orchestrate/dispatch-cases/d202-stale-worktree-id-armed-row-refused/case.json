@@ -1,0 +1,24 @@
+{
+  "description": "**確かめる行は送り先の行（#309 (B)）。** plan の #201 は古い `worktree_id`（`commandmate-stale-issue-201`）を持ち、どの `ls --json` 行もその ID を持たない。pre-flight の解決（plan の ID）で完全一致が無いので、同じ解決が使う branch の規則で今の行を引き、その行の claude が有効なので `invalid_input`（exit 3）で何も送らない。古い ID だけで行を探す実装は「行が無い」と読み、d203 と区別できない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "issue_patch": { "201": { "worktree_id": "commandmate-stale-issue-201" } },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--no-auto-yes"],
+  "expect": {
+    "exit": 3,
+    "status": "failure",
+    "stop_reason": "dispatch_error",
+    "human_required": false,
+    "auto_yes": false,
+    "waves_count": 0,
+    "out_dir_created": false,
+    "never_sent": [201, 200],
+    "blocking_codes": ["invalid_input"],
+    "blocking_details_include": [
+      ["Auto-Yes is enabled on #201", "instance claude", "Nothing was dispatched"]
+    ]
+  }
+}

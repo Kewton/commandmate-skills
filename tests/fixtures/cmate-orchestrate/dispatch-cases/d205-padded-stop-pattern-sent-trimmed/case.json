@@ -1,0 +1,20 @@
+{
+  "description": "d204 の相方（#309 (A)）: 前後に空白のある有効な pattern `'  harness-stop  '` は受理し、`send` には trim 後の `harness-stop` を渡す。サーバーが判定・保存するのは trim 後の値なので、runner が判定した値と効いている値を一致させる。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--auto-yes", "--auto-yes-stop-pattern", "  harness-stop  "],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "sent": [201, 200],
+    "dispatch_send_args": {
+      "201": ["--auto-yes", "--duration", "1h", "--stop-pattern", "harness-stop"],
+      "200": ["--auto-yes", "--duration", "1h", "--stop-pattern", "harness-stop"]
+    }
+  }
+}

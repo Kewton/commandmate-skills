@@ -1627,7 +1627,29 @@ function main() {
     // `commandmate ls --json` — the dispatch-time worktree-id resolver. Returns
     // the worktrees the harness injected from the plan's branches, plus any
     // `sync_worktrees` row once a `commandmate sync` has registered it (#91).
-    const rows = visibleWorktrees(spec);
+    // Every row carries `autoYesByInstance` (CommandMate #2512), `{}` — no
+    // instance armed — unless the worker's `ls_row` says otherwise (Issue #309).
+    // `ls_row` is merged into the row; a null value REMOVES the key, which is how
+    // a case models a server older than #2512. `ls_json_fail_from: N` makes the
+    // N-th and every later `ls --json` call fail.
+    if (argv.includes('--json') && Number.isInteger(spec.ls_json_fail_from)) {
+      const dir = process.env.CMATE_FAKE_STATE;
+      const counter = dir ? join(dir, 'ls-json-calls') : null;
+      let calls = 0;
+      try {
+        calls = counter ? Number.parseInt(readFileSync(counter, 'utf8'), 10) || 0 : 0;
+      } catch {
+        calls = 0;
+      }
+      calls += 1;
+      if (counter) writeFileSync(counter, String(calls));
+      if (calls >= spec.ls_json_fail_from) fail('Error: failed to list worktrees: server unreachable', 1);
+    }
+    const rows = visibleWorktrees(spec).map((row) => {
+      const merged = { autoYesByInstance: {}, ...row, ...(workerSpec(spec, issueFromBranch(row.branch)).ls_row ?? {}) };
+      for (const [key, value] of Object.entries(merged)) if (value === null) delete merged[key];
+      return merged;
+    });
     if (argv.includes('--json')) {
       process.stdout.write(`${JSON.stringify(rows)}\n`);
       process.exit(0);

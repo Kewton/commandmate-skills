@@ -1,0 +1,26 @@
+{
+  "description": "d197 の相方（#309 (B) の非回帰）: `autoYesByInstance` は在るが、dispatch が駆動する instance（`cliToolId` claude）の Auto-Yes は無効である。#201 は claude が `enabled: false`（dispatch の名指さない codex だけが有効）、#200 は claude が `enabled: true` でも `expiresAt` が過去（`ls` 自身が off と読む値）。どちらも拒否せず、d58 と同じく完走し、どの `send` にも `--auto-yes` / `--duration` / `--stop-pattern` が付かない。",
+  "plan": {
+    "issues_fixture": "cases/02-explicit-dependency/issues.json",
+    "orchestrate_args": ["200", "201", "--profile", "node-commandmate", "--max-parallel", "3", "--run-id", "plan"]
+  },
+  "scenario": "scenario.json",
+  "dispatch_args": ["--no-auto-yes"],
+  "expect": {
+    "exit": 0,
+    "status": "success",
+    "stop_reason": "completed",
+    "human_required": false,
+    "auto_yes": false,
+    "waves_count": 2,
+    "advanced": [true, true],
+    "no_respond": true,
+    "sent": [201, 200],
+    "send_counts": { "201": 1, "200": 1 },
+    "absent_send_args": {
+      "201": ["--auto-yes", "--duration", "--stop-pattern"],
+      "200": ["--auto-yes", "--duration", "--stop-pattern"]
+    },
+    "absent_limitation_codes": ["auto_yes_used", "auto_yes_window_short"]
+  }
+}
