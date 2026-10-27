@@ -1045,6 +1045,81 @@ assert_eq "workdir-lifetime: every run still reaches the verdict its gates earne
 assert_eq "workdir-lifetime: the work directory is removed when the run really ends" \
   "0" "$(ls -1 "$wl_tmp" 2>/dev/null | wc -l | tr -d ' ')"
 
+# --- 25. job control writes nothing to the runner's stderr (CommandMate#3944) --
+# With `set -m` on, bash calls setpgid in the parent and in the forked child; a
+# failing child call prints `child setpgid (N to N): Operation not permitted` to
+# the stderr it inherited, before the subshell's `> "$rga_log" 2>&1` applies.
+# verify-run.sh wraps `set -m` … `set +m` in `{ … } 2>>"$rga_log.jobctl"`. The
+# cases below run THAT block, cut out of the real runner, with a cheap command as
+# the gate. The EPERM itself is a race and cannot be forced, so a write to stderr
+# injected inside the region is the deterministic stand-in. Not into $rga_log:
+# emit_log_tail's "no output captured" test reads that file's size.
+FAIL_CONTEXT=""
+FAIL_CONTEXT_SHOWN=0
+jc_dir="$SANDBOX/jobctl"
+mkdir -p "$jc_dir"
+# Prints the block from the `  {` line directly above the only `  set -m` through
+# `  } 2>>"$rga_log.jobctl"`, verbatim; exits 1 when that shape is not there.
+jc_block() { # runner
+  awk '
+    found == 0 && prev == "  {" && $0 == "  set -m" { found = 1; print prev }
+    found == 1 { print; if ($0 == "  } 2>>\"$rga_log.jobctl\"") { found = 2; exit } }
+    { prev = $0 }
+    END { if (found != 2) exit 1 }
+  ' "$1"
+}
+# jc_run <name> <block-file> <gate> — runs the block once in a fresh directory.
+# The harness prints "pid pgid" to stdout; its files stay under $jc_dir/<name>/.
+jc_run() {
+  jc_case="$jc_dir/$1"
+  mkdir -p "$jc_case"
+  {
+    printf "CWD='%s'\n" "$jc_case"
+    printf "rga_cmd='%s'\n" "$3"
+    printf "rga_log='%s'\n" "$jc_case/gate.log"
+    cat "$2"
+    printf '%s\n' 'pgid=$(ps -o pgid= -p "$rga_pid" 2>/dev/null | tr -d " ")' \
+      'echo "$rga_pid $pgid"' 'wait "$rga_pid"'
+  } > "$jc_case/harness.sh"
+  bash "$jc_case/harness.sh" > "$jc_case/stdout" 2> "$jc_case/stderr"
+  JC_RC=$?
+}
+
+jc_block "$RUNNER" > "$jc_dir/block.sh"
+assert_eq "jobctl: the runner has a { set -m … } 2>>\"\$rga_log.jobctl\" block" "0" "$?"
+assert_eq "jobctl: there is exactly one set -m in the runner" "1" \
+  "$(grep -c '^[[:space:]]*set -m\([[:space:]]\|$\)' "$RUNNER")"
+assert_has "jobctl: the gate launch is inside the block" "$jc_dir/block.sh" '> "$rga_log" 2>&1 &'
+assert_has "jobctl: the per-attempt cleanup removes the jobctl file" "$RUNNER" \
+  'rm -f "$rga_mark" "$rga_log.jobctl"'
+
+# Positive: a write injected inside the region lands in the jobctl file only.
+sed 's/^  set -m$/  set -m\
+  echo region-stderr >\&2/' "$jc_dir/block.sh" > "$jc_dir/block-inject.sh"
+assert_has "jobctl: the injection really is in the block under test" \
+  "$jc_dir/block-inject.sh" 'echo region-stderr >&2'
+jc_run inject "$jc_dir/block-inject.sh" 'echo gate-out'
+assert_eq "jobctl: the launch exits 0" "0" "$JC_RC"
+assert_eq "jobctl: nothing reaches stderr" "" "$(cat "$jc_dir/inject/stderr")"
+assert_has "jobctl: the write lands in the jobctl file" "$jc_dir/inject/gate.log.jobctl" 'region-stderr'
+assert_eq "jobctl: the gate log holds only the gate's own output" "gate-out" "$(cat "$jc_dir/inject/gate.log")"
+
+# Not vacuous: without the group redirection the same write reaches stderr.
+sed 's/^  } 2>>"\$rga_log\.jobctl"$/  }/' "$jc_dir/block-inject.sh" > "$jc_dir/block-bare.sh"
+assert_lacks "jobctl: the control block has no redirection" "$jc_dir/block-bare.sh" 'rga_log.jobctl'
+jc_run bare "$jc_dir/block-bare.sh" 'echo gate-out'
+assert_eq "jobctl: the control launch exits 0" "0" "$JC_RC"
+assert_has "jobctl: without the group the write reaches stderr" "$jc_dir/bare/stderr" 'region-stderr'
+
+# The group must not change what job control is for: the gate leads its own group.
+jc_run pgid "$jc_dir/block.sh" 'sleep 1'
+assert_eq "jobctl: the pgid launch exits 0" "0" "$JC_RC"
+jc_pid=$(cut -d' ' -f1 "$jc_dir/pgid/stdout")
+jc_pgid=$(cut -d' ' -f2 "$jc_dir/pgid/stdout")
+case "$jc_pid" in ''|*[!0-9]*) jc_pid_ok=no ;; *) jc_pid_ok=yes ;; esac
+assert_eq "jobctl: the harness reported a numeric pid" "yes" "$jc_pid_ok"
+assert_eq "jobctl: the gate is its own process group leader (PGID = PID)" "$jc_pid" "$jc_pgid"
+
 # --- summary ------------------------------------------------------------------
 total=$((TOTAL_PASS + TOTAL_FAIL))
 echo "# tests: $TOTAL_PASS passed, $TOTAL_FAIL failed"

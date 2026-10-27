@@ -78,6 +78,8 @@ EXIT trap で消えるため、ここで echo しないものは後から読め�
 | 契約除外: commit 側の pathspec 除去 | 6 件（＋ CommandMate 側 conformance 3 件） |
 | 契約除外: 未コミット側の除外除去 | 9 件（＋ CommandMate 側 conformance 2 件） |
 | 契約除外: `-uall` 除去 | 10 件 |
+| `{ set -m … } 2>>"$rga_log.jobctl"` の囲みごと除去（変更前のランナー、CommandMate#3944） | 第 25 節 12 件 |
+| 囲みは残し `2>>"$rga_log.jobctl"` だけ除去 | 第 25 節 8 件 |
 | 契約除外: rename の 2 パス目を見ない | 1 件 |
 | 契約除外: `-z` をやめて人間向けフォーマットを行単位で読む | 21 件 |
 | **#223 / #224（2026-08-20 実測）** ||
