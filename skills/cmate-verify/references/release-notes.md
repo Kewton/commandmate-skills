@@ -12,6 +12,17 @@ SKILL.md が正しい。
 
 ## Changelog
 
+### 0.6.2 — ゲート起動のジョブ制御が呼び出し元の stderr に `child setpgid` 行を出さなくなった（CommandMate#3944）
+
+- `set -m` を有効にすると bash は親と fork した子の両方で setpgid を呼ぶ。親の呼び出しが先に通ると子の呼び出しが
+  EPERM で失敗し、bash はサブシェル自身のリダイレクトが効く前に `child setpgid (N to N): Operation not permitted`
+  を子がまだ持っている stderr、つまりランナーの stderr へ書く。プロセスグループ自体は正しいので、誤っているのは
+  この 1 行だけである。
+- `set -m` … `set +m` を `{ … } 2>>"$rga_log.jobctl"` で囲み、ジョブ制御中に bash が書く stderr をゲートのログの
+  隣の別ファイルへ送る。ゲートのログ（`$rga_log`）へ送らないのは、`emit_log_tail` の「no output captured」判定が
+  そのファイルのサイズを読むため。`/dev/null` へは捨てない。別ファイルは `$WORKDIR` 内にあり、各試行の終わりに消す。
+- ゲートの PGID・watchdog の対象・stdout の書式・exit code は変わらない。`verify-run.sh` は上流（CommandMate PR #3949）と byte 一致。
+
 ### 0.6.0 — env-clean から外す `$HOME` 直下のエントリを受理し、実行例のパスを install 先に合わせた（#270 / CommandMate#3012）
 
 - **#270**: 上流 CommandMate#2901 で `verify-run.sh` に入った `options.envCleanIgnoreHomeEntries`（`$HOME` 直下の
