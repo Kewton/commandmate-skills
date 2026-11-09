@@ -12,6 +12,19 @@ SKILL.md が正しい。
 
 ## Changelog
 
+### 0.8.0 — verify-run.sh の本体だけが死んでも、走っているゲートのロックを他者に奪わせない（CommandMate#4288）
+
+- ゲートは `set -m` で本体とは別のプロセスグループに起こされるが、`owner` には本体の pid しか無かった。本体だけが
+  SIGKILL で死ぬと、ゲートが走っているのに「保有者は死んだ」と読まれ、ロックが 2 者に取られた。本体だけへの TERM で
+  EXIT trap がゲートの生存を見ずに解放する経路も同じ理由で直した。
+- mutex 付きのゲートは起動の前に `owner` を `pgid`（ゲートのグループ G）と新しい token へ tmp＋`mv` で書き直し、
+  読み直して確かめてから合図を出す。書き直しに失敗したらゲートを始めない（exit 125、`machine-lock-handoff-failed`）。
+  解放はグループ G が空になってからで、人が居る間は消さない（`machine-lock-release-deferred`）。
+- 取得・回収・解放の判断に使う観測は「生きている／いない／不明」の 3 値とし、不明（EPERM・EACCES・EIO・一覧の失敗）は
+  取らない・消さない・解放しない（`machine-lock-unknown`）。戻せずに残った `<name>.lock.gone-<token>-<serial>` は保有中と読む。
+  札の形・待ちの規約は変えない。詳細は SKILL.md の規約表を正とする。
+- stdout の書式・通常の exit code の意味は変わらない。`verify-run.sh` は上流（CommandMate PR #4295）と byte 一致。
+
 ### 0.7.0 — machine-lock の待ちを先着順の札にし、死んだ保有者の回収を列の先頭だけに限った（CommandMate#4277）
 
 - 空いた瞬間に先にポーリングした者がロックを取っていたので、長く待っている run が後から来たゲートに何度も
