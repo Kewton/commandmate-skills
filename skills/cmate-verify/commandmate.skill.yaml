@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-verify
 name: cmate-verify
-version: 0.6.2
+version: 0.7.0
 summary: 検証ゲートを .commandmate/verify.yaml に宣言し、未着手ガードとプライマリ checkout skip を挟んで worktree で逐次実行し、出力ではなく実 exit code で合否を判定する bash 3.2 互換ランナー。
 description: >-
   「このリポジトリで何が通れば合格か」を `.commandmate/verify.yaml`（形式 v1）に宣言し、
@@ -99,20 +99,20 @@ risk_rationale: >-
   verify.yaml に限られる。credential は読まない。
 files:
   - path: SKILL.md
-    sha256: 7a576aee2678354b4e244a4ca01443e0c4dd582610231c69174b5702e036b076
-    size: 22806
+    sha256: d66f46045bb690950992baf68c406046bb2a20f8760249e6787c5274200466fc
+    size: 24539
     kind: skill_md
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: ea7918fb8829d9523663e0e2a5afb7b39575ca5a7218f3e4257b0b4a2e2732de
-    size: 10635
+    sha256: 3f9f8eb6906162ecb97ad9889ceaaa9db7d03ce797a9a787cfd5b3c88eeb09a5
+    size: 11773
     kind: instruction
     executable: false
     script: false
   - path: scripts/verify-run.sh
-    sha256: ec4dceeb333d91ceb886c3ab4712e2022d2add9c1c500b987f773cd5ca0e0c2f
-    size: 46251
+    sha256: 17091de9524659b0937925e4b7097ce2b8b5af35243510c38cc22be87947e8c0
+    size: 56987
     kind: script
     executable: true
     script: true
