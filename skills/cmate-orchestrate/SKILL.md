@@ -630,7 +630,7 @@ report/artifact に残さない（redaction）。
 
 **運転ノート**（SKILL.md が4点に収めるために移送した機構の細部。この文書から一方向に参照する）:
 
-- [references/runner-operations.md](./references/runner-operations.md) — 各 runner のオプション運用（ランチャー表記・前提・dispatch の各 flag・PR 本文・profile-init・status）
+- [references/runner-operations.md](./references/runner-operations.md) — 各 runner のオプション運用（ランチャー表記・前提・dispatch の各 flag・PR 本文・profile-init・status・mem）
 - [references/codes-and-recovery.md](./references/codes-and-recovery.md) — 出力 code の全一覧と、**停止したときの対処表の正本**
 
 **ADR（裁定の記録。契約の正本ではない）**:
