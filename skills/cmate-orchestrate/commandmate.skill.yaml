@@ -113,8 +113,8 @@ risk_rationale: >-
   repairs failures within a fixed cap, stopping as blocked. Secrets are redacted.
 files:
   - path: SKILL.md
-    sha256: c79122378ab63eda5dc5ef8a908fccf82197d97a2c7b839d50bee162370ca048
-    size: 59982
+    sha256: 1f7813554f5a2698213dfff95ec6b0c17f56f5e19884967bc508c56cd4ac3641
+    size: 57722
     kind: skill_md
     executable: false
     script: false
@@ -169,6 +169,12 @@ files:
   - path: references/dispatch-contract.md
     sha256: 33aeea37c96a29f425e556096c916f54d4e7e92e8f4720cf26a6ea24ed0a4a1f
     size: 189627
+    kind: instruction
+    executable: false
+    script: false
+  - path: references/integration-verify.md
+    sha256: 0534345ee4622a4c829644e0ff20739f9c2d254a50b7d1a37161a0c750c299b6
+    size: 3008
     kind: instruction
     executable: false
     script: false
