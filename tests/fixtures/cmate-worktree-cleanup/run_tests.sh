@@ -359,6 +359,62 @@ grep -q '^uncommitted$' "$WT/Proj-issue-104/e.txt" && pass "104's uncommitted ed
 [ -d "$WT/Proj-develop" ] && [ -f "$PRIMARY/README.md" ] && pass "primary and develop worktrees intact" || fail "primary and develop worktrees intact" "missing"
 
 # ---------------------------------------------------------------------------
+# 6b. mem (CommandMate#4228, contract 2): SKILL.md gates mem on `mode == on`;
+#     off / old CLI / non-zero exit mean "do not use mem", and nothing in this
+#     skill ever writes to mem. A fake `commandmate` stands in for the CLI.
+# ---------------------------------------------------------------------------
+GATE=$(grep -F 'commandmate mem mode --json' "$SKILL_DIR/SKILL.md" | head -1)
+if [ -n "$GATE" ]; then pass "SKILL.md carries the mem mode gate"; else fail "SKILL.md carries the mem mode gate" "no 'commandmate mem mode --json' line"; fi
+
+MEMBIN="$WORK/membin"
+mkdir -p "$MEMBIN"
+cat > "$MEMBIN/commandmate" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$MEM_STUB_LOG"
+if [ "${1:-}" = mem ] && [ "${2:-}" = mode ]; then
+  case "$MEM_STUB_MODE" in
+    on)      printf '{\n  "mode": "on"\n}\n'; exit 0 ;;
+    off)     printf '{\n  "mode": "off"\n}\n'; exit 0 ;;
+    unknown) echo "error: unknown command 'mem'" >&2; exit 1 ;;
+    fail)    exit 1 ;;
+  esac
+fi
+if [ "${1:-}" = ls ]; then echo '{"worktrees":[]}'; exit 0; fi
+exit 1
+STUB
+chmod +x "$MEMBIN/commandmate"
+export MEM_STUB_LOG="$WORK/mem-stub.log"
+
+mem_gate() { # <mode> <gate-line> -> exit status of the gate
+  MEM_STUB_MODE=$1 PATH="$MEMBIN:$PATH" bash -c "$2" >/dev/null 2>&1
+}
+if mem_gate on "$GATE"; then pass "mem gate: mode on -> usable"; else fail "mem gate: mode on -> usable" "gate returned non-zero"; fi
+for m in off unknown fail; do
+  if mem_gate "$m" "$GATE"; then fail "mem gate: $m -> not used" "gate returned 0"; else pass "mem gate: $m -> not used"; fi
+done
+# Mutation: a gate that stops checking for `on` must be noticed.
+MGATE=${GATE//\"mode\": \"on\"/\"mode\"}
+if [ "$MGATE" != "$GATE" ] && mem_gate off "$MGATE"; then
+  pass "mutation killed: a gate that ignores the value lets mode off through (the off case above would fail)"
+else
+  fail "mutation killed (mem gate)" "mutated gate was not distinguishable"
+fi
+
+# The runner never touches mem, whatever the mode: same plan, no `mem` call.
+: > "$MEM_STUB_LOG"
+for m in on off; do
+  (cd "$PRIMARY" && MEM_STUB_MODE=$m PATH="$MEMBIN:$PATH" node "$RUNNER" --all-eligible --sync --integration develop --now "$NOW") > "$WORK/mem-$m.json" 2> "$WORK/mem-$m.err"
+done
+if cmp -s "$WORK/mem-on.json" "$WORK/mem-off.json"; then pass "runner output is byte-identical for mem mode on and off"; else fail "runner output is byte-identical for mem mode on and off" "differs"; fi
+if grep -qE '^mem( |$)' "$MEM_STUB_LOG"; then fail "runner never calls commandmate mem" "$(grep -E '^mem' "$MEM_STUB_LOG" | head -3)"; else pass "runner never calls commandmate mem"; fi
+# SKILL.md only reads mem: no write subcommand anywhere in it.
+if grep -nE 'commandmate mem (add|update|close|purge|promote)' "$SKILL_DIR/SKILL.md" >/dev/null; then
+  fail "SKILL.md never writes to mem" "$(grep -nE 'commandmate mem (add|update|close|purge|promote)' "$SKILL_DIR/SKILL.md")"
+else
+  pass "SKILL.md never writes to mem"
+fi
+
+# ---------------------------------------------------------------------------
 # 7. The shipped runner never forces anything.
 # ---------------------------------------------------------------------------
 if grep -nE "'--force'|'-D'|'-f'" "$SKILL_DIR/scripts/"*.mjs >/dev/null; then

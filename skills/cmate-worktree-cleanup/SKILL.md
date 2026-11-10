@@ -149,6 +149,16 @@ clean な候補ごとに proof を求める。型は `direct` / `merged_equivale
 2. `mode: apply` に進むには、利用者の **明示確認** が要る。承認された worktree を
    `confirmed_targets` として受け取る。確認できない（非対話含む）場合は `dry_run` に留める。
    **確認なしに削除しない。**
+3. mem（CommandMate#4220）を使えるときだけ、plan に対象ブランチの open の項目の件数を載せてよい
+   （読みだけ）。使えるかは、この手順の頭で 1 回だけ次で判定し、結果を使い回す。exit 0 かつ
+   mode が `on` のときだけ「使える」。`off`・`derived`・`mem` を持たない旧 CLI・server 停止・
+   未登録・曖昧・exit 非 0 は、すべて「使わない」で正常であり、従来どおりに進める。
+
+   ```bash
+   commandmate mem mode --json 2>/dev/null | grep -q '"mode": "on"'
+   ```
+
+   件数は `commandmate mem list --worktree <id> --json` の `items` の数である。**件数は削除可否の判断に使わない。**
 
 ### Step 6 — apply（削除）
 
@@ -183,6 +193,14 @@ server へ接続するため、server 未起動または sync を持たない旧
 `worktree_ids` を `commandmate ls --json` から削除前に控えること、推測 id を書かないこと、
 port 決め打ちの curl sync を使わないことは
 [`references/safety.md`](./references/safety.md) §5 が正本である。
+
+**mem の項目は消さない。** mem はブランチ単位に残り、worktree を消しても項目は残る
+（worktree の削除で閉じるのは各セッションの `now` だけ）。消した worktree を指す
+`worktree:<id>` の条件は、次の読みで閉じる。残った項目は
+`commandmate mem list --repository <id> --branch <name>` で読める。消すかどうか
+（`mem purge`）は人が決める（セッションの中からの `purge` は exit 55 で拒否される）。
+mem を使えるとき（Step 5 の判定）は、件数を `next_actions` に 1 行載せるだけにする。
+この skill は mem に書かない。
 
 ## 6. 診断のみ（自動停止・削除しない）
 
