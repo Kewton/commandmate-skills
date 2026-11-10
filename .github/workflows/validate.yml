@@ -252,3 +252,17 @@ jobs:
       # bash, node (set up above) and stdlib-only python3; no network.
       - name: Run the cmate-acceptance-test suite
         run: bash tests/fixtures/cmate-acceptance-test/run_tests.sh
+
+      # cmate-handoff ships no script (CommandMate#4228): its runnable part is
+      # the bash templates in SKILL.md. This suite runs them behind the mem mode
+      # gate against a commandmate stub for mode on, mode off and a CLI without
+      # mem, and counts the calls -- off and no-mem must reach nothing but
+      # `mem mode --json`. It also pins, by literal, that SKILL.md opens with
+      # the purpose and what-not-to-write, and injects the mutations that must
+      # turn it red. Wired here and in .commandmate/verify.yaml in the same
+      # change that adds the suite; the defect class of #57/#69, #70, #241 is a
+      # suite named nowhere.
+      #
+      # bash only; no network.
+      - name: Run the cmate-handoff suite
+        run: bash tests/fixtures/cmate-handoff/run_tests.sh
