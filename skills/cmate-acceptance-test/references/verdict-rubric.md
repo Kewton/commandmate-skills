@@ -45,9 +45,23 @@ evidence が任意の 4 つも、`notes` に理由を書くことは必須であ
 |---|---|---|
 | 1 | `status` が `failure` | `no_go` |
 | 2 | `outcome: fail` の criterion が 1 件以上ある | `no_go` |
-| 3 | `status` が `success`（= 全 `pass`） | `go` |
+| 3 | `status` が `success`（= 全 `pass`）で、未反映の decision が無い | `go` |
+| 3b | `status` が `success` だが、未反映の decision（§3.1）がある | `conditional_go` |
 | 4 | 未確定の criterion すべてに `next_action` と担当がある | `conditional_go` |
 | 5 | 上記以外 | `no_go` |
+
+行 3b の `conditional_go` は、本文に反映されたことを人が確かめるまで `go` にしない、
+という意味である。`next_actions` に `decision <id> の Issue 本文への反映を人が確かめる`
+（担当 `user`、`criterion_ids` は空）を置く。未反映の decision がある実行で
+`outcome: fail` があれば、行 2 で `no_go` である。行 4 の実行でも、同じ action を足す。
+
+### 3.1 未反映の decision（mem を使えるときだけ）
+
+`commandmate mem mode --json` が exit 0 で `"mode": "on"` のときだけ、
+`commandmate mem list --json` を読み、`state` が `recorded`（承認・記録済みだが正本へ未反映）の
+`decision` を探す。`promoted`・`closed` は反映済みである。mode が `on` でない・`mem` が
+無い・exit 非 0 のときは「未反映なし」として扱い、この行を使わない（従来の決定表のまま）。
+読むだけで、mem に書き込まない。runner へは plan の `unreflected_decisions`（ID の配列）で渡す。
 
 行 4 の「未確定」とは `flaky` / `blocked` / `not_run` / `manual_pending` /
 `not_verifiable` を指す。1 件でも次 action と担当を書けないものが残るなら、

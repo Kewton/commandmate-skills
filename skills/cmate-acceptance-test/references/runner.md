@@ -51,6 +51,7 @@ result document を書けなかった。summary は標準出力に出る。
 | `criteria[].confirmation` | `confirm_required` のとき必須。`granted` は利用者の応答そのまま |
 | `criteria[].next_action` | 未確定になったときの次 action と担当。runner は担当を推測しない |
 | `criteria[].notes` | 分類の根拠など。`notes` に追記される |
+| `unreflected_decisions` | 任意。mem で見つけた未反映の decision の ID の配列（`verdict-rubric.md` §3.1）。あれば全 pass でも `conditional_go` にし、`next_actions` に確認の action を足す。runner は mem を呼ばない |
 | `environment.invocation` | `interactive` 以外は `non_interactive` として扱う |
 
 `issue_ref` が無い・受入条件が 0 件・plan を読めない・`--cwd` が無いときは、

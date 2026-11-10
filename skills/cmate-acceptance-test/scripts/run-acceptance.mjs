@@ -25,7 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const SKILL_ID = 'cmate-acceptance-test';
-export const SKILL_VERSION = '0.3.0';
+export const SKILL_VERSION = '0.4.0';
 
 // Bytes of the combined stdout/stderr tail kept in output_excerpt. The schema
 // allows 4000 characters; the tail is where test runners print their totals
@@ -89,10 +89,12 @@ export function deriveStatus(criteria, failed) {
 }
 
 // verdict-rubric §3: verdict, rows evaluated top to bottom.
-export function deriveVerdict(status, criteria, nextActions) {
+export function deriveVerdict(status, criteria, nextActions, decisions = []) {
   if (status === 'failure') return 'no_go';
   if (criteria.some((c) => c.outcome === 'fail')) return 'no_go';
-  if (status === 'success') return 'go';
+  // verdict-rubric §3 row 3: all pass but a decision is not yet reflected in the
+  // issue body -> conditional_go, never go.
+  if (status === 'success') return decisions.length ? 'conditional_go' : 'go';
   const covered = new Set(
     nextActions.filter((a) => String(a.owner || '').trim()).flatMap((a) => a.criterion_ids || []),
   );
@@ -421,8 +423,17 @@ export function buildResult(plan, { cwd, now = utcNow, exec = runOnce } = {}) {
     doc.checks.push(check);
   });
 
+  // Decision ids the caller read from mem (mode on only) and found recorded but
+  // not yet reflected in the issue body. The runner never calls mem itself.
+  const decisions = Array.isArray(plan.unreflected_decisions)
+    ? plan.unreflected_decisions.map((d) => String(d).trim()).filter((d) => /^[A-Za-z0-9._:-]{1,64}$/.test(d))
+    : [];
+  decisions.forEach((d) => {
+    doc.next_actions.push({ action: clip(`decision ${d} の Issue 本文への反映を人が確かめる`, 300), owner: 'user', criterion_ids: [] });
+  });
+
   doc.status = deriveStatus(doc.criteria, false);
-  doc.verdict = deriveVerdict(doc.status, doc.criteria, doc.next_actions);
+  doc.verdict = deriveVerdict(doc.status, doc.criteria, doc.next_actions, decisions);
 
   const failed = doc.criteria.filter((c) => c.outcome === 'fail').map((c) => c.id);
   const unresolved = doc.criteria.filter((c) => UNRESOLVED.has(c.outcome));
@@ -436,7 +447,9 @@ export function buildResult(plan, { cwd, now = utcNow, exec = runOnce } = {}) {
   doc.verdict_reason = clip(
     {
       go: `全 ${doc.criteria.length} 件の受入条件が exit code 0 で pass`,
-      conditional_go: `pass ${passCount}/${doc.criteria.length}。未確定 ${unresolved.map((c) => c.id).join(', ')} は次 action と担当つき`,
+      conditional_go: decisions.length
+        ? `pass ${passCount}/${doc.criteria.length}。未反映の decision ${decisions.join(', ')} を人が確かめるまで go にしない${unresolved.length ? `。未確定 ${unresolved.map((c) => c.id).join(', ')}` : ''}`
+        : `pass ${passCount}/${doc.criteria.length}。未確定 ${unresolved.map((c) => c.id).join(', ')} は次 action と担当つき`,
       no_go: doc.blocking_reasons[0] || 'no_go',
     }[doc.verdict],
     300,
