@@ -606,6 +606,60 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 6. --note is gated on `mem mode` being "on" (CommandMate#4228, contract 2)
+# ---------------------------------------------------------------------------
+printf '\n== 6. send --note is used only when mem mode is on ==\n'
+
+GATE=$(grep -m1 "commandmate mem mode --json .*grep -q" "$SKILL_MD")
+if [ -n "$GATE" ] && grep -q -- '--note' "$SKILL_MD" && grep -q 'ask --async. には .--note. が無い' "$SKILL_MD"; then
+  pass 'SKILL.md carries the mode gate, --note and the ask --async exclusion'
+else
+  fail 'SKILL.md carries the mode gate, --note and the ask --async exclusion' "gate=[$GATE]"
+fi
+
+mkdir -p "$WORK/membin"
+cat > "$WORK/membin/commandmate" <<'STUB'
+#!/usr/bin/env bash
+case "${MEM_STUB_MODE:-}" in
+  on)  printf '{\n  "mode": "on"\n}\n'; exit 0 ;;
+  off) printf '{\n  "mode": "off"\n}\n'; exit 50 ;;
+  derived) printf '{\n  "mode": "derived"\n}\n'; exit 0 ;;
+  old) printf "error: unknown command 'mem'\n" >&2; exit 1 ;;
+  *)   exit 1 ;;
+esac
+STUB
+chmod +x "$WORK/membin/commandmate"
+
+gate_rc() { # $1 = gate snippet, $2 = stub mode
+  MEM_STUB_MODE="$2" PATH="$WORK/membin:$PATH" bash -c "$1" >/dev/null 2>&1
+  echo $?
+}
+
+if [ "$(gate_rc "$GATE" on)" -eq 0 ]; then
+  pass 'mode on: the gate passes, --note may be used'
+else
+  fail 'mode on: the gate passes, --note may be used' 'gate did not exit 0'
+fi
+for m in off derived old broken; do
+  if [ "$(gate_rc "$GATE" "$m")" -ne 0 ]; then
+    pass "mode $m: the gate says do not use mem (normal path, no --note)"
+  else
+    fail "mode $m: the gate says do not use mem" 'gate exited 0'
+  fi
+done
+
+# Mutation: a gate that only checks for a "mode" key lets off/derived through.
+mutations=$((mutations + 1))
+MUT_GATE=${GATE//\"mode\": \"on\"/\"mode\"}
+if [ "$MUT_GATE" = "$GATE" ]; then
+  fail 'a gate without the "on" test is caught' 'the mutation changed nothing'
+elif [ "$(gate_rc "$MUT_GATE" off)" -eq 0 ]; then
+  pass 'a gate without the "on" test is caught (off now passes)'
+else
+  fail 'a gate without the "on" test is caught' 'off still blocked after the mutation'
+fi
+
+# ---------------------------------------------------------------------------
 printf '\n%s passed, %s failed (%s mutations exercised)\n' "$passed" "$failed" "$mutations"
 [ "$failed" -eq 0 ] || exit 1
 exit 0

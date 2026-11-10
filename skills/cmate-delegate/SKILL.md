@@ -269,6 +269,24 @@ commandmate send <worktree-id> "<依頼文>" --instance <instance-id> --reply-to
   `<worktree-id>[@<instance-id|alias>]`（別のセッションへ返させる）である。
 - どちらでも **`wait` しない**。自分の作業を続ける。
 
+**依頼の目的を mem に残す（任意）。** 手順の頭で 1 回、次を打つ。exit 0 で `"mode": "on"` のときだけ
+`send --reply-to` に `--note "<何のための依頼か、一言>"` を足してよい。
+
+```bash
+commandmate mem mode --json 2>/dev/null | grep -q '"mode": "on"'
+```
+
+返答を待つ `waiting` の項目があなたのセッションに作られ、relay が終わると閉じる。
+`off`・`derived`・`mem` が無い古い CLI・サーバ停止・exit 非 0 は、すべて「使わない」であり、
+`--note` を付けない従来の送り方がそのまま正常な経路である（失敗として報告しない）。
+
+- `on` でないときに付けると、**本文は送られずに** mem の exit（50 など）で終わる。何も送られていないので、
+  `--note` を外して **1 回だけ**送り直す。
+- `--note` に相手の名前・relay の ID・依頼の本文を書かない（relay の台帳が持っている）。
+- `ask --async` には `--note` が無い。この経路では mem に書かない。
+- 返答待ちの項目はこの `--note` だけが作る。`cmate-handoff` を併用していても、同じ relay の項目を
+  足したり `update`・`close` したりしない（1 種類の項目に書き手は 1 つ）。
+
 ### 8.3 待つ（第4節）か、待たない（この節）か
 
 | 返答の位置づけ | 選ぶもの |

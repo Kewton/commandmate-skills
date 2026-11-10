@@ -1,5 +1,14 @@
 # release notes
 
+## 0.3.0 — 委任の目的を mem に残す（任意）（CommandMate#4228 の契約 2）
+
+`send --reply-to` に `--note` を足す手順を第8.2節に加えた。手順の頭で
+`commandmate mem mode --json` の `"mode"` が `"on"` と確かめたときだけ付ける。`off`・`derived`・
+`mem` が無い古い CLI・exit 非 0 は「使わない」で、既存の `ask`／`send`／relay の経路は変わらない。
+`--note` を付けて 50 などが返ったら本文は送られていないので、外して 1 回だけ送り直す。
+`ask --async` では mem に書かない。`compatibility.commandmate` は `>=0.11.0 <1.0.0` のまま
+（mem は実行時に確かめる）。
+
 ## 0.2.0 — 文脈の上限で止まった依頼を、完了ではなく失敗として返す（CommandMate#3011）
 
 **何が起きたか。** 管理（Command Code）のセッションを長く使い続けたら、依頼が

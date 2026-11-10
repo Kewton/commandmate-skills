@@ -59,3 +59,8 @@ package is not allowed to reach.
    only an upstream 0 is rewritten; and a copy of `ask.sh` with the detector
    disabled must stop giving 11
    ([CommandMate#3011](https://github.com/Kewton/CommandMate/issues/3011)).
+7. **`send --note` is used only when `mem mode` is `on`** (CommandMate#4228,
+   contract 2). The gate line in SKILL.md section 8.2 is run against a stub
+   `commandmate`: `on` passes; `off` (exit 50), `derived`, an old CLI without
+   `mem` and a broken server all say "do not use mem". A copy of the gate
+   without the `"on"` test must let `off` through, which the suite catches.
