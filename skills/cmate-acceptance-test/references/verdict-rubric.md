@@ -61,7 +61,8 @@ evidence が任意の 4 つも、`notes` に理由を書くことは必須であ
 `commandmate mem list --json` を読み、`state` が `recorded`（承認・記録済みだが正本へ未反映）の
 `decision` を探す。`promoted`・`closed` は反映済みである。mode が `on` でない・`mem` が
 無い・exit 非 0 のときは「未反映なし」として扱い、この行を使わない（従来の決定表のまま）。
-読むだけで、mem に書き込まない。runner へは plan の `unreflected_decisions`（ID の配列）で渡す。
+読むだけで、mem に書き込まない。読むのは受入を走らせる枝の decision だけで、mode が `on` のとき
+だけ summary の「対象」に `mem        読んだ枝 <枝>` を書く（decision が 0 件でも）。`on` でなければ書かない。runner へは plan の `unreflected_decisions`（ID の配列）で渡す。
 
 行 4 の「未確定」とは `flaky` / `blocked` / `not_run` / `manual_pending` /
 `not_verifiable` を指す。1 件でも次 action と担当を書けないものが残るなら、

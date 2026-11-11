@@ -82,8 +82,8 @@ risk_rationale: >-
   use is limited to reading the issue. No executable file ships.
 files:
   - path: SKILL.md
-    sha256: e0282a0fa314282781cadd06a31eff4c97825f5ccb96a2075dc7d1738b9b833b
-    size: 16220
+    sha256: 21f15b7a3c9f9eba6145fa35413f889314d2b9064c6b155ab8f0d51b2ee21165
+    size: 16698
     kind: skill_md
     executable: false
     script: false
@@ -94,8 +94,8 @@ files:
     executable: false
     script: false
   - path: references/changelog.md
-    sha256: e70d0d6a924fc44e5f61311209006b372e37c339bfcf0f727192b43c3df7f1ed
-    size: 11901
+    sha256: fa99096a08c4e12c9a0420a862826f4294d0ffabc2be040f4e5f7eed79e8625e
+    size: 12443
     kind: instruction
     executable: false
     script: false
@@ -106,8 +106,8 @@ files:
     executable: false
     script: false
   - path: references/runner.md
-    sha256: efbe8c2792cc93bb09ab8105f4e332a7ebae724f1ea84f7785f80842aeb2eb30
-    size: 6167
+    sha256: 66da1aaf540f28d7fb5f9f1ebdbb4e56d1e7cf1653cd18592e9205c233887d30
+    size: 6450
     kind: instruction
     executable: false
     script: false
@@ -118,8 +118,8 @@ files:
     executable: false
     script: false
   - path: references/verdict-rubric.md
-    sha256: 0433e64741fb69645b105a7f238db77ad2b9bd922f841d930cc22e2a0569b522
-    size: 6469
+    sha256: 07cb49d86d32fd5f2a3fe4e7394875764c14e491137585c51f980698cad30740
+    size: 6697
     kind: instruction
     executable: false
     script: false
@@ -130,8 +130,8 @@ files:
     executable: false
     script: false
   - path: scripts/run-acceptance.mjs
-    sha256: 4bd16bfe0f7ba113cef51a35dad5c4944b484c43db16e5d0a5b66faf13734a01
-    size: 24745
+    sha256: 91569fec2eaae9c99aedcbc4199aef5592dae997e9b75d46178d97e78c63a2cd
+    size: 25156
     kind: script
     executable: false
     script: true

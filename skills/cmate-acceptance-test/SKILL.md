@@ -113,6 +113,10 @@ Skill 自身が実行してよいのは、manifest の `requirements.commands` �
    残っていれば、Issue 本文の受入条件は古い可能性がある。その decision の ID を summary に
    挙げ、plan の `unreflected_decisions` に入れる。本文に反映されたことを人が確かめるまで
    `go` にしない（[`references/verdict-rubric.md`](./references/verdict-rubric.md) §3 行 3b）。
+   decision を読むのは受入を走らせる枝だけである。mode が `on` のときだけ、読んだ枝の名を
+   plan の `mem_read_branch` に入れ、summary に「読んだ枝」の 1 文を書く。`on` でないときは書かない。
+   入れる枝の名は `commandmate mem mode --json` の `branch`（mem が判定に使った枝）であり、
+   `git branch --show-current` で別に引かない（detached や別の作業木で食い違うため）。
    mem に書き込まない。
 
 ### Step 2 — 分類と risk tier

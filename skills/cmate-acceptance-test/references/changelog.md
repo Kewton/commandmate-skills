@@ -17,6 +17,11 @@ mem（CommandMate#4220）が使えるときだけ、未反映の decision を見
   `conditional_go`（`next_actions` に担当 `user` の確認 action）。
 - **runner の plan に `unreflected_decisions` を足した（任意）。** 無いときの出力は
   0.3.0 と変わらない。schema は変わらない。
+- **summary に「読んだ枝」の 1 文（D-12）。** decision を読むのは受入を走らせる枝だけ。
+  mode が `on` のときだけ plan の `mem_read_branch` を入れ、summary の「対象」に
+  `mem        読んだ枝 <枝>` を書く。`on` でない（off・derived・mem 無し）ときは書かない。
+  result の構造化の欄（`verdict`・`unreflected_decisions`・`next_actions`）は変わらない。
+  入れる枝の名は `commandmate mem mode --json` の `branch`（mem が判定に使った枝）。
 - `requirements.commands` に `commandmate` を足した（読みだけ。版の範囲は付けない）。
   `compatibility.commandmate` の範囲は変えない。
 

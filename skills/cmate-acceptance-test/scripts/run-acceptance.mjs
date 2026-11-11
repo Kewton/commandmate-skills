@@ -458,7 +458,7 @@ export function buildResult(plan, { cwd, now = utcNow, exec = runOnce } = {}) {
 }
 
 // verdict-rubric §5, in that order.
-export function renderSummary(doc, resultPath) {
+export function renderSummary(doc, resultPath, memBranch = null) {
   const label = { go: 'GO', conditional_go: 'CONDITIONAL GO', no_go: 'NO-GO' }[doc.verdict];
   const t = doc.target;
   const lines = [];
@@ -470,6 +470,8 @@ export function renderSummary(doc, resultPath) {
   lines.push(`  repository ${t.repository || '(不明)'}`);
   lines.push(`  branch     ${t.branch || '(不明)'} @ ${t.commit ? t.commit.slice(0, 7) : '(不明)'}${t.dirty ? ', 未 commit の変更あり' : ''}`);
   lines.push(`  実行        ${doc.environment.agent} ${doc.environment.agent_version || '(version 不明)'} / ${doc.generated_at}`);
+  // D-12: only when mem mode was on (the caller passes mem_read_branch); never otherwise (D-14).
+  if (memBranch) lines.push(`  mem        読んだ枝 ${memBranch}（decision はこの枝だけを読む）`);
   lines.push('');
   const passCount = doc.criteria.filter((c) => c.outcome === 'pass').length;
   lines.push(`受入条件 (${passCount}/${doc.criteria.length} 検証済み)`);
@@ -555,7 +557,10 @@ function main(argv) {
     doc.verdict_reason = clip(`検証を実行できなかった: ${planError}`, 300);
   }
   const shownOut = redact(args.out, [[cwd, '.'], [os.homedir(), '<redacted:home>']]).text;
-  const summary = renderSummary(doc, shownOut);
+  const memBranch = typeof plan.mem_read_branch === 'string' && /^[A-Za-z0-9._/-]{1,200}$/.test(plan.mem_read_branch.trim())
+    ? plan.mem_read_branch.trim()
+    : null;
+  const summary = renderSummary(doc, shownOut, memBranch);
   doc.summary_text = clip(summary, 20000);
   process.stdout.write(`${summary}\n`);
   try {
