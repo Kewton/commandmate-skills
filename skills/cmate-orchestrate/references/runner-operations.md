@@ -31,6 +31,7 @@
 | 第3.5節 profile-init（押さえるべき3点・`--check`） | 第13節 |
 | 第3.6節 inspect（`--check-references` の判定範囲と境界） | 第15節 |
 | 第3.7節 status（read-only の契約と表示規則） | 第14節 |
+| 第6節 運転ノート（mem の見直し） | 第17節 |
 
 ---
 
@@ -679,3 +680,21 @@ warning が1件でもあれば `status: partial`、notice だけなら `success`
 `out_exists` / exit 4）と stdout にだけある。plan は Issue 本文と profile の純関数であり、
 `acceptance_criteria` は `string[]` のままである。後続の「merge 後の観測 runner」は、この
 artifact の値を「着手前」として読む。
+
+---
+
+## 17. mem との境界（wave の完了で見直す）
+
+runner は mem を読まず書かない。mem（CommandMate#4220）を使うのは、runner を動かしているあなたである。
+`commandmate mem mode --json` の `"mode"` が `"on"` のときだけ、次を行う。それ以外ではこの節を飛ばす
+（`off`・`derived`・mem が無い古い CLI・未登録・サーバ停止はいずれも正常であり、何もしない。失敗として報告しない）。
+判定は手順の頭で 1 回行い、その手順の間は結果を使い回す。
+
+- **wave の完了**（merge-report の後、次の wave の dispatch の前）と **run の停止**で、`cmate-handoff` の
+  「区切りでの見直し」を 1 回行う：`commandmate mem check --suggest --quiet`、自分の `now` の置き換え。
+- run・wave・Issue・PR の状態を mem に**写さない**。正本は run の成果物（plan / dispatch / merge / uat の report）と
+  GitHub で、`status.mjs` が読む。
+- plan が `open_question_declared` で止まり、人が決めた答えを decision として記録したときは、
+  **決定が Issue の本文へ反映されたこと**を確かめてから re-plan する（`cmate-handoff` の「仕様を変える決定」）。
+  `commandmate mem list` でその decision が `recorded`（未反映）なら re-plan しない。
+- ワーカーの mem はワーカーのもの。あなたはワーカーの項目を更新・close しない（できない：exit 55）。
