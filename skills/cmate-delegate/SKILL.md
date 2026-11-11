@@ -258,28 +258,35 @@ commandmate send --help 2>/dev/null | grep -q -- '--reply-to'   # exit 0 なら�
 
 ### 8.2 送る
 
-```bash
-commandmate ask <worktree-id> "<依頼文>" --instance <instance-id> --async
-commandmate send <worktree-id> "<依頼文>" --instance <instance-id> --reply-to self
-```
-
-- `ask --async` は relay が台帳に載った時点で **exit 0**、stdout には **relay-id だけ**が出る。
-- `send --reply-to` は、もともと送るつもりだったメッセージに同じ配送を付ける形である。
-  `--reply-to` が取るのは `self`（このコマンドを打っているセッション）か
-  `<worktree-id>[@<instance-id|alias>]`（別のセッションへ返させる）である。
-- どちらでも **`wait` しない**。自分の作業を続ける。
-
-**依頼の目的を mem に残す（任意）。** 手順の頭で 1 回、次を打つ。exit 0 で `"mode": "on"` のときだけ
-`send --reply-to` に `--note "<何のための依頼か、一言>"` を足してよい。
+**まず、送信より前に**手順の頭で 1 回、mem の mode を確かめる（送ってから読んでも `--note` は付けられない）。
 
 ```bash
 commandmate mem mode --json 2>/dev/null | grep -q '"mode": "on"'
 ```
 
+exit 0 で `"mode": "on"` のときは、`send --reply-to` に `--note "<何のための依頼か、一言>"` を**必ず**付ける。
 返答を待つ `waiting` の項目があなたのセッションに作られ、relay が終わると閉じる。
+
+```bash
+commandmate send <worktree-id> "<依頼文>" --instance <instance-id> --reply-to self --note "<何のための依頼か、一言>"
+```
+
 `off`・`derived`・`mem` が無い古い CLI・サーバ停止・exit 非 0 は、すべて「使わない」であり、
 `--note` を付けない従来の送り方がそのまま正常な経路である（失敗として報告しない）。
 
+```bash
+commandmate send <worktree-id> "<依頼文>" --instance <instance-id> --reply-to self
+commandmate ask <worktree-id> "<依頼文>" --instance <instance-id> --async
+```
+
+- mode が `on` で、返答を後で受け取るつもりの委任は、`ask --async` を使わず
+  `send --reply-to self --note` を使う。`ask --async` は、mode が `on` でないとき、
+  または返答の記録が要らないときだけ使う。
+- `ask --async` は relay が台帳に載った時点で **exit 0**、stdout には **relay-id だけ**が出る。
+- `send --reply-to` は、もともと送るつもりだったメッセージに同じ配送を付ける形である。
+  `--reply-to` が取るのは `self`（このコマンドを打っているセッション）か
+  `<worktree-id>[@<instance-id|alias>]`（別のセッションへ返させる）である。
+- どちらでも **`wait` しない**。自分の作業を続ける。
 - `on` でないときに付けると、**本文は送られずに** mem の exit（50 など）で終わる。何も送られていないので、
   `--note` を外して **1 回だけ**送り直す。
 - `--note` に相手の名前・relay の ID・依頼の本文を書かない（relay の台帳が持っている）。

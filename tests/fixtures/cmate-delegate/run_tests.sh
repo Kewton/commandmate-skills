@@ -719,6 +719,54 @@ else
   fail 'a procedure without the resend is caught' "delivered=$note_deliv"
 fi
 
+# --- mode on: --note is required, mem mode is read before sending, ask --async is not chosen (UAT 1) ---
+# A real Agent skipped --note under "(任意)" and read mem mode after sending. The
+# procedure is prose, so each property is a check over section 8.2 of a SKILL.md;
+# the same checks run on the pre-fix text and on single-sentence mutations of the
+# current text, and every one of those must fail.
+sec82() { sed -n '/^### 8\.2 /,/^### 8\.3 /p' "$1"; }
+chk_required() { # --note is mandatory when mode is on; no "optional" wording
+  s=$(sec82 "$1")
+  printf '%s' "$s" | grep -q -- '--note.*\*\*必ず\*\*付ける' \
+    && ! printf '%s' "$s" | grep -q '任意\|足してよい'
+}
+chk_order() { # the mem mode check is stated, and comes before the first send/ask line
+  s=$(sec82 "$1")
+  printf '%s' "$s" | grep -q '送信より前' || return 1
+  m=$(printf '%s\n' "$s" | grep -n 'commandmate mem mode --json' | head -1 | cut -d: -f1)
+  c=$(printf '%s\n' "$s" | grep -n '^commandmate \(send\|ask\) ' | head -1 | cut -d: -f1)
+  [ -n "$m" ] && [ -n "$c" ] && [ "$m" -lt "$c" ]
+}
+chk_async() { # mode on + reply wanted later: send --reply-to self --note, not ask --async
+  s=$(sec82 "$1")
+  printf '%s' "$s" | grep -q 'ask --async. を使わず' \
+    && printf '%s' "$s" | grep -q 'send --reply-to self --note. を使う'
+}
+
+for chk in chk_required chk_order chk_async; do
+  if $chk "$SKILL_MD"; then pass "SKILL.md 8.2: $chk"; else fail "SKILL.md 8.2: $chk" 'property missing'; fi
+done
+
+git -C "$SKILL_DIR" show b96c949:skills/cmate-delegate/SKILL.md > "$WORK/skill.prefix.md" 2>/dev/null || true
+if [ -s "$WORK/skill.prefix.md" ]; then
+  for chk in chk_required chk_order chk_async; do
+    mutations=$((mutations + 1))
+    if $chk "$WORK/skill.prefix.md"; then fail "pre-fix SKILL.md is red for $chk" 'still green'; else pass "pre-fix SKILL.md is red for $chk"; fi
+  done
+fi
+# order mutation: move the mem mode block after the first send line
+mutations=$((mutations + 1))
+awk '/^commandmate mem mode --json/ {held=$0; next} {print} /^commandmate send .*--note/ && held {print held; held=""}' \
+  "$SKILL_MD" > "$WORK/skill.order.md"
+if chk_order "$WORK/skill.order.md"; then fail 'mem mode read after sending is caught' 'still green'; else pass 'mem mode read after sending is caught'; fi
+# wording mutations on the current text
+mutations=$((mutations + 1))
+sed 's/\*\*必ず\*\*付ける/付けてよい（任意）/' "$SKILL_MD" > "$WORK/skill.opt.md"
+if chk_required "$WORK/skill.opt.md"; then fail 'an optional --note is caught' 'still green'; else pass 'an optional --note is caught'; fi
+mutations=$((mutations + 1))
+sed 's/ask --async. を使わず/ask --async. でもよい。/' "$SKILL_MD" > "$WORK/skill.async.md"
+if chk_async "$WORK/skill.async.md"; then fail 'choosing ask --async under mode on is caught' 'still green'; else pass 'choosing ask --async under mode on is caught'; fi
+
 # ---------------------------------------------------------------------------
 printf '\n%s passed, %s failed (%s mutations exercised)\n' "$passed" "$failed" "$mutations"
 [ "$failed" -eq 0 ] || exit 1
