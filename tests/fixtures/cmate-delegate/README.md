@@ -64,3 +64,6 @@ package is not allowed to reach.
    `commandmate`: `on` passes; `off` (exit 50), `derived`, an old CLI without
    `mem` and a broken server all say "do not use mem". A copy of the gate
    without the `"on"` test must let `off` through, which the suite catches.
+   The stub's `off` returns exit 0, as the real `mem mode` does. A `--note`
+   refused with 50 is resent once without `--note` (one delivery); a procedure
+   without the resend delivers nothing and is caught.

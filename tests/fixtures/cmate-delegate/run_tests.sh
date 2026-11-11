@@ -622,7 +622,7 @@ cat > "$WORK/membin/commandmate" <<'STUB'
 #!/usr/bin/env bash
 case "${MEM_STUB_MODE:-}" in
   on)  printf '{\n  "mode": "on"\n}\n'; exit 0 ;;
-  off) printf '{\n  "mode": "off"\n}\n'; exit 50 ;;
+  off) printf '{\n  "mode": "off"\n}\n'; exit 0 ;;  # real memMode: off is still exit 0 (service.ts:903)
   derived) printf '{\n  "mode": "derived"\n}\n'; exit 0 ;;
   old) printf "error: unknown command 'mem'\n" >&2; exit 1 ;;
   *)   exit 1 ;;
@@ -657,6 +657,66 @@ elif [ "$(gate_rc "$MUT_GATE" off)" -eq 0 ]; then
   pass 'a gate without the "on" test is caught (off now passes)'
 else
   fail 'a gate without the "on" test is caught' 'off still blocked after the mutation'
+fi
+
+# --- send --note refused with 50: strip --note and resend once (S2-note50) ---
+# The suite cannot run an Agent, so the procedure SKILL.md section 8.2 states is
+# written out once here (note_send) and driven against a send stub that refuses
+# the first --note with 50 WITHOUT delivering, as mem does. SKILL.md is also
+# checked for the sentence, so the driver cannot drift from the text unseen.
+mkdir -p "$WORK/notebin"
+cat > "$WORK/notebin/commandmate" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = send ] || exit 1
+printf '%s\n' "$*" >> "$NOTE_LOG"
+case "$*" in
+  *--note*)
+    # mem refused (50 etc.): nothing is delivered. Accepted (0): the body is delivered.
+    if [ "${NOTE_STUB_EXIT:-0}" -ne 0 ]; then exit "$NOTE_STUB_EXIT"; fi ;;
+esac
+printf 'DELIVERED\n' >> "$NOTE_DELIVERED"
+exit 0
+STUB
+chmod +x "$WORK/notebin/commandmate"
+
+note_send() { # $1 = 1 to keep the resend step, 0 for the mutation
+  rc=0
+  commandmate send wt-b "body" --instance codex-2 --reply-to self --note "why" || rc=$?
+  if [ "$rc" -eq 50 ] && [ "$1" = 1 ]; then
+    commandmate send wt-b "body" --instance codex-2 --reply-to self
+  fi
+}
+run_note() { # $1 keep-resend, $2 stub exit for --note
+  : > "$WORK/note.log"; : > "$WORK/note.delivered"
+  NOTE_LOG="$WORK/note.log" NOTE_DELIVERED="$WORK/note.delivered" NOTE_STUB_EXIT="$2" \
+    PATH="$WORK/notebin:$PATH" bash -c "$(declare -f note_send); note_send $1" >/dev/null 2>&1
+  note_calls=$(grep -c . "$WORK/note.log"); note_notes=$(grep -c -- '--note' "$WORK/note.log")
+  note_deliv=$(grep -c . "$WORK/note.delivered")
+}
+
+run_note 1 50
+if [ "$note_calls" -eq 2 ] && [ "$note_notes" -eq 1 ] && [ "$note_deliv" -eq 1 ]; then
+  pass 'a --note refused with 50 is resent once without --note: 1 delivery'
+else
+  fail 'a --note refused with 50 is resent once without --note' "calls=$note_calls notes=$note_notes delivered=$note_deliv"
+fi
+run_note 1 0
+if [ "$note_calls" -eq 1 ] && [ "$note_deliv" -eq 1 ] && [ "$note_notes" -eq 1 ]; then
+  pass 'a --note that is accepted delivers the body once and is never resent (control)'
+else
+  fail 'a --note that is accepted delivers the body once and is never resent' "calls=$note_calls delivered=$note_deliv"
+fi
+if grep -q -- '--note. を外して \*\*1 回だけ\*\*送り直す' "$SKILL_MD"; then
+  pass 'SKILL.md states: remove --note and resend exactly once'
+else
+  fail 'SKILL.md states: remove --note and resend exactly once' 'sentence missing'
+fi
+mutations=$((mutations + 1))
+run_note 0 50
+if [ "$note_deliv" -eq 0 ]; then
+  pass 'a procedure without the resend is caught (delivery 0)'
+else
+  fail 'a procedure without the resend is caught' "delivered=$note_deliv"
 fi
 
 # ---------------------------------------------------------------------------
