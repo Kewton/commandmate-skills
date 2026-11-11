@@ -606,6 +606,168 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 6. --note is gated on `mem mode` being "on" (CommandMate#4228, contract 2)
+# ---------------------------------------------------------------------------
+printf '\n== 6. send --note is used only when mem mode is on ==\n'
+
+GATE=$(grep -m1 "commandmate mem mode --json .*grep -q" "$SKILL_MD")
+if [ -n "$GATE" ] && grep -q -- '--note' "$SKILL_MD" && grep -q 'ask --async. には .--note. が無い' "$SKILL_MD"; then
+  pass 'SKILL.md carries the mode gate, --note and the ask --async exclusion'
+else
+  fail 'SKILL.md carries the mode gate, --note and the ask --async exclusion' "gate=[$GATE]"
+fi
+
+mkdir -p "$WORK/membin"
+cat > "$WORK/membin/commandmate" <<'STUB'
+#!/usr/bin/env bash
+case "${MEM_STUB_MODE:-}" in
+  on)  printf '{\n  "mode": "on"\n}\n'; exit 0 ;;
+  off) printf '{\n  "mode": "off"\n}\n'; exit 0 ;;  # real memMode: off is still exit 0 (service.ts:903)
+  derived) printf '{\n  "mode": "derived"\n}\n'; exit 0 ;;
+  old) printf "error: unknown command 'mem'\n" >&2; exit 1 ;;
+  *)   exit 1 ;;
+esac
+STUB
+chmod +x "$WORK/membin/commandmate"
+
+gate_rc() { # $1 = gate snippet, $2 = stub mode
+  MEM_STUB_MODE="$2" PATH="$WORK/membin:$PATH" bash -c "$1" >/dev/null 2>&1
+  echo $?
+}
+
+if [ "$(gate_rc "$GATE" on)" -eq 0 ]; then
+  pass 'mode on: the gate passes, --note may be used'
+else
+  fail 'mode on: the gate passes, --note may be used' 'gate did not exit 0'
+fi
+for m in off derived old broken; do
+  if [ "$(gate_rc "$GATE" "$m")" -ne 0 ]; then
+    pass "mode $m: the gate says do not use mem (normal path, no --note)"
+  else
+    fail "mode $m: the gate says do not use mem" 'gate exited 0'
+  fi
+done
+
+# Mutation: a gate that only checks for a "mode" key lets off/derived through.
+mutations=$((mutations + 1))
+MUT_GATE=${GATE//\"mode\": \"on\"/\"mode\"}
+if [ "$MUT_GATE" = "$GATE" ]; then
+  fail 'a gate without the "on" test is caught' 'the mutation changed nothing'
+elif [ "$(gate_rc "$MUT_GATE" off)" -eq 0 ]; then
+  pass 'a gate without the "on" test is caught (off now passes)'
+else
+  fail 'a gate without the "on" test is caught' 'off still blocked after the mutation'
+fi
+
+# --- send --note refused with 50: strip --note and resend once (S2-note50) ---
+# The suite cannot run an Agent, so the procedure SKILL.md section 8.2 states is
+# written out once here (note_send) and driven against a send stub that refuses
+# the first --note with 50 WITHOUT delivering, as mem does. SKILL.md is also
+# checked for the sentence, so the driver cannot drift from the text unseen.
+mkdir -p "$WORK/notebin"
+cat > "$WORK/notebin/commandmate" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = send ] || exit 1
+printf '%s\n' "$*" >> "$NOTE_LOG"
+case "$*" in
+  *--note*)
+    # mem refused (50 etc.): nothing is delivered. Accepted (0): the body is delivered.
+    if [ "${NOTE_STUB_EXIT:-0}" -ne 0 ]; then exit "$NOTE_STUB_EXIT"; fi ;;
+esac
+printf 'DELIVERED\n' >> "$NOTE_DELIVERED"
+exit 0
+STUB
+chmod +x "$WORK/notebin/commandmate"
+
+note_send() { # $1 = 1 to keep the resend step, 0 for the mutation
+  rc=0
+  commandmate send wt-b "body" --instance codex-2 --reply-to self --note "why" || rc=$?
+  if [ "$rc" -eq 50 ] && [ "$1" = 1 ]; then
+    commandmate send wt-b "body" --instance codex-2 --reply-to self
+  fi
+}
+run_note() { # $1 keep-resend, $2 stub exit for --note
+  : > "$WORK/note.log"; : > "$WORK/note.delivered"
+  NOTE_LOG="$WORK/note.log" NOTE_DELIVERED="$WORK/note.delivered" NOTE_STUB_EXIT="$2" \
+    PATH="$WORK/notebin:$PATH" bash -c "$(declare -f note_send); note_send $1" >/dev/null 2>&1
+  note_calls=$(grep -c . "$WORK/note.log"); note_notes=$(grep -c -- '--note' "$WORK/note.log")
+  note_deliv=$(grep -c . "$WORK/note.delivered")
+}
+
+run_note 1 50
+if [ "$note_calls" -eq 2 ] && [ "$note_notes" -eq 1 ] && [ "$note_deliv" -eq 1 ]; then
+  pass 'a --note refused with 50 is resent once without --note: 1 delivery'
+else
+  fail 'a --note refused with 50 is resent once without --note' "calls=$note_calls notes=$note_notes delivered=$note_deliv"
+fi
+run_note 1 0
+if [ "$note_calls" -eq 1 ] && [ "$note_deliv" -eq 1 ] && [ "$note_notes" -eq 1 ]; then
+  pass 'a --note that is accepted delivers the body once and is never resent (control)'
+else
+  fail 'a --note that is accepted delivers the body once and is never resent' "calls=$note_calls delivered=$note_deliv"
+fi
+if grep -q -- '--note. を外して \*\*1 回だけ\*\*送り直す' "$SKILL_MD"; then
+  pass 'SKILL.md states: remove --note and resend exactly once'
+else
+  fail 'SKILL.md states: remove --note and resend exactly once' 'sentence missing'
+fi
+mutations=$((mutations + 1))
+run_note 0 50
+if [ "$note_deliv" -eq 0 ]; then
+  pass 'a procedure without the resend is caught (delivery 0)'
+else
+  fail 'a procedure without the resend is caught' "delivered=$note_deliv"
+fi
+
+# --- mode on: --note is required, mem mode is read before sending, ask --async is not chosen (UAT 1) ---
+# A real Agent skipped --note under "(任意)" and read mem mode after sending. The
+# procedure is prose, so each property is a check over section 8.2 of a SKILL.md;
+# the same checks run on the pre-fix text and on single-sentence mutations of the
+# current text, and every one of those must fail.
+sec82() { sed -n '/^### 8\.2 /,/^### 8\.3 /p' "$1"; }
+chk_required() { # --note is mandatory when mode is on; no "optional" wording
+  s=$(sec82 "$1")
+  printf '%s' "$s" | grep -q -- '--note.*\*\*必ず\*\*付ける' \
+    && ! printf '%s' "$s" | grep -q '任意\|足してよい'
+}
+chk_order() { # the mem mode check is stated, and comes before the first send/ask line
+  s=$(sec82 "$1")
+  printf '%s' "$s" | grep -q '送信より前' || return 1
+  m=$(printf '%s\n' "$s" | grep -n 'commandmate mem mode --json' | head -1 | cut -d: -f1)
+  c=$(printf '%s\n' "$s" | grep -n '^commandmate \(send\|ask\) ' | head -1 | cut -d: -f1)
+  [ -n "$m" ] && [ -n "$c" ] && [ "$m" -lt "$c" ]
+}
+chk_async() { # mode on + reply wanted later: send --reply-to self --note, not ask --async
+  s=$(sec82 "$1")
+  printf '%s' "$s" | grep -q 'ask --async. を使わず' \
+    && printf '%s' "$s" | grep -q 'send --reply-to self --note. を使う'
+}
+
+for chk in chk_required chk_order chk_async; do
+  if $chk "$SKILL_MD"; then pass "SKILL.md 8.2: $chk"; else fail "SKILL.md 8.2: $chk" 'property missing'; fi
+done
+
+git -C "$SKILL_DIR" show b96c949:skills/cmate-delegate/SKILL.md > "$WORK/skill.prefix.md" 2>/dev/null || true
+if [ -s "$WORK/skill.prefix.md" ]; then
+  for chk in chk_required chk_order chk_async; do
+    mutations=$((mutations + 1))
+    if $chk "$WORK/skill.prefix.md"; then fail "pre-fix SKILL.md is red for $chk" 'still green'; else pass "pre-fix SKILL.md is red for $chk"; fi
+  done
+fi
+# order mutation: move the mem mode block after the first send line
+mutations=$((mutations + 1))
+awk '/^commandmate mem mode --json/ {held=$0; next} {print} /^commandmate send .*--note/ && held {print held; held=""}' \
+  "$SKILL_MD" > "$WORK/skill.order.md"
+if chk_order "$WORK/skill.order.md"; then fail 'mem mode read after sending is caught' 'still green'; else pass 'mem mode read after sending is caught'; fi
+# wording mutations on the current text
+mutations=$((mutations + 1))
+sed 's/\*\*必ず\*\*付ける/付けてよい（任意）/' "$SKILL_MD" > "$WORK/skill.opt.md"
+if chk_required "$WORK/skill.opt.md"; then fail 'an optional --note is caught' 'still green'; else pass 'an optional --note is caught'; fi
+mutations=$((mutations + 1))
+sed 's/ask --async. を使わず/ask --async. でもよい。/' "$SKILL_MD" > "$WORK/skill.async.md"
+if chk_async "$WORK/skill.async.md"; then fail 'choosing ask --async under mode on is caught' 'still green'; else pass 'choosing ask --async under mode on is caught'; fi
+
+# ---------------------------------------------------------------------------
 printf '\n%s passed, %s failed (%s mutations exercised)\n' "$passed" "$failed" "$mutations"
 [ "$failed" -eq 0 ] || exit 1
 exit 0

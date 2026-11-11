@@ -1,5 +1,24 @@
 # release notes
 
+## 0.3.0 — 委任の目的を mem に残す（CommandMate#4228 の契約 2）
+
+`send --reply-to` に `--note` を足す手順を第8.2節に加えた。手順の頭で
+`commandmate mem mode --json` の `"mode"` が `"on"` と確かめたときだけ付ける。`off`・`derived`・
+`mem` が無い古い CLI・exit 非 0 は「使わない」で、既存の `ask`／`send`／relay の経路は変わらない。
+`--note` を付けて 50 などが返ったら本文は送られていないので、外して 1 回だけ送り直す。
+`ask --async` では mem に書かない。`compatibility.commandmate` は `>=0.11.0 <1.0.0` のまま
+（mem は実行時に確かめる）。
+
+fixture の stub は、実物（`memMode`）に合わせて off でも exit 0・`"mode": "off"` を返す。判定は
+`grep -q '"mode": "on"'` なので、off は「使わない」のまま変わらない。`--note` が 50 で断られたときの
+再送（外して 1 回・本文の配送は 1）の対照を足した。
+受け付けられた `--note` は本文を配送する（呼び出し 1・配送 1・再送なし）対照も、stub が配送を記録する形に直した。
+
+UAT の差し戻し（mode on でも `--note` を省く Agent がいた）を直した。mode が `on` のときは
+`send --reply-to` に `--note` を**必ず**付ける（「任意」「足してよい」を外した）。`mem mode` の確認は送信より前。
+mode が `on` で返答を後で受け取るつもりの委任は `ask --async` ではなく `send --reply-to self --note` を使う
+（`ask --async` は `on` でないとき、または返答の記録が要らないときだけ）。
+
 ## 0.2.0 — 文脈の上限で止まった依頼を、完了ではなく失敗として返す（CommandMate#3011）
 
 **何が起きたか。** 管理（Command Code）のセッションを長く使い続けたら、依頼が
