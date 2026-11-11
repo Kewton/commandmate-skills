@@ -13,6 +13,10 @@
   （読みだけ。削除可否の判断に使わない）を、§5 に「mem の項目は消さない」を足した。
 - `off`・旧 CLI（`mem` が無い）・server 停止・exit 非 0 は「使わない」で正常。削除・sync・runner・
   result schema は変えていない。この skill は mem に書かない。
+- 判定と件数は手順の頭で 1 回ではなく、`decision` が `delete`／`skip` の候補の worktree ごとに行う
+  （`mem mode --worktree <id>`・`mem list --worktree <id>`）。on の worktree だけに
+  `mem: open N 件（<branch>）` を出し、off・derived の worktree には list を呼ばず、除外の候補には何も呼ばない
+  （H #4228 上流 v5.1 U-5、PM-12 (b)）。
 - `compatibility.commandmate` は `>=0.11.0 <1.0.0` のまま（mem の有無は実行時に確かめる）。
 
 ## 0.2.0 — BEHIND を経た squash merge と、判定を実行する runner（CommandMate#3010）

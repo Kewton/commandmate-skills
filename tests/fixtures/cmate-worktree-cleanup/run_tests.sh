@@ -359,53 +359,118 @@ grep -q '^uncommitted$' "$WT/Proj-issue-104/e.txt" && pass "104's uncommitted ed
 [ -d "$WT/Proj-develop" ] && [ -f "$PRIMARY/README.md" ] && pass "primary and develop worktrees intact" || fail "primary and develop worktrees intact" "missing"
 
 # ---------------------------------------------------------------------------
-# 6b. mem (CommandMate#4228, contract 2): SKILL.md gates mem on `mode == on`;
-#     off / old CLI / non-zero exit mean "do not use mem", and nothing in this
-#     skill ever writes to mem. A fake `commandmate` stands in for the CLI.
+# 6b. mem (CommandMate#4228, contract 2; H #4228 upstream v5.1 U-5, PM-12 (b)):
+#     SKILL.md decides per target worktree whether mem is usable (mode == on),
+#     and prints `mem: open N 件（<branch>）` only for those. Candidates with
+#     decision delete / skip are asked; excluded worktrees are never asked.
+#     off / derived / old CLI / non-zero exit mean "do not use mem" (and mode
+#     is the only call made for them). The skill never writes to mem. A fake
+#     `commandmate` stands in for the CLI; the per-target block is extracted
+#     from SKILL.md and executed as written.
 # ---------------------------------------------------------------------------
-GATE=$(grep -F 'commandmate mem mode --json' "$SKILL_DIR/SKILL.md" | head -1)
-if [ -n "$GATE" ]; then pass "SKILL.md carries the mem mode gate"; else fail "SKILL.md carries the mem mode gate" "no 'commandmate mem mode --json' line"; fi
+BLOCK="$WORK/mem-block.sh"
+sed -n '/# mem-per-target:begin/,/# mem-per-target:end/p' "$SKILL_DIR/SKILL.md" > "$BLOCK"
+if grep -q 'mem mode --worktree' "$BLOCK"; then pass "SKILL.md carries the per-target mem block"; else fail "SKILL.md carries the per-target mem block" "marker block missing or has no --worktree"; fi
 
 MEMBIN="$WORK/membin"
 mkdir -p "$MEMBIN"
 cat > "$MEMBIN/commandmate" <<'STUB'
 #!/usr/bin/env bash
+# MEM_MODES="<worktree>=<on|off|derived|unknown|fail>,..." ; mem list returns 3 items.
 printf '%s\n' "$*" >> "$MEM_STUB_LOG"
+wt=""; prev=""
+for a in "$@"; do [ "$prev" = --worktree ] && wt=$a; prev=$a; done
+mode=fail
+IFS=, read -ra kv <<< "${MEM_MODES:-}"
+for e in "${kv[@]}"; do [ "${e%%=*}" = "$wt" ] && mode=${e#*=}; done
 if [ "${1:-}" = mem ] && [ "${2:-}" = mode ]; then
-  case "$MEM_STUB_MODE" in
-    on)      printf '{\n  "mode": "on"\n}\n'; exit 0 ;;
-    off)     printf '{\n  "mode": "off"\n}\n'; exit 0 ;;
+  case "$mode" in
+    on|off|derived) printf '{\n  "mode": "%s"\n}\n' "$mode"; exit 0 ;;
     unknown) echo "error: unknown command 'mem'" >&2; exit 1 ;;
-    fail)    exit 1 ;;
+    *) exit 1 ;;
   esac
 fi
+if [ "${1:-}" = mem ] && [ "${2:-}" = list ]; then echo '{"items":[{},{},{}],"frozen":false}'; exit 0; fi
 if [ "${1:-}" = ls ]; then echo '{"worktrees":[]}'; exit 0; fi
 exit 1
 STUB
 chmod +x "$MEMBIN/commandmate"
 export MEM_STUB_LOG="$WORK/mem-stub.log"
 
-mem_gate() { # <mode> <gate-line> -> exit status of the gate
-  MEM_STUB_MODE=$1 PATH="$MEMBIN:$PATH" bash -c "$2" >/dev/null 2>&1
-}
-if mem_gate on "$GATE"; then pass "mem gate: mode on -> usable"; else fail "mem gate: mode on -> usable" "gate returned non-zero"; fi
-for m in off unknown fail; do
-  if mem_gate "$m" "$GATE"; then fail "mem gate: $m -> not used" "gate returned 0"; else pass "mem gate: $m -> not used"; fi
-done
-# Mutation: a gate that stops checking for `on` must be noticed.
-MGATE=${GATE//\"mode\": \"on\"/\"mode\"}
-if [ "$MGATE" != "$GATE" ] && mem_gate off "$MGATE"; then
-  pass "mutation killed: a gate that ignores the value lets mode off through (the off case above would fail)"
+# CANDIDATES = delete / skip candidates of the real plan ("worktree_ref branch"), as SKILL.md says.
+CAND=$(node -e '
+  const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  for (const c of d.candidates) if (c.decision === "delete" || c.decision === "skip") console.log(c.worktree_ref + " " + c.branch);
+' "$PLAN")
+EXCL=$(node -e '
+  const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  console.log((d.excluded || []).map((e) => e.worktree_ref).join(" "));
+' "$PLAN")
+if printf '%s\n' "$CAND" | grep -q 'Proj-issue-100 ' && printf '%s\n' "$CAND" | grep -q 'Proj-issue-103 ' && [ -n "$EXCL" ]; then
+  pass "pre: plan has delete candidates, skip candidates and excluded worktrees"
 else
-  fail "mutation killed (mem gate)" "mutated gate was not distinguishable"
+  fail "pre: plan has delete candidates, skip candidates and excluded worktrees" "CAND=$CAND EXCL=$EXCL"
 fi
 
-# The runner never touches mem, whatever the mode: same plan, no `mem` call.
+mem_run() { # <modes> <block-file> -> stdout of the block; calls land in MEM_STUB_LOG
+  : > "$MEM_STUB_LOG"
+  MEM_MODES=$1 CANDIDATES=$CAND PATH="$MEMBIN:$PATH" bash "$2" 2>/dev/null
+}
+# 100 delete/on, 101 delete/off, 102 delete/derived, 103 skip/on, 104 skip/unknown (old CLI), 105 skip/fail.
+# Every excluded worktree is on too: it must still not be asked.
+EXMODES=""; for e in $EXCL; do EXMODES="$EXMODES,$e=on"; done
+MIX="Proj-issue-100=on,Proj-issue-101=off,Proj-issue-102=derived,Proj-issue-103=on,Proj-issue-104=unknown,Proj-issue-105=fail$EXMODES"
+
+OUT=$(mem_run "$MIX" "$BLOCK")
+n_lines=$(printf '%s\n' "$OUT" | grep -c '^mem: open ')
+if [ "$n_lines" = 2 ] && printf '%s\n' "$OUT" | grep -qx 'mem: open 3 件（feature/100-direct）' && printf '%s\n' "$OUT" | grep -qx 'mem: open 3 件（feature/103-mismatch）'; then
+  pass "mix: only the on targets (delete 100 and skip 103) get 'mem: open N 件（<branch>）'"
+else
+  fail "mix: only the on targets get a count line" "out=$OUT"
+fi
+bad=""
+for r in 101 102 104 105; do
+  grep -q "mem list --worktree Proj-issue-$r" "$MEM_STUB_LOG" && bad="$bad $r"
+  grep -q "mem mode --worktree Proj-issue-$r" "$MEM_STUB_LOG" || bad="$bad mode-$r"
+done
+[ -z "$bad" ] && pass "mix: off / derived / old-CLI / failing targets get mode only, never list" || fail "mix: off targets are asked mode only" "$bad"
+grep -q "mem list --worktree Proj-issue-100" "$MEM_STUB_LOG" && grep -q "mem list --worktree Proj-issue-103" "$MEM_STUB_LOG" \
+  && pass "mix: list is called for the on delete and the on skip target" || fail "mix: list for on targets" "$(cat "$MEM_STUB_LOG")"
+ex_called=""; for e in $EXCL; do grep -q -- "--worktree $e " "$MEM_STUB_LOG" && ex_called="$ex_called $e"; done
+[ -z "$ex_called" ] && pass "excluded worktrees are never asked (no mode, no list)" || fail "excluded worktrees are never asked" "$ex_called"
+if grep -qE '^mem (add|update|close|purge|promote)' "$MEM_STUB_LOG"; then fail "no mem write is ever called" "$(cat "$MEM_STUB_LOG")"; else pass "no mem write is ever called"; fi
+
+# All off: no list, no line (SK-clean-off).
+ALLOFF=$(printf '%s\n' "$CAND" | awk '{printf "%s=off,", $1}')
+OUT=$(mem_run "$ALLOFF" "$BLOCK")
+if [ -z "$OUT" ] && ! grep -q 'mem list' "$MEM_STUB_LOG" && grep -q 'mem mode' "$MEM_STUB_LOG"; then
+  pass "all targets off: mode is asked, list is not, no count line"
+else
+  fail "all targets off" "out=$OUT"
+fi
+
+# Mutations: each must make the mix expectations fail.
+mutant_check() { # <label> <sed-expr>
+  local m="$WORK/mem-block-mut.sh" out
+  sed "$2" "$BLOCK" > "$m"
+  if cmp -s "$m" "$BLOCK"; then fail "mutation applied: $1" "pattern not found"; return; fi
+  out=$(mem_run "$MIX" "$m")
+  if [ "$(printf '%s\n' "$out" | grep -c '^mem: open ')" = 2 ] && ! grep -q 'mem list --worktree Proj-issue-10[1245]' "$MEM_STUB_LOG"; then
+    fail "mutation killed: $1" "the suite did not notice"
+  else
+    pass "mutation killed: $1"
+  fi
+}
+mutant_check "gate ignores the mode value (off targets get a list and a line)" "s/grep -q '\"mode\": \"on\"'/grep -q 'mode'/"
+mutant_check "gate is decided once for the first target, not per target" "s/mem mode --worktree \"\${WT_ID}\"/mem mode --worktree Proj-issue-100/"
+
+# The runner never touches mem, and its plan (candidates + skill.version only) is the same for any mode.
 : > "$MEM_STUB_LOG"
 for m in on off; do
-  (cd "$PRIMARY" && MEM_STUB_MODE=$m PATH="$MEMBIN:$PATH" node "$RUNNER" --all-eligible --sync --integration develop --now "$NOW") > "$WORK/mem-$m.json" 2> "$WORK/mem-$m.err"
+  (cd "$PRIMARY" && MEM_MODES="Proj-issue-100=$m" PATH="$MEMBIN:$PATH" node "$RUNNER" --all-eligible --sync --integration develop --now "$NOW") > "$WORK/mem-$m.json" 2> "$WORK/mem-$m.err"
 done
-if cmp -s "$WORK/mem-on.json" "$WORK/mem-off.json"; then pass "runner output is byte-identical for mem mode on and off"; else fail "runner output is byte-identical for mem mode on and off" "differs"; fi
+pick() { node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); console.log(JSON.stringify({c:d.candidates,v:d.skill&&d.skill.version}))' "$1"; }
+if [ "$(pick "$WORK/mem-on.json")" = "$(pick "$WORK/mem-off.json")" ]; then pass "runner plan (candidates, skill.version) is the same for mem mode on and off"; else fail "runner plan is the same for mem mode on and off" "differs"; fi
 if grep -qE '^mem( |$)' "$MEM_STUB_LOG"; then fail "runner never calls commandmate mem" "$(grep -E '^mem' "$MEM_STUB_LOG" | head -3)"; else pass "runner never calls commandmate mem"; fi
 # SKILL.md only reads mem: no write subcommand anywhere in it.
 if grep -nE 'commandmate mem (add|update|close|purge|promote)' "$SKILL_DIR/SKILL.md" >/dev/null; then

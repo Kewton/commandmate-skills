@@ -149,16 +149,28 @@ clean な候補ごとに proof を求める。型は `direct` / `merged_equivale
 2. `mode: apply` に進むには、利用者の **明示確認** が要る。承認された worktree を
    `confirmed_targets` として受け取る。確認できない（非対話含む）場合は `dry_run` に留める。
    **確認なしに削除しない。**
-3. mem（CommandMate#4220）を使えるときだけ、plan に対象ブランチの open の項目の件数を載せてよい
-   （読みだけ）。使えるかは、この手順の頭で 1 回だけ次で判定し、結果を使い回す。exit 0 かつ
-   mode が `on` のときだけ「使える」。`off`・`derived`・`mem` を持たない旧 CLI・server 停止・
-   未登録・曖昧・exit 非 0 は、すべて「使わない」で正常であり、従来どおりに進める。
+3. mem（CommandMate#4220）は、**対象の worktree ごと**に使えるか判定する（手順の頭で 1 回ではない。
+   on と off が混ざることがある）。plan の `decision` が `delete` または `skip` の候補だけが対象で、
+   `excluded`（current / integration / not_in_scope）の worktree には mem を呼ばない。
+   その worktree の mode が `on`（exit 0 かつ `"mode": "on"`）のときだけ、open の項目の件数を
+   `mem: open N 件（<branch>）` の 1 行で plan のその候補に載せる（読みだけ）。`off`・`derived`・
+   `mem` を持たない旧 CLI・server 停止・未登録・曖昧・exit 非 0 の worktree は「使わない」で正常であり、
+   mode を呼ぶだけで list は呼ばず、件数の行を出さず、従来どおりに進める。実行している worktree の
+   mode は件数に効かない。
 
    ```bash
-   commandmate mem mode --json 2>/dev/null | grep -q '"mode": "on"'
+   # mem-per-target:begin
+   # CANDIDATES は decision が delete / skip の候補の「worktree id と branch」を 1 行ずつ並べたもの
+   while read -r WT_ID BRANCH; do
+     if commandmate mem mode --worktree "${WT_ID}" --json 2>/dev/null | grep -q '"mode": "on"'; then
+       N=$(commandmate mem list --worktree "${WT_ID}" --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).items.length)}catch(e){}})')
+       [ -n "${N}" ] && echo "mem: open ${N} 件（${BRANCH}）"
+     fi
+   done <<< "${CANDIDATES}"
+   # mem-per-target:end
    ```
 
-   件数は `commandmate mem list --worktree <id> --json` の `items` の数である。**件数は削除可否の判断に使わない。**
+   **件数は削除可否の判断に使わない。** 件数の行は Agent の文であり、runner の出力には入らない。
 
 ### Step 6 — apply（削除）
 
@@ -199,7 +211,7 @@ port 決め打ちの curl sync を使わないことは
 `worktree:<id>` の条件は、次の読みで閉じる。残った項目は
 `commandmate mem list --repository <id> --branch <name>` で読める。消すかどうか
 （`mem purge`）は人が決める（セッションの中からの `purge` は exit 55 で拒否される）。
-mem を使えるとき（Step 5 の判定）は、件数を `next_actions` に 1 行載せるだけにする。
+mem を使える worktree（Step 5 の対象ごとの判定）では、件数を `next_actions` に 1 行載せるだけにする。
 この skill は mem に書かない。
 
 ## 6. 診断のみ（自動停止・削除しない）
