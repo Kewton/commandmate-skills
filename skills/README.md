@@ -17,6 +17,7 @@ skills/<skill-id>/
 |---|---|---|
 | `cmate-acceptance-test` | moderate | 受入テストの標準手順 |
 | `cmate-delegate` | moderate | 隣のセッションへ一言頼んで返答を回収する手順（bash ラッパ同梱） |
+| `cmate-handoff` | moderate | 次のセッションが読み直せないもの（意図・次の一手・人への質問・決定・罠）を mem に残し、再開で brief から取り戻す手順 |
 | `cmate-issue-authoring` | moderate | Feature 記述から Issue 群を起案し、承認後に一括登録する手順 |
 | `cmate-issue-refinement` | moderate | Issue 精緻化の標準手順 |
 | `cmate-orchestrate` | high | 複数 Issue の計画・dispatch・PR/merge・UAT（Node runner 同梱） |
@@ -31,8 +32,9 @@ skills/<skill-id>/
 | `cmate-worktree-cleanup` | high | worktree の安全な後始末 |
 | `cmate-worktree-setup` | moderate | 専用 worktree の作成と baseline 取得 |
 
-**上の 15 package すべてが Catalog に publish 済み**であり、`commandmate skill install`
+**上の 16 package のうち `cmate-handoff` を除く 15 package が Catalog に publish 済み**であり、`commandmate skill install`
 で入る（[CommandMate#1592](https://github.com/Kewton/CommandMate/issues/1592) で一括公開したものと、その後に足したもの）。
+`cmate-handoff` は mem を含む CommandMate のリリースの後に publish する（それまでは未 publish）。
 
 この表は目次であって正本ではない。**version は載せない**（package ごとに上がるので、ここに書くと必ずずれる）。
 version と risk は各 `commandmate.skill.yaml` の `version` / `declared_risk` を読むこと。Agent 対応状況は
