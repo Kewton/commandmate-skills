@@ -2,6 +2,26 @@
 
 ここには「何が起きたか → だからこう変えた」を残す。
 
+## 0.3.0 — mem の件数を plan に載せる（CommandMate#4228 の契約 2）
+
+**何が起きたか。** mem（CommandMate#4220）はブランチ単位に項目を残す。worktree を消しても項目は
+残るが、利用者はそれを知る手がかりを cleanup の plan から得られなかった。
+
+**だからこう変えた。**
+
+- `SKILL.md` Step 5 に、mem の mode が `on` のときだけ open の項目の件数を plan に載せる手順
+  （読みだけ。削除可否の判断に使わない）を、§5 に「mem の項目は消さない」を足した。
+- `off`・旧 CLI（`mem` が無い）・server 停止・exit 非 0 は「使わない」で正常。削除・sync・runner・
+  result schema は変えていない。この skill は mem に書かない。
+- 判定と件数は手順の頭で 1 回ではなく、`decision` が `delete`／`skip` の候補の worktree ごとに行う
+  （`mem mode --worktree <id>`・`mem list --worktree <id>`）。on の worktree だけに
+  `mem: open N 件（<branch>）` を出し、off・derived の worktree には list を呼ばず、除外の候補には何も呼ばない
+  （H #4228 上流 v5.1 U-5、PM-12 (b)）。
+- 件数の行は人への提示にだけ添える（plan 文書・result・`next_actions` には入れない。schema は閉じている）。
+  plan の `worktree_ref` と mem の worktree id は `commandmate ls --json` の `path` の basename で結ぶ
+  （P2-3・P3-3）。
+- `compatibility.commandmate` は `>=0.11.0 <1.0.0` のまま（mem の有無は実行時に確かめる）。
+
 ## 0.2.0 — BEHIND を経た squash merge と、判定を実行する runner（CommandMate#3010）
 
 **何が起きたか。** 保護された `main` では 2 本目以降の PR が BEHIND になり、ワーカーが

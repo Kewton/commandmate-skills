@@ -2545,6 +2545,14 @@ fixture は `sent: []`（1件も送っていない）と `verify` の呼び先�
 
 ## パッケージ
 
+### 0.42.0 — wave の完了と run の停止で mem を見直す手順を足した（CommandMate#4228 の契約 2）
+
+- **CommandMate#4228** —— mem（CommandMate#4220）の mode が `on` のときだけ、wave の完了（merge-report の後、次の wave の
+  dispatch の前）と run の停止で `cmate-handoff` の「区切りでの見直し」を行う手順を `runner-operations.md` 第17節に置いた。
+  runner（`scripts/*.mjs`）は変えておらず mem を呼ばないので、report は byte 単位で従来どおり。`off` などは正常として何もしない。
+- あわせて SKILL.md の上限（60,000 バイトまで 18 バイトだった）に余裕を作るため、第3.3節「合流後の統合ブランチ検証」の本文を
+  `references/integration-verify.md` へ文言を変えずに移送した。
+
 ### 0.41.0 — stop pattern を dispatch から渡せるようにし、Auto-Yes が有効な instance への off の dispatch を止めた（#309）
 
 - **#309** —— `--auto-yes-stop-pattern <regex>` を足し、auto-yes を arm する `send` に trim 後の値を `--stop-pattern` として

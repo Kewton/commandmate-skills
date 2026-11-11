@@ -149,6 +149,29 @@ clean な候補ごとに proof を求める。型は `direct` / `merged_equivale
 2. `mode: apply` に進むには、利用者の **明示確認** が要る。承認された worktree を
    `confirmed_targets` として受け取る。確認できない（非対話含む）場合は `dry_run` に留める。
    **確認なしに削除しない。**
+3. mem（CommandMate#4220）は、**対象の worktree ごと**に使えるか判定する（手順の頭で 1 回ではない。
+   on と off が混ざることがある）。plan の `decision` が `delete` または `skip` の候補だけが対象で、
+   `excluded`（current / integration / not_in_scope）の worktree には mem を呼ばない。
+   その worktree の mode が `on`（exit 0 かつ `"mode": "on"`）のときだけ、open の項目の件数を
+   `mem: open N 件（<branch>）` の 1 行を、人への提示（この Step の 1）でその候補の行に添える（読みだけ。plan 文書・result・`next_actions` には入れない）。`off`・`derived`・
+   `mem` を持たない旧 CLI・server 停止・未登録・曖昧・exit 非 0 の worktree は「使わない」で正常であり、
+   mode を呼ぶだけで list は呼ばず、件数の行を出さず、従来どおりに進める。実行している worktree の
+   mode は件数に効かない。plan の `worktree_ref`（dir の basename）と mem の worktree id は、`commandmate ls --json` の
+   `path` の basename が `worktree_ref` に一致する要素の `id` で結ぶ（一致が 0 件か複数なら「未登録・曖昧」で使わない。id を推測しない）。
+
+   ```bash
+   # mem-per-target:begin
+   # CANDIDATES は decision が delete / skip の候補の「worktree id と branch」を 1 行ずつ並べたもの
+   while read -r WT_ID BRANCH; do
+     if commandmate mem mode --worktree "${WT_ID}" --json 2>/dev/null | grep -q '"mode": "on"'; then
+       N=$(commandmate mem list --worktree "${WT_ID}" --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).items.length)}catch(e){}})')
+       [ -n "${N}" ] && echo "mem: open ${N} 件（${BRANCH}）"
+     fi
+   done <<< "${CANDIDATES}"
+   # mem-per-target:end
+   ```
+
+   **件数は削除可否の判断に使わない。** 件数の行は人への提示にだけ添える Agent の文であり、runner の出力にも、plan・result の schema（`candidate`・`next_action`・`reason`）にも入らない。
 
 ### Step 6 — apply（削除）
 
@@ -183,6 +206,14 @@ server へ接続するため、server 未起動または sync を持たない旧
 `worktree_ids` を `commandmate ls --json` から削除前に控えること、推測 id を書かないこと、
 port 決め打ちの curl sync を使わないことは
 [`references/safety.md`](./references/safety.md) §5 が正本である。
+
+**mem の項目は消さない。** mem はブランチ単位に残り、worktree を消しても項目は残る
+（worktree の削除で閉じるのは各セッションの `now` だけ）。消した worktree を指す
+`worktree:<id>` の条件は、次の読みで閉じる。残った項目は
+`commandmate mem list --repository <id> --branch <name>` で読める。消すかどうか
+（`mem purge`）は人が決める（セッションの中からの `purge` は exit 55 で拒否される）。
+件数の行は Step 5 の人への提示に添えるだけで、`next_actions` や result には載せない。
+この skill は mem に書かない。
 
 ## 6. 診断のみ（自動停止・削除しない）
 
