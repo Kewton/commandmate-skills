@@ -98,8 +98,8 @@ risk_rationale: >-
   のときだけ。install 時に実行されるものは無い。
 files:
   - path: SKILL.md
-    sha256: 2e0a4d7d82dbcbbc4d956fcc5d4dc6ab2661aa4dc131e7427652dbc945e3baf2
-    size: 17777
+    sha256: 970188c00fd88c832645e2a0859b71fd2f85eab7e7dffbe9baec5a2a782a66b9
+    size: 18253
     kind: skill_md
     executable: false
     script: false
@@ -122,8 +122,8 @@ files:
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 82ea88554aa5509c9a339ae1d25a8c0dc15232963174a1b8d6d52b336cb980fa
-    size: 4037
+    sha256: c9426ed9eb082b4fbe913724439c642f30164c5d8ea511a394a999816a2f5864
+    size: 4316
     kind: instruction
     executable: false
     script: false

@@ -472,6 +472,34 @@ done
 pick() { node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); console.log(JSON.stringify({c:d.candidates,v:d.skill&&d.skill.version}))' "$1"; }
 if [ "$(pick "$WORK/mem-on.json")" = "$(pick "$WORK/mem-off.json")" ]; then pass "runner plan (candidates, skill.version) is the same for mem mode on and off"; else fail "runner plan is the same for mem mode on and off" "differs"; fi
 if grep -qE '^mem( |$)' "$MEM_STUB_LOG"; then fail "runner never calls commandmate mem" "$(grep -E '^mem' "$MEM_STUB_LOG" | head -3)"; else pass "runner never calls commandmate mem"; fi
+# P2-3 (H #4228 impl-2): the count line is for the human-facing presentation ONLY. It is in neither the
+# plan nor the result (both schemas are closed; next_action.reason has no mem value), and SKILL.md has
+# no instruction that puts it into next_actions / a candidate.
+leaks_mem_line() { grep -q 'mem: open' "$1"; }
+if ! leaks_mem_line "$WORK/mem-on.json" && ! leaks_mem_line "$PLAN" && ! leaks_mem_line "$RESULT"; then
+  pass "count line is in neither the plan nor the result (mem on)"
+else
+  fail "count line is in neither the plan nor the result" "found in plan/result"
+fi
+DOCTORED="$WORK/doctored-result.json"
+node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); (d.next_actions=d.next_actions||[]).push({reason:"mem",detail:"mem: open 3 件（feature/100-direct）"}); console.log(JSON.stringify(d))' "$RESULT" > "$DOCTORED"
+if leaks_mem_line "$DOCTORED"; then pass "mutation killed: a count line pushed into next_actions is detected"; else fail "mutation killed: count line in next_actions" "the check did not notice"; fi
+if grep -qE '"mem"' "$SKILL_DIR/schemas/cleanup-result.v1.json" "$SKILL_DIR/schemas/cleanup-plan.v1.json"; then
+  fail "schemas carry no mem value" "$(grep -nE '"mem"' "$SKILL_DIR"/schemas/*.json | head -3)"
+else
+  pass "schemas carry no mem value (candidate / next_action stay closed)"
+fi
+if grep -n '件数' "$SKILL_DIR/SKILL.md" | grep -E 'next_actions|plan のその候補|candidate' | grep -vE '入れない|載せない|にも入らない' >/dev/null; then
+  fail "SKILL.md never tells to put the count into next_actions / the plan" "$(grep -n '件数' "$SKILL_DIR/SKILL.md" | grep -E 'next_actions|plan のその候補|candidate')"
+else
+  pass "SKILL.md never tells to put the count into next_actions / the plan"
+fi
+# P3-3: the worktree_ref -> mem worktree id link is written down.
+if grep -q 'worktree_ref' "$SKILL_DIR/SKILL.md" && grep -qE 'ls --json.*path|`path` の basename' "$SKILL_DIR/SKILL.md"; then
+  pass "SKILL.md links worktree_ref to the mem worktree id via ls --json path"
+else
+  fail "SKILL.md links worktree_ref to the mem worktree id" "sentence missing"
+fi
 # SKILL.md only reads mem: no write subcommand anywhere in it.
 if grep -nE 'commandmate mem (add|update|close|purge|promote)' "$SKILL_DIR/SKILL.md" >/dev/null; then
   fail "SKILL.md never writes to mem" "$(grep -nE 'commandmate mem (add|update|close|purge|promote)' "$SKILL_DIR/SKILL.md")"

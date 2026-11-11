@@ -153,10 +153,11 @@ clean な候補ごとに proof を求める。型は `direct` / `merged_equivale
    on と off が混ざることがある）。plan の `decision` が `delete` または `skip` の候補だけが対象で、
    `excluded`（current / integration / not_in_scope）の worktree には mem を呼ばない。
    その worktree の mode が `on`（exit 0 かつ `"mode": "on"`）のときだけ、open の項目の件数を
-   `mem: open N 件（<branch>）` の 1 行で plan のその候補に載せる（読みだけ）。`off`・`derived`・
+   `mem: open N 件（<branch>）` の 1 行を、人への提示（この Step の 1）でその候補の行に添える（読みだけ。plan 文書・result・`next_actions` には入れない）。`off`・`derived`・
    `mem` を持たない旧 CLI・server 停止・未登録・曖昧・exit 非 0 の worktree は「使わない」で正常であり、
    mode を呼ぶだけで list は呼ばず、件数の行を出さず、従来どおりに進める。実行している worktree の
-   mode は件数に効かない。
+   mode は件数に効かない。plan の `worktree_ref`（dir の basename）と mem の worktree id は、`commandmate ls --json` の
+   `path` の basename が `worktree_ref` に一致する要素の `id` で結ぶ（一致が 0 件か複数なら「未登録・曖昧」で使わない。id を推測しない）。
 
    ```bash
    # mem-per-target:begin
@@ -170,7 +171,7 @@ clean な候補ごとに proof を求める。型は `direct` / `merged_equivale
    # mem-per-target:end
    ```
 
-   **件数は削除可否の判断に使わない。** 件数の行は Agent の文であり、runner の出力には入らない。
+   **件数は削除可否の判断に使わない。** 件数の行は人への提示にだけ添える Agent の文であり、runner の出力にも、plan・result の schema（`candidate`・`next_action`・`reason`）にも入らない。
 
 ### Step 6 — apply（削除）
 
@@ -211,7 +212,7 @@ port 決め打ちの curl sync を使わないことは
 `worktree:<id>` の条件は、次の読みで閉じる。残った項目は
 `commandmate mem list --repository <id> --branch <name>` で読める。消すかどうか
 （`mem purge`）は人が決める（セッションの中からの `purge` は exit 55 で拒否される）。
-mem を使える worktree（Step 5 の対象ごとの判定）では、件数を `next_actions` に 1 行載せるだけにする。
+件数の行は Step 5 の人への提示に添えるだけで、`next_actions` や result には載せない。
 この skill は mem に書かない。
 
 ## 6. 診断のみ（自動停止・削除しない）

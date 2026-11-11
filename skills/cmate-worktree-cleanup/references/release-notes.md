@@ -17,6 +17,9 @@
   （`mem mode --worktree <id>`・`mem list --worktree <id>`）。on の worktree だけに
   `mem: open N 件（<branch>）` を出し、off・derived の worktree には list を呼ばず、除外の候補には何も呼ばない
   （H #4228 上流 v5.1 U-5、PM-12 (b)）。
+- 件数の行は人への提示にだけ添える（plan 文書・result・`next_actions` には入れない。schema は閉じている）。
+  plan の `worktree_ref` と mem の worktree id は `commandmate ls --json` の `path` の basename で結ぶ
+  （P2-3・P3-3）。
 - `compatibility.commandmate` は `>=0.11.0 <1.0.0` のまま（mem の有無は実行時に確かめる）。
 
 ## 0.2.0 — BEHIND を経た squash merge と、判定を実行する runner（CommandMate#3010）
