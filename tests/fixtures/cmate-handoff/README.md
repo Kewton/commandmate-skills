@@ -39,8 +39,15 @@ The package ships no script. Its runnable part is the fenced `bash` blocks in
    `if true` each turn a case red.
 6. **What the package must not hold.** Steps that depend on the screen still
    being designed (`handoff propose` / `handoff done`, the popup feature), a new
-   kind, `mem purge` / promote / approve in a runnable block, `$<digit>` /
+   kind, `mem purge` / promote / approve (and `handoff approve|cancel|end`) in a runnable block, `$<digit>` /
    `$ARGUMENTS`, plain-http URLs. Each is planted in a copy and must be caught.
+7. **The hand-off request before ending (section 11).** The blocks of section
+   11 run as written: mode on makes `handoff propose` (add / update / close)
+   calls and ends with `handoff done`, and makes no `mem add|update|close|now`
+   call; mode off, derived and no `mem` call nothing but `mem mode --json`.
+   Mutations that must turn it red: the procedure removed, a proposal replaced
+   by a direct `mem add`, a guard dropped, propose chained to done, done before
+   the proposals.
 
 Wired in `.commandmate/verify.yaml` (`handoff-fixtures`) and in
 `.github/workflows/validate.yml` (`runner-suites`), in the same change that

@@ -32,11 +32,19 @@
 #     the condition dropped, and one guard replaced by `if true`. Each must turn
 #     a case red.
 #  6. **What the package must not hold.** Nothing that depends on the screen
-#     still being designed (`handoff propose` / `handoff done`, the popup
-#     feature), no new kind for a question, no promote/approve/purge call in a
+#     still being designed (the popup feature, "after G"), no new kind for a question, no promote/approve/purge call in a
 #     runnable block, no `$<digit>` / `$ARGUMENTS` (Claude Code rewrites them
 #     with the slash arguments), no plain-http URL. Each rule is exercised by
 #     planting the forbidden text in a copy.
+#
+#  7. **The hand-off request before ending (section 11).** A request from the
+#     screen's "end" button is answered with `handoff propose` (add / update /
+#     close) and `handoff done`, never with `mem add` / `update` / `close`, and
+#     only when the gate says on. The blocks of section 11 are run as written,
+#     with the request id filled in: mode on proposes and returns (done last),
+#     confirms nothing directly; mode off and no `mem` call nothing but
+#     `mem mode --json`. Mutations: the procedure removed, a proposal replaced
+#     by a direct `mem add`, a guard dropped, propose chained to done.
 #
 # Requires bash (3.2 is enough) and the POSIX tools. No network, no CommandMate
 # server: `commandmate` on PATH is a stub that only writes a log.
@@ -198,7 +206,7 @@ set -u
 printf '%s\n' "$*" >> "$CMATE_STUB_LOG"
 case "${CMATE_STUB_MODE:-on}" in
   nomem)
-    if [ "${1:-}" = mem ] || [ "${1:-}" = brief ]; then
+    if [ "${1:-}" = mem ] || [ "${1:-}" = brief ] || [ "${1:-}" = handoff ]; then
       printf "error: unknown command '%s'\n" "$1" >&2
       exit 1
     fi
@@ -221,7 +229,7 @@ if [ "${1:-}" = mem ] && [ "${2:-}" = mode ]; then
   esac
 fi
 case "${1:-}" in
-  mem|brief) printf 'stub: ok\n'; exit 0 ;;
+  mem|brief|handoff) printf 'stub: ok\n'; exit 0 ;;
 esac
 printf 'stub: cmate-handoff must never call: %s\n' "$*" >&2
 exit 97
@@ -438,7 +446,7 @@ check_forbidden() {
   dir=$(dirname "$file")
   pkg_files="$file $(find "$dir/references" -name '*.md' 2>/dev/null | sort | tr '\n' ' ')"
   # shellcheck disable=SC2086
-  if hits=$(grep -n -e 'handoff propose' -e 'handoff done' -e 'popup' $pkg_files); then
+  if hits=$(grep -n -e 'popup' $pkg_files); then
     printf 'depends on the screen still being designed: %s\n' "$hits"; problems=1
   fi
   # shellcheck disable=SC2086
@@ -450,7 +458,7 @@ check_forbidden() {
     printf 'adds a kind: %s\n' "$hits"; problems=1
   fi
   extract_blocks "$file" "$WORK/forbid-blocks" >/dev/null
-  if hits=$(cat "$WORK/forbid-blocks"/block-*.sh | grep -n -E 'mem (purge|promote|approve)|confirm-reflected|curl '); then
+  if hits=$(cat "$WORK/forbid-blocks"/block-*.sh | grep -n -E 'mem (purge|promote|approve)|handoff (approve|cancel|end)|confirm-reflected|curl '); then
     printf 'a runnable block calls what the skill must not: %s\n' "$hits"; problems=1
   fi
   if hits=$(grep -n -E '\$[0-9]|\$ARGUMENTS' "$file"); then
@@ -470,8 +478,7 @@ else
 fi
 
 # Each rule exercised by planting the text in a copy of the package.
-PLANTS='handoff propose	Run `commandmate handoff propose` before ending.
-popup	Read features.popup to see whether a person is watching.
+PLANTS='popup	Read features.popup to see whether a person is watching.
 later screen work	G の後で足す。
 a new kind	commandmate mem add --kind question --text "x"
 purge in a block	```bash
@@ -497,6 +504,154 @@ while IFS='	' read -r rule text; do
 done <<EOF
 $PLANTS
 EOF
+
+# ---------------------------------------------------------------------------
+# 7. The hand-off request before ending (section 11)
+# ---------------------------------------------------------------------------
+printf '\n== 7. a request from the "end" button: propose, never confirm ==\n'
+
+H11='## 11. 終了の前の引き継ぎの依頼'
+
+# section_blocks <SKILL.md> <dir>: block-NN.sh for the fenced bash blocks under
+# H11 only (the next `## ` heading, or the end, closes the section).
+section_blocks() {
+  local file="$1" dir="$2"
+  rm -rf "$dir"; mkdir -p "$dir"
+  awk -v dir="$dir" -v h="$H11" '
+    $0 == h { sec = 1; next }
+    /^## / && sec { sec = 0 }
+    sec && /^```bash[[:space:]]*$/ && !inside { inside = 1; n++; out = sprintf("%s/block-%02d.sh", dir, n); printf "" > out; next }
+    sec && /^```[[:space:]]*$/ && inside { inside = 0; close(out); next }
+    sec && inside { print >> out }
+    END { print n + 0 }
+  ' "$file"
+}
+
+# run_request <SKILL.md> <mode> <log>: the gate, then the section-11 blocks, in
+# one shell, as an Agent that received a request would run them.
+run_request() {
+  local file="$1" mode="$2" log="$3" gate="$WORK/req-gate" sec="$WORK/req-sec" script="$WORK/req.sh"
+  extract_blocks "$file" "$gate" >/dev/null
+  section_blocks "$file" "$sec" >/dev/null
+  : > "$log"
+  { cat "$gate/block-01.sh"; cat "$sec"/block-*.sh 2>/dev/null; } > "$script"
+  CMATE_STUB_LOG="$log" CMATE_STUB_MODE="$mode" bash "$script" >/dev/null 2>&1
+}
+
+# check_request <SKILL.md>: prints the problems, returns 1 if any.
+check_request() {
+  local file="$1" problems=0 log="$WORK/req.log" n mode last
+  n=$(section_blocks "$file" "$WORK/req-count")
+  if [ "$n" -lt 4 ]; then
+    printf 'section 11 holds %s runnable blocks (want >= 4: add, update, close, done)\n' "$n"; return 1
+  fi
+  # mode on: proposals reach the CLI, done is last, nothing is confirmed directly.
+  run_request "$file" on "$log"
+  for want in 'handoff propose --request' ' add --kind ' ' update ' ' close ' 'handoff done --request'; do
+    grep -q -F -e "$want" "$log" || { printf 'mode on: no call with "%s"\n' "$want"; problems=1; }
+  done
+  if grep -q '^mem \(now\|add\|update\|close\)' "$log"; then
+    printf 'mode on: a direct confirm was made: %s\n' "$(grep '^mem \(now\|add\|update\|close\)' "$log" | tr '\n' ';')"; problems=1
+  fi
+  last=$(tail -1 "$log")
+  case "$last" in
+    'handoff done '*) ;;
+    *) printf 'mode on: done is not the last call (last: %s)\n' "$last"; problems=1 ;;
+  esac
+  # propose and done are never one command.
+  if grep -h -E 'handoff (propose|done)' "$WORK/req-count"/block-*.sh | grep -E '&&|;|\|\|' >/dev/null; then
+    printf 'a handoff call is chained to another with && ; ||\n'; problems=1
+  fi
+  # mode off / no mem: nothing but the gate.
+  for mode in off derived nomem; do
+    run_request "$file" "$mode" "$log"
+    if [ "$(cat "$log")" != 'mem mode --json' ]; then
+      printf 'mode %s: calls other than mem mode: %s\n' "$mode" "$(grep -v -x 'mem mode --json' "$log" | tr '\n' ';')"; problems=1
+    fi
+  done
+  # the guard, statically: every section-11 block is wrapped in the MEM guard.
+  check_guards_static "$WORK/req-count" || problems=1
+  return "$problems"
+}
+
+if out=$(check_request "$SKILL_MD" 2>&1); then
+  pass 'a request with mode on proposes and returns, confirms nothing; off / derived / no mem call nothing'
+else
+  fail 'a request with mode on proposes and returns, confirms nothing; off / derived / no mem call nothing' "$out"
+fi
+
+# The section states the rule in words, too.
+if grep -q -F '`mem add` / `update` / `close` で**直接確定しない**' "$SKILL_MD" \
+  && grep -q -F '**第 3.1 節の入口の判定が `on` でなければ何もしない。**' "$SKILL_MD" \
+  && grep -q -F '**`decision` は提案に含めない。**' "$SKILL_MD"; then
+  pass 'section 11 states "do not confirm directly", "nothing unless on" and "no decision in a proposal"'
+else
+  fail 'section 11 states "do not confirm directly", "nothing unless on" and "no decision in a proposal"' 'a literal is missing'
+fi
+
+expect_request_rejected() {
+  local name="$1" copy="$2" out
+  mutations=$((mutations + 1))
+  if cmp -s "$SKILL_MD" "$copy"; then
+    fail "$name" 'the mutation changed nothing'
+    return
+  fi
+  if out=$(check_request "$copy" 2>&1); then
+    fail "$name" 'check_request accepted the mutated file'
+  else
+    pass "$name ($(printf '%s' "$out" | head -1))"
+  fi
+}
+
+# 7a. The procedure removed (section 11 deleted).
+copy="$WORK/req-removed.md"
+awk -v h="$H11" '$0 == h { skip = 1; next } /^## / && skip { skip = 0 } !skip { print }' "$SKILL_MD" > "$copy"
+expect_request_rejected 'removing the procedure is caught' "$copy"
+
+# 7b. A proposal replaced by a direct confirm.
+copy="$WORK/req-direct.md"
+awk -v h="$H11" '
+  $0 == h { sec = 1 }
+  sec && /handoff propose --request .* add --kind next/ && !done {
+    print "  commandmate mem add --kind next \\"; done = 1; next }
+  { print }
+' "$SKILL_MD" > "$copy"
+expect_request_rejected 'a proposal replaced by a direct mem add is caught' "$copy"
+
+# 7c. The guard of the first propose block dropped.
+copy="$WORK/req-unguarded.md"
+awk -v h="$H11" '
+  $0 == h { sec = 1 }
+  sec && $0 == "if [ \"${MEM}\" = on ]; then" && !done { print "if true; then"; done = 1; next }
+  { print }
+' "$SKILL_MD" > "$copy"
+expect_request_rejected 'an unguarded block in section 11 is caught' "$copy"
+
+# 7d. done chained to a propose.
+copy="$WORK/req-chained.md"
+awk -v h="$H11" '
+  $0 == h { sec = 1 }
+  sec && /commandmate handoff done --request/ && !done {
+    print "  commandmate handoff propose --request \"<r>\" add --kind next --text x && \\"; done = 1 }
+  { print }
+' "$SKILL_MD" > "$copy"
+expect_request_rejected 'propose chained to done is caught' "$copy"
+
+# 7e. done called before the proposals (the order of the blocks swapped).
+copy="$WORK/req-order.md"
+cp "$SKILL_MD" "$copy"
+python3 - "$copy" <<'PY'
+import re, sys
+p = sys.argv[1]
+s = open(p).read()
+head, sec = s.split('## 11. 終了の前の引き継ぎの依頼', 1)
+blocks = re.findall(r'```bash\n.*?\n```\n', sec, re.S)
+done = [b for b in blocks if 'handoff done' in b][0]
+first = blocks[0]
+sec = sec.replace(done, '', 1).replace(first, done + '\n' + first, 1)
+open(p, 'w').write(head + '## 11. 終了の前の引き継ぎの依頼' + sec)
+PY
+expect_request_rejected 'done before the proposals is caught' "$copy"
 
 # ---------------------------------------------------------------------------
 printf '\n%s passed, %s failed (%s mutations exercised)\n' "$passed" "$failed" "$mutations"

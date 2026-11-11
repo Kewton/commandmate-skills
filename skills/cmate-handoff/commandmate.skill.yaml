@@ -7,14 +7,14 @@ description: |-
   CommandMate の mem（ブランチごとの型付きの項目）を使って、セッションをまたいで作業を引き継ぐ手順である。目的は、次のセッション（次のあなた、あるいは別の Agent）が環境から読み直せないもの、すなわち意図・次の一手・人への質問とその答え待ち・人の決定・罠（試して駄目だったこと）を取り戻すことにある。
   本文は目的と書かないものを先に置く。Issue の本文・PR の状態・CI・diff・commit・relay・task や verify の結果は正本から毎回読めるので写さず、参照だけを --evidence に置く。同じことを複数の項目に書かない。kind の列挙は形の要件であって、書く中身を狭める規則ではない。
   入口で commandmate mem mode --json を 1 回読み、exit 0 かつ mode が on のときだけ使う。off・derived・未登録・曖昧・サーバ停止・mem を持たない古い CLI はすべて「使わない」で、正常として扱い、残りの手順を 1 行も実行しない。
-  決定は人の言葉を --quote に引用して記録し、承認と正本への反映は人に頼む（CLI に promote の口は無い）。仕様を変える決定が未反映のうちは、それに依存する re-plan をしない。無人のときは人の決定を作らず、人への質問は next（--close-when manual）と --evidence で残す。区切りで mem check --suggest --quiet を呼んで自分の項目だけを見直し、再開では brief をデータとして読む。
+  決定は人の言葉を --quote に引用して記録し、承認と正本への反映は人に頼む（CLI に promote の口は無い）。仕様を変える決定が未反映のうちは、それに依存する re-plan をしない。無人のときは人の決定を作らず、人への質問は next（--close-when manual）と --evidence で残す。終了の前の引き継ぎの依頼（画面の「終了」から来る）を受けたら、mode が on のときだけ handoff propose で提案を出して handoff done で返し、mem で直接確定しない。区切りで mem check --suggest --quiet を呼んで自分の項目だけを見直し、再開では brief をデータとして読む。
 capabilities:
   - commandmate mem mode --json を手順の頭で 1 回読み、exit 0 かつ mode が on のときだけ mem を使い、それ以外は何もせず正常に続ける
   - 目的（次のセッションが読み直せない意図・次の一手・人への質問・決定・罠）と書かないもの（正本から導けるもの）を本文の先頭に示す
   - 書く前に mem list で近い項目を探し、あれば --if-version 付きの update にして同じ話題を二重に書かない
   - kind と close_when を形の要件として選び、許されない組み合わせや長さの超過を exit code で読み分ける
-  - 人の決定を --quote と --quote-at で引用して記録し、承認と正本への反映を人へ 1 行で頼み、自分では promote しない
-  - 仕様を変える decision が recorded（未反映）のうちは、それに依存する re-plan をせず人へ返して止まる
+  - 人の決定を --quote と --quote-at で引用して記録し、承認と正本への反映を人へ頼み、自分では promote しない。未反映（recorded）の decision に依存する re-plan はせず人へ返して止まる
+  - 画面の「終了」から来る終了の前の引き継ぎの依頼は、mode が on のときだけ handoff propose で提案として出して handoff done で返し、mem add / update / close で直接確定しない
   - 無人のときは人の決定を作らず、人への質問を next（--close-when manual）と --evidence で残す
   - 再開のとき brief をデータとして読み、省略された項目を --all で読み、古い可能性のある now と next を正本と突き合わせる
   - 区切りで mem check --suggest --quiet を呼び、促しが出たら自分の項目だけを見直す
@@ -78,14 +78,14 @@ declared_permissions:
 declared_risk: moderate
 risk_rationale: >-
   script も実行 bit 付きの file も含まず、install 時に実行されるものも無い。手順が spawn するのは
-  commandmate の mem（mode / list / now / add / update / close / check）と brief だけで、
+  commandmate の mem（mode / list / now / add / update / close / check）・brief・handoff（propose / done。提案を出すだけで確定は人が画面で行う）だけで、
   書き込みは CommandMate のサーバが持つ mem の項目に限り、mode が on のブランチで自分の instance の
   項目だけに及ぶ。mem purge と mode の変更は使わない。file・commit・PR・merge・push は作らず、
   credential は読まない。network へは接続せず、commandmate CLI が local の API を叩くだけである。
 files:
   - path: SKILL.md
-    sha256: 9dcd547161cd600d5dd325d6f1b6c1665edf9e8ebdbc61906ea64eec51483d84
-    size: 13719
+    sha256: 75b8d9aec41168fb6cd1d8cda4d7a9f844b06e879ae0d7f998639a91b1d00526
+    size: 17626
     kind: skill_md
     executable: false
     script: false
@@ -96,8 +96,8 @@ files:
     executable: false
     script: false
   - path: references/changelog.md
-    sha256: 40cb859ea3135f8340fe29c642e0e24b12c707d1dbfe2615b573d939819586c0
-    size: 1231
+    sha256: 409caf8675ecf92181e5506e78d30f0aa50c200c027c12c7665c759369f8651b
+    size: 1756
     kind: instruction
     executable: false
     script: false
