@@ -349,7 +349,14 @@ def check_rubric(document: dict[str, Any]) -> list[str]:
     elif has_fail:
         expected_verdict = "no_go"
     elif status == "success":
-        expected_verdict = "go"
+        # verdict-rubric row 3b: an unreflected decision keeps an all-pass run
+        # from `go`.
+        has_decision_action = any(
+            str(action.get("action", "")).startswith("decision ")
+            and str(action.get("owner", "")).strip()
+            for action in next_actions
+        )
+        expected_verdict = "conditional_go" if has_decision_action else "go"
     else:
         covered = {
             ref

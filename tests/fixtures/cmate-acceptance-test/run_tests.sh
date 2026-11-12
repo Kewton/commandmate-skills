@@ -251,6 +251,86 @@ expect "long output keeps the tail and says it was cut" long \
   'ev("EV-01").truncated === true && ev("EV-01").output_excerpt.trimEnd().endsWith("LAST-LINE") && [...ev("EV-01").output_excerpt].length <= 4000'
 
 # ---------------------------------------------------------------------------
+# 5b. mem (CommandMate#4228 contract 2): an unreflected decision keeps an
+#     all-pass run from `go` (verdict-rubric row 3b). mode off / no mem means
+#     the caller passes no decisions and the run is exactly the old one.
+# ---------------------------------------------------------------------------
+mem_plan() { printf '{"issue_ref":"#4228","environment":{"agent":"suite"},%s"criteria":[{"text":"build が通る","command":"exit 0"}]}' "$1"; }
+run_plan mem-off "$(mem_plan '')"
+check "mem off / unavailable: no decisions -> go (unchanged)" mem-off --status success --verdict go --outcome AC-01=pass
+expect "mem off: next_actions stays empty" mem-off 'd.next_actions.length === 0'
+run_plan mem-empty "$(mem_plan '"unreflected_decisions":[],')"
+check "mem on, nothing unreflected -> go" mem-empty --status success --verdict go --outcome AC-01=pass
+run_plan mem-on "$(mem_plan '"unreflected_decisions":["dec-7"],')"
+check "mem on, unreflected decision -> conditional_go (schema + rubric)" mem-on --status success --verdict conditional_go --outcome AC-01=pass
+expect "mem on: the decision id is a next action owned by a person" mem-on \
+  'd.next_actions.some((a) => a.action.includes("decision dec-7") && a.owner === "user") && d.verdict_reason.includes("dec-7")'
+run_plan mem-fail "$(printf '{"issue_ref":"#4228","environment":{"agent":"suite"},"unreflected_decisions":["dec-7"],"criteria":[{"text":"x","command":"exit 1"}]}')"
+check "mem on, a failing criterion still -> no_go" mem-fail --verdict no_go --outcome AC-01=fail
+
+# D-12 / D-14: the summary names the branch mem was read from, only when mode was on.
+# Structured fields and summary inclusion are checked separately (summary carries
+# generated_at, so it is never compared byte for byte).
+run_plan mem-br-on "$(mem_plan '"mem_read_branch":"h-on-cl","unreflected_decisions":["dec-7"],')"
+check "mem on with a branch: structured result unchanged (conditional_go)" mem-br-on --status success --verdict conditional_go --outcome AC-01=pass
+expect "mem on: summary_text names the branch that was read" mem-br-on 'd.summary_text.includes("読んだ枝 h-on-cl")'
+run_plan mem-br-on0 "$(mem_plan '"mem_read_branch":"h-acc0",')"
+check "mem on, no decision: go" mem-br-on0 --status success --verdict go --outcome AC-01=pass
+expect "mem on, no decision: the branch is still named" mem-br-on0 'd.summary_text.includes("読んだ枝 h-acc0")'
+expect "mem off: summary_text has no read-branch sentence" mem-off '!d.summary_text.includes("読んだ枝")'
+# mem off and mem on0 (nothing unreflected) must agree on the structured fields.
+off_s=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(JSON.stringify([d.status,d.verdict,d.unreflected_decisions||null,d.next_actions]))' "$WORK/mem-off.json")
+on0_s=$(node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(JSON.stringify([d.status,d.verdict,d.unreflected_decisions||null,d.next_actions]))' "$WORK/mem-br-on0.json")
+[ "$off_s" = "$on0_s" ] && [ "$off_s" = '["success","go",null,[]]' ] \
+  && pass "mem off and mem on0 agree on status, verdict, unreflected_decisions, next_actions" \
+  || fail "mem off and mem on0 agree on status, verdict, unreflected_decisions, next_actions" "off=$off_s on0=$on0_s"
+MEMB="$WORK/mutant-membr"
+mkdir -p "$MEMB"
+cp "$RUNNER" "$MEMB/run-acceptance.mjs"
+sed -i.bak "s/  if (memBranch) lines.push(/  if (false \&\& memBranch) lines.push(/" "$MEMB/run-acceptance.mjs"
+if cmp -s "$MEMB/run-acceptance.mjs" "$RUNNER"; then
+  fail "read-branch mutation applied" "the summary line was not found"
+else
+  run_plan mutant-membr "$(mem_plan '"mem_read_branch":"h-on-cl",')" "$MEMB/run-acceptance.mjs"
+  if node -e 'const d=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit(d.summary_text.includes("読んだ枝 h-on-cl")?0:1)' "$WORK/mutant-membr.json"; then
+    fail "read-branch mutation killed" "a runner that drops the sentence still names the branch"
+  else
+    pass "read-branch mutation killed: dropping the sentence loses the branch name"
+  fi
+fi
+
+grep -q 'mode が `on` のときだけ、読んだ枝の名を' "$SKILL_DIR/SKILL.md" \
+  && grep -q '`mem_read_branch` に入れ' "$SKILL_DIR/SKILL.md" \
+  && grep -q '`on` でないときは書かない' "$SKILL_DIR/SKILL.md" \
+  && pass "SKILL.md: mem_read_branch only when mode is on, else no sentence" \
+  || fail "SKILL.md: mem_read_branch only when mode is on, else no sentence" "sentence missing"
+grep -q '`commandmate mem mode --json` の `branch`' "$SKILL_DIR/SKILL.md" \
+  && pass "SKILL.md: mem_read_branch comes from mem mode --json branch" \
+  || fail "SKILL.md: mem_read_branch comes from mem mode --json branch" "sentence missing"
+grep -q 'mem mode --json' "$SKILL_DIR/SKILL.md" && ! grep -qE 'commandmate mem (add|update|close|promote)' "$SKILL_DIR/SKILL.md" \
+  && pass "SKILL.md gates mem on mode and never writes to it" \
+  || fail "SKILL.md gates mem on mode and never writes to it" "mode check missing or a mem write command is present"
+
+# Control: a runner that ignores the decisions says `go`; the mem-on case must fail.
+MEM="$WORK/mutant-mem"
+mkdir -p "$MEM"
+cp "$RUNNER" "$MEM/run-acceptance.mjs"
+sed -i.bak "s/return decisions.length ? 'conditional_go' : 'go';/return 'go';/" "$MEM/run-acceptance.mjs"
+if cmp -s "$MEM/run-acceptance.mjs" "$RUNNER"; then
+  fail "mem mutation applied" "the decisions row was not found"
+else
+  run_plan mutant-mem-on "$(mem_plan '"unreflected_decisions":["dec-7"],')" "$MEM/run-acceptance.mjs"
+  run_plan mutant-mem-off "$(mem_plan '')" "$MEM/run-acceptance.mjs"
+  if python3 "$CHECK" "$WORK/mutant-mem-on.json" --verdict conditional_go >/dev/null 2>&1; then
+    fail "mem mutation killed" "a runner that ignores decisions still said conditional_go"
+  elif python3 "$CHECK" "$WORK/mutant-mem-off.json" --verdict go >/dev/null 2>&1; then
+    pass "mem mutation killed: ignoring decisions turns mem-on into go (mem-off still go)"
+  else
+    fail "mem mutation killed" "the mutant broke the mem-off case too"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # 6. Control: a runner that judges by TAP counts fails the spec case.
 # ---------------------------------------------------------------------------
 MUT="$WORK/mutant"

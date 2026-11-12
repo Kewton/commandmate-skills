@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-acceptance-test
 name: cmate-acceptance-test
-version: 0.3.0
+version: 0.4.0
 summary: Issue の受入条件を証跡付きで検証し、Go / Conditional Go / No-Go を versioned な result として返す。
 description: |-
   対象 Issue の受入条件を自動検証と手動確認に分け、command exit code、test 結果、diff、手動観察を evidence として構造化したうえで、受入の可否を判定する手順である。
@@ -60,6 +60,7 @@ requirements:
   commands:
     - name: gh
     - name: git
+    - name: commandmate
     - name: node
       version_range: '>=22.0.0'
   network_hosts:
@@ -76,13 +77,13 @@ risk_rationale: >-
   Executes processes by design: read-only gh and git, plus the project test
   commands the user passes in and confirms, run directly or through the bundled
   runner scripts/run-acceptance.mjs (Node standard library only, no executable
-  bit, invoked via node). Writes only the result document and the evidence
-  directory. Network use is limited to reading the issue. Environment variables
-  are checked for presence, never read into evidence. No executable file ships.
+  bit). Reads mem (commandmate mem mode/list --json) when available, never
+  writes. Writes only the result document and the evidence directory. Network
+  use is limited to reading the issue. No executable file ships.
 files:
   - path: SKILL.md
-    sha256: 684c19c03253b27672428d6a27d033674e418c611f121e4f1509a1dd59d5cfa2
-    size: 15078
+    sha256: 21f15b7a3c9f9eba6145fa35413f889314d2b9064c6b155ab8f0d51b2ee21165
+    size: 16698
     kind: skill_md
     executable: false
     script: false
@@ -93,8 +94,8 @@ files:
     executable: false
     script: false
   - path: references/changelog.md
-    sha256: 44b9ed9a5d01015fb87b6c5e90c19bb7e8222d03891c92aeb1c0969f2ffba8c1
-    size: 10801
+    sha256: fa99096a08c4e12c9a0420a862826f4294d0ffabc2be040f4e5f7eed79e8625e
+    size: 12443
     kind: instruction
     executable: false
     script: false
@@ -105,8 +106,8 @@ files:
     executable: false
     script: false
   - path: references/runner.md
-    sha256: 26eaf43ae58af96d3a10879f25c8417e65e730382083816153bb8962abc5b586
-    size: 5908
+    sha256: 66da1aaf540f28d7fb5f9f1ebdbb4e56d1e7cf1653cd18592e9205c233887d30
+    size: 6450
     kind: instruction
     executable: false
     script: false
@@ -117,8 +118,8 @@ files:
     executable: false
     script: false
   - path: references/verdict-rubric.md
-    sha256: 9cc73192cc932a35bfed9596c98e65b454120284168124838960a73b85fce903
-    size: 5268
+    sha256: 07cb49d86d32fd5f2a3fe4e7394875764c14e491137585c51f980698cad30740
+    size: 6697
     kind: instruction
     executable: false
     script: false
@@ -129,8 +130,8 @@ files:
     executable: false
     script: false
   - path: scripts/run-acceptance.mjs
-    sha256: 6034e165f58eb2390535bc8e7a2abd8d6693371247c8ab55831b6dfb101abbd9
-    size: 23768
+    sha256: 91569fec2eaae9c99aedcbc4199aef5592dae997e9b75d46178d97e78c63a2cd
+    size: 25156
     kind: script
     executable: false
     script: true

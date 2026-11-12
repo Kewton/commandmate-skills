@@ -4,6 +4,27 @@ Catalog の `changelog` はこの Skill の release tag の annotation から生
 その annotation の元になる記述をここに置く。install 前の利用者が読む前提で書く。
 **新しい version を上に置く。version を上げたらこの file も同じ commit で更新する。**
 
+## 0.4.0
+
+mem（CommandMate#4220）が使えるときだけ、未反映の decision を見て `conditional_go`
+にする（CommandMate#4228 の契約 2）。
+
+- **Step 1-4 を足した。** `commandmate mem mode --json` が `"mode": "on"` のときだけ
+  `commandmate mem list --json` を読み、`recorded`（承認済みだが本文へ未反映）の decision
+  が残っていれば、ID を summary に挙げて `go` にしない。`off`・`derived`・`mem` が無い・
+  exit 非 0 は「使わない」で正常であり、手順も判定も従来どおり。mem に書き込まない。
+- **verdict-rubric に行 3b を足した。** 全 `pass` でも未反映の decision があれば
+  `conditional_go`（`next_actions` に担当 `user` の確認 action）。
+- **runner の plan に `unreflected_decisions` を足した（任意）。** 無いときの出力は
+  0.3.0 と変わらない。schema は変わらない。
+- **summary に「読んだ枝」の 1 文（D-12）。** decision を読むのは受入を走らせる枝だけ。
+  mode が `on` のときだけ plan の `mem_read_branch` を入れ、summary の「対象」に
+  `mem        読んだ枝 <枝>` を書く。`on` でない（off・derived・mem 無し）ときは書かない。
+  result の構造化の欄（`verdict`・`unreflected_decisions`・`next_actions`）は変わらない。
+  入れる枝の名は `commandmate mem mode --json` の `branch`（mem が判定に使った枝）。
+- `requirements.commands` に `commandmate` を足した（読みだけ。版の範囲は付けない）。
+  `compatibility.commandmate` の範囲は変えない。
+
 ## 0.3.0
 
 command で検証する受入条件のための runner（`scripts/run-acceptance.mjs`）を同梱し、

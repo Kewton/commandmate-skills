@@ -78,6 +78,8 @@ Skill 自身が実行してよいのは、manifest の `requirements.commands` �
 
 - `gh` — `gh issue view <ref> --json number,title,body,labels,state` のみ。
 - `git` — `git status`、`git diff`、`git log`、`git rev-parse`、`git show` のみ。
+- `commandmate` — `commandmate mem mode --json` と `commandmate mem list --json` のみ（読み）。
+  無ければ、または exit 非 0 なら使わない（Step 1-4）。mem に書き込まない。
 
 対象 project の test command（`npm test`、`pytest` など）は **入力として与えられたもの**
 だけを実行する。推測して実行しない。実行前に利用者へ提示して確認を取る。
@@ -103,6 +105,19 @@ Skill 自身が実行してよいのは、manifest の `requirements.commands` �
    列挙する。
 2. 各条件に `id` を振る（`AC-01` から連番。抽出順で固定し、実行結果で並べ替えない）。
 3. 条件が 0 件のときは §5 に従って停止する。条件のない Issue を「問題なし」としない。
+4. **受入条件が最新の決定を反映しているか。** mem（CommandMate#4220）を使えるときだけ見る。
+   使えるとは、`commandmate mem mode --json 2>/dev/null | grep -q '"mode": "on"'` が
+   exit 0 のことである。`off`・`derived`・`mem` が無い・exit 非 0 は「使わない」で、
+   これは正常であり、何も見ずに先へ進む。使えるなら `commandmate mem list --json` を読み、
+   `decision` が `recorded`（承認・記録済みだが正本へ未反映）で残っていないかを見る。
+   残っていれば、Issue 本文の受入条件は古い可能性がある。その decision の ID を summary に
+   挙げ、plan の `unreflected_decisions` に入れる。本文に反映されたことを人が確かめるまで
+   `go` にしない（[`references/verdict-rubric.md`](./references/verdict-rubric.md) §3 行 3b）。
+   decision を読むのは受入を走らせる枝だけである。mode が `on` のときだけ、読んだ枝の名を
+   plan の `mem_read_branch` に入れ、summary に「読んだ枝」の 1 文を書く。`on` でないときは書かない。
+   入れる枝の名は `commandmate mem mode --json` の `branch`（mem が判定に使った枝）であり、
+   `git branch --show-current` で別に引かない（detached や別の作業木で食い違うため）。
+   mem に書き込まない。
 
 ### Step 2 — 分類と risk tier
 
