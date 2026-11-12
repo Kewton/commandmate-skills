@@ -1663,7 +1663,7 @@
         "parallel",
         "issue"
       ],
-      "latest": "0.41.0",
+      "latest": "0.42.0",
       "versions": [
         {
           "version": "0.4.0",
@@ -3289,6 +3289,60 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.41.0/cmate-orchestrate-0.41.0.tar.gz",
             "sha256": "6e2638d44e55694960b13b16a6970f522e77ec2c5f42fb06780a3fe862415536",
             "size": 889657,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name. Same deterministic runner, same plan (parity).",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              },
+              {
+                "agent": "opencode-v2",
+                "evidence": "Measured 2026-09-29 on opencode2 2.0.18 (CommandMate#2975): GET /api/skill lists SKILL.md from .agents/skills and .claude/skills; /<name> makes the model call the skill tool. No restart needed. Not in v2's / palette (@ and /skills only). This package was NOT separately measured.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.42.0",
+          "changelog": "0.41.0 以降の変更（#316）を公開する。CommandMate#4228 の契約 2（orchestrate）である。\n\n主題は 1 つ。**wave の完了と run の停止という「区切り」で、作業の現在地（mem の now / next）を見直す手順を、orchestrate の運用手順に正式に載せる**ことである。\n\norchestrate は複数の Issue を wave 単位で dispatch し、合流し、止まる。この間、run の状態は report と各 worktree には残るが、「いま何をしていて次に何をするか」を引き継ぐ層（CommandMate#4220 の mem）は、区切りで誰も見直していなかった。wave が終わっても run が止まっても now / next は古いままで、次に入る人（または次の自分）は report を読み解いて組み立て直すしかなかった。\n\n- **CommandMate#4228（契約 2）**: `references/runner-operations.md` に第 17 節を新設した。wave が完了したとき、および run が停止したときの両方で、mem の mode が `on` の場合に限り、`cmate-handoff` の「区切りでの見直し」を行う。mode が `off` / `derived` の場合、および mem を持たない古い CommandMate CLI の場合は**正常として何もしない**（失敗にも warning にもしない）。SKILL.md の既存の参照行には `・mem` を足して、第 17 節へ辿れるようにした。\n  - runner（`scripts/*.mjs`）の挙動は変えていない。手順の追加であり、`dispatch_schema_version` も 1 のまま、既存 run の report は変わらない。\n  - `cmate-handoff` は名前で参照するだけで、導入されていなくても orchestrate は動く（並行して cmate-handoff 0.1.0 を公開する）。\n  - 画面（G）の実装に依存する手順は書いていない。CLI と mem の mode だけで完結する。\n- **SKILL.md の縮小（意味は変えない移送）**: SKILL.md は上限 60,000 バイトの直前（59,982）にあり、1 行も足せなかった。第 3.3 節「合流後の統合ブランチ検証」の本文 27 行を新規の `references/integration-verify.md` へ逐語で移し、見出しと正本（`merge-contract.md` 第 5.4 節）への参照は SKILL.md に残した。SKILL.md は 57,722 バイトになり、第 17 節の参照行を足した後も 57,728 バイト（上限まで 2,272）。移した本文に語句の変更は無い。\n- **版**: 0.41.0 → 0.42.0。`commandmate.skill.yaml` の version と files:、`scripts/lib.mjs` の `SKILL_VERSION`、golden 12 ファイルの `skill_version`、`release-notes.md` を更新した。\n\n検証: validate.py（通常 / fixtures 用 skills-root）、selftest.py、orchestrate-fixtures、monitor-fixtures、bash 構文検査はいずれも exit 0。main への追随後に verify.yaml の全ゲートを再実行し、全て exit 0 を確認している。\n\n互換性: 既存の plan / dispatch / merge / uat の入出力は変わらない。mem を使わない環境では、この版の差は SKILL.md と references の文面だけである。",
+          "published_at": "2026-11-12T00:12:11Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-orchestrate-v0.42.0",
+            "commit": "2a373d6dcbf870fec5dabe471d6886a47f7b365b"
+          },
+          "artifact": {
+            "asset_name": "cmate-orchestrate-0.42.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-orchestrate-v0.42.0/cmate-orchestrate-0.42.0.tar.gz",
+            "sha256": "b86eee83785992c39560544cd69dcc2228e30f567e308d8c4d8d56485a54859a",
+            "size": 890513,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
