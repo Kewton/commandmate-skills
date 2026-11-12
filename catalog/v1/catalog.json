@@ -19,7 +19,7 @@
         "quality-gate",
         "issue"
       ],
-      "latest": "0.3.0",
+      "latest": "0.4.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -319,6 +319,60 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-acceptance-test-v0.3.0/cmate-acceptance-test-0.3.0.tar.gz",
             "sha256": "853c8a84084c3be6d420501506f2b685d9dccccc756af32e387c86d409b85737",
             "size": 31073,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              },
+              {
+                "agent": "opencode-v2",
+                "evidence": "Measured 2026-09-29 on opencode2 2.0.18 (CommandMate#2975): GET /api/skill lists SKILL.md from .agents/skills and .claude/skills; /<name> makes the model call the skill tool. No restart needed. Not in v2's / palette (@ and /skills only). This package was NOT separately measured.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "moderate"
+        },
+        {
+          "version": "0.4.0",
+          "changelog": "cmate-acceptance-test 0.4.0 — 受入の判定で、mem に残っている「本文へ未反映の decision」を見て conditional_go にする（CommandMate#4228 契約 2、#320）。\n\n主題は 1 つ。**受入条件が最新の人の決定を反映しているかを、全 pass の `go` で見落とさない**ことである。\n\n受入は、Issue 本文の受入条件を command で検証し、結果から verdict（go / conditional_go / no_go）を出す。しかし人が途中で決めたこと（条件の追加・緩和・撤回）は、承認されても本文へ反映されるまでの間 mem（CommandMate#4220）の decision にしか無いことがある。受入条件が古いまま全て pass すると、古い条件に対する `go` が出る。それは「最新の決定に対して合格した」と同じではない。\n\n- **CommandMate#4228（契約 2）**: SKILL.md の手順 Step 1 に、項目 4「受入条件が最新の決定を反映しているか」を足した。`commandmate mem mode --json` が `\"mode\": \"on\"` のときだけ `commandmate mem list --json` を読み、`recorded`（承認済みだが本文へ未反映）の decision が残っていれば、ID を summary に挙げて `go` にしない。`off`・`derived`・mem の無い古い CLI・exit 非 0 は「使わない」を正常とし、手順も判定も従来どおり。mem には書き込まない（§3 に `commandmate` を読みだけとして 1 行足した）。\n  - **verdict-rubric**: 決定表に行 3b を足した。全 `pass` でも未反映の decision があれば `conditional_go` とし、`next_actions` に担当 `user` の確認 action を入れる。`fail` があれば従来どおり `no_go` で、decision は結果を覆さない。`check_result.py` にも行 3b を足した。\n  - **runner**: plan に任意の `unreflected_decisions` を足した。無いときの出力は 0.3.0 とバイト一致で、result schema は変わらない。runner 自身は mem を呼ばない（読むのは手順を踏む Agent で、値を plan に渡す）。\n  - **summary に「読んだ枝」の 1 文（D-12）**: decision を読むのは受入を走らせる枝だけである。mode が `on` のときだけ、plan の `mem_read_branch`（`commandmate mem mode --json` の `branch`。`git branch --show-current` では引かない）を入れ、summary の「対象」に `mem 読んだ枝 <枝>` を書く。`on` でないときは書かない。構造化の欄（`status`・`verdict`・`unreflected_decisions`・`next_actions`）は変わらない。\n- **manifest**: `requirements.commands` に `commandmate` を足した（読みだけ。版の範囲は付けない）。`risk_rationale` を読みだけに直した。`compatibility.commandmate` は変えない。declared_risk は moderate のまま。\n- **検証**: `tests/fixtures/cmate-acceptance-test/run_tests.sh` に、mode off（decision なし → go）/ on（未反映あり → conditional_go、fail ありは no_go）の実比較、decisions を無視する変異を外すと落ちる対照、構造化の欄と summary の包含の分離、SKILL.md の文の literal grep を追加した。\n- 版は 0.3.0 → 0.4.0（`commandmate.skill.yaml` の version と files:、runner の `SKILL_VERSION`、`references/changelog.md` の 0.4.0 節）。cmate-handoff は名前で参照せず、導入されていなくても動く。",
+          "published_at": "2026-11-12T00:20:01Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-acceptance-test-v0.4.0",
+            "commit": "7abfcb5cf2d809133b9719a50024f928515f672c"
+          },
+          "artifact": {
+            "asset_name": "cmate-acceptance-test-0.4.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-acceptance-test-v0.4.0/cmate-acceptance-test-0.4.0.tar.gz",
+            "sha256": "79221259201d11e418d5349d5ced9d8f829873ca8c99614e6ea720cdddd9fffa",
+            "size": 33118,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
