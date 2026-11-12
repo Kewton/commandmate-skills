@@ -6135,7 +6135,7 @@
         "safety",
         "github"
       ],
-      "latest": "0.2.1",
+      "latest": "0.3.0",
       "versions": [
         {
           "version": "0.1.0",
@@ -6425,6 +6425,60 @@
             "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worktree-cleanup-v0.2.1/cmate-worktree-cleanup-0.2.1.tar.gz",
             "sha256": "06f3f9a09260f37dac0d4675c32f91d9c6aff50ca9be3614a0ecf4b2265857d6",
             "size": 38949,
+            "content_type": "application/gzip",
+            "format": "tar.gz"
+          },
+          "compatibility": {
+            "agents": [
+              {
+                "agent": "claude",
+                "evidence": "Measured 2026-07-26 on Claude Code 2.1.220 with CommandMate 0.15.0: an installed skill is discovered from .claude/skills and matches in the slash palette. The installer writes .agents/skills and .claude/skills byte-identically, so the path is package-independent.",
+                "support": "native"
+              },
+              {
+                "agent": "codex",
+                "evidence": "Measured 2026-07-26 on Codex CLI 0.145.0: SKILL.md is read from .agents/skills (model self-report, not a mechanical trace). This version does not expose skills as slash commands, so invoke it by name.",
+                "support": "native"
+              },
+              {
+                "agent": "gemini",
+                "evidence": "Not verified for this version. Readable as a procedure, discovery and reload unverified.",
+                "support": "unknown"
+              },
+              {
+                "agent": "opencode",
+                "evidence": "Measured 2026-08-25 on opencode 1.18.22 (CommandMate#2037) and re-checked 2026-09-04 on 1.18.27: GET /skill lists SKILL.md from .agents/skills and .claude/skills; submitting /<name> loads the skill. Scanned at boot, restart after install. Not in opencode's own slash palette.",
+                "support": "native"
+              },
+              {
+                "agent": "command-code",
+                "evidence": "Measured 2026-09-04 on Command Code 1.47.0 (CommandMate#2322): discovered from .agents/skills (cmd skills list, /skills picker); /<name> emits skill_loaded and runs. .claude/skills is not read; the installer's .agents/skills copy suffices. No restart needed.",
+                "support": "native"
+              },
+              {
+                "agent": "opencode-v2",
+                "evidence": "Measured 2026-09-29 on opencode2 2.0.18 (CommandMate#2975): GET /api/skill lists SKILL.md from .agents/skills and .claude/skills; /<name> makes the model call the skill tool. No restart needed. Not in v2's / palette (@ and /skills only). This package was NOT separately measured.",
+                "support": "native"
+              }
+            ],
+            "commandmate": ">=0.11.0 <1.0.0"
+          },
+          "declared_risk": "high"
+        },
+        {
+          "version": "0.3.0",
+          "changelog": "cmate-worktree-cleanup 0.3.0 — 削除候補の worktree ごとに、mem に残っている open の項目の件数を人への提示に添える（CommandMate#4228 契約 2、#318）。\n\n主題は 1 つ。**worktree を消す前に、そのブランチの mem に「まだ閉じていない引き継ぎ」が残っていることを、人が見える形で知らせる**ことである。\n\nworktree を掃除するとき、clean か・merge 証跡が足りているかは runner が判定する。しかし mem（CommandMate#4220）の項目はブランチ単位で残り、意図・次の一手・人への質問・決定・罠はそこにしか無いことがある。消す側はそれを知らないまま「merge 済みだから消してよい」と進められた。一方、件数を削除可否の判定に混ぜると、判定が mem の有無で揺れて runner の保証（判定は git と gh の証跡だけで決まる）が崩れる。この版は、判定には使わず、人への提示にだけ添える。\n\n- **CommandMate#4228（契約 2）**: SKILL.md Step 5 の確認の手順に、mem の mode が `on` のときだけ働く記述を足した。mode の判定は手順の頭で 1 回、`commandmate mem mode --json` が `\"mode\": \"on\"` のときだけ使う。`off`・`derived`・mem の無い古い CLI・サーバ停止・exit 非 0 はすべて「使わない」を正常として扱い、何も出さず失敗にもしない。\n  - **worktree ごとに数える**: delete / skip の候補ごとに `mem mode --worktree` と `mem list --worktree <id> --json` を呼び、mode が on の対象だけ `mem: open N 件（<branch>）` の 1 行を出す。除外の候補では呼ばない。plan の worktree_ref（dir の basename）と mem の worktree id は、`commandmate ls --json` の path の basename で結ぶ（0 件・複数件に当たるときは使わない）。\n  - **人への提示だけ**: 件数の行は Step 5 の 1 の提示にだけ添える。plan・result・`next_action.reason` には入れず、閉じた schema は変えていない。件数は削除可否に使わない。\n  - **mem の項目は消さない**: 項目はブランチ単位に残り、`purge` は人が決める（セッション内からは exit 55）。この skill は mem に書かない。\n- **runner と互換**: runner（`scripts/*.mjs`）の挙動と result schema は変えていない。出力は mem の mode が on でも off でもバイト一致し、runner は `mem` を一度も呼ばない。`compatibility.commandmate` は `>=0.11.0 <1.0.0` のまま。cmate-handoff は名前で参照せず、導入されていなくても動く。画面（G）に依存する手順は無い。\n- **検証**: `tests/fixtures/cmate-worktree-cleanup/run_tests.sh` に、偽 `commandmate` による mode on / off / 未知のコマンド / exit 1 の対照、判定を緩めると落ちる変異、worktree ごとの件数（mix / skip / excl の対照）、件数の行が plan / result に出たら落ちる対照、SKILL.md に mem の書き込み系コマンドが無いことの検査を追加した。\n- 版は 0.2.1 → 0.3.0。`commandmate.skill.yaml`（version と files:）、`scripts/lib.mjs` の `SKILL_VERSION`、`references/release-notes.md` の 0.3.0 節を更新した。",
+          "published_at": "2026-11-12T00:16:09Z",
+          "source": {
+            "repository": "Kewton/commandmate-skills",
+            "ref": "cmate-worktree-cleanup-v0.3.0",
+            "commit": "10283c5d9ebf77c0eed7eb1c31d4fd511b8559ec"
+          },
+          "artifact": {
+            "asset_name": "cmate-worktree-cleanup-0.3.0.tar.gz",
+            "url": "https://github.com/Kewton/commandmate-skills/releases/download/cmate-worktree-cleanup-v0.3.0/cmate-worktree-cleanup-0.3.0.tar.gz",
+            "sha256": "116d2657090220300644a29256dbcff717ec46017d9ce485774194b56032804a",
+            "size": 40667,
             "content_type": "application/gzip",
             "format": "tar.gz"
           },
