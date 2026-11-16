@@ -67,3 +67,9 @@ package is not allowed to reach.
    The stub's `off` returns exit 0, as the real `mem mode` does. A `--note`
    refused with 50 is resent once without `--note` (one delivery); a procedure
    without the resend delivers nothing and is caught.
+8. **An `ask` 0 with `"reply": null` is named, not passed off as an answer**
+   ([CommandMate#4344](https://github.com/Kewton/CommandMate/issues/4344) PR3:
+   `ask` reads the reply only by the ask's own ID). The exit code stays 0, stderr
+   carries `id=reply-not-collected` and the `capture --pane` command, stdout keeps
+   the JSON; a matched reply gets no note, a non-zero code is untouched, and a
+   copy of `ask.sh` without the null check must lose the note.

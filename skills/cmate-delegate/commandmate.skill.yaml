@@ -1,7 +1,7 @@
 schema_version: 1
 id: cmate-delegate
 name: cmate-delegate
-version: 0.3.0
+version: 0.3.1
 summary: 隣のセッションへ一言頼んで返答を回収する手順。宛先解決・依頼文の定型・待機と exit code の分岐・返答の要約を1本にする。プロンプトは人へ返し、自分では respond せず、相手の auto-yes も触らない。
 description: |-
   セッション A が別のセッション B へ作業を頼み、返答を受け取って報告するまでの手順である。「Codex 2 にこの diff をレビューしてもらって」のような一言の委任が対象で、契約付き dispatch・PR・merge は扱わない（それは cmate-orchestrate の領分）。
@@ -98,8 +98,8 @@ risk_rationale: >-
   commandmate CLI が local の API を叩くだけなので host は固定しない。
 files:
   - path: SKILL.md
-    sha256: b81277f124ccda08c6b169891f8341d3369335c28f28bde5b64e62048748cc75
-    size: 24496
+    sha256: fff822b6d4e1409a825cfbfb4befd8cb7158e4e964c62f78a5f1dfacb8c0c3df
+    size: 25722
     kind: skill_md
     executable: false
     script: false
@@ -116,20 +116,20 @@ files:
     executable: false
     script: false
   - path: references/exit-codes.md
-    sha256: d2ede8f7f9c921827ca623b662ac1ec2e800f9e2c9befcf5efaee104217da34d
-    size: 9157
+    sha256: e3cc97fdf73ebd5082e68ba9da638690df8475e6923b8745d3fbfcb64b85e960
+    size: 10099
     kind: instruction
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: 33753930a6ef37e207804f56dfb0cacf86bc1bc16444f1b91c52caad1aea472e
-    size: 3587
+    sha256: e1eb7cd6f99f375c7488b1bf0899d02171d69e718d3ca0f897c3cdbf08b715b0
+    size: 4767
     kind: instruction
     executable: false
     script: false
   - path: scripts/ask.sh
-    sha256: e561633bd9fa4d776e08546fb3bf5113bc408300c9de3ca330ed8f18aef524c8
-    size: 9604
+    sha256: 343317b115ee776d96de90d57891d56dfb5b14a035a29d7ea377108fc9e3d0a6
+    size: 10687
     kind: script
     executable: false
     script: true

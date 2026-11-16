@@ -155,7 +155,7 @@ bash .agents/skills/cmate-delegate/scripts/ask.sh <worktree-id> <instance-id> "<
 
 | code | 名前 | 意味 | すること |
 |---|---|---|---|
-| `0` | `SUCCESS` | 相手が 1 ターンを終えてコンポーザーへ戻った | `capture` して第7節へ |
+| `0` | `SUCCESS` | 相手が 1 ターンを終えてコンポーザーへ戻った | `capture` して第7節へ（`ask` で `"reply": null` なら第7節「出典を明示する」） |
 | `10` | `PROMPT_DETECTED` | 相手が確認を待っている | **第5節。答えない** |
 | `11` | `UPSTREAM_FAULT` | ターンが走っていない。`id=context-limit`（stderr / `--json`）なら相手の文脈が上限で、依頼は何もされていない | 既定は送り直す。`id=context-limit` は**再送しても直らない**。`commandmate instances <worktree-id> kill <instance-id>` で新しいセッションにして送り直す |
 | `21` | `NOT_STARTED` | 宛先のセッションが起動していない | `send` を実際に打ったか確認する。打っていて 21 なら相手が落ちている |
@@ -224,8 +224,19 @@ auto-yes は解決策ではない。
 
 ### 出典を明示する
 
-- `ask --json` が `source` を返す版（CommandMate#2376 以降）で `source` が `capture` なら、
-  「**画面の末尾から読んだ**」と報告に書く。`history` なら「チャット履歴から読んだ」。
+- `ask --json` の `source` は版で意味が変わる。
+  - **CommandMate 0.32.0 〜 0.51.2**（`ask` 導入から #4344 PR3 を含まない版まで）: `source` は
+    `history` / `pane` / `none`。`pane` なら「**画面の末尾から読んだ**」、`history` なら
+    「チャット履歴から読んだ」と報告に書く。
+  - **#4344 PR3 を含む CommandMate のリリース以降**: `ask` は返答を**この依頼の ID の帰属**でだけ読み、
+    画面からは拾わない。`source` は `history`（台帳がこの依頼に結んだ返答）/ `none` だけで、`pane` は出ない。
+    `attribution.state` が `matched` でないとき（帰属できない tool＝`tool_unsupported`、古いサーバー＝
+    `server_unsupported`、`ambiguous`・`unmatched`）は **exit 0 でも `"reply": null`・stdout 空**で、
+    stderr に `reply not collected (<state>/<reason>)` が 1 行出る。これを「返答が無かった」「完了した」と
+    報告しない。「返答は回収されなかった（理由: `<state>/<reason>`）」と書き、
+    `commandmate capture <worktree-id> --instance <instance-id> --pane --tail 80` で取った画面を
+    「**画面の末尾から読んだ**」と明記して添える。同梱の `ask.sh` はこのとき stderr に
+    `id=reply-not-collected` を出し、exit 0 のまま返す。
 - **v0.1 の経路（`capture --pane --tail`）では、常に「画面の末尾から読んだ」である。**
   0.31.3 の `capture --json` に `source` field は無い（実測）。
   画面の末尾は**スクロールで流れた部分を含まない**ので、長い返答は先頭が欠けうる。

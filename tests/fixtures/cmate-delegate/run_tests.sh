@@ -606,6 +606,72 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 6b. An ask 0 with "reply": null is reported, not passed off as an answer
+#     (CommandMate#4344 PR3: the reply is read only by the ask's own ID)
+# ---------------------------------------------------------------------------
+printf '\n== 6b. ask.sh names a reply that ask did not collect ==\n'
+
+NULL_JSON='{
+  "worktreeId": "wt-b",
+  "instanceId": "copilot",
+  "source": "none",
+  "reply": null,
+  "askId": null,
+  "attribution": { "state": "unavailable", "reason": "tool_unsupported", "notified": false }
+}'
+MATCHED_JSON='{ "source": "history", "reply": "REVIEW OK", "attribution": { "state": "matched", "reason": null, "notified": false } }'
+
+# run_null <script> <ask exit> <reply text> -> null_rc, null_out, null_err
+run_null() {
+  reset_stub
+  CMATE_STUB_HAS_ASK=1
+  CMATE_STUB_ASK_EXIT="$2"
+  CMATE_STUB_REPLY_TEXT="$3"
+  export CMATE_STUB_HAS_ASK CMATE_STUB_ASK_EXIT CMATE_STUB_REPLY_TEXT
+  null_err=$(bash "$1" wt-b copilot 'please review' --timeout 5 2>&1 >/dev/null)
+  null_out=$(bash "$1" wt-b copilot 'please review' --timeout 5 2>/dev/null)
+  null_rc=$?
+}
+
+run_null "$ASK" 0 "$NULL_JSON"
+if [ "$null_rc" -eq 0 ] && printf '%s' "$null_err" | grep -q 'id=reply-not-collected' \
+  && printf '%s' "$null_err" | grep -q 'commandmate capture wt-b --instance copilot --pane' \
+  && [ "$null_out" = "$NULL_JSON" ]; then
+  pass '"reply": null on exit 0 stays 0, says reply-not-collected and keeps the JSON on stdout'
+else
+  fail '"reply": null on exit 0 stays 0, says reply-not-collected and keeps the JSON on stdout' "exit=$null_rc out=$null_out err=$null_err"
+fi
+
+run_null "$ASK" 0 "$MATCHED_JSON"
+if [ "$null_rc" -eq 0 ] && ! printf '%s' "$null_err" | grep -q 'reply-not-collected'; then
+  pass 'a matched reply carries no reply-not-collected note'
+else
+  fail 'a matched reply carries no reply-not-collected note' "exit=$null_rc err=$null_err"
+fi
+
+run_null "$ASK" 124 "$NULL_JSON"
+if [ "$null_rc" -eq 124 ] && ! printf '%s' "$null_err" | grep -q 'reply-not-collected'; then
+  pass 'a non-zero ask code with "reply": null is passed through untouched'
+else
+  fail 'a non-zero ask code with "reply": null is passed through untouched' "exit=$null_rc err=$null_err"
+fi
+
+# Mutation: without the null check the note must disappear.
+mutations=$((mutations + 1))
+MUT_NULL="$WORK/ask-nonull.sh"
+sed 's/grep -E -q .\"reply\": \*null./false/' "$ASK" > "$MUT_NULL"
+if cmp -s "$ASK" "$MUT_NULL"; then
+  fail 'a removed reply-null check is caught' 'the mutation changed nothing'
+else
+  run_null "$MUT_NULL" 0 "$NULL_JSON"
+  if printf '%s' "$null_err" | grep -q 'reply-not-collected'; then
+    fail 'a removed reply-null check is caught' 'the note survived the mutation'
+  else
+    pass 'a removed reply-null check is caught (the note is gone)'
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # 6. --note is gated on `mem mode` being "on" (CommandMate#4228, contract 2)
 # ---------------------------------------------------------------------------
 printf '\n== 6. send --note is used only when mem mode is on ==\n'
