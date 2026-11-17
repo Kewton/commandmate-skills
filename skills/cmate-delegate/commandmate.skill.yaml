@@ -98,8 +98,8 @@ risk_rationale: >-
   commandmate CLI が local の API を叩くだけなので host は固定しない。
 files:
   - path: SKILL.md
-    sha256: fff822b6d4e1409a825cfbfb4befd8cb7158e4e964c62f78a5f1dfacb8c0c3df
-    size: 25722
+    sha256: f386e885252fb7f41f7d11a3d287f571f4fb94ebc7c3571c86aab0c9b47c4c1a
+    size: 26842
     kind: skill_md
     executable: false
     script: false

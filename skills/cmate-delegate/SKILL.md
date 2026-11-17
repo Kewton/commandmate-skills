@@ -87,6 +87,8 @@ alias の照合は「完全一致 → 大小無視の一致 → 部分一致」�
 
 宛先の worktree が別リポジトリでもよい。**相手のコンテキストは共有されない**ことだけ忘れないこと（第3節）。
 
+> **宛先が Antigravity（agy）のとき** — Google Antigravity の追加利用規約 6 条（https://antigravity.google/terms ）と公式 FAQ（https://antigravity.google/docs/faq ）は、個人向けプラン（無料・Google AI Plus／Pro／Ultra）で、第三者のソフトウェアやコーディングエージェントを通して Antigravity を使うことを制限しています。この skill は AI エージェントから隣のセッションへ依頼を送るため、宛先の instance のツールが `antigravity` なら送らず、人に返してください。API キーか Gemini Enterprise で使っている場合の申告は、サーバーの環境変数 `CM_ANTIGRAVITY_USAGE`（`api-key` / `enterprise`）で、変えたらサーバーの再起動が要ります（CLI を打つ側の環境に設定しても効きません。申告は利用者の自己申告で、CommandMate は資格情報を読んで確かめません）。人が自分で起動して入力する使い方が規約の範囲内かについて、Google による明示の確認は無い。（2026-11-16 時点）
+
 ## 3. 依頼文を組む
 
 **相手はあなたの会話も、あなたが読んだファイルも、あなたが決めたことも知らない。**
