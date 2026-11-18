@@ -53,7 +53,7 @@ Command Code の管理セッションを長く使い回すと、依頼が
 返答本文は stdout にそのまま出す。Claude の `Prompt is too long` や OpenAI 系の
 `context_length_exceeded` は別 Issue で、この検出には含めない。
 
-この保険が本文を読めるのは、本文がある経路だけである。**#4344 PR3 を含む CommandMate のリリース以降**の
+この保険が本文を読めるのは、本文がある経路だけである。**CommandMate 0.52.0 以降**（#4344 PR3 を含む版）の
 `ask` は、返答をこの依頼の ID に帰属できないとき（帰属できない tool・古いサーバー・`ambiguous`・`unmatched`）
 exit `0` のまま `"reply": null` を返す。読む本文が無いので、保険が当たらないことは「文脈の上限ではなかった」の
 証拠にならない。このとき `ask.sh` は `0` を書き換えず、stderr に `id=reply-not-collected` と
@@ -127,7 +127,7 @@ commandmate wait      <real-wt> --instance codex --timeout 5  ; echo $?   # 21
 `ask` が在る環境では `ask` の exit code をそのまま返す。
 
 例外は、`0` を `11`（`id=context-limit`）に読み替える保険の検出だけである（第2.1節）。それ以外の code は書き換えない。
-`ask` が `0` で `"reply": null` を返したとき（#4344 PR3 を含む版）も `0` のままで、stderr に `id=reply-not-collected` を足すだけである。
+`ask` が `0` で `"reply": null` を返したとき（CommandMate 0.52.0 以降。#4344 PR3 を含む版）も `0` のままで、stderr に `id=reply-not-collected` を足すだけである。
 
 これはテストで固定してある（`tests/fixtures/cmate-delegate/run_tests.sh`）。
 **stdout に出るのは `capture` の squeeze 済みテキストだけ**で、

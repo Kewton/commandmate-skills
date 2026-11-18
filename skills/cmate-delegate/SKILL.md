@@ -230,7 +230,7 @@ auto-yes は解決策ではない。
   - **CommandMate 0.32.0 〜 0.51.2**（`ask` 導入から #4344 PR3 を含まない版まで）: `source` は
     `history` / `pane` / `none`。`pane` なら「**画面の末尾から読んだ**」、`history` なら
     「チャット履歴から読んだ」と報告に書く。
-  - **#4344 PR3 を含む CommandMate のリリース以降**: `ask` は返答を**この依頼の ID の帰属**でだけ読み、
+  - **CommandMate 0.52.0 以降**（#4344 PR3 を含む版）: `ask` は返答を**この依頼の ID の帰属**でだけ読み、
     画面からは拾わない。`source` は `history`（台帳がこの依頼に結んだ返答）/ `none` だけで、`pane` は出ない。
     `attribution.state` が `matched` でないとき（帰属できない tool＝`tool_unsupported`、古いサーバー＝
     `server_unsupported`、`ambiguous`・`unmatched`）は **exit 0 でも `"reply": null`・stdout 空**で、

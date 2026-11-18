@@ -221,7 +221,7 @@ if cm ask --help >/dev/null 2>&1; then
     context_limit_advice
     exit "$EXIT_CONTEXT_LIMIT"
   fi
-  # From the CommandMate release that includes #4344 PR3, ask reads the reply
+  # From CommandMate 0.52.0 (the release that includes #4344 PR3), ask reads the reply
   # only through the ask's own ID, and otherwise answers exit 0 with
   # "reply": null (tool_unsupported, server_unsupported, ambiguous, unmatched).
   # There is no body to scan then, so "no context-limit line" proves nothing.

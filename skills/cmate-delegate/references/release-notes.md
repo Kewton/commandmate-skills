@@ -2,7 +2,7 @@
 
 ## 0.3.1 — `ask` が返答を依頼の ID で読む版に合わせる（CommandMate#4344 PR3）
 
-**#4344 PR3 を含む CommandMate のリリース以降**、`ask` は返答をこの依頼の ID の帰属でだけ読み、
+**CommandMate 0.52.0 以降**（#4344 PR3 を含む版）、`ask` は返答をこの依頼の ID の帰属でだけ読み、
 画面からは拾わない。`--json` の `source` は `history` / `none` だけになり、帰属できないとき
 （`tool_unsupported`・`server_unsupported`・`ambiguous`・`unmatched`）は exit 0 で `"reply": null`・stdout 空になる。
 

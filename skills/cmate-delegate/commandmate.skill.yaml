@@ -98,7 +98,7 @@ risk_rationale: >-
   commandmate CLI が local の API を叩くだけなので host は固定しない。
 files:
   - path: SKILL.md
-    sha256: f386e885252fb7f41f7d11a3d287f571f4fb94ebc7c3571c86aab0c9b47c4c1a
+    sha256: 44c390515748cc689d2f9b798810d29b469db65b83187f3a21e3e47682f5150f
     size: 26842
     kind: skill_md
     executable: false
@@ -116,20 +116,20 @@ files:
     executable: false
     script: false
   - path: references/exit-codes.md
-    sha256: e3cc97fdf73ebd5082e68ba9da638690df8475e6923b8745d3fbfcb64b85e960
-    size: 10099
+    sha256: 928fe2bdfd38c4fb561527130385fca68f7f1362e85a8373deb25fdf3f10bdbc
+    size: 10127
     kind: instruction
     executable: false
     script: false
   - path: references/release-notes.md
-    sha256: e1eb7cd6f99f375c7488b1bf0899d02171d69e718d3ca0f897c3cdbf08b715b0
+    sha256: 57bcc2b39a38e31cc86702e2828ec7a753bb390ce1fdaaff6bf7f6a2d9a26568
     size: 4767
     kind: instruction
     executable: false
     script: false
   - path: scripts/ask.sh
-    sha256: 343317b115ee776d96de90d57891d56dfb5b14a035a29d7ea377108fc9e3d0a6
-    size: 10687
+    sha256: deadd86634d1b837781914e1bce5e31ac5cb255e2ce34e94f1ce817977283aed
+    size: 10696
     kind: script
     executable: false
     script: true
